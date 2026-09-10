@@ -58,6 +58,10 @@ if (URHO3D_PARTICLE_GRAPH)
     define_engine_source_files (Particles)
 endif ()
 
+if (URHO3D_LUA)
+    define_engine_source_files (LuaScript)
+endif ()
+
 if (URHO3D_RMLUI)
     define_engine_source_files (RmlUI)
 endif ()
@@ -218,6 +222,9 @@ set (PUBLIC_THIRD_PARTY_DEPENDENCIES
     datachannel-static
     TracyClient
 )
+if (URHO3D_LUA)
+    list (APPEND PUBLIC_THIRD_PARTY_DEPENDENCIES Lua sol3)
+endif ()
 
 # Private dependencies that are hidden from the user and are not exposed in the public API or headers
 set (PRIVATE_THIRD_PARTY_DEPENDENCIES
