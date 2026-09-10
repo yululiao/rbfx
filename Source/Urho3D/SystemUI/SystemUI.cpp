@@ -292,6 +292,12 @@ void SystemUI::SetRelativeMouseMove(bool enabled, bool revertMousePositionOnDisa
     revertMousePosition_ = g.IO.MousePos;
 }
 
+void SystemUI::UpdateRelativeMouseRevertPosition(const ImVec2& position)
+{
+    if (revertMousePositionOnDisable_)
+        revertMousePosition_ = position;
+}
+
 const Vector2 SystemUI::GetRelativeMouseMove() const
 {
     return relativeMouseMove_;

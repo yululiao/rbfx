@@ -45,7 +45,9 @@ void SceneSelector::ProcessInput(SceneViewPage& scenePage, bool& mouseConsumed)
 
     if (!mouseConsumed)
     {
-        if (ui::IsItemHovered() && ui::IsMouseReleased(MOUSEB_LEFT) && !ui::IsMouseDragPastThreshold(MOUSEB_LEFT))
+        // Alt + LMB is reserved for camera orbiting, do not select on click
+        if (ui::IsItemHovered() && ui::IsMouseReleased(MOUSEB_LEFT) && !ui::IsMouseDragPastThreshold(MOUSEB_LEFT)
+            && !ui::IsKeyDown(KEY_LALT) && !ui::IsKeyDown(KEY_RALT))
         {
             mouseConsumed = true;
             Node* selectedNode = QuerySelectedNode(scene, scenePage.cameraRay_);

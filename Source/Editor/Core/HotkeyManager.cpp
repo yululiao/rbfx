@@ -113,7 +113,7 @@ bool EditorHotkey::IsTextInputFriendly() const
 bool EditorHotkey::CheckKeyboardQualifiers() const
 {
     const bool ctrlDown = ui::IsKeyDown(KEY_LCTRL) || ui::IsKeyDown(KEY_RCTRL);
-    const bool altDown = ui::IsKeyDown(KEY_LALT);
+    const bool altDown = ui::IsKeyDown(KEY_LALT) || ui::IsKeyDown(KEY_RALT);
     const bool shiftDown = ui::IsKeyDown(KEY_LSHIFT) || ui::IsKeyDown(KEY_RSHIFT);
 
     if (qualifiersDown_.Test(QUAL_CTRL) && !ctrlDown)

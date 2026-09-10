@@ -58,6 +58,8 @@ public:
     bool IsTranslate() const { return operation_ == TransformGizmoOperation::Translate; }
     bool IsRotate() const { return operation_ == TransformGizmoOperation::Rotate; }
     bool IsScale() const { return operation_ == TransformGizmoOperation::Scale; }
+    /// Whether the gizmo is hovered by the mouse or being manipulated. Updated every frame.
+    bool IsGizmoInteractable() const { return gizmoInteractable_; }
     /// @}
 
     /// Implement SceneViewAddon.
@@ -87,6 +89,7 @@ private:
 
     bool isLocal_{};
     bool isPivoted_{};
+    bool gizmoInteractable_{};
     TransformGizmoOperation operation_{TransformGizmoOperation::Translate};
 };
 

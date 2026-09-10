@@ -62,6 +62,7 @@ SceneHierarchy::SceneHierarchy(SceneViewTab* sceneViewTab)
     widget_->OnNodeReordered.Subscribe(this, &SceneHierarchy::ReorderNode);
     widget_->OnComponentReordered.Subscribe(this, &SceneHierarchy::ReorderComponent);
     widget_->OnNodeReparented.Subscribe(this, &SceneHierarchy::ReparentNode);
+    widget_->OnNodeDoubleClicked.Subscribe(this, &SceneHierarchy::FocusNode);
 }
 
 void SceneHierarchy::WriteIniSettings(ImGuiTextBuffer& output)
@@ -166,6 +167,12 @@ void SceneHierarchy::ReparentNode(Node* parentNode, Node* childNode)
 {
     owner_->PushAction<ReparentNodeAction>(childNode, parentNode);
     childNode->SetParent(parentNode);
+}
+
+void SceneHierarchy::FocusNode(Node* node)
+{
+    if (node)
+        owner_->FocusNode(node);
 }
 
 }

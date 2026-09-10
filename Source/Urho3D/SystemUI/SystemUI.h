@@ -43,6 +43,9 @@ public:
     /// Should be called withing ImGUI window.
     /// Relative mouse movement is automatically disabled when all mouse buttons are released.
     void SetRelativeMouseMove(bool enabled, bool revertMousePositionOnDisable);
+    /// Update position that the mouse cursor will be reverted to when relative mouse movement is disabled.
+    /// Effective only if relative mouse movement was enabled with revertMousePositionOnDisable=true.
+    void UpdateRelativeMouseRevertPosition(const ImVec2& position);
     /// Return relative mouse movement value.
     const Vector2 GetRelativeMouseMove() const;
 

@@ -22,6 +22,8 @@
 
 #include "../../Foundation/SceneViewTab/EditorCamera.h"
 
+#include "../../Foundation/SceneViewTab/TransformManipulator.h"
+
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Input/Input.h>
 #include <Urho3D/IO/ArchiveSerialization.h>
@@ -56,7 +58,17 @@ void EditorCamera::ProcessInput(SceneViewPage& scenePage, bool& mouseConsumed)
     Camera* camera = scenePage.renderer_->GetCamera();
     const auto& cfg = settings_->GetValues();
 
-    cameraController_->ProcessInput(camera, state, &cfg);
+    // Plain LMB drag pans the view, unless transform gizmo is hovered or manipulated.
+    // Gizmo state is from the previous frame, which is accurate enough because
+    // gizmo cannot move while camera is not being manipulated.
+    const auto manipulator = owner_->GetAddon<TransformManipulator>();
+    const bool allowPlainLmbPan = !manipulator || !manipulator->IsGizmoInteractable();
+
+    // Orbiting and panning take precedence over scene selection and gizmo manipulation.
+    // Plain look-around does not conflict with LMB-only gizmo and selection.
+    cameraController_->ProcessInput(camera, state, &cfg, allowPlainLmbPan);
+    if (cameraController_->IsMouseCaptured())
+        mouseConsumed = true;
 }
 
 void EditorCamera::SerializePageState(Archive& archive, const char* name, ea::any& stateWrapped) const
@@ -74,15 +86,26 @@ CameraController::PageState& EditorCamera::GetOrInitializeState(SceneViewPage& s
     return ea::any_cast<CameraController::PageState&>(stateWrapped);
 }
 
-void EditorCamera::LookAtPosition(SceneViewPage& scenePage, const Vector3& position) const
+void EditorCamera::LookAtPosition(SceneViewPage& scenePage, const Vector3& position, const BoundingBox& worldBox) const
 {
     auto& state = GetOrInitializeState(scenePage);
     Camera* camera = scenePage.renderer_->GetCamera();
     const auto& cfg = settings_->GetValues();
     Node* node = camera->GetNode();
 
-    const Vector3 newPosition = position - node->GetRotation() * Vector3{0.0f, 0.0f, cfg.focusDistance_};
+    // Focus distance adapts to the size of the node, Unity-style,
+    // so the object is framed nicely in the view regardless of its size
+    float focusDistance = cfg.focusDistance_;
+    const float radius = 0.5f * worldBox.Size().Length();
+    if (radius > M_EPSILON)
+    {
+        const float fitDistance = radius / Tan(camera->GetFov() * M_DEGTORAD * 0.5f);
+        focusDistance = Max(1.5f * fitDistance, 0.5f);
+    }
+
+    const Vector3 newPosition = position - node->GetRotation() * Vector3{0.0f, 0.0f, focusDistance};
     state.pendingOffset_ += newPosition - state.lastCameraPosition_;
+    state.orbitDistance_ = focusDistance;
 }
 
 }

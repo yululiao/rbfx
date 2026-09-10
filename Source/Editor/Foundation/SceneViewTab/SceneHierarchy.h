@@ -64,6 +64,7 @@ private:
     void ReorderNode(Node* node, unsigned oldIndex, unsigned newIndex);
     void ReorderComponent(Component* component, unsigned oldIndex, unsigned newIndex);
     void ReparentNode(Node* parentNode, Node* childNode);
+    void FocusNode(Node* node);
 
     bool reentrant_{};
     SharedPtr<SceneHierarchyWidget> widget_;

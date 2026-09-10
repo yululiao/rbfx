@@ -45,6 +45,7 @@ public:
         float minSpeed_{2.0f};
         float maxSpeed_{10.0f};
         float scrollSpeed_{3.5f};
+        float panSpeed_{1.0f};
         float acceleration_{1.0f};
         float shiftFactor_{4.0f};
         float focusDistance_{10.0f};
@@ -63,6 +64,7 @@ public:
         float currentMoveSpeed_{};
         Vector3 pendingOffset_;
         ea::optional<Vector3> orbitPosition_;
+        float orbitDistance_{};
 
         PageState();
         void LookAt(const Vector3& position, const Vector3& target);
@@ -72,14 +74,28 @@ public:
 
     CameraController(Context* context, HotkeyManager* hotkeyManager);
 
-    void ProcessInput(Camera* camera, PageState& state, const Settings* settings = nullptr);
+    /// Process camera navigation input. Returns true if navigation is active this frame.
+    /// \param allowPlainLmbPan Whether plain LMB drag should pan the view (when gizmo is not interactable).
+    bool ProcessInput(Camera* camera, PageState& state, const Settings* settings = nullptr,
+        bool allowPlainLmbPan = false);
+
+    /// Whether navigation currently takes precedence over gizmo manipulation and selection.
+    bool IsMouseCaptured() const { return isOrbiting_ || isLmbOrbiting_ || isPanning_; }
 
 private:
     void UpdateState(const Settings& settings, const Camera* camera, PageState& state) const;
+    void RenderGrabCursor() const;
+    ea::optional<ea::pair<Vector3, float>> QueryOrbitPivot(const Camera* camera) const;
+    ea::optional<ea::pair<Vector3, float>> QueryOrbitPivot(const Camera* camera, const Vector2& relPos) const;
+    void InitializeOrbitPivot(const Settings& settings, const Camera* camera, PageState& state) const;
     Vector2 GetMouseMove() const;
     Vector3 GetMoveDirection() const;
 
-    bool isActive_{};
+    bool isLooking_{};
+    bool isOrbiting_{};
+    bool isLmbOrbiting_{};
+    bool isPanning_{};
+    Vector2 virtualCursorPos_{};
     HotkeyManager* hotkeyManager_{};
 };
 

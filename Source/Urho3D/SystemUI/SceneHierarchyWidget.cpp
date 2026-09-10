@@ -196,8 +196,9 @@ void SceneHierarchyWidget::RenderNode(SceneSelection& selection, Node* node)
     ProcessItemIfActive(selection, node);
 
     const unsigned numItems = GetVisibleItemsCount(node, settings_.showTemporary_, settings_.showComponents_);
+    // Note: no OpenOnDoubleClick, double-click focuses the camera on the node (Unity-style).
+    // Nodes can still be opened with single click on the arrow.
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
-        | ImGuiTreeNodeFlags_OpenOnDoubleClick
         | ImGuiTreeNodeFlags_SpanAvailWidth
         | ImGuiTreeNodeFlags_AllowOverlap;
     if (node->GetParent() == nullptr)
@@ -228,6 +229,9 @@ void SceneHierarchyWidget::RenderNode(SceneSelection& selection, Node* node)
 
     if (ui::IsItemClicked(MOUSEB_LEFT) && ui::IsItemToggledOpen())
         ignoreNextMouseRelease_ = true;
+
+    if (ui::IsItemHovered() && ui::IsMouseDoubleClicked(MOUSEB_LEFT))
+        OnNodeDoubleClicked(this, node);
 
     if (ui::IsItemHovered() && ui::IsMouseReleased(MOUSEB_LEFT) && !ui::IsMouseDragPastThreshold(MOUSEB_LEFT))
     {

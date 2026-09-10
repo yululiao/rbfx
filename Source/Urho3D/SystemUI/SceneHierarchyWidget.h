@@ -45,6 +45,8 @@ public:
     Signal<void(Node* node, unsigned oldIndex, unsigned newIndex)> OnNodeReordered;
     Signal<void(Component* component, unsigned oldIndex, unsigned newIndex)> OnComponentReordered;
     Signal<void(Node* parentNode, Node* childNode)> OnNodeReparented;
+    /// Emitted when node is double-clicked, e.g. to focus the camera on the node (Unity-style).
+    Signal<void(Node* node)> OnNodeDoubleClicked;
 
     explicit SceneHierarchyWidget(Context* context);
 

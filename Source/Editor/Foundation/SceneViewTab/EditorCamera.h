@@ -51,7 +51,7 @@ public:
 
 private:
     CameraController::PageState& GetOrInitializeState(SceneViewPage& scenePage) const;
-    void LookAtPosition(SceneViewPage& scenePage, const Vector3& position) const;
+    void LookAtPosition(SceneViewPage& scenePage, const Vector3& position, const BoundingBox& worldBox) const;
 
     const WeakPtr<CameraController::SettingsPage> settings_;
     SharedPtr<CameraController> cameraController_;

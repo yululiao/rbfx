@@ -157,7 +157,7 @@ class SceneViewTab : public ResourceEditorTab
     URHO3D_OBJECT(SceneViewTab, ResourceEditorTab);
 
 public:
-    Signal<void(SceneViewPage& page, const Vector3& position)> OnLookAt;
+    Signal<void(SceneViewPage& page, const Vector3& position, const BoundingBox& worldBox)> OnLookAt;
     Signal<void(SceneViewPage& page, Scene* scene, SceneSelection& selection)> OnSelectionEditMenu;
 
     struct ByInputPriority
@@ -214,6 +214,7 @@ public:
     void CreateNodeInSelection(Scene* scene, SceneSelection& selection);
     void CreateComponentInSelection(Scene* scene, SceneSelection& selection, StringHash componentType);
     void FocusSelection(SceneSelection& selection);
+    void FocusNode(Node* node);
     void MoveSelectionToLatest(SceneSelection& selection);
     void MoveSelectionPositionToLatest(SceneSelection& selection);
     void MoveSelectionRotationToLatest(SceneSelection& selection);

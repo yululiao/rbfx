@@ -31,6 +31,7 @@
 #include <Urho3D/Engine/EngineEvents.h>
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/DebugRenderer.h>
+#include <Urho3D/Graphics/Drawable.h>
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/IO/ArchiveSerialization.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -77,6 +78,20 @@ void SetSceneNextIds(Scene* scene, unsigned nextNodeId, unsigned nextComponentId
 {
     scene->SetAttribute("Next Node ID", nextNodeId);
     scene->SetAttribute("Next Component ID", nextComponentId);
+}
+
+/// World bounding box of all drawables under the node (recursive). Undefined if node has no drawable geometry.
+BoundingBox GetNodeWorldBoundingBox(Node* node)
+{
+    BoundingBox result;
+    for (Component* component : node->GetComponents())
+    {
+        if (const auto drawable = dynamic_cast<Drawable*>(component))
+            result.Merge(drawable->GetWorldBoundingBox());
+    }
+    for (Node* child : node->GetChildren())
+        result.Merge(GetNodeWorldBoundingBox(child));
+    return result;
 }
 
 void RecalculateSceneNextIds(Scene* scene)
@@ -649,9 +664,15 @@ void SceneViewTab::CreateComponentInSelection(Scene* scene, SceneSelection& sele
 void SceneViewTab::FocusSelection(SceneSelection& selection)
 {
     if (Node* activeNode = selection.GetActiveNode())
+        FocusNode(activeNode);
+}
+
+void SceneViewTab::FocusNode(Node* node)
+{
+    if (SceneViewPage* page = GetPage(node->GetScene()))
     {
-        if (SceneViewPage* page = GetPage(activeNode->GetScene()))
-            OnLookAt(this, *page, activeNode->GetWorldPosition());
+        const BoundingBox worldBox = GetNodeWorldBoundingBox(node);
+        OnLookAt(this, *page, node->GetWorldPosition(), worldBox);
     }
 }
 

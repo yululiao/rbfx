@@ -95,6 +95,8 @@ TransformManipulator::TransformManipulator(SceneViewTab* owner, SettingsPage* se
 
 void TransformManipulator::ProcessInput(SceneViewPage& scenePage, bool& mouseConsumed)
 {
+    gizmoInteractable_ = false;
+
     if (!settings_)
         return;
     const Settings& cfg = settings_->GetValues();
@@ -113,7 +115,15 @@ void TransformManipulator::ProcessInput(SceneViewPage& scenePage, bool& mouseCon
         const bool needSnap = ui::IsKeyDown(KEY_CTRL);
         const Vector3 snapValue = needSnap ? cfg.GetSnapValue(operation_) : Vector3::ZERO;
         if (transformNodesGizmo_->Manipulate(gizmo, operation_, GetCurrentAxes(), isLocal_, isPivoted_, snapValue))
+        {
+            gizmoInteractable_ = true;
             mouseConsumed = true;
+        }
+        else if (operation_ != TransformGizmoOperation::None)
+        {
+            // Gizmo is rendered, but not being manipulated. Check if it is hovered.
+            gizmoInteractable_ = ImGuizmo::IsOver();
+        }
     }
 }
 
