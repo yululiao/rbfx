@@ -20,17 +20,42 @@
 # THE SOFTWARE.
 #
 
-# Define target name
-set (TARGET_NAME AssetImporter)
+return_if_not_tool(AssetImporter)
 
-# Define source files
-define_source_files ()
+# Build Assimp as static dependency library of the tool
+if (MSVC)
+    # Third-party warnings are irrelevant to us
+    ucm_replace_flag("/W[0-3]" "/W0" REGEX)
+endif ()
+set (ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set (ASSIMP_RAPIDJSON_NO_MEMBER_ITERATOR OFF CACHE BOOL "" FORCE)
+set (ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set (ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set (ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set (ASSIMP_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set (ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory (../../ThirdParty/Assimp ${CMAKE_CURRENT_BINARY_DIR}/../ThirdParty/Assimp)
 
-# Define dependency libs
-add_subdirectory (../../ThirdParty/Assimp ../../ThirdParty/Assimp)
-add_subdirectory (../../ThirdParty/ufbx ../../ThirdParty/ufbx)
-set (LIBS assimp ufbx)
-set (INCLUDE_DIRS ../../ThirdParty/Assimp/include ${CMAKE_CURRENT_BINARY_DIR}/../../ThirdParty/Assimp/include ../../ThirdParty/ufbx)
+# Build ufbx as static dependency library of the tool (alternative FBX backend, see -ufbx flag)
+add_subdirectory (../../ThirdParty/ufbx ${CMAKE_CURRENT_BINARY_DIR}/../ThirdParty/ufbx)
 
-# Setup target
-setup_executable (TOOL)
+file (GLOB SOURCE_FILES *.cpp *.h)
+# AssetImporter is built as a dynamic library so the Editor can import FBX in-process.
+# Public C API is defined in AssetImporterLibrary.h (ASSETIMPORTER_API export macro).
+add_library (AssetImporter SHARED ${SOURCE_FILES})
+target_compile_definitions (AssetImporter PRIVATE ASSETIMPORTER_LIBRARY_BUILD)
+target_include_directories (AssetImporter SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ThirdParty/Assimp/include
+    ${CMAKE_CURRENT_BINARY_DIR}/../ThirdParty/Assimp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ThirdParty/ufbx
+)
+target_link_libraries (AssetImporter Urho3D assimp ufbx)
+# Install next to the Editor executable. Not part of the SDK export set
+# because third-party dependencies (assimp, ufbx) are not exported.
+install (TARGETS AssetImporter
+    COMPONENT Tools
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Install runtime dependencies
+install_target_runtime_deps(TARGET AssetImporter COMPONENT Tools)

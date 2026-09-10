@@ -43,6 +43,10 @@ target_include_directories(EditorLibrary PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/Tools>
 )
 target_link_libraries (EditorLibrary PUBLIC Urho3D)
+# FBX import is performed in-process through the AssetImporter dynamic library
+# (built as a tool, so it requires URHO3D_TOOLS to be enabled).
+# Linked into executables instead of EditorLibrary to keep the SDK export set clean.
+set (EDITOR_ASSETIMPORTER_LINK AssetImporter)
 
 # Unless forbidden by the user, add Editor executable(s).
 set (EDITOR_TARGETS "")
@@ -54,6 +58,7 @@ if (NOT URHO3D_NO_EDITOR_PLAYER_EXE)
 
     add_executable (Editor ${TARGET_TYPE} Editor.cpp)
     target_link_libraries (Editor PUBLIC EditorLibrary)
+    target_link_libraries (Editor PRIVATE ${EDITOR_ASSETIMPORTER_LINK})
     list (APPEND EDITOR_TARGETS Editor)
 
     if (URHO3D_CSHARP)

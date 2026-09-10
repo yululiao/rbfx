@@ -4,6 +4,7 @@
 
 #include "EditorApplication.h"
 
+#include "Assets/FbxImport.h"
 #include "Assets/ModelImporter.h"
 #include "Foundation/AnimationViewTab.h"
 #include "Foundation/ConcurrentAssetProcessing.h"
@@ -17,6 +18,7 @@
 #include "Foundation/InspectorTab/AnimationInspector.h"
 #include "Foundation/InspectorTab/AssetPipelineInspector.h"
 #include "Foundation/InspectorTab/EmptyInspector.h"
+#include "Foundation/InspectorTab/FbxAssetInspector.h"
 #include "Foundation/InspectorTab/MaterialInspector.h"
 #include "Foundation/InspectorTab/ModelInspector.h"
 #include "Foundation/InspectorTab/NodeComponentInspector.h"
@@ -84,6 +86,7 @@ EditorApplication::EditorApplication(Context* context)
     , editorPluginManager_(MakeShared<EditorPluginManager>(context_))
 {
     editorPluginManager_->AddPlugin("Assets.ModelImporter", &Assets_ModelImporter);
+    editorPluginManager_->AddPlugin("Assets.FbxImportSettings", &Assets_FbxImportSettings);
 
     editorPluginManager_->AddPlugin("Foundation.StandardFileTypes", &Foundation_StandardFileTypes);
     editorPluginManager_->AddPlugin("Foundation.ConcurrentAssetProcessing", &Foundation_ConcurrentAssetProcessing);
@@ -119,6 +122,7 @@ EditorApplication::EditorApplication(Context* context)
     editorPluginManager_->AddPlugin("Foundation.Inspector.Empty", &Foundation_EmptyInspector);
     editorPluginManager_->AddPlugin("Foundation.Inspector.AssetPipeline", &Foundation_AssetPipelineInspector);
     editorPluginManager_->AddPlugin("Foundation.Inspector.Animation", &Foundation_AnimationInspector);
+    editorPluginManager_->AddPlugin("Foundation.Inspector.FbxAsset", &Foundation_FbxAssetInspector);
     editorPluginManager_->AddPlugin("Foundation.Inspector.Texture2D", &Foundation_Texture2DInspector);
     editorPluginManager_->AddPlugin("Foundation.Inspector.TextureCube", &Foundation_TextureCubeInspector);
     editorPluginManager_->AddPlugin("Foundation.Inspector.Model", &Foundation_ModelInspector);

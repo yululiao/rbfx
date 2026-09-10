@@ -20,17 +20,7 @@
 # THE SOFTWARE.
 #
 
-if (NOT DESKTOP)
-    install(FILES PackageTool/PackageTool.py DESTINATION ${CMAKE_INSTALL_BINDIR_BASE})
-    return ()
-endif ()
-
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME Tools)
-
-add_subdirectory(PackageTool)
-add_subdirectory(RampGenerator)
-add_subdirectory(SpritePacker)
-add_subdirectory(ScriptPlayer)
-add_subdirectory(AssetImporter)
-
-vs_group_subdirectory_targets(${CMAKE_CURRENT_SOURCE_DIR} Tools)
+# ufbx is a single-file C library for loading FBX files
+file (GLOB SOURCE_FILES *.c *.h)
+add_library (ufbx STATIC ${SOURCE_FILES})
+target_include_directories (ufbx SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

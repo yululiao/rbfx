@@ -1059,12 +1059,12 @@ IF(ASSIMP_HUNTER_ENABLED)
   hunter_add_package(pugixml)
   find_package(pugixml CONFIG REQUIRED)
 ELSE()
-  # U3D - use urho3d thirdparty
+  # rbfx - use rbfx thirdparty
   SET( Pugixml_SRCS
-    ../../PugiXml/src/pugiconfig.hpp
-    ../../PugiXml/src/pugixml.hpp
+    ../../PugiXml/include/PugiXml/pugiconfig.hpp
+    ../../PugiXml/include/PugiXml/pugixml.hpp
   )
-  INCLUDE_DIRECTORIES("../../PugiXml/src")
+  INCLUDE_DIRECTORIES("../../PugiXml/include/PugiXml")
   SOURCE_GROUP( Contrib\\Pugixml FILES ${Pugixml_SRCS})
 ENDIF()
 
@@ -1243,10 +1243,11 @@ IF(ASSIMP_HUNTER_ENABLED)
   hunter_add_package(stb)
   find_package(stb CONFIG REQUIRED)
 ELSE()
+  # rbfx - use rbfx thirdparty
   SET( stb_SRCS
-    ../../STB/stb_image.h
+    ../../STB/include/STB/stb_image.h
   )
-  INCLUDE_DIRECTORIES("../../STB")
+  INCLUDE_DIRECTORIES("../../STB/include/STB")
   INCLUDE_DIRECTORIES("../contrib")
   SOURCE_GROUP( Contrib\\stb FILES ${stb_SRCS})
 ENDIF()

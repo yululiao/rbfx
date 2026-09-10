@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2022 the Urho3D project.
+// Copyright (c) 2017-2025 the rbfx project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,14 +27,19 @@
 namespace Urho3D
 {
 
-/// Import an FBX file using ufbx. Returns true on success.
-/// command: "model", "anim", "scene", "node", or "dump"
-bool ImportFbx(const ea::string& inFile, const ea::string& outFile, const ea::string& command, const ea::string& rootNodeName);
+class Context;
+class Project;
+
+/// Import single FBX file in-process using AssetImporter library.
+/// File name containing '@' is imported as Animation (.ani), otherwise as Model (.mdl).
+/// Output is placed next to the source file. Returns true on success.
+bool ImportFbxFile(Project* project, const ea::string& fileName);
+
+/// Import all FBX files found in given directory (recursively).
+/// Returns number of successfully imported files.
+unsigned ImportFbxFilesInDirectory(Project* project, const ea::string& directoryName);
+
+/// Register FBX import settings page (assimp/ufbx backend selection).
+void Assets_FbxImportSettings(Context* context, Project* project);
 
 }
-
-/// Unwind out of import routines without terminating the host process.
-/// Implemented in AssetImporter.cpp in the global namespace (that file uses
-/// "using namespace Urho3D" instead of opening the namespace), throws
-/// ImporterExitException caught by AssetImporterRun.
-[[noreturn]] void ImporterErrorExit(const ea::string& message, int exitCode = 1);

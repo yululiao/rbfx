@@ -80,6 +80,13 @@ void ToolManager::SerializeInBlock(Archive& archive)
     {
         blender_.firstScan_ = false;
         fbx2gltf_.firstScan_ = false;
+
+        // Tools that were not found in the previous session (or never scanned)
+        // are re-scanned on startup, so freshly built tools can be picked up
+        if (!blender_.found_)
+            blender_.scanPending_ = true;
+        if (!fbx2gltf_.found_)
+            fbx2gltf_.scanPending_ = true;
     }
 }
 

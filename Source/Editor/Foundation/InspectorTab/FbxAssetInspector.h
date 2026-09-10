@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2022 the Urho3D project.
+// Copyright (c) 2017-2025 the rbfx project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,19 +22,38 @@
 
 #pragma once
 
-#include <Urho3D/Container/Str.h>
+#include "../../Foundation/InspectorTab.h"
 
 namespace Urho3D
 {
 
-/// Import an FBX file using ufbx. Returns true on success.
-/// command: "model", "anim", "scene", "node", or "dump"
-bool ImportFbx(const ea::string& inFile, const ea::string& outFile, const ea::string& command, const ea::string& rootNodeName);
+void Foundation_FbxAssetInspector(Context* context, InspectorTab* inspectorTab);
+
+/// Inspector for FBX source files with manual import button.
+class FbxAssetInspector : public Object, public InspectorSource
+{
+    URHO3D_OBJECT(FbxAssetInspector, Object)
+
+public:
+    explicit FbxAssetInspector(Project* project);
+
+    /// Implement InspectorSource
+    /// @{
+    EditorTab* GetOwnerTab() override { return nullptr; }
+
+    void RenderContent() override;
+    void RenderContextMenuItems() override;
+    void RenderMenu() override;
+    void ApplyHotkeys(HotkeyManager* hotkeyManager) override;
+    /// @}
+
+private:
+    void OnProjectRequest(ProjectRequest* request);
+
+    WeakPtr<Project> project_;
+
+    ea::optional<ea::string> fbxFileName_;
+    ea::optional<ea::string> fbxResourceName_;
+};
 
 }
-
-/// Unwind out of import routines without terminating the host process.
-/// Implemented in AssetImporter.cpp in the global namespace (that file uses
-/// "using namespace Urho3D" instead of opening the namespace), throws
-/// ImporterExitException caught by AssetImporterRun.
-[[noreturn]] void ImporterErrorExit(const ea::string& message, int exitCode = 1);

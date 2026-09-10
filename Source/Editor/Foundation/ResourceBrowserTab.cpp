@@ -23,6 +23,8 @@
 #include "../Core/IniHelpers.h"
 #include "../Foundation/ResourceBrowserTab.h"
 
+#include "../Assets/FbxImport.h"
+
 #include <Urho3D/IO/FileSystem.h>
 
 #include <EASTL/sort.h>
@@ -436,6 +438,9 @@ void ResourceBrowserTab::RenderEntryContextMenuItems(const FileSystemEntry& entr
                 BeginEntryCreate(entry, factories_[*index]);
             ui::EndMenu();
         }
+
+        if (ui::MenuItem(ICON_FA_FILE_IMPORT " Import FBX Files"))
+            ImportFbxFilesInDirectory(GetProject(), entry.absolutePath_);
     }
 
     if (needSeparator)

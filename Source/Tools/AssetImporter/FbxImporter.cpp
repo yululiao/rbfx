@@ -16,8 +16,8 @@
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 //
 
 #include "FbxImporter.h"
@@ -43,20 +43,22 @@
 #endif
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Resource/XMLFile.h>
+#include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Scene.h>
 
 #include <ufbx.h>
 
-#include <Urho3D/DebugNew.h>
+#include <EASTL/sort.h>
 
-using namespace Urho3D;
-
-// Access globals from AssetImporter.cpp
-extern SharedPtr<Context> context_;
-extern String inputName_;
-extern String resourcePath_;
-extern String outPath_;
-extern String outName_;
+// Globals from AssetImporter.cpp. They are defined in the global namespace there
+// (that file only does "using namespace Urho3D"), so these extern declarations must
+// live in the global namespace as well, otherwise the linker looks for
+// Urho3D::-qualified symbols that do not exist.
+extern Urho3D::Context* context_;
+extern ea::string inputName_;
+extern ea::string resourcePath_;
+extern ea::string outPath_;
+extern ea::string outName_;
 extern bool useSubdirs_;
 extern bool localIDs_;
 extern bool saveBinary_;
@@ -77,10 +79,13 @@ extern bool noOverwriteTexture_;
 extern bool noOverwriteNewerTexture_;
 extern bool checkUniqueModel_;
 extern unsigned maxBones_;
-extern Vector<String> nonSkinningBoneIncludes_;
-extern Vector<String> nonSkinningBoneExcludes_;
+extern ea::vector<ea::string> nonSkinningBoneIncludes_;
+extern ea::vector<ea::string> nonSkinningBoneExcludes_;
 extern float importStartTime_;
 extern float importEndTime_;
+
+namespace Urho3D
+{
 
 static const unsigned MAX_CHANNELS = 4;
 
@@ -88,9 +93,28 @@ static const unsigned MAX_CHANNELS = 4;
 // Type conversions
 // ---------------------------------------------------------------------------
 
+// Coordinate frame conversion into the Urho3D left-handed frame (Y-up, Z-forward).
+// This FBX was exported with the node hierarchy already carrying the Z-up -> Y-up
+// rotation (a -90 degree X rotation placed by the DCC exporter), so node matrices and
+// animation data are already Y-up. The remaining step - matching what assimp's
+// ConvertToLeftHanded (MakeLeftHanded) does - is a Z mirror Mz: (x, y, z) -> (x, y, -z),
+// det(Mz) = -1. Triangle winding is flipped once in FbxProcessMeshPart to compensate.
+//
+// The conversion is applied uniformly:
+//   - points/vectors (positions, normals, translations): Mz * v
+//   - rotations (quaternions): Mz * q * Mz (negate the x and y components, keep z and w)
+//   - transform matrices: Mz * M * Mz (negate the third row and third column, except m22)
+//   - scale factors: unchanged (Mz * diag(s) * Mz = diag(s))
+// Conjugation preserves det(M), so no negative scale ever appears in bone data, and the
+// whole skinning chain (bone initial transforms, offset matrices, animation keyframes,
+// baked vertices) stays mathematically self-consistent in the converted frame.
+// Note: raw mesh geometry is still Z-up; FbxProcessMeshPart bakes it through the node
+// matrix (which supplies the missing rotation) before this mirror applies to it.
+
 static Vector3 ToVector3(const ufbx_vec3& v)
 {
-    return Vector3((float)v.x, (float)v.y, (float)v.z);
+    // Mz * v: negate z
+    return Vector3((float)v.x, (float)v.y, (float)-v.z);
 }
 
 static Vector2 ToVector2(const ufbx_vec2& v)
@@ -100,32 +124,43 @@ static Vector2 ToVector2(const ufbx_vec2& v)
 
 static Quaternion ToQuaternion(const ufbx_quat& q)
 {
-    return Quaternion((float)q.w, (float)q.x, (float)q.y, (float)q.z);
+    // Mz * q * Mz: negate the x and y components, keep z and w.
+    // (Under a Z mirror a rotation about X or Y reverses direction, one about Z does not;
+    // verified element-wise against the quaternion-to-matrix formula.)
+    return Quaternion((float)q.w, (float)-q.x, (float)-q.y, (float)q.z);
 }
 
 static Matrix3x4 ToMatrix3x4(const ufbx_matrix& m)
 {
-    // ufbx_matrix: m_ij = row i, col j, stored as column vectors (cols[4])
-    // Urho3D Matrix3x4: row-major m00..m23
+    // Mz * M * Mz: negate the third row and third column (except the m22 diagonal);
+    // the translation column holds a point, so its z is negated as well.
+    // Element (i,j) becomes Mz[i][i] * m_ij * Mz[j][j].
     return Matrix3x4(
-        (float)m.m00, (float)m.m01, (float)m.m02, (float)m.m03,
-        (float)m.m10, (float)m.m11, (float)m.m12, (float)m.m13,
-        (float)m.m20, (float)m.m21, (float)m.m22, (float)m.m23
+        (float)m.m00, (float)m.m01, (float)-m.m02, (float)m.m03,
+        (float)m.m10, (float)m.m11, (float)-m.m12, (float)m.m13,
+        (float)-m.m20, (float)-m.m21, (float)m.m22, (float)-m.m23
     );
 }
 
-static String SanitateAssetName(const String& name)
+static Vector3 ToScale(const ufbx_vec3& v)
 {
-    String fixedName = name;
-    fixedName.Replace("<", "");
-    fixedName.Replace(">", "");
-    fixedName.Replace("?", "");
-    fixedName.Replace("*", "");
-    fixedName.Replace(":", "");
-    fixedName.Replace("\"", "");
-    fixedName.Replace("/", "");
-    fixedName.Replace("\\", "");
-    fixedName.Replace("|", "");
+    // Scale factors are unaffected by the Mz mirror: Mz * diag(s) * Mz = diag(s).
+    // Mirroring them would inject a negative z scale into bones and animation tracks.
+    return Vector3((float)v.x, (float)v.y, (float)v.z);
+}
+
+static ea::string SanitateAssetName(const ea::string& name)
+{
+    ea::string fixedName = name;
+    fixedName.replace("<", "");
+    fixedName.replace(">", "");
+    fixedName.replace("?", "");
+    fixedName.replace("*", "");
+    fixedName.replace(":", "");
+    fixedName.replace("\"", "");
+    fixedName.replace("/", "");
+    fixedName.replace("\\", "");
+    fixedName.replace("|", "");
     return fixedName;
 }
 
@@ -135,13 +170,13 @@ static String SanitateAssetName(const String& name)
 
 struct FbxModel
 {
-    String outName_;
+    ea::string outName_;
     ufbx_node* rootNode_{};
-    PODVector<ufbx_mesh*> meshes_;
-    PODVector<ufbx_node*> meshNodes_;
-    PODVector<ufbx_node*> bones_;
-    PODVector<float> boneRadii_;
-    PODVector<BoundingBox> boneHitboxes_;
+    ea::vector<ufbx_mesh*> meshes_;
+    ea::vector<ufbx_node*> meshNodes_;
+    ea::vector<ufbx_node*> bones_;
+    ea::vector<float> boneRadii_;
+    ea::vector<BoundingBox> boneHitboxes_;
     ufbx_node* rootBone_{};
     // Per mesh, per material-part: which parts to export
     // meshes_ and meshNodes_ are expanded so each entry corresponds to one (mesh, material_part) pair
@@ -149,11 +184,11 @@ struct FbxModel
 
 struct FbxScene
 {
-    String outName_;
+    ea::string outName_;
     ufbx_node* rootNode_{};
-    Vector<FbxModel> models_;
-    PODVector<ufbx_node*> nodes_;
-    PODVector<unsigned> nodeModelIndices_;
+    ea::vector<FbxModel> models_;
+    ea::vector<ufbx_node*> nodes_;
+    ea::vector<unsigned> nodeModelIndices_;
 };
 
 // ---------------------------------------------------------------------------
@@ -161,71 +196,61 @@ struct FbxScene
 // ---------------------------------------------------------------------------
 
 static void FbxDumpNodes(ufbx_node* node, ufbx_node* rootNode, unsigned level);
-static void FbxExportModel(ufbx_scene* scene, const String& outName, ufbx_node* rootNode);
-static void FbxExportAnimation(ufbx_scene* scene, const String& outName, ufbx_node* rootNode);
-static void FbxExportScene(ufbx_scene* scene, const String& outName, ufbx_node* rootNode, bool asPrefab);
+static void FbxExportModel(ufbx_scene* scene, const ea::string& outName, ufbx_node* rootNode);
+static void FbxExportAnimation(ufbx_scene* scene, const ea::string& outName, ufbx_node* rootNode);
+static void FbxExportScene(ufbx_scene* scene, const ea::string& outName, ufbx_node* rootNode, bool asPrefab);
 
 static void FbxCollectMeshes(FbxModel& model, ufbx_node* node);
 static void FbxCollectBones(FbxModel& model, ufbx_scene* scene);
-static void FbxCollectBonesFinal(PODVector<ufbx_node*>& dest, const HashSet<ufbx_node*>& necessary, ufbx_node* node);
+static void FbxCollectBonesFinal(ea::vector<ufbx_node*>& dest, const ea::unordered_set<ufbx_node*>& necessary, ufbx_node* node);
 static void FbxBuildBoneCollisionInfo(FbxModel& model, ufbx_scene* scene);
 static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene);
 static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model);
 
 static void FbxCollectSceneModels(FbxScene& fbxScene, ufbx_scene* scene, ufbx_node* node);
 static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asPrefab);
-static void FbxCreateHierarchy(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, HashMap<ufbx_node*, Node*>& nodeMapping);
-static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, HashMap<ufbx_node*, Node*>& nodeMapping);
+static void FbxCreateHierarchy(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, ea::unordered_map<ufbx_node*, Node*>& nodeMapping);
+static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, ea::unordered_map<ufbx_node*, Node*>& nodeMapping);
 
-static void FbxExportMaterials(ufbx_scene* scene, HashSet<String>& usedTextures);
-static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, HashSet<String>& usedTextures);
-static void FbxCopyTextures(ufbx_scene* scene, const HashSet<String>& usedTextures, const String& sourcePath);
+static void FbxExportMaterials(ufbx_scene* scene, ea::unordered_set<ea::string>& usedTextures);
+static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, ea::unordered_set<ea::string>& usedTextures);
+static void FbxCopyTextures(ufbx_scene* scene, const ea::unordered_set<ea::string>& usedTextures, const ea::string& sourcePath);
 
-static unsigned FbxGetBoneIndex(FbxModel& model, const String& boneName);
-
-// Vertex structure for ufbx_generate_indices dedup
-struct FbxVertex
-{
-    Vector3 position;
-    Vector3 normal;
-    Vector2 uv;
-    Color color;
-    Vector4 tangent;
-    float blendWeights[4];
-    unsigned char blendIndices[4];
-};
+static unsigned FbxGetBoneIndex(FbxModel& model, const ea::string& boneName);
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-bool ImportFbx(const String& inFile, const String& outFile, const String& command, const String& rootNodeName)
+bool ImportFbx(const ea::string& inFile, const ea::string& outFile, const ea::string& command, const ea::string& rootNodeName)
 {
     ufbx_load_opts opts = {};
-    opts.target_axes.right = UFBX_COORDINATE_AXIS_POSITIVE_X;
-    opts.target_axes.up = UFBX_COORDINATE_AXIS_POSITIVE_Y;
-    opts.target_axes.front = UFBX_COORDINATE_AXIS_NEGATIVE_Z;
-    opts.space_conversion = UFBX_SPACE_CONVERSION_ADJUST_TRANSFORMS;
+    // No target_axes / space_conversion: ufbx's ADJUST_TRANSFORMS only compensates via node
+    // matrices while leaving mesh vertices in the source coordinate system (e.g. 3ds Max
+    // Z-up), which produced upside-down geometry. Instead we load everything in the
+    // original frame and apply the handedness/axis conversion ourselves (matching what
+    // assimp's ConvertToLeftHanded does): see the S conjugation in ToVector3/ToQuaternion/
+    // ToMatrix3x4 below and the triangle winding flip in FbxProcessMeshPart.
     opts.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY;
     opts.generate_missing_normals = true;
     opts.clean_skin_weights = true;
 
     ufbx_error error;
-    ufbx_scene* scene = ufbx_load_file(GetNativePath(inFile).CString(), &opts, &error);
+    ufbx_scene* scene = ufbx_load_file(GetNativePath(inFile).c_str(), &opts, &error);
     if (!scene)
     {
-        PrintLine("ufbx error: " + String(error.description.data));
-        ErrorExit("Could not open or parse FBX file " + inFile);
+        PrintLine(ea::string("ufbx error: ") + error.description.data);
+        ImporterErrorExit("Could not open or parse FBX file " + inFile);
         return false;
     }
 
     ufbx_node* rootNode = scene->root_node;
-    if (!rootNodeName.Empty())
+    if (!rootNodeName.empty())
     {
         rootNode = nullptr;
         for (size_t i = 0; i < scene->nodes.count; ++i)
         {
-            if (!rootNodeName.Compare(scene->nodes.data[i]->name.data, false))
+            if (rootNodeName.to_lower() == ea::string(scene->nodes.data[i]->name.data).to_lower())
             {
                 rootNode = scene->nodes.data[i];
                 break;
@@ -234,7 +259,7 @@ bool ImportFbx(const String& inFile, const String& outFile, const String& comman
         if (!rootNode)
         {
             ufbx_free_scene(scene);
-            ErrorExit("Could not find scene node " + rootNodeName);
+            ImporterErrorExit("Could not find scene node " + rootNodeName);
             return false;
         }
     }
@@ -262,7 +287,7 @@ bool ImportFbx(const String& inFile, const String& outFile, const String& comman
 
     if (!noMaterials_)
     {
-        HashSet<String> usedTextures;
+        ea::unordered_set<ea::string> usedTextures;
         FbxExportMaterials(scene, usedTextures);
         if (!noTextures_)
             FbxCopyTextures(scene, usedTextures, GetPath(inFile));
@@ -281,18 +306,18 @@ static void FbxDumpNodes(ufbx_node* node, ufbx_node* rootNode, unsigned level)
     if (!node)
         return;
 
-    String indent(' ', level * 2);
-    Vector3 pos = ToVector3(node->local_transform.translation);
+    const ea::string indent(static_cast<ea::string::size_type>(level * 2), ' ');
+    const Vector3 pos = ToVector3(node->local_transform.translation);
 
-    PrintLine(indent + "Node " + String(node->name.data) + " pos " + String(pos));
+    PrintLine(Format("{}Node {} pos {}", indent, ea::string(node->name.data), pos.ToString()));
 
     if (node->mesh)
     {
         unsigned numParts = (unsigned)node->mesh->material_parts.count;
         if (numParts <= 1)
-            PrintLine(indent + "  1 geometry");
+            PrintLine(Format("{}  1 geometry", indent));
         else
-            PrintLine(indent + "  " + String(numParts) + " geometries");
+            PrintLine(Format("{}  {} geometries", indent, numParts));
     }
 
     for (size_t i = 0; i < node->children.count; ++i)
@@ -310,7 +335,7 @@ static void FbxCollectMeshes(FbxModel& model, ufbx_node* node)
         ufbx_mesh* mesh = node->mesh;
         // Check for duplicate
         bool dup = false;
-        for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+        for (unsigned i = 0; i < model.meshes_.size(); ++i)
         {
             if (mesh == model.meshes_[i] && node == model.meshNodes_[i])
             {
@@ -321,8 +346,8 @@ static void FbxCollectMeshes(FbxModel& model, ufbx_node* node)
         }
         if (!dup)
         {
-            model.meshes_.Push(mesh);
-            model.meshNodes_.Push(node);
+            model.meshes_.push_back(mesh);
+            model.meshNodes_.push_back(node);
         }
     }
 
@@ -334,9 +359,9 @@ static void FbxCollectMeshes(FbxModel& model, ufbx_node* node)
 // Bone collection
 // ---------------------------------------------------------------------------
 
-static unsigned FbxGetBoneIndex(FbxModel& model, const String& boneName)
+static unsigned FbxGetBoneIndex(FbxModel& model, const ea::string& boneName)
 {
-    for (unsigned i = 0; i < model.bones_.Size(); ++i)
+    for (unsigned i = 0; i < model.bones_.size(); ++i)
     {
         if (boneName == model.bones_[i]->name.data)
             return i;
@@ -344,27 +369,27 @@ static unsigned FbxGetBoneIndex(FbxModel& model, const String& boneName)
     return M_MAX_UNSIGNED;
 }
 
-static void FbxCollectBonesFinal(PODVector<ufbx_node*>& dest, const HashSet<ufbx_node*>& necessary, ufbx_node* node)
+static void FbxCollectBonesFinal(ea::vector<ufbx_node*>& dest, const ea::unordered_set<ufbx_node*>& necessary, ufbx_node* node)
 {
-    bool includeBone = necessary.Contains(node);
-    String boneName(node->name.data);
+    bool includeBone = necessary.contains(node);
+    ea::string boneName(node->name.data);
 
     if (!includeBone && includeNonSkinningBones_)
     {
-        if (nonSkinningBoneIncludes_.Empty())
+        if (nonSkinningBoneIncludes_.empty())
             includeBone = true;
 
-        for (unsigned i = 0; i < nonSkinningBoneIncludes_.Size(); ++i)
+        for (unsigned i = 0; i < nonSkinningBoneIncludes_.size(); ++i)
         {
-            if (boneName.Contains(nonSkinningBoneIncludes_[i], false))
+            if (boneName.contains(nonSkinningBoneIncludes_[i], false))
             {
                 includeBone = true;
                 break;
             }
         }
-        for (unsigned i = 0; i < nonSkinningBoneExcludes_.Size(); ++i)
+        for (unsigned i = 0; i < nonSkinningBoneExcludes_.size(); ++i)
         {
-            if (boneName.Contains(nonSkinningBoneExcludes_[i], false))
+            if (boneName.contains(nonSkinningBoneExcludes_[i], false))
             {
                 includeBone = false;
                 break;
@@ -376,7 +401,7 @@ static void FbxCollectBonesFinal(PODVector<ufbx_node*>& dest, const HashSet<ufbx
     }
 
     if (includeBone)
-        dest.Push(node);
+        dest.push_back(node);
 
     for (size_t i = 0; i < node->children.count; ++i)
         FbxCollectBonesFinal(dest, necessary, node->children.data[i]);
@@ -384,11 +409,11 @@ static void FbxCollectBonesFinal(PODVector<ufbx_node*>& dest, const HashSet<ufbx
 
 static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
 {
-    HashSet<ufbx_node*> necessary;
-    HashSet<ufbx_node*> rootNodes;
+    ea::unordered_set<ufbx_node*> necessary;
+    ea::unordered_set<ufbx_node*> rootNodes;
 
     bool haveSkinnedMeshes = false;
-    for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+    for (unsigned i = 0; i < model.meshes_.size(); ++i)
     {
         if (model.meshes_[i]->skin_deformers.count > 0)
         {
@@ -397,7 +422,7 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
         }
     }
 
-    for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+    for (unsigned i = 0; i < model.meshes_.size(); ++i)
     {
         ufbx_mesh* mesh = model.meshes_[i];
         ufbx_node* meshNode = model.meshNodes_[i];
@@ -414,7 +439,7 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
                     continue;
 
                 ufbx_node* boneNode = cluster->bone_node;
-                necessary.Insert(boneNode);
+                necessary.insert(boneNode);
                 boneRootNode = boneNode;
 
                 for (;;)
@@ -423,11 +448,11 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
                     if (!parent || parent == meshNode || parent == meshParentNode)
                         break;
                     boneRootNode = parent;
-                    necessary.Insert(parent);
+                    necessary.insert(parent);
                     boneNode = parent;
                 }
 
-                rootNodes.Insert(boneRootNode);
+                rootNodes.insert(boneRootNode);
             }
         }
 
@@ -435,7 +460,7 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
         if (haveSkinnedMeshes && mesh->skin_deformers.count == 0)
         {
             ufbx_node* boneNode = meshNode;
-            necessary.Insert(boneNode);
+            necessary.insert(boneNode);
             boneRootNode = boneNode;
 
             for (;;)
@@ -444,24 +469,24 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
                 if (!parent || parent == meshNode || parent == meshParentNode)
                     break;
                 boneRootNode = parent;
-                necessary.Insert(parent);
+                necessary.insert(parent);
                 boneNode = parent;
             }
 
-            rootNodes.Insert(boneRootNode);
+            rootNodes.insert(boneRootNode);
         }
     }
 
     // If multiple root nodes, find common parent
-    if (rootNodes.Size() > 1)
+    if (rootNodes.size() > 1)
     {
-        for (HashSet<ufbx_node*>::Iterator i = rootNodes.Begin(); i != rootNodes.End(); ++i)
+        for (auto i = rootNodes.begin(); i != rootNodes.end(); ++i)
         {
             ufbx_node* commonParent = (*i);
             while (commonParent)
             {
                 unsigned found = 0;
-                for (HashSet<ufbx_node*>::Iterator j = rootNodes.Begin(); j != rootNodes.End(); ++j)
+                for (auto j = rootNodes.begin(); j != rootNodes.end(); ++j)
                 {
                     if (i == j)
                         continue;
@@ -477,34 +502,34 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
                     }
                 }
 
-                if (found >= rootNodes.Size() - 1)
+                if (found >= rootNodes.size() - 1)
                 {
-                    PrintLine("Multiple roots initially found, using new root node " + String(commonParent->name.data));
-                    rootNodes.Clear();
-                    rootNodes.Insert(commonParent);
-                    necessary.Insert(commonParent);
+                    PrintLine("Multiple roots initially found, using new root node " + ea::string(commonParent->name.data));
+                    rootNodes.clear();
+                    rootNodes.insert(commonParent);
+                    necessary.insert(commonParent);
                     break;
                 }
 
                 commonParent = commonParent->parent;
             }
 
-            if (rootNodes.Size() == 1)
+            if (rootNodes.size() == 1)
                 break;
         }
-        if (rootNodes.Size() > 1)
-            ErrorExit("Skeleton with multiple root nodes found, not supported");
+        if (rootNodes.size() > 1)
+            ImporterErrorExit("Skeleton with multiple root nodes found, not supported");
     }
 
-    if (rootNodes.Empty())
+    if (rootNodes.empty())
         return;
 
-    model.rootBone_ = *rootNodes.Begin();
+    model.rootBone_ = *rootNodes.begin();
     FbxCollectBonesFinal(model.bones_, necessary, model.rootBone_);
 
-    model.boneRadii_.Resize(model.bones_.Size());
-    model.boneHitboxes_.Resize(model.bones_.Size());
-    for (unsigned i = 0; i < model.bones_.Size(); ++i)
+    model.boneRadii_.resize(model.bones_.size());
+    model.boneHitboxes_.resize(model.bones_.size());
+    for (unsigned i = 0; i < model.bones_.size(); ++i)
     {
         model.boneRadii_[i] = 0.0f;
         model.boneHitboxes_[i] = BoundingBox(0.0f, 0.0f);
@@ -517,7 +542,7 @@ static void FbxCollectBones(FbxModel& model, ufbx_scene* scene)
 
 static void FbxBuildBoneCollisionInfo(FbxModel& model, ufbx_scene* scene)
 {
-    for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+    for (unsigned i = 0; i < model.meshes_.size(); ++i)
     {
         ufbx_mesh* mesh = model.meshes_[i];
         if (mesh->skin_deformers.count == 0)
@@ -530,7 +555,7 @@ static void FbxBuildBoneCollisionInfo(FbxModel& model, ufbx_scene* scene)
             if (!cluster->bone_node)
                 continue;
 
-            String boneName(cluster->bone_node->name.data);
+            ea::string boneName(cluster->bone_node->name.data);
             unsigned boneIndex = FbxGetBoneIndex(model, boneName);
             if (boneIndex == M_MAX_UNSIGNED)
                 continue;
@@ -543,14 +568,11 @@ static void FbxBuildBoneCollisionInfo(FbxModel& model, ufbx_scene* scene)
                     uint32_t vertexIndex = cluster->vertices.data[wi];
                     if (vertexIndex < mesh->num_vertices)
                     {
-                        ufbx_vec3 pos = mesh->vertices.data[vertexIndex];
-                        // Transform vertex to bone space using geometry_to_bone
-                        ufbx_vec3 boneSpace;
-                        boneSpace.x = cluster->geometry_to_bone.m00 * pos.x + cluster->geometry_to_bone.m01 * pos.y + cluster->geometry_to_bone.m02 * pos.z + cluster->geometry_to_bone.m03;
-                        boneSpace.y = cluster->geometry_to_bone.m10 * pos.x + cluster->geometry_to_bone.m11 * pos.y + cluster->geometry_to_bone.m12 * pos.z + cluster->geometry_to_bone.m13;
-                        boneSpace.z = cluster->geometry_to_bone.m20 * pos.x + cluster->geometry_to_bone.m21 * pos.y + cluster->geometry_to_bone.m22 * pos.z + cluster->geometry_to_bone.m23;
-
-                        Vector3 vertex = ToVector3(boneSpace);
+                        // Transform vertex to bone space. Both the matrix and the point are
+                        // S-converted (see ToMatrix3x4/ToVector3), so the result matches the
+                        // converted bone frame used for the skeleton
+                        const Vector3 vertex = ToMatrix3x4(cluster->geometry_to_bone)
+                            * ToVector3(mesh->vertices.data[vertexIndex]);
                         float radius = vertex.Length();
                         if (radius > model.boneRadii_[boneIndex])
                             model.boneRadii_[boneIndex] = radius;
@@ -567,19 +589,19 @@ static void FbxBuildBoneCollisionInfo(FbxModel& model, ufbx_scene* scene)
 // ---------------------------------------------------------------------------
 
 static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNode,
-    PODVector<unsigned>& boneMappings,
-    Vector<PODVector<unsigned char> >& blendIndices,
-    Vector<PODVector<float> >& blendWeights,
+    ea::vector<unsigned>& boneMappings,
+    ea::vector<ea::vector<unsigned char> >& blendIndices,
+    ea::vector<ea::vector<float> >& blendWeights,
     size_t numVertices)
 {
-    blendIndices.Resize(numVertices);
-    blendWeights.Resize(numVertices);
-    boneMappings.Clear();
+    blendIndices.resize(numVertices);
+    blendWeights.resize(numVertices);
+    boneMappings.clear();
 
     if (mesh->skin_deformers.count == 0)
     {
         // Rigid skinning: attach all vertices to the mesh node's bone
-        String boneName(meshNode->name.data);
+        ea::string boneName(meshNode->name.data);
         unsigned globalIndex = FbxGetBoneIndex(model, boneName);
         if (globalIndex == M_MAX_UNSIGNED)
         {
@@ -587,21 +609,21 @@ static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNod
             return;
         }
 
-        if (model.bones_.Size() > maxBones_)
+        if (model.bones_.size() > maxBones_)
         {
-            boneMappings.Push(globalIndex);
+            boneMappings.push_back(globalIndex);
             for (unsigned i = 0; i < numVertices; ++i)
             {
-                blendIndices[i].Push(0);
-                blendWeights[i].Push(1.0f);
+                blendIndices[i].push_back(0);
+                blendWeights[i].push_back(1.0f);
             }
         }
         else
         {
             for (unsigned i = 0; i < numVertices; ++i)
             {
-                blendIndices[i].Push((unsigned char)globalIndex);
-                blendWeights[i].Push(1.0f);
+                blendIndices[i].push_back((unsigned char)globalIndex);
+                blendWeights[i].push_back(1.0f);
             }
         }
         return;
@@ -609,47 +631,54 @@ static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNod
 
     ufbx_skin_deformer* skin = mesh->skin_deformers.data[0];
 
-    if (model.bones_.Size() > maxBones_)
+    if (model.bones_.size() > maxBones_)
     {
         if (skin->clusters.count > maxBones_)
         {
-            ErrorExit(
-                "Geometry (submesh) has over " + String(maxBones_) + " bone influences. Try splitting to more submeshes\n"
-                "that each stay at " + String(maxBones_) + " bones or below."
-            );
+            ImporterErrorExit(Format(
+                "Geometry (submesh) has over {} bone influences. Try splitting to more submeshes\n"
+                "that each stay at {} bones or below.", maxBones_, maxBones_));
         }
 
-        boneMappings.Resize((unsigned)skin->clusters.count);
+        boneMappings.resize((unsigned)skin->clusters.count);
         for (size_t i = 0; i < skin->clusters.count; ++i)
         {
             ufbx_skin_cluster* cluster = skin->clusters.data[i];
-            String boneName(cluster->bone_node ? cluster->bone_node->name.data : "");
+            ea::string boneName(cluster->bone_node ? cluster->bone_node->name.data : "");
             unsigned globalIndex = FbxGetBoneIndex(model, boneName);
             if (globalIndex == M_MAX_UNSIGNED)
-                ErrorExit("Bone " + boneName + " not found");
+                ImporterErrorExit("Bone " + boneName + " not found");
             boneMappings[i] = globalIndex;
         }
 
-        // Use skin->vertices[]/weights[] for per-vertex data
-        // Note: skin->vertices may have fewer entries than mesh vertices
+        // Per-vertex blend data. Local palette index equals the cluster index:
+        // boneMappings[cluster] maps it to the global bone index on the engine side.
         for (unsigned vi = 0; vi < numVertices; ++vi)
         {
-            // Map from deduplicated vertex back to original vertex index
-            // We'll handle this mapping at the call site
+            if (vi < (unsigned)skin->vertices.count)
+            {
+                ufbx_skin_vertex sv = skin->vertices.data[vi];
+                for (uint32_t wi = 0; wi < sv.num_weights; ++wi)
+                {
+                    ufbx_skin_weight sw = skin->weights.data[sv.weight_begin + wi];
+                    blendIndices[vi].push_back((unsigned char)sw.cluster_index);
+                    blendWeights[vi].push_back((float)sw.weight);
+                }
+            }
         }
     }
     else
     {
         // Global bone indices: map cluster index to model bone index
-        PODVector<unsigned> clusterToBone;
-        clusterToBone.Resize((unsigned)skin->clusters.count);
+        ea::vector<unsigned> clusterToBone;
+        clusterToBone.resize((unsigned)skin->clusters.count);
         for (size_t i = 0; i < skin->clusters.count; ++i)
         {
             ufbx_skin_cluster* cluster = skin->clusters.data[i];
-            String boneName(cluster->bone_node ? cluster->bone_node->name.data : "");
+            ea::string boneName(cluster->bone_node ? cluster->bone_node->name.data : "");
             unsigned globalIndex = FbxGetBoneIndex(model, boneName);
             if (globalIndex == M_MAX_UNSIGNED)
-                ErrorExit("Bone " + boneName + " not found");
+                ImporterErrorExit("Bone " + boneName + " not found");
             clusterToBone[i] = globalIndex;
         }
 
@@ -665,25 +694,25 @@ static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNod
                 {
                     ufbx_skin_weight sw = skin->weights.data[sv.weight_begin + wi];
                     unsigned boneIdx;
-                    if (model.bones_.Size() > maxBones_)
+                    if (model.bones_.size() > maxBones_)
                         boneIdx = (unsigned)sw.cluster_index;
                     else
                         boneIdx = clusterToBone[sw.cluster_index];
-                    blendIndices[vi].Push((unsigned char)boneIdx);
-                    blendWeights[vi].Push((float)sw.weight);
+                    blendIndices[vi].push_back((unsigned char)boneIdx);
+                    blendWeights[vi].push_back((float)sw.weight);
                 }
             }
         }
     }
 
     // Normalize weights, remove excess influences (cap at 4)
-    for (unsigned i = 0; i < blendWeights.Size(); ++i)
+    for (unsigned i = 0; i < blendWeights.size(); ++i)
     {
-        while (blendWeights[i].Size() > 4)
+        while (blendWeights[i].size() > 4)
         {
             unsigned lowestIndex = 0;
             float lowest = M_INFINITY;
-            for (unsigned j = 0; j < blendWeights[i].Size(); ++j)
+            for (unsigned j = 0; j < blendWeights[i].size(); ++j)
             {
                 if (blendWeights[i][j] < lowest)
                 {
@@ -691,16 +720,16 @@ static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNod
                     lowestIndex = j;
                 }
             }
-            blendWeights[i].Erase(lowestIndex);
-            blendIndices[i].Erase(lowestIndex);
+            blendWeights[i].erase(blendWeights[i].begin() + lowestIndex);
+            blendIndices[i].erase(blendIndices[i].begin() + lowestIndex);
         }
 
         float sum = 0.0f;
-        for (unsigned j = 0; j < blendWeights[i].Size(); ++j)
+        for (unsigned j = 0; j < blendWeights[i].size(); ++j)
             sum += blendWeights[i][j];
         if (sum != 1.0f && sum != 0.0f)
         {
-            for (unsigned j = 0; j < blendWeights[i].Size(); ++j)
+            for (unsigned j = 0; j < blendWeights[i].size(); ++j)
                 blendWeights[i][j] /= sum;
         }
     }
@@ -710,28 +739,28 @@ static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNod
 // Vertex elements description
 // ---------------------------------------------------------------------------
 
-static PODVector<VertexElement> FbxGetVertexElements(ufbx_mesh* mesh, bool isSkinned)
+static ea::vector<VertexElement> FbxGetVertexElements(ufbx_mesh* mesh, bool isSkinned)
 {
-    PODVector<VertexElement> ret;
+    ea::vector<VertexElement> ret;
 
-    ret.Push(VertexElement(TYPE_VECTOR3, SEM_POSITION));
+    ret.push_back(VertexElement(TYPE_VECTOR3, SEM_POSITION));
 
     if (mesh->vertex_normal.exists)
-        ret.Push(VertexElement(TYPE_VECTOR3, SEM_NORMAL));
+        ret.push_back(VertexElement(TYPE_VECTOR3, SEM_NORMAL));
 
     for (unsigned i = 0; i < (unsigned)mesh->color_sets.count && i < MAX_CHANNELS; ++i)
-        ret.Push(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR, i));
+        ret.push_back(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR, i));
 
     for (unsigned i = 0; i < (unsigned)mesh->uv_sets.count && i < MAX_CHANNELS; ++i)
-        ret.Push(VertexElement(TYPE_VECTOR2, SEM_TEXCOORD, i));
+        ret.push_back(VertexElement(TYPE_VECTOR2, SEM_TEXCOORD, i));
 
     if (mesh->vertex_tangent.exists && mesh->vertex_bitangent.exists)
-        ret.Push(VertexElement(TYPE_VECTOR4, SEM_TANGENT));
+        ret.push_back(VertexElement(TYPE_VECTOR4, SEM_TANGENT));
 
     if (isSkinned)
     {
-        ret.Push(VertexElement(TYPE_VECTOR4, SEM_BLENDWEIGHTS));
-        ret.Push(VertexElement(TYPE_UBYTE4, SEM_BLENDINDICES));
+        ret.push_back(VertexElement(TYPE_VECTOR4, SEM_BLENDWEIGHTS));
+        ret.push_back(VertexElement(TYPE_UBYTE4, SEM_BLENDINDICES));
     }
 
     return ret;
@@ -749,30 +778,48 @@ static void FbxProcessMeshPart(
     SharedPtr<VertexBuffer>& vb, SharedPtr<IndexBuffer>& ib,
     unsigned& startVertexOffset, unsigned& startIndexOffset,
     BoundingBox& box, unsigned destGeomIndex,
-    SharedPtr<Model>& outModel, Vector<PODVector<unsigned> >& allBoneMappings)
+    SharedPtr<Model>& outModel, ea::vector<ea::vector<unsigned> >& allBoneMappings)
 {
     if (part->num_triangles == 0)
         return;
 
     // Get blend data per logical vertex (before triangulation/dedup)
-    Vector<PODVector<unsigned char> > blendIndices;
-    Vector<PODVector<float> > blendWeights;
-    PODVector<unsigned> boneMappings;
+    ea::vector<ea::vector<unsigned char> > blendIndices;
+    ea::vector<ea::vector<float> > blendWeights;
+    ea::vector<unsigned> boneMappings;
     if (isSkinned)
         FbxGetBlendData(model, mesh, meshNode, boneMappings, blendIndices, blendWeights, (unsigned)mesh->num_vertices);
 
     // Triangulate and build per-corner vertex data
-    PODVector<uint32_t> triIndices;
-    triIndices.Resize((unsigned)part->num_triangles * 3);
+    ea::vector<uint32_t> triIndices;
+    triIndices.resize((unsigned)part->num_triangles * 3);
 
     unsigned triOffset = 0;
     for (size_t fi = 0; fi < part->num_faces; ++fi)
     {
         ufbx_face face = mesh->faces.data[part->face_indices.data[fi]];
-        uint32_t numTris = ufbx_triangulate_face(&triIndices[triOffset], triIndices.Size() - triOffset, mesh, face);
+        uint32_t numTris = ufbx_triangulate_face(&triIndices[triOffset], triIndices.size() - triOffset, mesh, face);
         triOffset += numTris * 3;
     }
     unsigned numTriIndices = triOffset;
+
+    // Flip triangle winding: the coordinate conversion S (see ToVector3) is a mirror,
+    // det(S) = -1, so face orientation must be reversed to keep surfaces facing outward.
+    // ufbx did not flip anything because no target axes were requested.
+    for (unsigned i = 0; i + 2 < numTriIndices; i += 3)
+    {
+        const uint32_t tmp = triIndices[i + 1];
+        triIndices[i + 1] = triIndices[i + 2];
+        triIndices[i + 2] = tmp;
+    }
+
+    // Bake vertices from the mesh geometry space into the model root node space, in the
+    // converted (S-conjugated) frame. Chains of S-conjugated matrices stay conjugated:
+    // (S*A*S) * (S*B*S) = S*(A*B)*S, and applying the result to S-converted points
+    // yields exactly S * (original transform chain) * (original point).
+    const Matrix3x4 vertexTransform =
+        ToMatrix3x4(model.rootNode_->node_to_world).Inverse() * ToMatrix3x4(meshNode->node_to_world);
+    const Matrix3 normalTransform = vertexTransform.RotationMatrix();
 
     // Build vertex data for each triangle corner
     struct RawVertex
@@ -790,21 +837,24 @@ static void FbxProcessMeshPart(
     unsigned numColorSets = Min((unsigned)mesh->color_sets.count, MAX_CHANNELS);
     bool hasTangents = mesh->vertex_tangent.exists && mesh->vertex_bitangent.exists;
 
-    PODVector<RawVertex> rawVertices;
-    rawVertices.Resize(numTriIndices);
+    ea::vector<RawVertex> rawVertices;
+    rawVertices.resize(numTriIndices);
 
     for (unsigned i = 0; i < numTriIndices; ++i)
     {
         uint32_t idx = triIndices[i]; // index into mesh attribute arrays
         RawVertex& rv = rawVertices[i];
+        // Zero everything first: ufbx_generate_indices compares full vertex bytes,
+        // uninitialized fields/padding would break deduplication
+        memset(&rv, 0, sizeof(RawVertex));
 
         // Position - use logical vertex index
         uint32_t vertexIndex = mesh->vertex_indices.data[idx];
-        rv.position = ToVector3(mesh->vertex_position.values.data[mesh->vertex_position.indices.data[idx]]);
+        rv.position = vertexTransform * ToVector3(mesh->vertex_position.values.data[mesh->vertex_position.indices.data[idx]]);
 
         // Normal
         if (mesh->vertex_normal.exists)
-            rv.normal = ToVector3(mesh->vertex_normal.values.data[mesh->vertex_normal.indices.data[idx]]);
+            rv.normal = normalTransform * ToVector3(mesh->vertex_normal.values.data[mesh->vertex_normal.indices.data[idx]]);
 
         // UVs
         for (unsigned s = 0; s < numUVSets; ++s)
@@ -820,19 +870,19 @@ static void FbxProcessMeshPart(
         // Tangent + handedness
         if (hasTangents)
         {
-            Vector3 tan = ToVector3(mesh->vertex_tangent.values.data[mesh->vertex_tangent.indices.data[idx]]);
+            Vector3 tan = normalTransform * ToVector3(mesh->vertex_tangent.values.data[mesh->vertex_tangent.indices.data[idx]]);
             Vector3 norm = rv.normal;
-            Vector3 bitan = ToVector3(mesh->vertex_bitangent.values.data[mesh->vertex_bitangent.indices.data[idx]]);
+            Vector3 bitan = normalTransform * ToVector3(mesh->vertex_bitangent.values.data[mesh->vertex_bitangent.indices.data[idx]]);
+            // The S mirror flips the cross product, so the handedness sign is recomputed
+            // correctly from the converted vectors below
             float w = (tan.CrossProduct(norm).DotProduct(bitan) < 0.5f) ? -1.0f : 1.0f;
             rv.tangent = Vector4(tan.x_, tan.y_, tan.z_, w);
         }
 
         // Blend data (from logical vertex)
-        memset(rv.blendW, 0, sizeof(rv.blendW));
-        memset(rv.blendI, 0, sizeof(rv.blendI));
-        if (isSkinned && vertexIndex < (unsigned)blendWeights.Size())
+        if (isSkinned && vertexIndex < (unsigned)blendWeights.size())
         {
-            for (unsigned bi = 0; bi < 4 && bi < blendWeights[vertexIndex].Size(); ++bi)
+            for (unsigned bi = 0; bi < 4 && bi < blendWeights[vertexIndex].size(); ++bi)
             {
                 rv.blendW[bi] = blendWeights[vertexIndex][bi];
                 rv.blendI[bi] = blendIndices[vertexIndex][bi];
@@ -841,21 +891,20 @@ static void FbxProcessMeshPart(
     }
 
     // Deduplicate vertices using ufbx_generate_indices
-    PODVector<uint32_t> dedupIndices;
-    dedupIndices.Resize(numTriIndices);
+    ea::vector<uint32_t> dedupIndices;
+    dedupIndices.resize(numTriIndices);
 
-    ufbx_vertex_stream stream;
-    stream.data = rawVertices.Buffer();
+    ufbx_vertex_stream stream = {};
+    stream.data = rawVertices.data();
     stream.vertex_count = numTriIndices;
     stream.vertex_size = sizeof(RawVertex);
 
     ufbx_error err;
-    size_t numUniqueVertices = ufbx_generate_indices(&stream, 1, dedupIndices.Buffer(), numTriIndices, nullptr, &err);
+    size_t numUniqueVertices = ufbx_generate_indices(&stream, 1, dedupIndices.data(), numTriIndices, nullptr, &err);
 
-    PrintLine("Writing geometry with " + String((unsigned)numUniqueVertices) + " vertices " +
-        String(numTriIndices) + " indices");
+    PrintLine(Format("Writing geometry with {} vertices {} indices", (unsigned)numUniqueVertices, numTriIndices));
 
-    if (model.bones_.Size() > 0 && !isSkinned)
+    if (model.bones_.size() > 0 && !isSkinned)
         PrintLine("Warning: model has bones but geometry has no skinning information");
 
     bool largeIndices;
@@ -867,9 +916,12 @@ static void FbxProcessMeshPart(
     // Create buffers if needed
     if (!combineBuffers || !vb)
     {
-        PODVector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
+        ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
         vb = new VertexBuffer(context_);
+        // DLL host may have a Graphics subsystem, shadow data is not automatic there
+        vb->SetShadowed(true);
         ib = new IndexBuffer(context_);
+        ib->SetShadowed(true);
         largeIndices = numUniqueVertices > 65535;
         vb->SetSize((unsigned)numUniqueVertices, elements);
         ib->SetSize(numTriIndices, largeIndices);
@@ -893,7 +945,7 @@ static void FbxProcessMeshPart(
     }
 
     // Write vertex data
-    PODVector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
+    ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
     unsigned vertexSize = vb->GetVertexSize();
     unsigned char* vertexData = vb->GetShadowData();
     auto* base = (float*)(vertexData + startVertexOffset * vertexSize);
@@ -970,8 +1022,8 @@ static void FbxProcessMeshPart(
     outModel->SetNumGeometryLodLevels(destGeomIndex, 1);
     outModel->SetGeometry(destGeomIndex, 0, geom);
     outModel->SetGeometryCenter(destGeomIndex, center);
-    if (model.bones_.Size() > maxBones_)
-        allBoneMappings.Push(boneMappings);
+    if (model.bones_.size() > maxBones_)
+        allBoneMappings.push_back(boneMappings);
 
     startVertexOffset += (unsigned)numUniqueVertices;
     startIndexOffset += numTriIndices;
@@ -985,8 +1037,8 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
         return;
     }
 
-    String rootNodeName(model.rootNode_->name.data);
-    if (!model.meshes_.Size())
+    ea::string rootNodeName(model.rootNode_->name.data);
+    if (!model.meshes_.size())
     {
         PrintLine("No geometries found starting from node " + rootNodeName + ", skipping model save");
         return;
@@ -996,7 +1048,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
 
     // Count total geometries (one per material part per mesh)
     unsigned numGeometries = 0;
-    for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+    for (unsigned i = 0; i < model.meshes_.size(); ++i)
     {
         ufbx_mesh* mesh = model.meshes_[i];
         unsigned numParts = (unsigned)mesh->material_parts.count;
@@ -1006,17 +1058,17 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
     }
 
     SharedPtr<Model> outModel(new Model(context_));
-    Vector<PODVector<unsigned> > allBoneMappings;
+    ea::vector<ea::vector<unsigned> > allBoneMappings;
     BoundingBox box;
-    bool isSkinned = model.bones_.Size() > 0;
+    bool isSkinned = model.bones_.size() > 0;
 
     outModel->SetNumGeometries(numGeometries);
 
-    Vector<SharedPtr<VertexBuffer> > vbVector;
-    Vector<SharedPtr<IndexBuffer> > ibVector;
+    ea::vector<SharedPtr<VertexBuffer> > vbVector;
+    ea::vector<SharedPtr<IndexBuffer> > ibVector;
 
     unsigned destGeomIndex = 0;
-    for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+    for (unsigned i = 0; i < model.meshes_.size(); ++i)
     {
         ufbx_mesh* mesh = model.meshes_[i];
         ufbx_node* meshNode = model.meshNodes_[i];
@@ -1025,7 +1077,6 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
         if (numParts == 0)
         {
             // Mesh has no material parts - treat as single part covering all faces
-            // Build the entire mesh as one geometry
             SharedPtr<VertexBuffer> vb;
             SharedPtr<IndexBuffer> ib;
             unsigned startVertexOffset = 0;
@@ -1036,11 +1087,11 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
             syntheticPart.num_faces = mesh->num_faces;
             syntheticPart.num_triangles = mesh->num_triangles;
             // Build face_indices covering all faces
-            PODVector<uint32_t> allFaceIndices;
-            allFaceIndices.Resize((unsigned)mesh->num_faces);
+            ea::vector<uint32_t> allFaceIndices;
+            allFaceIndices.resize((unsigned)mesh->num_faces);
             for (unsigned fi = 0; fi < (unsigned)mesh->num_faces; ++fi)
                 allFaceIndices[fi] = fi;
-            syntheticPart.face_indices.data = allFaceIndices.Buffer();
+            syntheticPart.face_indices.data = allFaceIndices.data();
             syntheticPart.face_indices.count = mesh->num_faces;
 
             FbxProcessMeshPart(mesh, meshNode, &syntheticPart, model, scene,
@@ -1048,8 +1099,8 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                 startVertexOffset, startIndexOffset,
                 box, destGeomIndex, outModel, allBoneMappings);
 
-            vbVector.Push(vb);
-            ibVector.Push(ib);
+            vbVector.push_back(vb);
+            ibVector.push_back(ib);
             ++destGeomIndex;
         }
         else
@@ -1060,14 +1111,13 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                 if (part->num_triangles == 0)
                 {
                     // Empty part, still need to account for geometry slot
-                    // Create minimal empty geometry
                     SharedPtr<VertexBuffer> vb(new VertexBuffer(context_));
                     SharedPtr<IndexBuffer> ib(new IndexBuffer(context_));
-                    PODVector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
+                    ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
                     vb->SetSize(0, elements);
                     ib->SetSize(0, false);
-                    vbVector.Push(vb);
-                    ibVector.Push(ib);
+                    vbVector.push_back(vb);
+                    ibVector.push_back(ib);
                     SharedPtr<Geometry> geom(new Geometry(context_));
                     geom->SetIndexBuffer(ib);
                     geom->SetVertexBuffer(0, vb);
@@ -1089,39 +1139,39 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     startVertexOffset, startIndexOffset,
                     box, destGeomIndex, outModel, allBoneMappings);
 
-                vbVector.Push(vb);
-                ibVector.Push(ib);
+                vbVector.push_back(vb);
+                ibVector.push_back(ib);
                 ++destGeomIndex;
             }
         }
     }
 
     // Define model buffers and bounding box
-    PODVector<unsigned> emptyMorphRange;
+    ea::vector<unsigned> emptyMorphRange;
     outModel->SetVertexBuffers(vbVector, emptyMorphRange, emptyMorphRange);
     outModel->SetIndexBuffers(ibVector);
     outModel->SetBoundingBox(box);
 
     // Build skeleton
-    if (model.bones_.Size() && model.rootBone_)
+    if (model.bones_.size() && model.rootBone_)
     {
-        PrintLine("Writing skeleton with " + String(model.bones_.Size()) + " bones, rootbone " +
-            String(model.rootBone_->name.data));
+        PrintLine(Format("Writing skeleton with {} bones, rootbone {}",
+            model.bones_.size(), ea::string(model.rootBone_->name.data)));
 
         Skeleton skeleton;
-        Vector<Bone>& bones = skeleton.GetModifiableBones();
+        ea::vector<Bone>& bones = skeleton.GetModifiableBones();
 
-        for (unsigned i = 0; i < model.bones_.Size(); ++i)
+        for (unsigned i = 0; i < model.bones_.size(); ++i)
         {
             ufbx_node* boneNode = model.bones_[i];
 
             Bone newBone;
-            newBone.name_ = String(boneNode->name.data);
+            newBone.name_ = ea::string(boneNode->name.data);
 
             ufbx_transform t = boneNode->local_transform;
             newBone.initialPosition_ = ToVector3(t.translation);
             newBone.initialRotation_ = ToQuaternion(t.rotation);
-            newBone.initialScale_ = ToVector3(t.scale);
+            newBone.initialScale_ = ToScale(t.scale);
 
             // If root bone, include transforms between root bone and model root
             if (boneNode == model.rootBone_ && boneNode != model.rootNode_)
@@ -1137,11 +1187,18 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
 
             // Get offset matrix from skin clusters
             newBone.offsetMatrix_ = Matrix3x4::IDENTITY;
-            for (unsigned mi = 0; mi < model.meshes_.Size(); ++mi)
+            for (unsigned mi = 0; mi < model.meshes_.size(); ++mi)
             {
                 ufbx_mesh* mesh = model.meshes_[mi];
                 if (mesh->skin_deformers.count == 0)
                     continue;
+                // Same vertex baking transform as used in FbxProcessMeshPart. Vertices are
+                // baked into the model root node space, so the skin cluster matrix must be
+                // adjusted accordingly: offset = geometry_to_bone * inverse(baking transform).
+                // Both matrices are S-conjugated, so the chain stays consistent:
+                // (S*G2B*S) * (S*T^-1*S) = S*(G2B * T^-1)*S
+                const Matrix3x4 vertexTransform =
+                    ToMatrix3x4(model.rootNode_->node_to_world).Inverse() * ToMatrix3x4(model.meshNodes_[mi]->node_to_world);
                 ufbx_skin_deformer* skin = mesh->skin_deformers.data[0];
                 bool found = false;
                 for (size_t ci = 0; ci < skin->clusters.count; ++ci)
@@ -1149,7 +1206,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     ufbx_skin_cluster* cluster = skin->clusters.data[ci];
                     if (cluster->bone_node == boneNode)
                     {
-                        newBone.offsetMatrix_ = ToMatrix3x4(cluster->geometry_to_bone);
+                        newBone.offsetMatrix_ = ToMatrix3x4(cluster->geometry_to_bone) * vertexTransform.Inverse();
                         found = true;
                         break;
                     }
@@ -1163,16 +1220,16 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
             newBone.collisionMask_ = BONECOLLISION_SPHERE | BONECOLLISION_BOX;
             newBone.parentIndex_ = i; // Will be fixed below
 
-            bones.Push(newBone);
+            bones.push_back(newBone);
         }
 
         // Set bone hierarchy
-        for (unsigned i = 1; i < model.bones_.Size(); ++i)
+        for (unsigned i = 1; i < model.bones_.size(); ++i)
         {
             if (model.bones_[i]->parent)
             {
-                const char* parentName = model.bones_[i]->parent->name.data;
-                for (unsigned j = 0; j < bones.Size(); ++j)
+                const ea::string parentName(model.bones_[i]->parent->name.data);
+                for (unsigned j = 0; j < bones.size(); ++j)
                 {
                     if (bones[j].name_ == parentName)
                     {
@@ -1184,23 +1241,23 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
         }
 
         outModel->SetSkeleton(skeleton);
-        if (model.bones_.Size() > maxBones_)
+        if (model.bones_.size() > maxBones_)
             outModel->SetGeometryBoneMappings(allBoneMappings);
     }
 
     File outFile(context_);
     if (!outFile.Open(model.outName_, FILE_WRITE))
-        ErrorExit("Could not open output file " + model.outName_);
+        ImporterErrorExit("Could not open output file " + model.outName_);
     outModel->Save(outFile);
 
     // Save material list
     if (!noMaterials_ && saveMaterialList_)
     {
-        String materialListName = ReplaceExtension(model.outName_, ".txt");
+        ea::string materialListName = ReplaceExtension(model.outName_, ".txt");
         File listFile(context_);
         if (listFile.Open(materialListName, FILE_WRITE))
         {
-            for (unsigned i = 0; i < model.meshes_.Size(); ++i)
+            for (unsigned i = 0; i < model.meshes_.size(); ++i)
             {
                 ufbx_mesh* mesh = model.meshes_[i];
                 unsigned numParts = (unsigned)mesh->material_parts.count;
@@ -1215,9 +1272,9 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                         unsigned matIdx = mesh->material_parts.data[p].index;
                         if (matIdx < mesh->materials.count)
                         {
-                            String matName = SanitateAssetName(String(mesh->materials.data[matIdx]->name.data));
-                            if (matName.Trimmed().Empty())
-                                matName = inputName_ + "_Material" + String(matIdx);
+                            ea::string matName = SanitateAssetName(ea::string(mesh->materials.data[matIdx]->name.data));
+                            if (matName.trimmed().empty())
+                                matName = Format("{}_Material{}", inputName_, matIdx);
                             listFile.WriteLine((useSubdirs_ ? "Materials/" : "") + matName + ".xml");
                         }
                     }
@@ -1238,11 +1295,11 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
         ufbx_anim_stack* stack = scene->anim_stacks.data[ai];
         ufbx_anim* anim = stack->anim;
 
-        String animName(stack->name.data);
-        if (animName.Empty())
-            animName = "Anim" + String((unsigned)ai + 1);
+        ea::string animName(stack->name.data);
+        if (animName.empty())
+            animName = Format("Anim{}", (unsigned)ai + 1);
 
-        String animOutName;
+        ea::string animOutName;
         if (model)
             animOutName = GetPath(model->outName_) + GetFileName(model->outName_) + "_" + SanitateAssetName(animName) + ".ani";
         else
@@ -1265,10 +1322,10 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
         outAnim->SetAnimationName(animName);
         outAnim->SetLength(duration);
 
-        PrintLine("Writing animation " + animName + " length " + String(duration));
+        PrintLine("Writing animation " + animName + " length " + Format("{}", duration));
 
         // Collect all unique key times from all relevant animation curves for each bone
-        PODVector<ufbx_node*>& bones = model ? model->bones_ : *(PODVector<ufbx_node*>*)nullptr;
+        ea::vector<ufbx_node*>* bones = model ? &model->bones_ : nullptr;
         bool hasModel = (model != nullptr);
 
         if (!hasModel)
@@ -1277,12 +1334,12 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
             for (size_t ni = 0; ni < scene->nodes.count; ++ni)
             {
                 ufbx_node* node = scene->nodes.data[ni];
-                String channelName(node->name.data);
-                if (channelName.Empty())
+                ea::string channelName(node->name.data);
+                if (channelName.empty())
                     continue;
 
                 // Collect key times from all animation curves for this node in this stack
-                PODVector<float> keyTimes;
+                ea::vector<float> keyTimes;
                 for (size_t li = 0; li < stack->layers.count; ++li)
                 {
                     ufbx_anim_layer* layer = stack->layers.data[li];
@@ -1298,22 +1355,22 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                                 {
                                     float t = (float)val->curves[ci]->keyframes.data[ki].time;
                                     if (t >= thisImportStartTime && t <= thisImportEndTime)
-                                        keyTimes.Push(t);
+                                        keyTimes.push_back(t);
                                 }
                             }
                         }
                     }
                 }
 
-                if (keyTimes.Empty())
+                if (keyTimes.empty())
                     continue;
 
-                Sort(keyTimes.Begin(), keyTimes.End());
+                ea::sort(keyTimes.begin(), keyTimes.end());
                 // Remove duplicates
-                for (unsigned ki = 1; ki < keyTimes.Size();)
+                for (unsigned ki = 1; ki < keyTimes.size();)
                 {
                     if (keyTimes[ki] == keyTimes[ki - 1])
-                        keyTimes.Erase(ki);
+                        keyTimes.erase(keyTimes.begin() + ki);
                     else
                         ++ki;
                 }
@@ -1321,7 +1378,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                 AnimationTrack* track = outAnim->CreateTrack(channelName);
                 track->channelMask_ = CHANNEL_POSITION | CHANNEL_ROTATION | CHANNEL_SCALE;
 
-                for (unsigned ki = 0; ki < keyTimes.Size(); ++ki)
+                for (unsigned ki = 0; ki < keyTimes.size(); ++ki)
                 {
                     float t = keyTimes[ki];
                     ufbx_transform xform = ufbx_evaluate_transform(anim, node, (double)t);
@@ -1330,21 +1387,21 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                     kf.time_ = t - thisImportStartTime;
                     kf.position_ = ToVector3(xform.translation);
                     kf.rotation_ = ToQuaternion(xform.rotation);
-                    kf.scale_ = ToVector3(xform.scale);
-                    track->keyFrames_.Push(kf);
+                    kf.scale_ = ToScale(xform.scale);
+                    track->keyFrames_.push_back(kf);
                 }
             }
         }
         else
         {
             // Model-specific animations: only export bones that are in the skeleton
-            for (unsigned bi = 0; bi < bones.Size(); ++bi)
+            for (unsigned bi = 0; bi < bones->size(); ++bi)
             {
-                ufbx_node* boneNode = bones[bi];
-                String channelName(boneNode->name.data);
+                ufbx_node* boneNode = (*bones)[bi];
+                ea::string channelName(boneNode->name.data);
 
                 // Collect key times
-                PODVector<float> keyTimes;
+                ea::vector<float> keyTimes;
                 for (size_t li = 0; li < stack->layers.count; ++li)
                 {
                     ufbx_anim_layer* layer = stack->layers.data[li];
@@ -1360,22 +1417,22 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                                 {
                                     float t = (float)val->curves[ci]->keyframes.data[ki].time;
                                     if (t >= thisImportStartTime && t <= thisImportEndTime)
-                                        keyTimes.Push(t);
+                                        keyTimes.push_back(t);
                                 }
                             }
                         }
                     }
                 }
 
-                if (keyTimes.Empty())
+                if (keyTimes.empty())
                     continue;
 
-                Sort(keyTimes.Begin(), keyTimes.End());
+                ea::sort(keyTimes.begin(), keyTimes.end());
                 // Remove duplicates
-                for (unsigned ki = 1; ki < keyTimes.Size();)
+                for (unsigned ki = 1; ki < keyTimes.size();)
                 {
                     if (keyTimes[ki] == keyTimes[ki - 1])
-                        keyTimes.Erase(ki);
+                        keyTimes.erase(keyTimes.begin() + ki);
                     else
                         ++ki;
                 }
@@ -1387,9 +1444,9 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                 ufbx_transform restTransform = boneNode->local_transform;
                 bool hasPos = false, hasRot = false, hasScale = false;
 
-                PODVector<ufbx_transform> transforms;
-                transforms.Resize(keyTimes.Size());
-                for (unsigned ki = 0; ki < keyTimes.Size(); ++ki)
+                ea::vector<ufbx_transform> transforms;
+                transforms.resize(keyTimes.size());
+                for (unsigned ki = 0; ki < keyTimes.size(); ++ki)
                 {
                     transforms[ki] = ufbx_evaluate_transform(anim, boneNode, (double)keyTimes[ki]);
 
@@ -1397,11 +1454,11 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                         hasPos = true;
                     if (!hasRot && !ToQuaternion(transforms[ki].rotation).Equals(ToQuaternion(restTransform.rotation)))
                         hasRot = true;
-                    if (!hasScale && !ToVector3(transforms[ki].scale).Equals(ToVector3(restTransform.scale)))
+                    if (!hasScale && !ToScale(transforms[ki].scale).Equals(ToScale(restTransform.scale)))
                         hasScale = true;
                 }
 
-                if (keyTimes.Size() > 1)
+                if (keyTimes.size() > 1)
                 {
                     hasPos = true;
                     hasRot = true;
@@ -1416,9 +1473,9 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                 if (track->channelMask_ & CHANNEL_SCALE)
                 {
                     bool redundantScale = true;
-                    for (unsigned ki = 0; ki < keyTimes.Size(); ++ki)
+                    for (unsigned ki = 0; ki < keyTimes.size(); ++ki)
                     {
-                        Vector3 s = ToVector3(transforms[ki].scale);
+                        Vector3 s = ToScale(transforms[ki].scale);
                         if (fabsf(s.x_ - 1.0f) >= 0.000001f || fabsf(s.y_ - 1.0f) >= 0.000001f || fabsf(s.z_ - 1.0f) >= 0.000001f)
                         {
                             redundantScale = false;
@@ -1435,7 +1492,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                     continue;
                 }
 
-                for (unsigned ki = 0; ki < keyTimes.Size(); ++ki)
+                for (unsigned ki = 0; ki < keyTimes.size(); ++ki)
                 {
                     AnimationKeyFrame kf;
                     kf.time_ = keyTimes[ki] - thisImportStartTime;
@@ -1447,7 +1504,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                     if (model && boneNode == model->rootBone_ && boneNode != model->rootNode_)
                     {
                         // Build transform matrix and make relative to model root
-                        Matrix3x4 boneLocal(ToVector3(xform.translation), ToQuaternion(xform.rotation), ToVector3(xform.scale));
+                        Matrix3x4 boneLocal(ToVector3(xform.translation), ToQuaternion(xform.rotation), ToScale(xform.scale));
                         // Walk parent chain from root bone to model root
                         Matrix3x4 derivedTransform = boneLocal;
                         ufbx_node* parent = boneNode->parent;
@@ -1455,7 +1512,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                         {
                             Matrix3x4 parentLocal(ToVector3(parent->local_transform.translation),
                                 ToQuaternion(parent->local_transform.rotation),
-                                ToVector3(parent->local_transform.scale));
+                                ToScale(parent->local_transform.scale));
                             derivedTransform = parentLocal * derivedTransform;
                             parent = parent->parent;
                         }
@@ -1468,10 +1525,10 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                     {
                         kf.position_ = ToVector3(xform.translation);
                         kf.rotation_ = ToQuaternion(xform.rotation);
-                        kf.scale_ = ToVector3(xform.scale);
+                        kf.scale_ = ToScale(xform.scale);
                     }
 
-                    track->keyFrames_.Push(kf);
+                    track->keyFrames_.push_back(kf);
                 }
             }
         }
@@ -1481,7 +1538,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
         {
             File outFile(context_);
             if (!outFile.Open(animOutName, FILE_WRITE))
-                ErrorExit("Could not open output file " + animOutName);
+                ImporterErrorExit("Could not open output file " + animOutName);
             outAnim->Save(outFile);
         }
     }
@@ -1491,10 +1548,10 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
 // Export model command
 // ---------------------------------------------------------------------------
 
-static void FbxExportModel(ufbx_scene* scene, const String& outName, ufbx_node* rootNode)
+static void FbxExportModel(ufbx_scene* scene, const ea::string& outName, ufbx_node* rootNode)
 {
-    if (outName.Empty())
-        ErrorExit("No output file defined");
+    if (outName.empty())
+        ImporterErrorExit("No output file defined");
 
     FbxModel model;
     model.rootNode_ = rootNode;
@@ -1513,10 +1570,10 @@ static void FbxExportModel(ufbx_scene* scene, const String& outName, ufbx_node* 
 // Export animation command
 // ---------------------------------------------------------------------------
 
-static void FbxExportAnimation(ufbx_scene* scene, const String& outName, ufbx_node* rootNode)
+static void FbxExportAnimation(ufbx_scene* scene, const ea::string& outName, ufbx_node* rootNode)
 {
-    if (outName.Empty())
-        ErrorExit("No output file defined");
+    if (outName.empty())
+        ImporterErrorExit("No output file defined");
 
     noMaterials_ = true;
 
@@ -1528,11 +1585,11 @@ static void FbxExportAnimation(ufbx_scene* scene, const String& outName, ufbx_no
     FbxCollectBones(model, scene);
 
     // If no bones found from skinning, collect all scene nodes as bones
-    if (model.bones_.Size() == 0)
+    if (model.bones_.size() == 0)
     {
         // Walk the node tree and add all nodes as bones
         for (size_t i = 0; i < scene->nodes.count; ++i)
-            model.bones_.Push(scene->nodes.data[i]);
+            model.bones_.push_back(scene->nodes.data[i]);
         if (scene->nodes.count > 0)
             model.rootBone_ = scene->root_node;
     }
@@ -1551,21 +1608,21 @@ static void FbxCollectSceneModels(FbxScene& fbxScene, ufbx_scene* scene, ufbx_no
     {
         FbxModel model;
         model.rootNode_ = node;
-        model.outName_ = resourcePath_ + (useSubdirs_ ? "Models/" : "") + SanitateAssetName(String(node->name.data)) + ".mdl";
+        model.outName_ = resourcePath_ + (useSubdirs_ ? "Models/" : "") + SanitateAssetName(ea::string(node->name.data)) + ".mdl";
 
-        model.meshes_.Push(node->mesh);
-        model.meshNodes_.Push(node);
+        model.meshes_.push_back(node->mesh);
+        model.meshNodes_.push_back(node);
 
         // Check uniqueness
         bool unique = true;
         if (checkUniqueModel_)
         {
-            for (unsigned i = 0; i < fbxScene.models_.Size(); ++i)
+            for (unsigned i = 0; i < fbxScene.models_.size(); ++i)
             {
-                if (fbxScene.models_[i].meshes_.Size() == model.meshes_.Size())
+                if (fbxScene.models_[i].meshes_.size() == model.meshes_.size())
                 {
                     bool same = true;
-                    for (unsigned j = 0; j < model.meshes_.Size(); ++j)
+                    for (unsigned j = 0; j < model.meshes_.size(); ++j)
                     {
                         if (fbxScene.models_[i].meshes_[j] != model.meshes_[j])
                         {
@@ -1575,9 +1632,9 @@ static void FbxCollectSceneModels(FbxScene& fbxScene, ufbx_scene* scene, ufbx_no
                     }
                     if (same)
                     {
-                        PrintLine("Added node " + String(node->name.data));
-                        fbxScene.nodes_.Push(node);
-                        fbxScene.nodeModelIndices_.Push(i);
+                        PrintLine("Added node " + ea::string(node->name.data));
+                        fbxScene.nodes_.push_back(node);
+                        fbxScene.nodeModelIndices_.push_back(i);
                         unique = false;
                         break;
                     }
@@ -1588,16 +1645,16 @@ static void FbxCollectSceneModels(FbxScene& fbxScene, ufbx_scene* scene, ufbx_no
         if (unique)
         {
             PrintLine("Added model " + model.outName_);
-            PrintLine("Added node " + String(node->name.data));
+            PrintLine("Added node " + ea::string(node->name.data));
             FbxCollectBones(model, scene);
             FbxBuildBoneCollisionInfo(model, scene);
 
             if (!noAnimations_)
                 FbxBuildAndSaveAnimations(scene, &model);
 
-            fbxScene.models_.Push(model);
-            fbxScene.nodes_.Push(node);
-            fbxScene.nodeModelIndices_.Push(fbxScene.models_.Size() - 1);
+            fbxScene.models_.push_back(model);
+            fbxScene.nodes_.push_back(node);
+            fbxScene.nodeModelIndices_.push_back((unsigned)fbxScene.models_.size() - 1);
         }
     }
 
@@ -1605,23 +1662,23 @@ static void FbxCollectSceneModels(FbxScene& fbxScene, ufbx_scene* scene, ufbx_no
         FbxCollectSceneModels(fbxScene, scene, node->children.data[i]);
 }
 
-static void FbxCreateHierarchy(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, HashMap<ufbx_node*, Node*>& nodeMapping)
+static void FbxCreateHierarchy(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, ea::unordered_map<ufbx_node*, Node*>& nodeMapping)
 {
     FbxCreateSceneNode(outScene, srcNode, rootNode, nodeMapping);
     for (size_t i = 0; i < srcNode->children.count; ++i)
         FbxCreateHierarchy(outScene, srcNode->children.data[i], rootNode, nodeMapping);
 }
 
-static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, HashMap<ufbx_node*, Node*>& nodeMapping)
+static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* rootNode, ea::unordered_map<ufbx_node*, Node*>& nodeMapping)
 {
-    if (nodeMapping.Contains(srcNode))
+    if (nodeMapping.contains(srcNode))
         return nodeMapping[srcNode];
 
-    String nodeName(srcNode->name.data);
+    ea::string nodeName(srcNode->name.data);
 
     if (noHierarchy_)
     {
-        Node* outNode = outScene->CreateChild(nodeName, localIDs_ ? LOCAL : REPLICATED);
+        Node* outNode = outScene->CreateChild(nodeName);
         Matrix3x4 worldTransform = ToMatrix3x4(srcNode->node_to_world);
         Matrix3x4 rootInv = ToMatrix3x4(rootNode->node_to_world).Inverse();
         Matrix3x4 relative = rootInv * worldTransform;
@@ -1632,33 +1689,33 @@ static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* 
 
     if (srcNode == rootNode || !srcNode->parent)
     {
-        Node* outNode = outScene->CreateChild(nodeName, localIDs_ ? LOCAL : REPLICATED);
+        Node* outNode = outScene->CreateChild(nodeName);
         ufbx_transform t = srcNode->local_transform;
-        outNode->SetTransform(ToVector3(t.translation), ToQuaternion(t.rotation), ToVector3(t.scale));
+        outNode->SetTransform(ToVector3(t.translation), ToQuaternion(t.rotation), ToScale(t.scale));
         nodeMapping[srcNode] = outNode;
         return outNode;
     }
     else
     {
-        if (!nodeMapping.Contains(srcNode->parent))
+        if (!nodeMapping.contains(srcNode->parent))
             FbxCreateSceneNode(outScene, srcNode->parent, rootNode, nodeMapping);
 
         Node* parent = nodeMapping[srcNode->parent];
-        Node* outNode = parent->CreateChild(nodeName, localIDs_ ? LOCAL : REPLICATED);
+        Node* outNode = parent->CreateChild(nodeName);
         ufbx_transform t = srcNode->local_transform;
-        outNode->SetTransform(ToVector3(t.translation), ToQuaternion(t.rotation), ToVector3(t.scale));
+        outNode->SetTransform(ToVector3(t.translation), ToQuaternion(t.rotation), ToScale(t.scale));
         nodeMapping[srcNode] = outNode;
         return outNode;
     }
 }
 
-static String FbxGetMeshMaterialName(ufbx_mesh* mesh, unsigned partIndex)
+static ea::string FbxGetMeshMaterialName(ufbx_mesh* mesh, unsigned partIndex)
 {
     if (partIndex < mesh->materials.count)
     {
-        String matName = SanitateAssetName(String(mesh->materials.data[partIndex]->name.data));
-        if (matName.Trimmed().Empty())
-            matName = inputName_ + "_Material" + String(partIndex);
+        ea::string matName = SanitateAssetName(ea::string(mesh->materials.data[partIndex]->name.data));
+        if (matName.trimmed().empty())
+            matName = Format("{}_Material{}", inputName_, partIndex);
         return (useSubdirs_ ? "Materials/" : "") + matName + ".xml";
     }
     return (useSubdirs_ ? "Materials/" : "") + inputName_ + "_Material.xml";
@@ -1683,14 +1740,14 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
 
         if (createZone_)
         {
-            Node* zoneNode = outScene->CreateChild("Zone", localIDs_ ? LOCAL : REPLICATED);
+            Node* zoneNode = outScene->CreateChild("Zone");
             auto* zone = zoneNode->CreateComponent<Zone>();
             zone->SetBoundingBox(BoundingBox(-1000.0f, 1000.f));
             zone->SetAmbientColor(Color(0.25f, 0.25f, 0.25f));
 
             if (scene->lights.count == 0)
             {
-                Node* lightNode = outScene->CreateChild("GlobalLight", localIDs_ ? LOCAL : REPLICATED);
+                Node* lightNode = outScene->CreateChild("GlobalLight");
                 auto* light = lightNode->CreateComponent<Light>();
                 light->SetLightType(LIGHT_DIRECTIONAL);
                 lightNode->SetRotation(Quaternion(60.0f, 30.0f, 0.0f));
@@ -1699,7 +1756,7 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
     }
 
     auto* cache = context_->GetSubsystem<ResourceCache>();
-    HashMap<ufbx_node*, Node*> nodeMapping;
+    ea::unordered_map<ufbx_node*, Node*> nodeMapping;
 
     Node* outRootNode = nullptr;
     if (asPrefab)
@@ -1709,7 +1766,7 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
         Matrix3x4 rootTransform = ToMatrix3x4(fbxScene.rootNode_->node_to_world);
         bool rootIsIdentity = rootTransform.Equals(Matrix3x4::IDENTITY);
         bool rootHasModel = false;
-        for (unsigned i = 0; i < fbxScene.nodes_.Size(); ++i)
+        for (unsigned i = 0; i < fbxScene.nodes_.size(); ++i)
         {
             if (fbxScene.nodes_[i] == fbxScene.rootNode_)
             {
@@ -1725,22 +1782,22 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
         FbxCreateHierarchy(outScene, fbxScene.rootNode_, fbxScene.rootNode_, nodeMapping);
 
     // Create geometry nodes
-    for (unsigned i = 0; i < fbxScene.nodes_.Size(); ++i)
+    for (unsigned i = 0; i < fbxScene.nodes_.size(); ++i)
     {
         const FbxModel& model = fbxScene.models_[fbxScene.nodeModelIndices_[i]];
         Node* modelNode = FbxCreateSceneNode(outScene, fbxScene.nodes_[i], fbxScene.rootNode_, nodeMapping);
 
         auto* staticModel = static_cast<StaticModel*>(
-            model.bones_.Empty() ? modelNode->CreateComponent<StaticModel>() : modelNode->CreateComponent<AnimatedModel>());
+            model.bones_.empty() ? modelNode->CreateComponent<StaticModel>() : modelNode->CreateComponent<AnimatedModel>());
 
-        String modelName = (useSubdirs_ ? "Models/" : "") + GetFileNameAndExtension(model.outName_);
+        ea::string modelName = (useSubdirs_ ? "Models/" : "") + GetFileNameAndExtension(model.outName_);
         if (!cache->Exists(modelName))
         {
             auto* dummyModel = new Model(context_);
             dummyModel->SetName(modelName);
 
             unsigned numGeom = 0;
-            for (unsigned mi = 0; mi < model.meshes_.Size(); ++mi)
+            for (unsigned mi = 0; mi < model.meshes_.size(); ++mi)
             {
                 unsigned parts = (unsigned)model.meshes_[mi]->material_parts.count;
                 numGeom += parts > 0 ? parts : 1;
@@ -1752,13 +1809,13 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
 
         // Set materials
         unsigned matSlot = 0;
-        for (unsigned mi = 0; mi < model.meshes_.Size(); ++mi)
+        for (unsigned mi = 0; mi < model.meshes_.size(); ++mi)
         {
             ufbx_mesh* mesh = model.meshes_[mi];
             unsigned numParts = (unsigned)mesh->material_parts.count;
             if (numParts == 0)
             {
-                String matName = FbxGetMeshMaterialName(mesh, 0);
+                ea::string matName = FbxGetMeshMaterialName(mesh, 0);
                 if (!cache->Exists(matName))
                 {
                     auto* dummyMat = new Material(context_);
@@ -1771,7 +1828,7 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
             {
                 for (unsigned p = 0; p < numParts; ++p)
                 {
-                    String matName = FbxGetMeshMaterialName(mesh, mesh->material_parts.data[p].index);
+                    ea::string matName = FbxGetMeshMaterialName(mesh, mesh->material_parts.data[p].index);
                     if (!cache->Exists(matName))
                     {
                         auto* dummyMat = new Material(context_);
@@ -1819,7 +1876,7 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
 
     File file(context_);
     if (!file.Open(fbxScene.outName_, FILE_WRITE))
-        ErrorExit("Could not open output file " + fbxScene.outName_);
+        ImporterErrorExit("Could not open output file " + fbxScene.outName_);
 
     Node* output = asPrefab ? outRootNode : outScene;
     if (saveBinary_)
@@ -1830,7 +1887,7 @@ static void FbxBuildAndSaveScene(FbxScene& fbxScene, ufbx_scene* scene, bool asP
         output->SaveXML(file);
 }
 
-static void FbxExportScene(ufbx_scene* scene, const String& outName, ufbx_node* rootNode, bool asPrefab)
+static void FbxExportScene(ufbx_scene* scene, const ea::string& outName, ufbx_node* rootNode, bool asPrefab)
 {
     FbxScene fbxScene;
     fbxScene.outName_ = outName;
@@ -1841,7 +1898,7 @@ static void FbxExportScene(ufbx_scene* scene, const String& outName, ufbx_node* 
 
     FbxCollectSceneModels(fbxScene, scene, rootNode);
 
-    for (unsigned i = 0; i < fbxScene.models_.Size(); ++i)
+    for (unsigned i = 0; i < fbxScene.models_.size(); ++i)
         FbxBuildAndSaveModel(fbxScene.models_[i], scene);
 
     FbxBuildAndSaveScene(fbxScene, scene, asPrefab);
@@ -1851,7 +1908,7 @@ static void FbxExportScene(ufbx_scene* scene, const String& outName, ufbx_node* 
 // Materials
 // ---------------------------------------------------------------------------
 
-static void FbxExportMaterials(ufbx_scene* scene, HashSet<String>& usedTextures)
+static void FbxExportMaterials(ufbx_scene* scene, ea::unordered_set<ea::string>& usedTextures)
 {
     if (useSubdirs_)
         context_->GetSubsystem<FileSystem>()->CreateDir(resourcePath_ + "Materials");
@@ -1860,29 +1917,29 @@ static void FbxExportMaterials(ufbx_scene* scene, HashSet<String>& usedTextures)
         FbxBuildAndSaveMaterial(scene, scene->materials.data[i], usedTextures);
 }
 
-static String FbxGetTextureFileName(ufbx_texture* texture)
+static ea::string FbxGetTextureFileName(ufbx_texture* texture)
 {
     // Prefer relative_filename, fall back to filename
     if (texture->relative_filename.length > 0)
-        return GetFileNameAndExtension(String(texture->relative_filename.data));
+        return GetFileNameAndExtension(ea::string(texture->relative_filename.data));
     if (texture->filename.length > 0)
-        return GetFileNameAndExtension(String(texture->filename.data));
-    return String::EMPTY;
+        return GetFileNameAndExtension(ea::string(texture->filename.data));
+    return ea::string();
 }
 
-static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, HashSet<String>& usedTextures)
+static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, ea::unordered_set<ea::string>& usedTextures)
 {
-    String matName = SanitateAssetName(String(material->name.data));
-    if (matName.Trimmed().Empty())
-        matName = inputName_ + "_Material" + String(material->typed_id);
+    ea::string matName = SanitateAssetName(ea::string(material->name.data));
+    if (matName.trimmed().empty())
+        matName = Format("{}_Material{}", inputName_, material->typed_id);
 
     XMLFile outMaterial(context_);
     XMLElement materialElem = outMaterial.CreateRoot("material");
 
-    String diffuseTexName;
-    String normalTexName;
-    String specularTexName;
-    String emissiveTexName;
+    ea::string diffuseTexName;
+    ea::string normalTexName;
+    ea::string specularTexName;
+    ea::string emissiveTexName;
     Color diffuseColor = Color::WHITE;
     Color specularColor;
     Color emissiveColor = Color::BLACK;
@@ -1927,15 +1984,15 @@ static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, 
     specPower = (float)material->fbx.specular_exponent.value_real;
 
     // Build technique name
-    String techniqueName = "Techniques/NoTexture";
-    if (!diffuseTexName.Empty())
+    ea::string techniqueName = "Techniques/NoTexture";
+    if (!diffuseTexName.empty())
     {
         techniqueName = "Techniques/Diff";
-        if (!normalTexName.Empty())
+        if (!normalTexName.empty())
             techniqueName += "Normal";
-        if (!specularTexName.Empty())
+        if (!specularTexName.empty())
             techniqueName += "Spec";
-        if (normalTexName.Empty() && specularTexName.Empty() && !emissiveTexName.Empty())
+        if (normalTexName.empty() && specularTexName.empty() && !emissiveTexName.empty())
             techniqueName += emissiveAO_ ? "AO" : "Emissive";
     }
     if (hasAlpha)
@@ -1944,33 +2001,33 @@ static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, 
     XMLElement techniqueElem = materialElem.CreateChild("technique");
     techniqueElem.SetString("name", techniqueName + ".xml");
 
-    if (!diffuseTexName.Empty())
+    if (!diffuseTexName.empty())
     {
         XMLElement texElem = materialElem.CreateChild("texture");
         texElem.SetString("unit", "diffuse");
         texElem.SetString("name", (useSubdirs_ ? "Textures/" : "") + diffuseTexName);
-        usedTextures.Insert(diffuseTexName);
+        usedTextures.insert(diffuseTexName);
     }
-    if (!normalTexName.Empty())
+    if (!normalTexName.empty())
     {
         XMLElement texElem = materialElem.CreateChild("texture");
         texElem.SetString("unit", "normal");
         texElem.SetString("name", (useSubdirs_ ? "Textures/" : "") + normalTexName);
-        usedTextures.Insert(normalTexName);
+        usedTextures.insert(normalTexName);
     }
-    if (!specularTexName.Empty())
+    if (!specularTexName.empty())
     {
         XMLElement texElem = materialElem.CreateChild("texture");
         texElem.SetString("unit", "specular");
         texElem.SetString("name", (useSubdirs_ ? "Textures/" : "") + specularTexName);
-        usedTextures.Insert(specularTexName);
+        usedTextures.insert(specularTexName);
     }
-    if (!emissiveTexName.Empty())
+    if (!emissiveTexName.empty())
     {
         XMLElement texElem = materialElem.CreateChild("texture");
         texElem.SetString("unit", "emissive");
         texElem.SetString("name", (useSubdirs_ ? "Textures/" : "") + emissiveTexName);
-        usedTextures.Insert(emissiveTexName);
+        usedTextures.insert(emissiveTexName);
     }
 
     XMLElement diffuseColorElem = materialElem.CreateChild("parameter");
@@ -1984,7 +2041,7 @@ static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, 
     emissiveColorElem.SetColor("value", emissiveColor);
 
     auto* fileSystem = context_->GetSubsystem<FileSystem>();
-    String outFileName = resourcePath_ + (useSubdirs_ ? "Materials/" : "") + matName + ".xml";
+    ea::string outFileName = resourcePath_ + (useSubdirs_ ? "Materials/" : "") + matName + ".xml";
     if (noOverwriteMaterial_ && fileSystem->FileExists(outFileName))
     {
         PrintLine("Skipping save of existing material " + matName);
@@ -1995,7 +2052,7 @@ static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, 
 
     File outFile(context_);
     if (!outFile.Open(outFileName, FILE_WRITE))
-        ErrorExit("Could not open output file " + outFileName);
+        ImporterErrorExit("Could not open output file " + outFileName);
     outMaterial.Save(outFile);
 }
 
@@ -2003,26 +2060,24 @@ static void FbxBuildAndSaveMaterial(ufbx_scene* scene, ufbx_material* material, 
 // Texture copying
 // ---------------------------------------------------------------------------
 
-static void FbxCopyTextures(ufbx_scene* scene, const HashSet<String>& usedTextures, const String& sourcePath)
+static void FbxCopyTextures(ufbx_scene* scene, const ea::unordered_set<ea::string>& usedTextures, const ea::string& sourcePath)
 {
     auto* fileSystem = context_->GetSubsystem<FileSystem>();
 
     if (useSubdirs_)
         fileSystem->CreateDir(resourcePath_ + "Textures");
 
-    for (HashSet<String>::ConstIterator i = usedTextures.Begin(); i != usedTextures.End(); ++i)
+    for (const auto& fileName : usedTextures)
     {
-        const String& fileName = *i;
-
         // Check for embedded textures in ufbx
         bool foundEmbedded = false;
         for (size_t ti = 0; ti < scene->textures.count; ++ti)
         {
             ufbx_texture* tex = scene->textures.data[ti];
-            String texFileName = FbxGetTextureFileName(tex);
+            ea::string texFileName = FbxGetTextureFileName(tex);
             if (texFileName == fileName && tex->content.size > 0)
             {
-                String fullDestName = resourcePath_ + (useSubdirs_ ? "Textures/" : "") + fileName;
+                ea::string fullDestName = resourcePath_ + (useSubdirs_ ? "Textures/" : "") + fileName;
                 bool destExists = fileSystem->FileExists(fullDestName);
                 if (destExists && noOverwriteTexture_)
                 {
@@ -2042,8 +2097,8 @@ static void FbxCopyTextures(ufbx_scene* scene, const HashSet<String>& usedTextur
         if (foundEmbedded)
             continue;
 
-        String fullSourceName = sourcePath + fileName;
-        String fullDestName = resourcePath_ + (useSubdirs_ ? "Textures/" : "") + fileName;
+        ea::string fullSourceName = sourcePath + fileName;
+        ea::string fullDestName = resourcePath_ + (useSubdirs_ ? "Textures/" : "") + fileName;
 
         if (!fileSystem->FileExists(fullSourceName))
         {
@@ -2076,3 +2131,5 @@ static void FbxCopyTextures(ufbx_scene* scene, const HashSet<String>& usedTextur
         fileSystem->Copy(fullSourceName, fullDestName);
     }
 }
+
+} // namespace Urho3D
