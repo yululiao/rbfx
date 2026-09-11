@@ -99,8 +99,8 @@ void EditorCamera::LookAtPosition(SceneViewPage& scenePage, const Vector3& posit
     const float radius = 0.5f * worldBox.Size().Length();
     if (radius > M_EPSILON)
     {
-        const float fitDistance = radius / Tan(camera->GetFov() * M_DEGTORAD * 0.5f);
-        focusDistance = Max(1.5f * fitDistance, 0.5f);
+        const float fitDistance = radius;/// Tan(camera->GetFov() * M_DEGTORAD * 0.5f);
+        focusDistance = Max(3.6f * fitDistance, 0.5f);
     }
 
     const Vector3 newPosition = position - node->GetRotation() * Vector3{0.0f, 0.0f, focusDistance};
