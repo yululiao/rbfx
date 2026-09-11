@@ -7,6 +7,12 @@
 #pragma once
 
 #include "../Core/Object.h"
+#include "../Core/Variant.h"
+
+#include "../Math/Color.h"
+#include "../Math/Quaternion.h"
+#include "../Math/Vector2.h"
+#include "../Math/Vector3.h"
 
 #include <EASTL/unique_ptr.h>
 
@@ -19,15 +25,24 @@ class Node;
 
 struct lua_State;
 
-namespace sol
-{
-
-class state;
-
-}
+// Lightweight forward declarations for sol types (state, protected_function aliases, etc.).
+#include <sol/forward.hpp>
 
 namespace Urho3D
 {
+
+/// Lightweight read-only wrapper over event data that allows Lua callbacks
+/// to read event parameters by name: data.TimeStep, data.Name, etc.
+class LuaEventData
+{
+public:
+    explicit LuaEventData(const VariantMap* eventData)
+        : eventData_(eventData)
+    {
+    }
+
+    const VariantMap* eventData_;
+};
 
 /// Lua scripting subsystem.
 class URHO3D_API LuaScript : public Object
@@ -37,10 +52,10 @@ class URHO3D_API LuaScript : public Object
 public:
     /// Construct.
     explicit LuaScript(Context* context);
-    /// Destruct.
+    /// Destruct. Unsubscribes from all events before destroying the Lua state.
     ~LuaScript() override;
 
-    /// Initialize Lua state and register engine bindings.
+    /// Initialize Lua state and register engine bindings. Idempotent.
     bool Initialize();
 
     /// Execute Lua code from a string.
@@ -51,6 +66,15 @@ public:
     /// Expose a Node (or a Scene subclass) as a global Lua variable.
     void SetGlobalNode(const ea::string& name, Node* node);
 
+    /// Subscribe Lua callback to an event from any sender.
+    void SubscribeGlobalEvent(const char* eventName, sol::protected_function callback);
+    /// Subscribe Lua callback to an event from a specific sender.
+    void SubscribeSenderEvent(Object* sender, const char* eventName, sol::protected_function callback);
+    /// Unsubscribe Lua callbacks from an event type, any sender.
+    void UnsubscribeEvent(const char* eventName);
+    /// Unsubscribe Lua callbacks from an event type sent by a specific sender.
+    void UnsubscribeSenderEvent(Object* sender, const char* eventName);
+
     /// Return sol state.
     sol::state& GetState();
     /// Return raw Lua state.
@@ -59,6 +83,10 @@ public:
 private:
     /// Register Urho3D types available to Lua.
     void RegisterEngineBindings();
+    /// Handle a command entered in the editor console.
+    void HandleConsoleCommand(StringHash eventType, VariantMap& eventData);
+    /// Invoke Lua callback with event data wrapper.
+    void InvokeEventCallback(sol::protected_function& callback, VariantMap& eventData);
 
     /// Lua virtual machine state.
     ea::unique_ptr<sol::state> luaState_;

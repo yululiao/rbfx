@@ -12,7 +12,9 @@
 #include "../Graphics/Material.h"
 #include "../Graphics/Model.h"
 #include "../Graphics/StaticModel.h"
+#include "../Math/Color.h"
 #include "../Math/Quaternion.h"
+#include "../Math/Vector2.h"
 #include "../Math/Vector3.h"
 #include "../Scene/Node.h"
 #include "../Scene/Scene.h"
@@ -26,6 +28,17 @@ namespace sol
 // without comparison operators; we register all desired Lua behavior explicitly.
 template <>
 struct is_automagical<Urho3D::Node> : std::false_type {};
+
+// Quaternion, Vector2 and Color lack the full set of comparison operators
+// (e.g. operator<), which sol3's automagical registration requires.
+template <>
+struct is_automagical<Urho3D::Quaternion> : std::false_type {};
+
+template <>
+struct is_automagical<Urho3D::Vector2> : std::false_type {};
+
+template <>
+struct is_automagical<Urho3D::Color> : std::false_type {};
 
 } // namespace sol
 
@@ -54,6 +67,26 @@ SharedPtr<Node> NodeCreateChild(Node* parent, const char* name)
 
 } // namespace
 
+void RegisterVector2Bindings(sol::state& lua)
+{
+    lua.new_usertype<Vector2>("Vector2",
+        sol::call_constructor, sol::constructors<Vector2(), Vector2(float, float)>(),
+        "x", &Vector2::x_,
+        "y", &Vector2::y_,
+        "Length", &Vector2::Length,
+        "Normalized", &Vector2::Normalized,
+        sol::meta_function::equal_to, [](const Vector2& a, const Vector2& b) { return a == b; },
+        sol::meta_function::addition, [](const Vector2& a, const Vector2& b) { return a + b; },
+        sol::meta_function::subtraction, [](const Vector2& a, const Vector2& b) { return a - b; },
+        sol::meta_function::multiplication, sol::overload(
+            [](const Vector2& a, float s) { return a * s; },
+            [](const Vector2& a, const Vector2& b) { return a * b; }),
+        sol::meta_function::division, [](const Vector2& a, float s) { return a / s; },
+        "ZERO", sol::var(Vector2::ZERO),
+        "ONE", sol::var(Vector2::ONE)
+    );
+}
+
 void RegisterVector3Bindings(sol::state& lua)
 {
     lua.new_usertype<Vector3>("Vector3",
@@ -66,10 +99,53 @@ void RegisterVector3Bindings(sol::state& lua)
         "Dot", &Vector3::DotProduct,
         "Cross", &Vector3::CrossProduct,
         "ZERO", sol::var(Vector3::ZERO),
+        sol::meta_function::equal_to, [](const Vector3& a, const Vector3& b) { return a == b; },
         sol::meta_function::addition, [](const Vector3& a, const Vector3& b) { return a + b; },
         sol::meta_function::subtraction, [](const Vector3& a, const Vector3& b) { return a - b; },
         sol::meta_function::multiplication, [](const Vector3& a, float s) { return a * s; },
         sol::meta_function::division, [](const Vector3& a, float s) { return a / s; }
+    );
+}
+
+void RegisterQuaternionBindings(sol::state& lua)
+{
+    lua.new_usertype<Quaternion>("Quaternion",
+        // 3 floats = euler angles, 4 floats = (w, x, y, z) components.
+        sol::call_constructor, sol::constructors<Quaternion(), Quaternion(float, float, float), Quaternion(float, float, float, float)>(),
+        "w", &Quaternion::w_,
+        "x", &Quaternion::x_,
+        "y", &Quaternion::y_,
+        "z", &Quaternion::z_,
+        "FromAngleAxis", &Quaternion::FromAngleAxis,
+        "FromEulerAngles", &Quaternion::FromEulerAngles,
+        "YawAngle", &Quaternion::YawAngle,
+        "PitchAngle", &Quaternion::PitchAngle,
+        "RollAngle", &Quaternion::RollAngle,
+        sol::meta_function::equal_to, [](const Quaternion& a, const Quaternion& b) { return a == b; },
+        sol::meta_function::multiplication, sol::overload(
+            [](const Quaternion& a, const Quaternion& b) { return a * b; },
+            [](const Quaternion& a, const Vector3& v) { return a * v; },
+            [](const Quaternion& a, float s) { return a * s; }),
+        "IDENTITY", sol::var(Quaternion::IDENTITY)
+    );
+}
+
+void RegisterColorBindings(sol::state& lua)
+{
+    lua.new_usertype<Color>("Color",
+        sol::call_constructor, sol::constructors<Color(), Color(float, float, float), Color(float, float, float, float)>(),
+        "r", &Color::r_,
+        "g", &Color::g_,
+        "b", &Color::b_,
+        "a", &Color::a_,
+        sol::meta_function::equal_to, [](const Color& a, const Color& b) { return a == b; },
+        sol::meta_function::addition, [](const Color& a, const Color& b) { return a + b; },
+        sol::meta_function::multiplication, [](const Color& a, float s) { return a * s; },
+        "WHITE", sol::var(Color::WHITE),
+        "BLACK", sol::var(Color::BLACK),
+        "RED", sol::var(Color::RED),
+        "GREEN", sol::var(Color::GREEN),
+        "BLUE", sol::var(Color::BLUE)
     );
 }
 
@@ -123,10 +199,33 @@ void RegisterNodeBindings(sol::state& lua)
         "numChildren", sol::readonly_property([](Node* node) -> unsigned {
             return node ? node->GetNumChildren() : 0;
         }),
+        "GetChild", [](Node* node, const char* name) -> Node* {
+            return node ? node->GetChild(name) : nullptr;
+        },
+        "GetChildren", [](Node* node, sol::this_state s) -> sol::object {
+            if (!node)
+                return sol::lua_nil;
+            const ea::vector<SharedPtr<Node>>& children = node->GetChildren();
+            sol::state_view lua(s);
+            sol::table result = lua.create_table(static_cast<unsigned>(children.size()), 0);
+            for (unsigned i = 0; i < children.size(); ++i)
+                result[i + 1] = children[i].Get();
+            return result;
+        },
         "CreateChild", &NodeCreateChild,
         "Remove", [](Node* node) { if (node) node->Remove(); },
         "RemoveChild", [](Node* node, Node* child) { if (node) node->RemoveChild(child); },
         "RemoveAllChildren", [](Node* node) { if (node) node->RemoveAllChildren(); },
+
+        // State
+        "enabled", sol::property(
+            [](Node* node) -> bool { return node && node->IsEnabled(); },
+            [](Node* node, bool enabled) { if (node) node->SetEnabled(enabled); }
+        ),
+
+        // Transform helpers
+        "Translate", [](Node* node, const Vector3& delta) { if (node) node->Translate(delta); },
+        "Rotate", [](Node* node, const Quaternion& delta) { if (node) node->Rotate(delta); },
 
         // Components
         "CreateStaticModel", [](Node* node) -> StaticModel* {

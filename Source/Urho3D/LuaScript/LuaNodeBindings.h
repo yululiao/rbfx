@@ -43,8 +43,14 @@ struct unique_usertype_traits<Urho3D::SharedPtr<T, RefCountedType>>
 namespace Urho3D
 {
 
+/// Register Vector2 math type to Lua.
+void RegisterVector2Bindings(sol::state& lua);
 /// Register Vector3 math type to Lua.
 void RegisterVector3Bindings(sol::state& lua);
+/// Register Quaternion math type to Lua.
+void RegisterQuaternionBindings(sol::state& lua);
+/// Register Color math type to Lua.
+void RegisterColorBindings(sol::state& lua);
 /// Register Node, Scene and component types to Lua.
 void RegisterNodeBindings(sol::state& lua);
 
