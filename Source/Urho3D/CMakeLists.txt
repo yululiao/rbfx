@@ -62,7 +62,8 @@ if (URHO3D_LUA)
     define_engine_source_files (LuaScript)
     # sol3 usertype registrations cause heavy template instantiation
     if (MSVC)
-        set_source_files_properties (LuaScript/LuaNodeBindings.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
+        file (GLOB LUA_BINDING_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} LuaScript/*.cpp)
+        set_source_files_properties (${LUA_BINDING_SOURCES} PROPERTIES COMPILE_OPTIONS "/bigobj")
     endif ()
 endif ()
 

@@ -8,6 +8,7 @@
 
 #include "../LuaScript/LuaScript.h"
 
+#include "../LuaScript/LuaBindings.h"
 #include "../LuaScript/LuaNodeBindings.h"
 #include "../Core/Context.h"
 #include "../Core/Variant.h"
@@ -21,35 +22,6 @@
 
 namespace Urho3D
 {
-
-namespace
-{
-
-/// Convert an event parameter Variant into a corresponding Lua value.
-sol::object VariantToLua(sol::state_view lua, const Variant& value)
-{
-    switch (value.GetType())
-    {
-    case VAR_BOOL: return sol::make_object(lua, value.GetBool());
-    case VAR_INT: return sol::make_object(lua, value.GetInt());
-    case VAR_INT64: return sol::make_object(lua, value.GetInt64());
-    case VAR_FLOAT: return sol::make_object(lua, value.GetFloat());
-    case VAR_DOUBLE: return sol::make_object(lua, value.GetDouble());
-    case VAR_STRING: return sol::make_object(lua, value.GetString().c_str());
-    case VAR_VECTOR2: return sol::make_object(lua, value.GetVector2());
-    case VAR_VECTOR3: return sol::make_object(lua, value.GetVector3());
-    case VAR_QUATERNION: return sol::make_object(lua, value.GetQuaternion());
-    case VAR_COLOR: return sol::make_object(lua, value.GetColor());
-    case VAR_PTR:
-        // Expose pointer parameters that map to bound Lua types (e.g. nodes in scene events).
-        if (Node* node = dynamic_cast<Node*>(value.GetPtr()))
-            return sol::make_object(lua, node);
-        return sol::lua_nil;
-    default: return sol::lua_nil;
-    }
-}
-
-} // namespace
 
 LuaScript::LuaScript(Context* context)
     : Object(context)
@@ -262,11 +234,21 @@ lua_State* LuaScript::GetLuaState() const
 
 void LuaScript::RegisterEngineBindings()
 {
-    RegisterVector2Bindings(*luaState_);
-    RegisterVector3Bindings(*luaState_);
-    RegisterQuaternionBindings(*luaState_);
-    RegisterColorBindings(*luaState_);
-    RegisterNodeBindings(*luaState_);
+    RegisterMathBindings(*luaState_);
+    RegisterCoreBindings(*luaState_, context_);
+    RegisterNodeBindings(*luaState_, context_);
+    // Resource must be registered before Graphics: Model/Material/Image
+    // derive from Resource and sol3 requires base usertypes to exist first.
+    RegisterResourceBindings(*luaState_, context_);
+    RegisterGraphicsBindings(*luaState_, context_);
+    RegisterInputBindings(*luaState_, context_);
+    RegisterUIBindings(*luaState_, context_);
+    RegisterPhysicsBindings(*luaState_, context_);
+    RegisterUrho2DBindings(*luaState_, context_);
+    RegisterPhysics2DBindings(*luaState_, context_);
+    RegisterAudioBindings(*luaState_, context_);
+    RegisterNavigationBindings(*luaState_, context_);
+    RegisterNetworkBindings(*luaState_, context_);
 
     // Event data wrapper: parameters are looked up by name via dynamic indexing,
     // e.g. data.TimeStep, data.Name, data.Node.
@@ -298,6 +280,11 @@ void LuaScript::RegisterEngineBindings()
                 SubscribeSenderEvent(sender, eventName, std::move(callback));
             }));
     luaState_->set_function("UnsubscribeEvent",
+        sol::overload(
+            [this](const char* eventName) { UnsubscribeEvent(eventName); },
+            [this](Object* sender, const char* eventName) { UnsubscribeSenderEvent(sender, eventName); }));
+    // tolua-style alias used by the samples (49/50 pause-on-fullscreen-UI).
+    luaState_->set_function("UnsubscribeFromEvent",
         sol::overload(
             [this](const char* eventName) { UnsubscribeEvent(eventName); },
             [this](Object* sender, const char* eventName) { UnsubscribeSenderEvent(sender, eventName); }));

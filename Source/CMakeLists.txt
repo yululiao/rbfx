@@ -41,6 +41,7 @@ endif ()
 add_subdirectory (Urho3D)
 add_subdirectory (Tools)
 add_subdirectory (Samples)
+add_subdirectory (LuaSamples)
 add_subdirectory (Tests)
 
 # Check options outside so user can add Player and/or Editor explicitly afterwards.
