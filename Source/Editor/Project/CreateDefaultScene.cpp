@@ -22,6 +22,9 @@
 
 #include "../Project/CreateDefaultScene.h"
 
+#ifdef URHO3D_LUA
+#include "../Project/LuaGameScript.h"
+#endif
 #include <Urho3D/Graphics/Light.h>
 #include <Urho3D/Graphics/Material.h>
 #include <Urho3D/Graphics/Model.h>
@@ -47,6 +50,11 @@ void CreateDefaultScene(Context* context, const ea::string& fileName, const Defa
     auto sceneResource = MakeShared<SceneResource>(context);
     auto scene = sceneResource->GetScene();
     scene->CreateComponent<Octree>();
+
+#ifdef URHO3D_LUA
+    auto luaGameScript = scene->CreateComponent<LuaGameScript>();
+    luaGameScript->SetScriptPath("Scripts/main.lua");
+#endif
 
     if (params.highQuality_)
     {

@@ -35,9 +35,12 @@
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/Input/Input.h>
 #ifdef URHO3D_LUA
+#include "../Foundation/SceneViewTab.h"
+#include "../Project/LuaGameScript.h"
+
 #include <Urho3D/Graphics/DebugRenderer.h>
 #include <Urho3D/Graphics/Octree.h>
-#include <Urho3D/LuaScript/LuaScript.h>
+#include <LuaScript/LuaScript.h>
 #endif
 #include <Urho3D/Plugins/PluginManager.h>
 #include <Urho3D/RenderAPI/RenderContext.h>
@@ -75,7 +78,7 @@ class GameViewTab::PlayState : public Object
     URHO3D_OBJECT(PlayState, Object);
 
 public:
-    PlayState(Context* context, CustomBackbufferTexture* backbuffer, Scene* gameScene)
+    PlayState(Context* context, CustomBackbufferTexture* backbuffer, Scene* editorScene)
         : Object(context)
         , engine_(GetSubsystem<Engine>())
         , renderer_(GetSubsystem<Renderer>())
@@ -89,6 +92,7 @@ public:
         , stateManager_(GetSubsystem<StateManager>())
         , project_(GetSubsystem<Project>())
         , backbuffer_(backbuffer)
+        , editorScene_(editorScene)
     {
         engine_->SetParameter(Param_IsRunningInEditor, true);
 
@@ -105,32 +109,32 @@ public:
         UpdatePreferredMouseSetup();
 
 #ifdef URHO3D_LUA
-        // Expose the editor-provided game scene to Lua so GetGameScene() works.
-        if (auto* luaScript = GetSubsystem<LuaScript>())
-            luaScript->SetGameScene(gameScene);
-
-        // Execute the project's main.lua entry point if it exists.
+        // Expose the editor scene as a global Lua variable.
         if (auto* luaScript = GetSubsystem<LuaScript>())
         {
-            const ea::string mainLuaPath = project_->GetProjectPath() + "Scripts/main.lua";
-            URHO3D_LOGINFO("Looking for main.lua at: {}", mainLuaPath.c_str());
-            auto* fs = GetSubsystem<FileSystem>();
-            if (fs && fs->FileExists(mainLuaPath))
+            luaScript->SetGlobalNode("scene", editorScene);
+
+            // Find LuaGameScript component and execute its script.
+            auto components = editorScene->GetComponents<LuaGameScript>();
+            if (!components.empty())
             {
-                URHO3D_LOGINFO("Executing main.lua...");
-                if (!luaScript->ExecuteFileAbsolute(mainLuaPath))
-                    URHO3D_LOGERROR("Failed to execute main.lua");
+                const ea::string scriptPath = project_->GetProjectPath() + components[0]->GetScriptPath();
+                auto* fs = GetSubsystem<FileSystem>();
+                if (fs && fs->FileExists(scriptPath))
+                {
+                    URHO3D_LOGINFO("Executing Lua script: {}", scriptPath.c_str());
+                    if (!luaScript->ExecuteFileAbsolute(scriptPath))
+                        URHO3D_LOGERROR("Failed to execute Lua script: {}", scriptPath.c_str());
+                }
                 else
-                    URHO3D_LOGINFO("main.lua executed successfully.");
+                {
+                    URHO3D_LOGWARNING("Lua script not found: {}", scriptPath.c_str());
+                }
             }
             else
             {
-                URHO3D_LOGWARNING("No main.lua found at: {}", mainLuaPath.c_str());
+                URHO3D_LOGWARNING("No LuaGameScript component found in the scene.");
             }
-        }
-        else
-        {
-            URHO3D_LOGERROR("LuaScript subsystem is not available!");
         }
 #endif
 
@@ -199,10 +203,17 @@ public:
         ReleaseInput();
 
 #ifdef URHO3D_LUA
-        // Reset Lua state so next play session starts clean.
+        // Clear Lua globals before reinitialization.
         if (auto* luaScript = GetSubsystem<LuaScript>())
+        {
+            luaScript->SetGlobalNode("scene", nullptr);
             luaScript->Reinitialize();
+        }
 #endif
+
+        // Disable editor scene updates.
+        if (auto scene = editorScene_.Get())
+            scene->SetUpdateEnabled(false);
 
         pluginManager_->StopApplication();
         backbuffer_->SetActive(false);
@@ -261,6 +272,7 @@ private:
 
     CustomBackbufferTexture* backbuffer_{};
     WeakPtr<RenderSurface> backbufferSurface_;
+    WeakPtr<Scene> editorScene_;
 
     bool inputGrabbed_{};
 
@@ -297,15 +309,14 @@ void GameViewTab::Play()
     if (state_)
         Stop();
 
-#ifdef URHO3D_LUA
-    // Create a game scene for the play session so Lua can use GetGameScene().
-    gameScene_ = MakeShared<Scene>(context_);
-    gameScene_->CreateComponent<Octree>();
-    gameScene_->CreateComponent<DebugRenderer>();
-    gameScene_->SetUpdateEnabled(true);
-#endif
+    // Use the editor's current scene for the play session.
+    auto* sceneViewTab = project_->FindTab<SceneViewTab>();
+    Scene* editorScene = sceneViewTab ? sceneViewTab->GetActivePage()->scene_.Get() : nullptr;
+    if (!editorScene)
+        return;
 
-    state_ = ea::make_unique<PlayState>(context_, backbuffer_, gameScene_.Get());
+    editorScene->SetUpdateEnabled(true);
+    state_ = ea::make_unique<PlayState>(context_, backbuffer_, editorScene);
     OnSimulationStarted(this);
 }
 
@@ -314,20 +325,8 @@ void GameViewTab::Stop()
     if (!state_)
         return;
 
-#ifdef URHO3D_LUA
-    // Clear the game scene before Lua reinitialization.
-    if (auto* luaScript = GetSubsystem<LuaScript>())
-        luaScript->SetGameScene(nullptr);
-    gameScene_ = nullptr;
-#endif
-
     state_ = nullptr;
     OnSimulationStopped(this);
-}
-
-Scene* GameViewTab::GetGameScene() const
-{
-    return gameScene_;
 }
 
 void GameViewTab::TogglePlayed()

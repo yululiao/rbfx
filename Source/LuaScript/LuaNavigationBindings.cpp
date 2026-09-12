@@ -1,22 +1,22 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../Navigation/CrowdAgent.h"
-#include "../Navigation/CrowdManager.h"
-#include "../Navigation/DynamicNavigationMesh.h"
-#include "../Navigation/Navigable.h"
-#include "../Navigation/NavigationMesh.h"
-#include "../Navigation/Obstacle.h"
-#include "../Navigation/OffMeshConnection.h"
-#include "../Scene/Node.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Navigation/CrowdAgent.h"
+#include "../Urho3D/Navigation/CrowdManager.h"
+#include "../Urho3D/Navigation/DynamicNavigationMesh.h"
+#include "../Urho3D/Navigation/Navigable.h"
+#include "../Urho3D/Navigation/NavigationMesh.h"
+#include "../Urho3D/Navigation/Obstacle.h"
+#include "../Urho3D/Navigation/OffMeshConnection.h"
+#include "../Urho3D/Scene/Node.h"
 
 #include <sol/sol.hpp>
 

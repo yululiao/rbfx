@@ -65,7 +65,8 @@
 #include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Input/Input.h>
 #ifdef URHO3D_LUA
-#include <Urho3D/LuaScript/LuaScript.h>
+#include <LuaScript/LuaScript.h>
+#include "Project/LuaGameScript.h"
 #endif
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/SystemUI/Console.h>
@@ -167,6 +168,8 @@ void EditorApplication::Setup()
 #ifdef URHO3D_LUA
     const auto luaScript = MakeShared<LuaScript>(context_);
     context_->RegisterSubsystem(luaScript);
+    luaScript->Initialize();
+    LuaGameScript::RegisterObject(context_);
 #endif
 
 #ifdef _WIN32

@@ -1,1 +1,106 @@
-{}
+{
+	"AssetPipelineModificationTimes": [
+		{
+			"key": "Default.assetpipeline",
+			"value": 1789183221
+		}
+	],
+	"Assets": [
+		{
+			"key": "Default.assetpipeline",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Scenes/Default.scene",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Kachujin_Walk_IK_Only.ani",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Fonts/Anonymous Pro.ttf",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Textures/StoneNormal.dds",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Textures/StoneDiffuse.dds",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Textures/Kachujin_diffuse.png",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "fbx/cube.fbx",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Kachujin.mdl",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Textures/Kachujin_specular.png",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Materials/StoneTiled.xml",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Kachujin_Walk.ani",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Materials/Kachujin.xml",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "fbx/plane.fbx",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/License.txt",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Textures/Kachujin_normal.png",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		}
+	]
+}

@@ -14,7 +14,9 @@
 #include <Urho3D/Engine/Engine.h>
 #include <Urho3D/Engine/EngineDefs.h>
 #include <Urho3D/IO/Log.h>
-#include <Urho3D/LuaScript/LuaScript.h>
+#include <LuaScript/LuaScript.h>
+#include <Urho3D/Graphics/Octree.h>
+#include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/Console.h>
 
 using namespace Urho3D;
@@ -89,15 +91,15 @@ public:
 
     void Start() override
     {
-        // The engine registers the LuaScript subsystem itself when the Lua
-        // support is compiled in (see Engine::Initialize).
-        auto* luaScript = GetSubsystem<LuaScript>();
-        if (!luaScript)
-        {
-            URHO3D_LOGERROR("LuaScript subsystem is not available. Enable URHO3D_LUA in the build.");
-            GetSubsystem<Engine>()->Exit();
-            return;
-        }
+        // Create and register the LuaScript subsystem.
+        const auto luaScript = MakeShared<LuaScript>(context_);
+        context_->RegisterSubsystem(luaScript);
+        luaScript->Initialize();
+
+        // Create a scene and expose it as a global Lua variable.
+        auto scene = MakeShared<Scene>(context_);
+        scene->CreateComponent<Octree>();
+        luaScript->SetGlobalNode("scene", scene.Get());
 
         // The C++ Sample base creates the console so samples can toggle it
         // (26_ConsoleInput). Mirror that behavior for the Lua samples.

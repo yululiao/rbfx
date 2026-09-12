@@ -62,9 +62,6 @@
 #ifdef URHO3D_NAVIGATION
 #include "../Navigation/NavigationMesh.h"
 #endif
-#ifdef URHO3D_LUA
-#include "../LuaScript/LuaScript.h"
-#endif
 #ifdef URHO3D_NETWORK
 #include "../Network/Network.h"
 #endif
@@ -407,12 +404,6 @@ bool Engine::Initialize(const StringVariantMap& applicationParameters, const Str
     context_->RegisterSubsystem(new StateManager(context_));
 #ifdef URHO3D_PARTICLE_GRAPH
     context_->RegisterSubsystem(new ParticleGraphSystem(context_));
-#endif
-
-#ifdef URHO3D_LUA
-    auto* luaScript = new LuaScript(context_);
-    context_->RegisterSubsystem(luaScript);
-    luaScript->Initialize();
 #endif
 
 #ifdef URHO3D_URHO2D

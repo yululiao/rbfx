@@ -1,53 +1,53 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
-#include "../LuaScript/LuaScript.h"
+#include "LuaBindings.h"
+#include "LuaScript.h"
 
-#include "../Core/Context.h"
-#include "../Graphics/AnimatedModel.h"
-#include "../Graphics/Animation.h"
-#include "../Graphics/AnimationController.h"
-#include "../Graphics/BillboardSet.h"
-#include "../Graphics/ParticleEffect.h"
-#include "../Graphics/ParticleEmitter.h"
-#include "../Graphics/Camera.h"
-#include "../Graphics/DebugRenderer.h"
-#include "../Graphics/DecalSet.h"
-#include "../Graphics/Drawable.h"
-#include "../Graphics/Graphics.h"
-#include "../Graphics/Light.h"
-#include "../Graphics/Material.h"
-#include "../Graphics/Model.h"
-#include "../Graphics/Octree.h"
-#include "../Graphics/OctreeQuery.h"
-#include "../Graphics/Renderer.h"
-#include "../Graphics/RenderSurface.h"
-#include "../Graphics/Skybox.h"
-#include "../Graphics/StaticModel.h"
-#include "../Graphics/StaticModelGroup.h"
-#include "../Graphics/RibbonTrail.h"
-#include "../Graphics/Technique.h"
-#include "../Graphics/Terrain.h"
-#include "../Graphics/VertexBuffer.h"
-#include "../Graphics/IndexBuffer.h"
-#include "../Graphics/Geometry.h"
-#include "../UI/Text3D.h"
-#include "../Graphics/Texture.h"
-#include "../Graphics/Texture2D.h"
-#include "../Graphics/Viewport.h"
-#include "../Graphics/Zone.h"
-#include "../Graphics/Geometry.h"
-#include "../RenderAPI/RenderDevice.h"
-#include "../Resource/Image.h"
-#include "../Scene/Node.h"
-#include "../Scene/Scene.h"
-#include "../Scene/ValueAnimation.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Graphics/AnimatedModel.h"
+#include "../Urho3D/Graphics/Animation.h"
+#include "../Urho3D/Graphics/AnimationController.h"
+#include "../Urho3D/Graphics/BillboardSet.h"
+#include "../Urho3D/Graphics/ParticleEffect.h"
+#include "../Urho3D/Graphics/ParticleEmitter.h"
+#include "../Urho3D/Graphics/Camera.h"
+#include "../Urho3D/Graphics/DebugRenderer.h"
+#include "../Urho3D/Graphics/DecalSet.h"
+#include "../Urho3D/Graphics/Drawable.h"
+#include "../Urho3D/Graphics/Graphics.h"
+#include "../Urho3D/Graphics/Light.h"
+#include "../Urho3D/Graphics/Material.h"
+#include "../Urho3D/Graphics/Model.h"
+#include "../Urho3D/Graphics/Octree.h"
+#include "../Urho3D/Graphics/OctreeQuery.h"
+#include "../Urho3D/Graphics/Renderer.h"
+#include "../Urho3D/Graphics/RenderSurface.h"
+#include "../Urho3D/Graphics/Skybox.h"
+#include "../Urho3D/Graphics/StaticModel.h"
+#include "../Urho3D/Graphics/StaticModelGroup.h"
+#include "../Urho3D/Graphics/RibbonTrail.h"
+#include "../Urho3D/Graphics/Technique.h"
+#include "../Urho3D/Graphics/Terrain.h"
+#include "../Urho3D/Graphics/VertexBuffer.h"
+#include "../Urho3D/Graphics/IndexBuffer.h"
+#include "../Urho3D/Graphics/Geometry.h"
+#include "../Urho3D/UI/Text3D.h"
+#include "../Urho3D/Graphics/Texture.h"
+#include "../Urho3D/Graphics/Texture2D.h"
+#include "../Urho3D/Graphics/Viewport.h"
+#include "../Urho3D/Graphics/Zone.h"
+#include "../Urho3D/Graphics/Geometry.h"
+#include "../Urho3D/RenderAPI/RenderDevice.h"
+#include "../Urho3D/Resource/Image.h"
+#include "../Urho3D/Scene/Node.h"
+#include "../Urho3D/Scene/Scene.h"
+#include "../Urho3D/Scene/ValueAnimation.h"
 
 #include <sol/sol.hpp>
 
@@ -970,12 +970,6 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             : SharedPtr<Viewport>(new Viewport(context, scene, camera)));
         renderer->SetViewport(index, viewport);
         return sol::make_object(sol::state_view(s), viewport);
-    });
-
-    // Global helper: return the game scene provided by the editor (or nil in standalone player).
-    lua.set_function("GetGameScene", [context]() -> Scene* {
-        auto* luaScript = context->GetSubsystem<LuaScript>();
-        return luaScript ? luaScript->GetGameScene() : nullptr;
     });
 
     // Light type constants.

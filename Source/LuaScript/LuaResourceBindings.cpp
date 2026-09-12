@@ -1,20 +1,20 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../IO/FileSystem.h"
-#include "../IO/Log.h"
-#include "../Resource/Resource.h"
-#include "../Resource/ResourceCache.h"
-#include "../Resource/Localization.h"
-#include "../Resource/XMLFile.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/IO/FileSystem.h"
+#include "../Urho3D/IO/Log.h"
+#include "../Urho3D/Resource/Resource.h"
+#include "../Urho3D/Resource/ResourceCache.h"
+#include "../Urho3D/Resource/Localization.h"
+#include "../Urho3D/Resource/XMLFile.h"
 
 #include <sol/sol.hpp>
 

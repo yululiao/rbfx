@@ -4,22 +4,22 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaNodeBindings.h"
+#include "LuaNodeBindings.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../IO/Log.h"
-#include "../IO/VectorBuffer.h"
-#include "../Resource/ResourceCache.h"
-#include "../Resource/XMLFile.h"
-#include "../Scene/Component.h"
-#include "../Scene/Node.h"
-#include "../Scene/PrefabReference.h"
-#include "../Scene/Scene.h"
-#include "../Scene/ValueAnimation.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/IO/Log.h"
+#include "../Urho3D/IO/VectorBuffer.h"
+#include "../Urho3D/Resource/ResourceCache.h"
+#include "../Urho3D/Resource/XMLFile.h"
+#include "../Urho3D/Scene/Component.h"
+#include "../Urho3D/Scene/Node.h"
+#include "../Urho3D/Scene/PrefabReference.h"
+#include "../Urho3D/Scene/Scene.h"
+#include "../Urho3D/Scene/ValueAnimation.h"
 
 #include <sol/sol.hpp>
 

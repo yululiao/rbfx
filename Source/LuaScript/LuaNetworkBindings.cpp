@@ -1,28 +1,28 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../IO/MemoryBuffer.h"
-#include "../IO/VectorBuffer.h"
-#include "../Network/Connection.h"
-#include "../Network/HttpRequest.h"
-#include "../Network/LANDiscoveryManager.h"
-#include "../Network/Network.h"
-#include "../Network/Protocol.h"
-#include "../Resource/JSONFile.h"
-#include "../Replica/BehaviorNetworkObject.h"
-#include "../Replica/ClientReplica.h"
-#include "../Replica/NetworkObject.h"
-#include "../Replica/ReplicationManager.h"
-#include "../Scene/Node.h"
-#include "../Scene/Scene.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/IO/MemoryBuffer.h"
+#include "../Urho3D/IO/VectorBuffer.h"
+#include "../Urho3D/Network/Connection.h"
+#include "../Urho3D/Network/HttpRequest.h"
+#include "../Urho3D/Network/LANDiscoveryManager.h"
+#include "../Urho3D/Network/Network.h"
+#include "../Urho3D/Network/Protocol.h"
+#include "../Urho3D/Resource/JSONFile.h"
+#include "../Urho3D/Replica/BehaviorNetworkObject.h"
+#include "../Urho3D/Replica/ClientReplica.h"
+#include "../Urho3D/Replica/NetworkObject.h"
+#include "../Urho3D/Replica/ReplicationManager.h"
+#include "../Urho3D/Scene/Node.h"
+#include "../Urho3D/Scene/Scene.h"
 
 #include <sol/sol.hpp>
 

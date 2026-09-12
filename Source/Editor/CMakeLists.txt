@@ -43,6 +43,9 @@ target_include_directories(EditorLibrary PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/Tools>
 )
 target_link_libraries (EditorLibrary PUBLIC Urho3D)
+if (URHO3D_LUA)
+    target_link_libraries(EditorLibrary PUBLIC RbfxLuaScript)
+endif ()
 # FBX import is performed in-process through the AssetImporter dynamic library
 # (built as a tool, so it requires URHO3D_TOOLS to be enabled).
 # Linked into executables instead of EditorLibrary to keep the SDK export set clean.

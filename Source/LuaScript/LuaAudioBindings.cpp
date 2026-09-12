@@ -1,24 +1,24 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Audio/Audio.h"
-#include "../Audio/AudioDefs.h"
-#include "../Audio/BufferedSoundStream.h"
-#include "../Audio/Microphone.h"
-#include "../Audio/Sound.h"
-#include "../Audio/SoundListener.h"
-#include "../Audio/SoundSource.h"
-#include "../Audio/SoundSource3D.h"
-#include "../Audio/SoundStream.h"
-#include "../Core/Context.h"
-#include "../Scene/Node.h"
+#include "../Urho3D/Audio/Audio.h"
+#include "../Urho3D/Audio/AudioDefs.h"
+#include "../Urho3D/Audio/BufferedSoundStream.h"
+#include "../Urho3D/Audio/Microphone.h"
+#include "../Urho3D/Audio/Sound.h"
+#include "../Urho3D/Audio/SoundListener.h"
+#include "../Urho3D/Audio/SoundSource.h"
+#include "../Urho3D/Audio/SoundSource3D.h"
+#include "../Urho3D/Audio/SoundStream.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Scene/Node.h"
 
 #include <sol/sol.hpp>
 

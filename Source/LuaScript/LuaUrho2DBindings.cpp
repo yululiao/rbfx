@@ -1,32 +1,32 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../Physics2D/CollisionBox2D.h"
-#include "../Physics2D/CollisionCircle2D.h"
-#include "../Physics2D/CollisionShape2D.h"
-#include "../Physics2D/PhysicsWorld2D.h"
-#include "../Physics2D/RigidBody2D.h"
-#include "../Scene/Node.h"
-#include "../Urho2D/AnimatedSprite2D.h"
-#include "../Urho2D/AnimationSet2D.h"
-#include "../Urho2D/Drawable2D.h"
-#include "../Urho2D/ParticleEffect2D.h"
-#include "../Urho2D/ParticleEmitter2D.h"
-#include "../Urho2D/Sprite2D.h"
-#include "../Urho2D/StaticSprite2D.h"
-#include "../Urho2D/StretchableSprite2D.h"
-#include "../Urho2D/TileMap2D.h"
-#include "../Urho2D/TileMapDefs2D.h"
-#include "../Urho2D/TileMapLayer2D.h"
-#include "../Urho2D/TmxFile2D.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Physics2D/CollisionBox2D.h"
+#include "../Urho3D/Physics2D/CollisionCircle2D.h"
+#include "../Urho3D/Physics2D/CollisionShape2D.h"
+#include "../Urho3D/Physics2D/PhysicsWorld2D.h"
+#include "../Urho3D/Physics2D/RigidBody2D.h"
+#include "../Urho3D/Scene/Node.h"
+#include "../Urho3D/Urho2D/AnimatedSprite2D.h"
+#include "../Urho3D/Urho2D/AnimationSet2D.h"
+#include "../Urho3D/Urho2D/Drawable2D.h"
+#include "../Urho3D/Urho2D/ParticleEffect2D.h"
+#include "../Urho3D/Urho2D/ParticleEmitter2D.h"
+#include "../Urho3D/Urho2D/Sprite2D.h"
+#include "../Urho3D/Urho2D/StaticSprite2D.h"
+#include "../Urho3D/Urho2D/StretchableSprite2D.h"
+#include "../Urho3D/Urho2D/TileMap2D.h"
+#include "../Urho3D/Urho2D/TileMapDefs2D.h"
+#include "../Urho3D/Urho2D/TileMapLayer2D.h"
+#include "../Urho3D/Urho2D/TmxFile2D.h"
 
 #include <sol/sol.hpp>
 

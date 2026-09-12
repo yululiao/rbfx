@@ -1,34 +1,34 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../IO/Log.h"
-#include "../UI/BorderImage.h"
-#include "../UI/Button.h"
-#include "../UI/CheckBox.h"
-#include "../UI/Cursor.h"
-#include "../UI/DropDownList.h"
-#include "../UI/Font.h"
-#include "../UI/LineEdit.h"
-#include "../UI/ListView.h"
-#include "../UI/Slider.h"
-#include "../UI/Sprite.h"
-#include "../UI/Text.h"
-#include "../UI/ToolTip.h"
-#include "../UI/UI.h"
-#include "../UI/UIComponent.h"
-#include "../SystemUI/Console.h"
-#include "../Scene/ValueAnimation.h"
-#include "../Scene/Animatable.h"
-#include "../UI/UIElement.h"
-#include "../UI/Window.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/IO/Log.h"
+#include "../Urho3D/UI/BorderImage.h"
+#include "../Urho3D/UI/Button.h"
+#include "../Urho3D/UI/CheckBox.h"
+#include "../Urho3D/UI/Cursor.h"
+#include "../Urho3D/UI/DropDownList.h"
+#include "../Urho3D/UI/Font.h"
+#include "../Urho3D/UI/LineEdit.h"
+#include "../Urho3D/UI/ListView.h"
+#include "../Urho3D/UI/Slider.h"
+#include "../Urho3D/UI/Sprite.h"
+#include "../Urho3D/UI/Text.h"
+#include "../Urho3D/UI/ToolTip.h"
+#include "../Urho3D/UI/UI.h"
+#include "../Urho3D/UI/UIComponent.h"
+#include "../Urho3D/SystemUI/Console.h"
+#include "../Urho3D/Scene/ValueAnimation.h"
+#include "../Urho3D/Scene/Animatable.h"
+#include "../Urho3D/UI/UIElement.h"
+#include "../Urho3D/UI/Window.h"
 
 #include <sol/sol.hpp>
 

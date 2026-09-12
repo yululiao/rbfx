@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
 namespace Urho3D
 {

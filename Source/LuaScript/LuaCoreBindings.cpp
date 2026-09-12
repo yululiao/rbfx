@@ -4,16 +4,16 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../Core/StringUtils.h"
-#include "../Core/Timer.h"
-#include "../Engine/Engine.h"
-#include "../IO/Log.h"
-#include "../Scene/Serializable.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Core/StringUtils.h"
+#include "../Urho3D/Core/Timer.h"
+#include "../Urho3D/Engine/Engine.h"
+#include "../Urho3D/IO/Log.h"
+#include "../Urho3D/Scene/Serializable.h"
 
 #include <sol/sol.hpp>
 

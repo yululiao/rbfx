@@ -33,7 +33,7 @@ else ()
 endif ()
 
 add_executable(LuaSamplesRunner ${PLATFORM} LuaSamplesRunner.cpp)
-target_link_libraries(LuaSamplesRunner PRIVATE Urho3D)
+target_link_libraries(LuaSamplesRunner PRIVATE Urho3D RbfxLuaScript)
 set_property(TARGET LuaSamplesRunner PROPERTY FOLDER "Sample Projects")
 
 # Keep the Lua sources beside the executable in sync on every build.

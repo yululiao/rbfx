@@ -4,23 +4,23 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Math/BoundingBox.h"
-#include "../Math/Color.h"
-#include "../Math/MathDefs.h"
-#include "../Math/Plane.h"
-#include "../Math/Random.h"
-#include "../Math/Quaternion.h"
-#include "../Math/RandomEngine.h"
-#include "../Math/Ray.h"
-#include "../Math/Rect.h"
-#include "../Math/Sphere.h"
-#include "../Math/Vector2.h"
-#include "../Math/Vector3.h"
-#include "../Math/Vector4.h"
+#include "../Urho3D/Math/BoundingBox.h"
+#include "../Urho3D/Math/Color.h"
+#include "../Urho3D/Math/MathDefs.h"
+#include "../Urho3D/Math/Plane.h"
+#include "../Urho3D/Math/Random.h"
+#include "../Urho3D/Math/Quaternion.h"
+#include "../Urho3D/Math/RandomEngine.h"
+#include "../Urho3D/Math/Ray.h"
+#include "../Urho3D/Math/Rect.h"
+#include "../Urho3D/Math/Sphere.h"
+#include "../Urho3D/Math/Vector2.h"
+#include "../Urho3D/Math/Vector3.h"
+#include "../Urho3D/Math/Vector4.h"
 
 #include <sol/sol.hpp>
 

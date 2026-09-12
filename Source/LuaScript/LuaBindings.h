@@ -6,8 +6,10 @@
 
 #pragma once
 
-#include "../Core/Object.h"
-#include "../Core/Variant.h"
+#include "../Urho3D/Core/Object.h"
+#include "../Urho3D/Core/Variant.h"
+
+#include "Export.h"
 
 #include <sol/sol.hpp>
 
@@ -107,40 +109,40 @@ using LuaObjectCaster = sol::object (*)(sol::state_view, Object*);
 
 /// Register a caster for a concrete Object type. Called by binding modules
 /// while registering their usertypes.
-URHO3D_API void RegisterLuaObjectCaster(StringHash type, LuaObjectCaster caster);
+RBFXLUA_API void RegisterLuaObjectCaster(StringHash type, LuaObjectCaster caster);
 
 /// Wrap an engine object for Lua: returns the registered usertype when the
 /// exact runtime type has one, otherwise a generic LuaObjectRef. Never null:
 /// null objects become Lua nil.
-URHO3D_API sol::object WrapLuaObject(sol::state_view lua, Object* object);
+RBFXLUA_API sol::object WrapLuaObject(sol::state_view lua, Object* object);
 
 /// Convert a Lua value into a Variant (type deduction: bool / number /
 /// string / Vector2 / Vector3 / Vector4 / Quaternion / Color / Object*).
-URHO3D_API Variant LuaToVariant(sol::state_view lua, const sol::object& value);
+RBFXLUA_API Variant LuaToVariant(sol::state_view lua, const sol::object& value);
 
 /// Convert a Variant into a Lua value. VAR_PTR values resolve through the
 /// usertype caster registry (falling back to a generic LuaObjectRef).
-URHO3D_API sol::object VariantToLua(sol::state_view lua, const Variant& value);
+RBFXLUA_API sol::object VariantToLua(sol::state_view lua, const Variant& value);
 
 /// Convert a VariantVector into a Lua table.
-URHO3D_API sol::table VariantVectorToLuaTable(sol::state_view lua, const VariantVector& values);
+RBFXLUA_API sol::table VariantVectorToLuaTable(sol::state_view lua, const VariantVector& values);
 
 // Binding module entry points. Each module lives in its own translation unit
 // to keep sol3 template instantiation within MSVC object file section limits.
 // Modules that expose subsystem access receive the owning Context.
 
-URHO3D_API void RegisterMathBindings(sol::state& lua);
-URHO3D_API void RegisterCoreBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterGraphicsBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterResourceBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterInputBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterUIBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterPhysicsBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterUrho2DBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterPhysics2DBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterAudioBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterNavigationBindings(sol::state& lua, Context* context);
-URHO3D_API void RegisterNetworkBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterMathBindings(sol::state& lua);
+RBFXLUA_API void RegisterCoreBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterGraphicsBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterResourceBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterInputBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterUIBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterPhysicsBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterUrho2DBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterPhysics2DBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterAudioBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterNavigationBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterNetworkBindings(sol::state& lua, Context* context);
 
 /// Helper for binding modules: register the caster of a concrete type.
 /// Casters return a SharedPtr so the Lua reference keeps the object alive

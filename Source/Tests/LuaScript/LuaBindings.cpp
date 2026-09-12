@@ -9,7 +9,7 @@
 #include "../CommonUtils.h"
 
 #include <Urho3D/Graphics/StaticModel.h>
-#include <Urho3D/LuaScript/LuaScript.h>
+#include <LuaScript/LuaScript.h>
 #include <Urho3D/Math/Vector3.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Scene.h>

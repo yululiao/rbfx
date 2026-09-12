@@ -6,13 +6,15 @@
 
 #pragma once
 
-#include "../Core/Object.h"
-#include "../Core/Variant.h"
+#include "../Urho3D/Core/Object.h"
+#include "../Urho3D/Core/Variant.h"
 
-#include "../Math/Color.h"
-#include "../Math/Quaternion.h"
-#include "../Math/Vector2.h"
-#include "../Math/Vector3.h"
+#include "Export.h"
+
+#include "../Urho3D/Math/Color.h"
+#include "../Urho3D/Math/Quaternion.h"
+#include "../Urho3D/Math/Vector2.h"
+#include "../Urho3D/Math/Vector3.h"
 
 #include <EASTL/unique_ptr.h>
 
@@ -46,7 +48,7 @@ public:
 };
 
 /// Lua scripting subsystem.
-class URHO3D_API LuaScript : public Object
+class RBFXLUA_API LuaScript : public Object
 {
     URHO3D_OBJECT(LuaScript, Object);
 
@@ -73,11 +75,6 @@ public:
     /// Return whether Lua state is initialized.
     bool IsInitialized() const { return !!luaState_; }
 
-    /// Set the game scene provided by the editor (or nullptr to clear).
-    void SetGameScene(Scene* scene);
-    /// Return the game scene, or nullptr if not set (standalone player).
-    Scene* GetGameScene() const;
-
     /// Subscribe Lua callback to an event from any sender.
     void SubscribeGlobalEvent(const char* eventName, sol::protected_function callback);
     /// Subscribe Lua callback to an event from a specific sender.
@@ -102,9 +99,6 @@ private:
 
     /// Lua virtual machine state.
     ea::unique_ptr<sol::state> luaState_;
-
-    /// Game scene provided by the editor during play mode.
-    SharedPtr<Scene> gameScene_;
 };
 
 } // namespace Urho3D

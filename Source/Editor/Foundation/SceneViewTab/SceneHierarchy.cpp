@@ -23,7 +23,6 @@
 #include "../../Core/IniHelpers.h"
 #include "../../Foundation/SceneViewTab/SceneHierarchy.h"
 
-#include "../../Foundation/GameViewTab.h"
 #include "../../Project/Project.h"
 
 #include <Urho3D/Scene/Component.h>
@@ -90,24 +89,6 @@ void SceneHierarchy::ReadIniSettings(const char* line)
 
 void SceneHierarchy::RenderContent()
 {
-    // When the game is playing, show the game scene instead of the editor scene.
-    auto* project = GetSubsystem<Project>();
-    auto* gameViewTab = project ? project->FindTab<GameViewTab>() : nullptr;
-    if (gameViewTab && gameViewTab->IsPlaying())
-    {
-        Scene* gameScene = gameViewTab->GetGameScene();
-        if (gameScene)
-        {
-            if (ui::BeginChild("##SceneHierarchy"))
-            {
-                gameSelection_ = SceneSelection{};
-                widget_->RenderContent(gameScene, gameSelection_);
-            }
-            ui::EndChild();
-            return;
-        }
-    }
-
     SceneViewPage* activePage = owner_->GetActivePage();
     if (!activePage)
         return;

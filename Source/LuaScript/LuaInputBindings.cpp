@@ -1,19 +1,19 @@
-﻿//
+//
 // Copyright (c) 2026 the rbfx project.
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Precompiled.h"
+#include "../Urho3D/Precompiled.h"
 
-#include "../LuaScript/LuaBindings.h"
+#include "LuaBindings.h"
 
-#include "../Core/Context.h"
-#include "../Input/Input.h"
-#include "../Input/InputConstants.h"
-#include "../Input/InputMap.h"
-#include "../Input/MoveAndOrbitComponent.h"
-#include "../Input/MoveAndOrbitController.h"
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Input/Input.h"
+#include "../Urho3D/Input/InputConstants.h"
+#include "../Urho3D/Input/InputMap.h"
+#include "../Urho3D/Input/MoveAndOrbitComponent.h"
+#include "../Urho3D/Input/MoveAndOrbitController.h"
 
 #include <sol/sol.hpp>
 
