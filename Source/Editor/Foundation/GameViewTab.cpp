@@ -47,6 +47,7 @@
 #include <Urho3D/SystemUI/DebugHud.h>
 #include <Urho3D/SystemUI/Widgets.h>
 #include <Urho3D/UI/UI.h>
+#include <Urho3D/Utility/PackedSceneData.h>
 
 #if URHO3D_RMLUI
     #include <Urho3D/RmlUI/RmlUI.h>
@@ -91,6 +92,13 @@ public:
         , editorScene_(editorScene)
     {
         engine_->SetParameter(Param_IsRunningInEditor, true);
+
+        // Snapshot the editor scene before the game touches it.
+        // The snapshot is restored in the destructor so Play mode changes
+        // (created/removed/modified nodes and components) never leak into
+        // the editing session — same pattern as SimulateSceneAction.
+        if (auto* scene = editorScene_.Get())
+            sceneSnapshot_ = PackedSceneData::FromScene(scene);
 
         UpdateRenderSurface();
 
@@ -173,15 +181,20 @@ public:
         ReleaseInput();
 
 #ifdef URHO3D_LUA
-        // Stop the Lua session (script cleanup -> globals reset -> Lua reinit)
-        // before plugins or scene state are touched.
+        // Stop the Lua session (globals reset -> Lua state reinit) before
+        // plugins or scene state are touched.
         if (luaRunner_)
             luaRunner_->Stop();
 #endif
 
-        // Disable editor scene updates.
+        // Restore the editor scene from the Play-time snapshot after the Lua
+        // state is torn down, so no stale Lua callbacks fire on removed nodes.
         if (auto scene = editorScene_.Get())
+        {
             scene->SetUpdateEnabled(false);
+            if (sceneSnapshot_.HasSceneData())
+                sceneSnapshot_.ToScene(scene);
+        }
 
 #ifdef URHO3D_LUA
         if (!pluginsSkipped_)
@@ -256,6 +269,8 @@ private:
     CustomBackbufferTexture* backbuffer_{};
     WeakPtr<RenderSurface> backbufferSurface_;
     WeakPtr<Scene> editorScene_;
+    /// Scene state as it was before Play started; restored on Stop.
+    PackedSceneData sceneSnapshot_;
 #ifdef URHO3D_LUA
     /// Lua play session; null when the plugin play mode is used.
     SharedPtr<LuaGameRunner> luaRunner_;

@@ -21,8 +21,8 @@ class RenderSurface;
 ///
 /// Owns the full Lua game lifecycle: entry detection (LuaGameScript component),
 /// script execution, viewport collection, per-frame viewport sync to the game
-/// render surface, and ordered teardown (script cleanup -> globals reset ->
-/// Lua state reinitialization).
+/// render surface, and teardown (globals reset -> Lua state reinitialization).
+/// Scene cleanup is handled by the editor via a Play-time scene snapshot.
 ///
 /// UI tabs should only call Start/Update/Stop; all subsystem orchestration
 /// (LuaScript, Renderer viewports) stays inside this class.
@@ -45,7 +45,7 @@ public:
     /// Per-frame sync: apply the game viewport to the game render surface.
     void Update(CustomBackbufferTexture* backbuffer);
 
-    /// Stop the session: run script cleanup, reset Lua globals, reinitialize Lua state.
+    /// Stop the session: reset Lua globals and reinitialize the Lua state.
     void Stop();
 
     /// Whether the session is active.

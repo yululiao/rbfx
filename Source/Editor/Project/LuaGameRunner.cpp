@@ -101,10 +101,9 @@ void LuaGameRunner::Stop()
 
     if (auto* luaScript = context_->GetSubsystem<LuaScript>())
     {
-        // Let the game script clean up its scene nodes first.
-        luaScript->ExecuteString("if __cleanup then __cleanup() end", "=[cleanup]");
-
         // Reset globals and the Lua state for the next play session.
+        // Scene cleanup is not needed here: the editor restores the scene
+        // from its Play-time snapshot (see GameViewTab::PlayState).
         luaScript->SetGlobalScene("scene", nullptr);
         luaScript->Reinitialize();
     }
