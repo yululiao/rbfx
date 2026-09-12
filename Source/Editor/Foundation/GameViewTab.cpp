@@ -34,15 +34,9 @@
 #include <Urho3D/Graphics/Renderer.h>
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/Input/Input.h>
-#ifdef URHO3D_LUA
 #include "../Foundation/SceneViewTab.h"
-#include "../Project/LuaGameScript.h"
-
-#include <Urho3D/Graphics/DebugRenderer.h>
-#include <Urho3D/Graphics/Octree.h>
-#include <Urho3D/Graphics/RenderSurface.h>
-#include <Urho3D/Graphics/Viewport.h>
-#include <LuaScript/LuaScript.h>
+#ifdef URHO3D_LUA
+#include "../Project/LuaGameRunner.h"
 #endif
 #include <Urho3D/Plugins/PluginManager.h>
 #include <Urho3D/RenderAPI/RenderContext.h>
@@ -108,69 +102,23 @@ public:
         GrabInput();
 
 #ifdef URHO3D_LUA
-        // Lua play mode: the scene has a LuaGameScript component.
-        // The Lua script is the game entry point, so plugins (e.g. Builtin.SceneViewer)
-        // must NOT be started — they would load a duplicate scene and overwrite
-        // the Lua viewport on the Renderer.
-        bool luaPlayMode = false;
-        if (auto* luaScript = GetSubsystem<LuaScript>())
-        {
-            ea::vector<LuaGameScript*> components;
-            editorScene->GetComponents<LuaGameScript>(components);
-            luaPlayMode = !components.empty();
-        }
+        // Lua play mode: the Lua script is the game entry point, so plugins
+        // (e.g. Builtin.SceneViewer) must NOT be started — they would load a
+        // duplicate scene and overwrite the Lua viewport on the Renderer.
+        luaRunner_ = MakeShared<LuaGameRunner>(context_);
+        const bool luaPlayMode = luaRunner_->Start(editorScene, project_);
+        if (!luaPlayMode)
+            luaRunner_ = nullptr;
+        pluginsSkipped_ = luaPlayMode;
 #endif
 
 #ifndef URHO3D_LUA
         pluginManager_->StartApplication();
 #else
-        if (!luaPlayMode)
+        if (!pluginsSkipped_)
             pluginManager_->StartApplication();
-        else
-            pluginsSkipped_ = true;
 #endif
         UpdatePreferredMouseSetup();
-
-#ifdef URHO3D_LUA
-        // Expose the editor scene as a global Lua variable.
-        if (luaPlayMode)
-        {
-            auto* luaScript = GetSubsystem<LuaScript>();
-            luaScript->SetGlobalScene("scene", editorScene);
-
-            // Find LuaGameScript component and execute its script.
-            ea::vector<LuaGameScript*> components;
-            editorScene->GetComponents<LuaGameScript>(components);
-            if (!components.empty())
-            {
-                const ea::string scriptPath = project_->GetProjectPath() + components[0]->GetScriptPath();
-                auto* fs = GetSubsystem<FileSystem>();
-                if (fs && fs->FileExists(scriptPath))
-                {
-                    URHO3D_LOGINFO("Executing Lua script: {}", scriptPath.c_str());
-                    if (!luaScript->ExecuteFileAbsolute(scriptPath))
-                        URHO3D_LOGERROR("Failed to execute Lua script: {}", scriptPath.c_str());
-                }
-                else
-                {
-                    URHO3D_LOGWARNING("Lua script not found: {}", scriptPath.c_str());
-                }
-            }
-
-            // After Lua execution, get the viewport and store it for later use.
-            // We'll set it on the backbuffer's RenderSurface in UpdateRenderSurface().
-            luaViewport_ = renderer_->GetViewport(0);
-        }
-#endif
-
-        // Subscribe to backbuffer texture creation to set up viewport when texture is ready.
-        backbuffer_->OnRenderSurfaceCreated.Subscribe(this, [this](RenderSurface* renderSurface)
-        {
-#ifdef URHO3D_LUA
-            if (luaViewport_)
-                renderSurface->SetViewport(0, luaViewport_);
-#endif
-        });
     }
 
     void GrabInput()
@@ -225,16 +173,10 @@ public:
         ReleaseInput();
 
 #ifdef URHO3D_LUA
-        // Let Lua clean up scene nodes before reinitialization.
-        if (auto* luaScript = GetSubsystem<LuaScript>())
-            luaScript->ExecuteString("if __cleanup then __cleanup() end", "=[cleanup]");
-
-        // Clear Lua globals before reinitialization.
-        if (auto* luaScript = GetSubsystem<LuaScript>())
-        {
-            luaScript->SetGlobalScene("scene", nullptr);
-            luaScript->Reinitialize();
-        }
+        // Stop the Lua session (script cleanup -> globals reset -> Lua reinit)
+        // before plugins or scene state are touched.
+        if (luaRunner_)
+            luaRunner_->Stop();
 #endif
 
         // Disable editor scene updates.
@@ -264,7 +206,7 @@ public:
         renderer_->SetNumViewports(0);
 
 #ifdef URHO3D_LUA
-        luaViewport_.Reset();
+        luaRunner_ = nullptr;
 #endif
 
         stateManager_->Reset();
@@ -293,11 +235,9 @@ private:
         }
 
 #ifdef URHO3D_LUA
-        // Set Lua viewport on the backbuffer RenderSurface.
-        // The RenderSurface will be automatically queued for rendering by Texture::Update()
-        // because it has SURFACE_UPDATEALWAYS mode (set by backbuffer_->SetActive(true)).
-        if (backbufferSurface && luaViewport_)
-            backbufferSurface->SetViewport(0, luaViewport_);
+        // Sync the Lua game viewport to the backbuffer render surface.
+        if (luaRunner_)
+            luaRunner_->Update(backbuffer_);
 #endif
     }
 
@@ -317,7 +257,8 @@ private:
     WeakPtr<RenderSurface> backbufferSurface_;
     WeakPtr<Scene> editorScene_;
 #ifdef URHO3D_LUA
-    SharedPtr<Viewport> luaViewport_;
+    /// Lua play session; null when the plugin play mode is used.
+    SharedPtr<LuaGameRunner> luaRunner_;
     /// True when plugin application was not started because Lua play mode is active.
     bool pluginsSkipped_{};
 #endif
