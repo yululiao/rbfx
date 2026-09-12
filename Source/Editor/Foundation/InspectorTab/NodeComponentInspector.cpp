@@ -24,6 +24,11 @@
 
 #include "../../Project/CreateComponentMenu.h"
 
+#ifdef URHO3D_LUA
+#include "../../Project/LuaGameScript.h"
+#include <Urho3D/Scene/Scene.h>
+#endif
+
 #include <Urho3D/Container/TransformedSpan.h>
 #include <Urho3D/Resource/ResourceCache.h>
 
@@ -349,11 +354,53 @@ void NodeComponentInspector::RenderAddComponent()
         ui::OpenPopup("##AddComponent");
     if (ui::BeginPopup("##AddComponent"))
     {
-        if (const auto componentType = RenderCreateComponentMenu(context_))
+        bool handled = false;
+
+#ifdef URHO3D_LUA
+        // LuaGameScript: only addable to Scene root node, one per scene
+        const bool isSceneNode = nodeWidget_ && !nodeWidget_->GetNodes().empty()
+            && nodeWidget_->GetNodes().front()->GetScene() == nodeWidget_->GetNodes().front();
+
+        if (isSceneNode)
         {
-            AddComponentToNodes(componentType->GetTypeNameHash());
-            ui::CloseCurrentPopup();
+            Node* sceneNode = nodeWidget_->GetNodes().front();
+            const bool hasLuaGameScript = sceneNode->HasComponent<LuaGameScript>();
+
+            if (hasLuaGameScript)
+            {
+                ui::BeginDisabled(true);
+                ui::MenuItem("Lua Game Script (Already Added)");
+                ui::EndDisabled();
+            }
+            else if (ui::MenuItem("Lua Game Script"))
+            {
+                AddComponentToNodes(LuaGameScript::GetTypeStatic());
+                handled = true;
+            }
+
+            ui::Separator();
         }
+#endif
+
+        if (!handled)
+        {
+#ifdef URHO3D_LUA
+            // Filter LuaGameScript from regular component menu (it's only addable via the dedicated button above)
+            ea::unordered_set<StringHash> excludedTypes;
+            excludedTypes.insert(LuaGameScript::GetTypeStatic());
+            if (const auto componentType = RenderCreateComponentMenu(context_, excludedTypes))
+#else
+            if (const auto componentType = RenderCreateComponentMenu(context_))
+#endif
+            {
+                AddComponentToNodes(componentType->GetTypeNameHash());
+                handled = true;
+            }
+        }
+
+        if (handled)
+            ui::CloseCurrentPopup();
+
         ui::EndPopup();
     }
 }

@@ -17,11 +17,11 @@
 	},
 	"Selection": {
 		"ActiveComponentId": 0,
-		"ActiveNodeId": 5,
-		"ActiveNodeOrSceneId": 5,
+		"ActiveNodeId": 0,
+		"ActiveNodeOrSceneId": 0,
 		"ComponentIds": [],
 		"NodeIds": [
-			5
+			1
 		]
 	}
 }

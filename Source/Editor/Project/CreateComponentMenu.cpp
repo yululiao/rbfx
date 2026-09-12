@@ -27,6 +27,8 @@
 #include <EASTL/map.h>
 #include <EASTL/sort.h>
 
+#include <Urho3D/Math/StringHash.h>
+
 namespace Urho3D
 {
 
@@ -61,7 +63,7 @@ struct CategoryGroup
         ea::erase_if(children_, [](const auto& item) { return item.second.IsEmpty(); });
     }
 
-    ObjectReflection* Render() const
+    ObjectReflection* Render(const ea::unordered_set<StringHash>& excludedTypes = {}) const
     {
         ObjectReflection* result = nullptr;
 
@@ -69,6 +71,8 @@ struct CategoryGroup
         {
             for (const auto& [typeName, reflection] : types_)
             {
+                if (excludedTypes.contains(reflection->GetTypeNameHash()))
+                    continue;
                 if (ui::MenuItem(typeName.c_str()))
                     result = reflection;
             }
@@ -84,7 +88,7 @@ struct CategoryGroup
         {
             if (ui::BeginMenu(groupName.c_str()))
             {
-                if (ObjectReflection* childResult = group.Render())
+                if (ObjectReflection* childResult = group.Render(excludedTypes))
                     result = childResult;
                 ui::EndMenu();
             }
@@ -169,7 +173,8 @@ const ea::vector<CategoryGroup>& GetOrCreateCategoryGroups(
 
 } // namespace
 
-ObjectReflection* RenderCreateComponentMenu(Context* context)
+ObjectReflection* RenderCreateComponentMenu(Context* context,
+    const ea::unordered_set<StringHash>& excludedTypes)
 {
     static const ea::string prefix = "Component/";
     static const ConstString specialCategories[] = {Category_Plugin, Category_User};
@@ -182,7 +187,7 @@ ObjectReflection* RenderCreateComponentMenu(Context* context)
         if (&group != &groups.front())
             ui::Separator();
 
-        if (ObjectReflection* groupResult = group.Render())
+        if (ObjectReflection* groupResult = group.Render(excludedTypes))
             result = groupResult;
     }
 

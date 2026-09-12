@@ -175,6 +175,12 @@ void LuaScript::SetGlobalNode(const ea::string& name, Node* node)
         (*luaState_)[name.c_str()] = node;
 }
 
+void LuaScript::SetGlobalScene(const ea::string& name, Scene* scene)
+{
+    if (luaState_)
+        (*luaState_)[name.c_str()] = scene;
+}
+
 void LuaScript::SubscribeGlobalEvent(const char* eventName, sol::protected_function callback)
 {
     if (!luaState_)

@@ -23,8 +23,10 @@
 #pragma once
 
 #include <Urho3D/Core/Context.h>
+#include <Urho3D/Math/StringHash.h>
 
 #include <EASTL/optional.h>
+#include <EASTL/unordered_set.h>
 
 namespace Urho3D
 {
@@ -32,6 +34,8 @@ namespace Urho3D
 class ObjectReflection;
 
 /// Helper function to render "create component menu".
-ObjectReflection* RenderCreateComponentMenu(Context* context);
+/// @param excludedTypes  Optional set of type hashes to exclude from the menu.
+ObjectReflection* RenderCreateComponentMenu(Context* context,
+    const ea::unordered_set<StringHash>& excludedTypes = {});
 
 }

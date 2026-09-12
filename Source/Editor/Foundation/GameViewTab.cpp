@@ -112,10 +112,11 @@ public:
         // Expose the editor scene as a global Lua variable.
         if (auto* luaScript = GetSubsystem<LuaScript>())
         {
-            luaScript->SetGlobalNode("scene", editorScene);
+            luaScript->SetGlobalScene("scene", editorScene);
 
             // Find LuaGameScript component and execute its script.
-            auto components = editorScene->GetComponents<LuaGameScript>();
+            ea::vector<LuaGameScript*> components;
+            editorScene->GetComponents<LuaGameScript>(components);
             if (!components.empty())
             {
                 const ea::string scriptPath = project_->GetProjectPath() + components[0]->GetScriptPath();
@@ -203,10 +204,14 @@ public:
         ReleaseInput();
 
 #ifdef URHO3D_LUA
+        // Let Lua clean up scene nodes before reinitialization.
+        if (auto* luaScript = GetSubsystem<LuaScript>())
+            luaScript->ExecuteString("if __cleanup then __cleanup() end", "=[cleanup]");
+
         // Clear Lua globals before reinitialization.
         if (auto* luaScript = GetSubsystem<LuaScript>())
         {
-            luaScript->SetGlobalNode("scene", nullptr);
+            luaScript->SetGlobalScene("scene", nullptr);
             luaScript->Reinitialize();
         }
 #endif
@@ -310,7 +315,7 @@ void GameViewTab::Play()
         Stop();
 
     // Use the editor's current scene for the play session.
-    auto* sceneViewTab = project_->FindTab<SceneViewTab>();
+    auto* sceneViewTab = GetProject()->FindTab<SceneViewTab>();
     Scene* editorScene = sceneViewTab ? sceneViewTab->GetActivePage()->scene_.Get() : nullptr;
     if (!editorScene)
         return;

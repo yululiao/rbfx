@@ -4,6 +4,7 @@
 
 #include "LuaGameScript.h"
 
+#include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/ObjectCategory.h>
 
 namespace Urho3D

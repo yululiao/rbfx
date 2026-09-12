@@ -2,7 +2,7 @@
 <resource _id="1">
 	<attributes>
 		<attribute name="Next Node ID" type="Int" value="7" />
-		<attribute name="Next Component ID" type="Int" value="8" />
+		<attribute name="Next Component ID" type="Int" value="13" />
 	</attributes>
 	<components>
 		<component _id="1" _typeName="Octree" />
@@ -78,6 +78,12 @@
 				</attribute>
 				<attribute name="Color Space" type="String" value="HDR Linear" />
 				<attribute name="PCF Kernel Size" type="Int" value="5" />
+			</attributes>
+		</component>
+		<component _id="11" _typeName="ReflectionProbeManager" />
+		<component _id="12" _typeName="LuaGameScript">
+			<attributes>
+				<attribute name="Script Path" type="String" value="Scripts/main.lua" />
 			</attributes>
 		</component>
 	</components>

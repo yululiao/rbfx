@@ -99,7 +99,7 @@ public:
         // Create a scene and expose it as a global Lua variable.
         auto scene = MakeShared<Scene>(context_);
         scene->CreateComponent<Octree>();
-        luaScript->SetGlobalNode("scene", scene.Get());
+        luaScript->SetGlobalScene("scene", scene.Get());
 
         // The C++ Sample base creates the console so samples can toggle it
         // (26_ConsoleInput). Mirror that behavior for the Lua samples.

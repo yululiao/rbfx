@@ -72,6 +72,8 @@ public:
 
     /// Expose a Node (or a Scene subclass) as a global Lua variable.
     void SetGlobalNode(const ea::string& name, Node* node);
+    /// Expose a Scene as a global Lua variable (preserves Scene* type for sol3).
+    void SetGlobalScene(const ea::string& name, Scene* scene);
     /// Return whether Lua state is initialized.
     bool IsInitialized() const { return !!luaState_; }
 
