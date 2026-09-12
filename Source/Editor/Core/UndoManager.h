@@ -134,8 +134,13 @@ private:
     void Update();
     bool NeedNewGroup() const;
     void CommitIncompleteAction(bool force);
+    /// Drop the oldest undo groups when the stack exceeds the limit.
+    /// The newest group (which may hold the incomplete action) is never dropped.
+    void TrimUndoStack();
 
     const unsigned actionCompletionTimeoutMs_{1000};
+    /// Maximum number of undo groups kept in memory.
+    const unsigned maxUndoGroups_{100};
 
     ea::vector<ActionGroup> undoStack_;
     ea::vector<ActionGroup> redoStack_;

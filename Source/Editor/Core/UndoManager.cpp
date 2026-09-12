@@ -134,6 +134,8 @@ EditorActionFrame UndoManager::PushAction(const EditorActionPtr& action)
 
     group.actions_.push_back(action);
 
+    TrimUndoStack();
+
     CommitIncompleteAction(true);
     if (!action->IsComplete())
     {
@@ -196,6 +198,8 @@ bool UndoManager::Redo()
 
         undoStack_.push_back(ea::move(group));
         redoStack_.pop_back();
+
+        TrimUndoStack();
         return true;
     }
     catch (const UndoException& e)
@@ -253,6 +257,15 @@ void UndoManager::CommitIncompleteAction(bool force)
         incompleteAction_ = nullptr;
     else if (force)
         URHO3D_LOGERROR("Incomplete action failed to complete when it was forced");
+}
+
+void UndoManager::TrimUndoStack()
+{
+    if (undoStack_.size() <= maxUndoGroups_)
+        return;
+
+    const unsigned numToRemove = undoStack_.size() - maxUndoGroups_;
+    undoStack_.erase(undoStack_.begin(), undoStack_.begin() + numToRemove);
 }
 
 }
