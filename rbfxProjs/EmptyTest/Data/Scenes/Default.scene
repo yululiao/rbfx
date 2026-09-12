@@ -141,7 +141,7 @@
 				<component _id="6" _typeName="StaticModel">
 					<attributes>
 						<attribute name="Model" type="ResourceRef" value="Model;Models/TeaPot.mdl" />
-						<attribute name="Material" type="ResourceRefList" value="Material;Materials/DefaultWhite.xml;Materials/DefaultWhite.xml" />
+						<attribute name="Material" type="ResourceRefList" value="Material;Materials/StoneTiled.xml;Materials/DefaultWhite.xml" />
 						<attribute name="Cast Shadows" type="Bool" value="true" />
 					</attributes>
 				</component>

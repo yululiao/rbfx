@@ -319,6 +319,14 @@ void GameViewTab::Play()
     if (!editorScene)
         return;
 
+    // Flush unsaved scene changes to disk before the play session touches the
+    // scene. The in-memory snapshot restores state on Stop, but this guards
+    // against an editor crash mid-play losing recent edits. Only dirty scenes
+    // are written (SaveResource skips unchanged resources), mirroring Unity's
+    // "Auto Save Scenes" on entering play mode.
+    if (autoSaveOnPlay_)
+        sceneViewTab->SaveResource(sceneViewTab->GetActiveResourceName());
+
     editorScene->SetUpdateEnabled(true);
     state_ = ea::make_unique<PlayState>(context_, backbuffer_, editorScene);
     OnSimulationStarted(this);
@@ -415,17 +423,22 @@ void GameViewTab::RenderContent()
 
 void GameViewTab::RenderContextMenuItems()
 {
+    if (ui::MenuItem("Auto Save Scene On Play", nullptr, autoSaveOnPlay_))
+        autoSaveOnPlay_ = !autoSaveOnPlay_;
 }
 
 void GameViewTab::WriteIniSettings(ImGuiTextBuffer& output)
 {
     WriteIntToIni(output, "IsHudVisible", hudVisible_ ? 1 : 0);
+    WriteIntToIni(output, "AutoSaveOnPlay", autoSaveOnPlay_ ? 1 : 0);
 }
 
 void GameViewTab::ReadIniSettings(const char* line)
 {
     if (const auto isHudVisible = ReadIntFromIni(line, "IsHudVisible"))
         hudVisible_ = *isHudVisible != 0;
+    if (const auto autoSaveOnPlay = ReadIntFromIni(line, "AutoSaveOnPlay"))
+        autoSaveOnPlay_ = *autoSaveOnPlay != 0;
 }
 
 void GameViewTab::QuitApplication()

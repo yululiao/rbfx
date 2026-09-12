@@ -23,7 +23,7 @@
 #include "../Project/CreateDefaultScene.h"
 
 #ifdef URHO3D_LUA
-#include "../Project/LuaGameScript.h"
+#include <LuaScript/LuaGameScript.h>
 #endif
 #include <Urho3D/Graphics/Light.h>
 #include <Urho3D/Graphics/Material.h>

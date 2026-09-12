@@ -32,6 +32,7 @@ set_target_properties(RbfxLuaScript PROPERTIES
 
 # Install public headers
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaScript.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/LuaGameScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaNodeBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/Export.h

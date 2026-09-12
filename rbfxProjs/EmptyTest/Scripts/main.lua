@@ -3,17 +3,9 @@
 -- Loads Kachujin models with random movement (based on 06_SkeletalAnimation).
 --
 -- The global variable `scene` is set by C++ (the editor's current scene).
--- On Stop, Lua state is reinitialized AND we explicitly remove the nodes
--- we added so the editor scene stays clean.
-
-----------------------------------------------------------------------
--- Track nodes we create so Cleanup can remove them from the editor scene.
-----------------------------------------------------------------------
-local createdNodes = {}
-
-local function track(node)
-    table.insert(createdNodes, node)
-end
+-- No cleanup bookkeeping is needed: when the user clicks Stop, the editor
+-- restores the whole scene from the snapshot taken before Play started,
+-- so anything created or modified here is discarded automatically.
 
 ----------------------------------------------------------------------
 -- Scene setup
@@ -21,7 +13,6 @@ end
 local function CreateScene()
     -- Ground plane
     local planeNode = scene:CreateChild("LuaTest_Plane")
-    track(planeNode)
     planeNode:SetScale(Vector3(50.0, 1.0, 50.0))
     local planeObject = planeNode:CreateComponent("StaticModel")
     planeObject:SetModel(GetResource("Model", "Models/Plane.mdl"))
@@ -29,7 +20,6 @@ local function CreateScene()
 
     -- Zone: ambient lighting & fog
     local zoneNode = scene:CreateChild("LuaTest_Zone")
-    track(zoneNode)
     local zone = zoneNode:CreateComponent("Zone")
     zone:SetBoundingBox(BoundingBox(-1000.0, 1000.0))
     zone:SetAmbientColor(Color(0.5, 0.5, 0.5))
@@ -39,7 +29,6 @@ local function CreateScene()
 
     -- Directional light with shadows
     local lightNode = scene:CreateChild("LuaTest_DirLight")
-    track(lightNode)
     lightNode:SetDirection(Vector3(0.6, -1.0, 0.8))
     local light = lightNode:CreateComponent("Light")
     light:SetLightType(LIGHT.DIRECTIONAL)
@@ -50,7 +39,6 @@ local function CreateScene()
 
     -- Camera with FreeFlyController (WASD + mouse look)
     local cameraNode = scene:CreateChild("LuaTest_Camera")
-    track(cameraNode)
     cameraNode:CreateComponent("FreeFlyController")
     local camera = cameraNode:CreateComponent("Camera")
     camera:SetFarClip(300.0)
@@ -67,7 +55,6 @@ local function CreateScene()
     local movers = {}
     for i = 1, NUM_MODELS do
         local modelNode = scene:CreateChild("LuaTest_Kachujin")
-        track(modelNode)
         modelNode:SetPosition(Vector3(Random(40.0) - 20.0, 0.0, Random(40.0) - 20.0))
         modelNode:SetRotation(Quaternion(0.0, Random(360.0), 0.0))
 
@@ -107,31 +94,13 @@ local function CreateInstructions(text)
     instructions:SetPosition(10, 10)
     instructions:SetWidth(root:GetWidth() - 20)
     instructions:SetColor(Color(0.0, 1.0, 0.0))
-    table.insert(createdNodes, instructions)
-end
-
-----------------------------------------------------------------------
--- Cleanup: remove everything we added to the editor scene / UI.
--- Called automatically when the user clicks Stop (via ExitEvent) or
--- when the Lua state is about to be reinitialized.
-----------------------------------------------------------------------
--- Register global cleanup function. The editor's PlayState destructor
--- calls `__cleanup()` before reinitializing the Lua state, so we can
--- remove the nodes we added to the editor scene.
-function __cleanup()
-    for _, node in ipairs(createdNodes) do
-        if node and node.Remove then
-            node:Remove()
-        end
-    end
-    createdNodes = {}
 end
 
 ----------------------------------------------------------------------
 -- Main
 ----------------------------------------------------------------------
 local movers = CreateScene()
-CreateInstructions("Kachujin Test - WASD + Mouse to move\nClick Stop to clean up")
+CreateInstructions("Kachujin Test - WASD + Mouse to move\nClick Stop to reset the scene")
 
 -- Per-frame movement: walk forward, yaw when hitting bounds
 SubscribeToEvent("Update", function(data)

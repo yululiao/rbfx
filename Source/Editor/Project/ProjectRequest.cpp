@@ -53,8 +53,9 @@ void ProjectRequest::InvokeProcessCallback()
     }
 }
 
-OpenResourceRequest::OpenResourceRequest(Context* context, const ea::string& resourceName)
+OpenResourceRequest::OpenResourceRequest(Context* context, const ea::string& resourceName, bool revealOnly)
     : ProjectRequest(context)
+    , revealOnly_(revealOnly)
 {
     auto project = GetSubsystem<Project>();
     resourceDesc_ = project->GetResourceDescriptor(resourceName);

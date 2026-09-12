@@ -4,15 +4,18 @@
 
 #include "../Project/LuaGameRunner.h"
 
-#include "../Project/LuaGameScript.h"
+#include <LuaScript/LuaGameScript.h>
 #include "../Project/Project.h"
 
 #include <Urho3D/Core/Context.h>
+#include <Urho3D/Graphics/Material.h>
 #include <Urho3D/Graphics/Renderer.h>
 #include <Urho3D/Graphics/RenderSurface.h>
+#include <Urho3D/Graphics/StaticModel.h>
 #include <Urho3D/Graphics/Viewport.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
+#include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/Utility/SceneRendererToTexture.h>
 #include <LuaScript/LuaScript.h>
@@ -58,6 +61,11 @@ bool LuaGameRunner::Start(Scene* scene, Project* project)
 
     // Expose the editor scene to the game script.
     luaScript->SetGlobalScene("scene", scene);
+
+    // Track materials referenced by the scene so Stop() can reload them
+    // if the game script mutates their content (resources are shared and
+    // not covered by the Play-time scene snapshot).
+    CollectReferencedMaterials(scene);
 
     // Execute the entry script referenced by the first LuaGameScript component.
     const ea::string scriptPath = project->GetProjectPath() + components[0]->GetScriptPath();
@@ -108,8 +116,55 @@ void LuaGameRunner::Stop()
         luaScript->Reinitialize();
     }
 
+    // Reload materials touched during Play so dirty runtime state
+    // (e.g. shader parameters set from Lua) does not leak into the editor.
+    ReloadTrackedMaterials();
+
     scene_ = nullptr;
     viewport_ = nullptr;
+    trackedMaterials_.clear();
+}
+
+void LuaGameRunner::CollectReferencedMaterials(Scene* scene)
+{
+    trackedMaterials_.clear();
+
+    // FindComponents with the Derived flag walks the whole scene recursively
+    // and matches subclasses, so AnimatedModel (derived from StaticModel) is
+    // collected as well.
+    ea::vector<StaticModel*> models;
+    scene->FindComponents<StaticModel>(models, ComponentSearchFlag::SelfOrChildrenRecursiveDerived);
+    for (StaticModel* model : models)
+    {
+        for (unsigned i = 0; i < model->GetNumGeometries(); ++i)
+            if (Material* material = model->GetMaterial(i))
+                trackedMaterials_.push_back(SharedPtr<Material>(material));
+    }
+
+    ea::sort(trackedMaterials_.begin(), trackedMaterials_.end());
+    trackedMaterials_.erase(ea::unique(trackedMaterials_.begin(), trackedMaterials_.end()),
+        trackedMaterials_.end());
+}
+
+void LuaGameRunner::ReloadTrackedMaterials()
+{
+    if (trackedMaterials_.empty())
+        return;
+
+    auto* cache = context_->GetSubsystem<ResourceCache>();
+    if (!cache)
+        return;
+
+    for (const SharedPtr<Material>& material : trackedMaterials_)
+    {
+        if (!material || material->GetName().empty())
+            continue;
+
+        // Reload from disk: reloads in-place, replacing dirty runtime state
+        // (shader parameters, cull mode, etc.) with the saved content.
+        if (!cache->ReloadResource(material))
+            URHO3D_LOGWARNING("Failed to reload material after Play: {}", material->GetName());
+    }
 }
 
 } // namespace Urho3D

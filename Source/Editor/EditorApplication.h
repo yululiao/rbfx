@@ -56,6 +56,27 @@ protected:
 
     void OpenOrCreateProject();
 
+    /// Native file picker for resource-reference attributes. Opens the OS dialog inside the
+    /// current project's Data directory and rewrites name to the project-relative resource
+    /// path. Installed as the engine resource browser via Widgets::SetResourceBrowser.
+    bool BrowseResource(StringHash& type, ea::string& name, const StringVector* allowedTypes);
+
+    /// Native file picker for string file-path attributes (marked via AttributeMetadata::FileFilter).
+    /// Opens the OS dialog inside the current project's root and rewrites value to the project-root-
+    /// relative path (matching how LuaGameRunner resolves the stored script path). Installed as the
+    /// engine file-path browser via Widgets::SetFilePathBrowser.
+    bool BrowseFilePath(ea::string& value, const char* filter);
+
+    /// Reveal the resource with the given project-relative name in the Resource Browser window by
+    /// posting an OpenResourceRequest. Installed as the engine resource navigator via
+    /// Widgets::SetResourceNavigator.
+    bool NavigateResource(const ea::string& name);
+
+    /// Opens a native file dialog rooted at baseDir and returns the chosen path relative to that
+    /// directory (forward slashes, extension kept) or nullopt if cancelled. extFilter is a
+    /// comma-separated NFD extension spec (e.g. "lua"), or null to list every file.
+    ea::optional<ea::string> PickProjectFile(const ea::string& baseDir, const char* extFilter) const;
+
     /// Editor paths
     /// @{
     ea::string tempJsonPath_;

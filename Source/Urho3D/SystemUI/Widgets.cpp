@@ -43,6 +43,15 @@ namespace Widgets
 namespace
 {
 
+/// Editor-provided resource browser used by EditResourceRef's browse button; empty until installed.
+ResourceBrowseFunction resourceBrowser;
+
+/// Editor-provided file-path browser used by the string editor's browse button; empty until installed.
+FilePathBrowseFunction filePathBrowser;
+
+/// Editor-provided resource navigator used by EditResourceRef's navigate button; empty until installed.
+ResourceNavigateFunction resourceNavigator;
+
 unsigned GetFloatNumberOfDigits(ea::span<const float> values, const EditVariantOptions& options)
 {
     if (options.step_ >= 1.0 || options.step_ <= 0.0)
@@ -265,6 +274,21 @@ void TextURL(const ea::string& label, const ea::string& url)
         fs->SystemOpen(url);
 }
 
+void SetResourceBrowser(const ResourceBrowseFunction& browser)
+{
+    resourceBrowser = browser;
+}
+
+void SetFilePathBrowser(const FilePathBrowseFunction& browser)
+{
+    filePathBrowser = browser;
+}
+
+void SetResourceNavigator(const ResourceNavigateFunction& navigator)
+{
+    resourceNavigator = navigator;
+}
+
 bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* allowedTypes)
 {
     bool modified = false;
@@ -291,9 +315,45 @@ bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* all
         }
     }
 
-    ui::SetNextItemWidth(ui::GetContentRegionAvail().x);
+    // Reserve horizontal space for the trailing icon buttons (browse and/or navigate) so the name
+    // input shrinks instead of the buttons wrapping to a new line.
+    const float buttonStep = GetSmallButtonSize() + ui::GetStyle().ItemSpacing.x;
+    float trailingWidth = 0.0f;
+    if (resourceBrowser)
+        trailingWidth += buttonStep;
+    if (resourceNavigator)
+        trailingWidth += buttonStep;
+    ui::SetNextItemWidth(ui::GetContentRegionAvail().x - trailingWidth);
     if (ui::InputText("##Name", &name, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_NoUndoRedo))
         modified = true;
+
+    // Browse button: opens the editor-provided native resource picker. Hidden until a
+    // browser is installed (editor sets it via SetResourceBrowser). The picker is a blocking
+    // OS dialog, so it is invoked directly on click instead of from inside an ImGui popup.
+    if (resourceBrowser)
+    {
+        ui::SameLine();
+        if (ui::Button(ICON_FA_FOLDER_OPEN))
+        {
+            if (resourceBrowser(type, name, allowedTypes))
+                modified = true;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Browse...");
+    }
+
+    // Navigate button: reveals the currently referenced resource in the Resource Browser window.
+    // Disabled while the reference is empty.
+    if (resourceNavigator)
+    {
+        ui::SameLine();
+        ui::BeginDisabled(name.empty());
+        if (ui::Button(ICON_FA_LOCATION_ARROW))
+            resourceNavigator(name);
+        ui::EndDisabled();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Reveal in Resource Browser");
+    }
 
     if (allowedTypes != nullptr)
     {
@@ -963,16 +1023,36 @@ bool EditVariantInt64(Variant& var, const EditVariantOptions& options)
 bool EditVariantString(Variant& var, const EditVariantOptions& options)
 {
     ea::string value = var.GetString();
-    ui::SetNextItemWidth(ui::GetContentRegionAvail().x);
+    // A browse button is shown only for path-marked strings and only when the editor installed a
+    // file-path browser. The picker is a blocking OS dialog, invoked directly on click.
+    const bool canBrowse = options.fileFilter_ && filePathBrowser;
+    const float browseWidth = canBrowse ? GetSmallButtonSize() + ui::GetStyle().ItemSpacing.x : 0.0f;
+    ui::SetNextItemWidth(ui::GetContentRegionAvail().x - browseWidth);
     const bool isCommitted = ui::InputText("", &value,
         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_NoUndoRedo | ImGuiInputTextFlags_CallbackAlways);
     const bool isDeactivated = ui::IsItemDeactivatedAfterEdit();
+    bool modified = false;
     if (isCommitted || isDeactivated)
     {
         var = value;
-        return true;
+        modified = true;
     }
-    return false;
+
+    if (canBrowse)
+    {
+        ui::SameLine();
+        if (ui::Button(ICON_FA_FOLDER_OPEN))
+        {
+            if (filePathBrowser(value, options.fileFilter_))
+            {
+                var = value;
+                modified = true;
+            }
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Browse...");
+    }
+    return modified;
 }
 
 bool EditVariantEnum(Variant& var, const EditVariantOptions& options)

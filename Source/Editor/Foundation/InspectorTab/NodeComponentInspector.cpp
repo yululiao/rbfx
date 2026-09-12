@@ -25,7 +25,7 @@
 #include "../../Project/CreateComponentMenu.h"
 
 #ifdef URHO3D_LUA
-#include "../../Project/LuaGameScript.h"
+#include <LuaScript/LuaGameScript.h>
 #include <Urho3D/Scene/Scene.h>
 #endif
 

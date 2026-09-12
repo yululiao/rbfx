@@ -151,9 +151,14 @@ void ResourceBrowserTab::OnProjectRequest(RefCounted* sender, ProjectRequest* re
         const ResourceFileDescriptor& desc = openResourceRequest->GetResource();
         if (const FileSystemEntry* entry = FindLeftPanelEntry(desc.resourceName_))
         {
+            // A "reveal" (inspector locate button) only highlights + scrolls to the asset; suppress the
+            // InspectResourceRequest so it does not steal the Inspector from the current editing target.
+            // A normal Open still leaves suppressInspector_ off, so its Inspector updates as before.
+            suppressInspector_ = openResourceRequest->IsRevealOnly();
             SelectLeftPanel(entry->resourceName_);
             if (!desc.isDirectory_)
                 SelectRightPanel(desc.resourceName_);
+            suppressInspector_ = false;
             ScrollToSelection();
         }
     }

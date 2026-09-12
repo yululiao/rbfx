@@ -287,6 +287,15 @@ void SerializableInspectorWidget::RenderAttribute(const AttributeInfo& info)
     }
     else if (info.type_ == VAR_INT && (info.name_.ends_with(" Mask") || info.name_.ends_with("Collision Layer")))
         options = options.AsBitmask();
+    else if (info.type_ == VAR_STRING)
+    {
+        // A FileFilter metadata marks this string as a browseable file path; forward the extension
+        // spec to the editor so its file-path browser opens with the right filter. The referenced
+        // string lives in the static attribute metadata, so the pointer stays valid here.
+        const ea::string& filter = info.GetMetadata(AttributeMetadata::FileFilter).GetString();
+        if (!filter.empty())
+            options = options.FileFilter(filter.c_str());
+    }
 
     if (Widgets::EditVariant(value, options))
         pendingSetAttributes_.emplace_back(&info, value);

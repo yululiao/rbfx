@@ -236,6 +236,10 @@ namespace AttributeMetadata
     /// Flag that indicates that the elements metadata should be extracted from the value itself.
     /// Applies only to StringVariantMap.
     URHO3D_GLOBAL_CONSTANT(ConstString DynamicMetadata{"DynamicMetadata"});
+    /// Comma-separated extension filter (e.g. "lua") that marks a string attribute as a browseable
+    /// file path. When present the inspector renders a native browse button next to the editor.
+    /// Applies only to String.
+    URHO3D_GLOBAL_CONSTANT(ConstString FileFilter{"FileFilter"});
 }
 
 // The following macros need to be used within a class member function such as ClassName::RegisterObject().

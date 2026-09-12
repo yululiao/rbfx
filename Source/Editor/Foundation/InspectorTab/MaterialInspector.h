@@ -28,9 +28,12 @@
 
 #include <Urho3D/Core/Timer.h>
 #include <Urho3D/SystemUI/MaterialInspectorWidget.h>
+#include <Urho3D/SystemUI/SerializableInspectorWidget.h>
 
 namespace Urho3D
 {
+
+class StaticModel;
 
 void Foundation_MaterialInspector(Context* context, InspectorTab* inspectorTab);
 
@@ -41,6 +44,7 @@ class MaterialInspector : public Object, public InspectorSource
 
 public:
     explicit MaterialInspector(Project* project);
+    ~MaterialInspector() override;
 
     /// Implement InspectorSource
     /// @{
@@ -59,6 +63,21 @@ private:
     void BeginEdit();
     void EndEdit();
 
+    /// Inline material editing embedded under StaticModel/AnimatedModel components in the node
+    /// inspector (via a SerializableInspectorWidget attribute hook on the "Material" reference).
+    /// This edits the same shared Material resource as the standalone inspector, so it reuses
+    /// ModifyResourceAction for undo and SaveFileDelayed for persistence.
+    ///
+    /// Unity-like behavior: the inline editor is rendered right after the material path row and is
+    /// collapsible; a material that lives in the project's Data folder is expandable/editable, while
+    /// a built-in material (loaded from engine CoreData) is shown greyed and cannot be expanded.
+    /// @{
+    bool OnMaterialAttribute(const AttributeHookContext& ctx, Variant& boxedValue);
+    void RenderInlineMaterials(StaticModel* model);
+    void InlineBeginEdit();
+    void InlineEndEdit();
+    /// @}
+
     const unsigned updatePeriodMs_{1000};
     const ea::string techniquePath_{"Techniques/"};
 
@@ -69,6 +88,20 @@ private:
     Timer updateTimer_;
 
     SharedPtr<ModifyResourceAction> pendingAction_;
+
+    /// Widgets and state for inline material editing under model components, one entry per
+    /// referenced material so built-in and project materials can be gated independently.
+    /// @{
+    struct InlineMaterial
+    {
+        ea::string name_;
+        bool isProjectAsset_{}; // false => built-in (CoreData): greyed, not expandable
+        SharedPtr<MaterialInspectorWidget> widget_;
+    };
+    ea::vector<InlineMaterial> inlineMaterials_;
+    StringVector inlineMaterialNames_; // material-name set the widgets were last built for
+    SharedPtr<ModifyResourceAction> inlinePendingAction_;
+    /// @}
 };
 
 }

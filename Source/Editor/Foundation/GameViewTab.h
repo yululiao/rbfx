@@ -76,6 +76,8 @@ private:
 
     ea::unique_ptr<PlayState> state_;
     bool hudVisible_{};
+    /// Flush unsaved scene changes to disk when Play starts.
+    bool autoSaveOnPlay_{true};
     IntRect gameViewRect_{};
 };
 

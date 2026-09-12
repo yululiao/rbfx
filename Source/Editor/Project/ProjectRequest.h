@@ -74,12 +74,17 @@ class OpenResourceRequest : public ProjectRequest
     URHO3D_OBJECT(OpenResourceRequest, ProjectRequest);
 
 public:
-    OpenResourceRequest(Context* context, const ea::string& resourceName);
+    /// When revealOnly is set, handlers should only locate/highlight the resource (scroll to it in the
+    /// Resource Browser) without opening an editor tab or switching the Inspector to it. Used by the
+    /// inspector's "reveal" button so it does not interrupt editing of the current selection.
+    OpenResourceRequest(Context* context, const ea::string& resourceName, bool revealOnly = false);
 
     const ResourceFileDescriptor& GetResource() const { return resourceDesc_; }
+    bool IsRevealOnly() const { return revealOnly_; }
 
 private:
     ResourceFileDescriptor resourceDesc_;
+    bool revealOnly_{};
 };
 
 /// Base class for all inspector requests.

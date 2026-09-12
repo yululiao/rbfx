@@ -54,6 +54,8 @@
 #include "Foundation/Texture2DViewTab.h"
 #include "Foundation/TextureCubeViewTab.h"
 
+#include "Project/ProjectRequest.h"
+
 #include <Urho3D/Core/CommandLine.h>
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/CoreEvents.h>
@@ -62,11 +64,12 @@
 #include <Urho3D/Engine/EngineEvents.h>
 #include <Urho3D/Graphics/Graphics.h>
 #include <Urho3D/IO/ArchiveSerialization.h>
+#include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Input/Input.h>
 #ifdef URHO3D_LUA
 #include <LuaScript/LuaScript.h>
-#include "Project/LuaGameScript.h"
+#include <LuaScript/LuaGameScript.h>
 #endif
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/SystemUI/Console.h>
@@ -242,6 +245,15 @@ void EditorApplication::Start()
     if (NFD_Init() != NFD_OKAY)
         URHO3D_LOGERROR("NFD_Init() failed: {}", NFD_GetError());
 
+    // Install the native pickers behind the inspector browse buttons. Both capture `this` and read
+    // project_ lazily at call time, so they are safe to install before any project is opened.
+    Widgets::SetResourceBrowser([this](StringHash& type, ea::string& name, const StringVector* allowedTypes)
+        { return BrowseResource(type, name, allowedTypes); });
+    Widgets::SetFilePathBrowser([this](ea::string& value, const char* filter)
+        { return BrowseFilePath(value, filter); });
+    Widgets::SetResourceNavigator([this](const ea::string& name)
+        { return NavigateResource(name); });
+
     auto cache = GetSubsystem<ResourceCache>();
     auto input = GetSubsystem<Input>();
     auto fs = GetSubsystem<FileSystem>();
@@ -307,6 +319,11 @@ void EditorApplication::Stop()
 #endif
 
     NFD_Quit();
+
+    // Detach the browse providers before NFD/engine teardown so no dangling `this` lambda survives.
+    Widgets::SetResourceBrowser(Widgets::ResourceBrowseFunction());
+    Widgets::SetFilePathBrowser(Widgets::FilePathBrowseFunction());
+    Widgets::SetResourceNavigator(Widgets::ResourceNavigateFunction());
 }
 
 Texture2D* EditorApplication::GetProjectPreview(const ea::string& projectPath)
@@ -909,6 +926,144 @@ void EditorApplication::OpenProfilerApplication()
 #else
     URHO3D_LOGERROR("Profiling is not enabled in this build.");
 #endif
+}
+
+namespace
+{
+
+/// Map a common resource type name to a comma-separated NFD extension spec used to pre-filter the
+/// native open dialog. Returns nullptr for unknown types, in which case the dialog lists all files.
+/// This is a UI convenience; the authoritative extension set lives in the project asset pipeline.
+const char* ResourceExtensionSpec(const ea::string& type)
+{
+    if (type == "Texture2D")
+        return "png,tga,jpg,jpeg,bmp,dds,ktx,webp";
+    if (type == "TextureCube")
+        return "dds,png,tga,jpg";
+    if (type == "Texture2DArray")
+        return "png,tga,dds";
+    if (type == "Texture3D")
+        return "dds";
+    if (type == "Material")
+        return "xml";
+    if (type == "Model")
+        return "mdl";
+    if (type == "Animation")
+        return "anim";
+    if (type == "Sound")
+        return "wav,ogg";
+    if (type == "Font")
+        return "ttf,otf,fnt";
+    if (type == "Scene" || type == "SceneResource" || type == "RenderPath")
+        return "xml";
+    if (type == "Prefab" || type == "PrefabResource")
+        return "prefab,xml";
+    if (type == "JSONFile")
+        return "json";
+    if (type == "XMLFile")
+        return "xml";
+    return nullptr;
+}
+
+} // namespace
+
+ea::optional<ea::string> EditorApplication::PickProjectFile(const ea::string& baseDir, const char* extFilter) const
+{
+    nfdu8filteritem_t filterItem{};
+    const nfdu8filteritem_t* filters = nullptr;
+    nfdfiltersize_t filterCount = 0;
+    if (extFilter && extFilter[0] != '\0')
+    {
+        filterItem.name = "Files";
+        filterItem.spec = extFilter;
+        filters = &filterItem;
+        filterCount = 1;
+    }
+
+    // NFD opens in the (already absolute) base directory. ResolvePath normalizes separators so the
+    // engine's trailing-slash project paths are handed over consistently.
+    const ea::string initialDir = ResolvePath(baseDir);
+
+    nfdu8char_t* outPath = nullptr;
+    const nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, filterCount, initialDir.c_str());
+    if (result == NFD_ERROR)
+    {
+        URHO3D_LOGERROR("File browse dialog failed: {}", NFD_GetError());
+        return ea::nullopt;
+    }
+    if (result != NFD_OKAY)
+        return ea::nullopt; // user cancelled
+
+    ea::string chosen = ResolvePath(outPath); // absolute, forward slashes
+    NFD_FreePathU8(outPath);
+
+    // Store the path relative to baseDir so it survives project relocation.
+    ea::string base = ResolvePath(baseDir);
+    if (!base.empty() && base[base.size() - 1] != '/')
+        base += '/';
+    if (chosen.size() > base.size() && chosen.compare(0, base.size(), base) == 0)
+        chosen = chosen.substr(base.size());
+    return chosen;
+}
+
+bool EditorApplication::BrowseResource(StringHash& type, ea::string& name, const StringVector* allowedTypes)
+{
+    if (!project_)
+        return false;
+
+    // Union the extension specs of the allowed types; empty spec means the dialog lists everything.
+    ea::string spec;
+    auto appendSpec = [&spec](const char* s)
+    {
+        if (!s)
+            return;
+        if (!spec.empty())
+            spec += ',';
+        spec += s;
+    };
+    if (allowedTypes)
+    {
+        for (const ea::string& allowedType : *allowedTypes)
+            appendSpec(ResourceExtensionSpec(allowedType));
+    }
+
+    const ea::optional<ea::string> relative = PickProjectFile(project_->GetDataPath(), spec.empty() ? nullptr : spec.c_str());
+    if (!relative)
+        return false;
+
+    name = *relative;
+    // Adopt the sole allowed type when the reference had no type set yet.
+    if (allowedTypes && allowedTypes->size() == 1 && type == StringHash())
+        type = StringHash((*allowedTypes)[0]);
+    return true;
+}
+
+bool EditorApplication::BrowseFilePath(ea::string& value, const char* filter)
+{
+    if (!project_)
+        return false;
+
+    // File-path attributes (e.g. LuaGameScript.Script Path) are stored relative to the project root,
+    // matching how LuaGameRunner resolves them during Play.
+    const ea::optional<ea::string> relative = PickProjectFile(project_->GetProjectPath(), filter);
+    if (!relative)
+        return false;
+
+    value = *relative;
+    return true;
+}
+
+bool EditorApplication::NavigateResource(const ea::string& name)
+{
+    if (!project_ || name.empty())
+        return false;
+
+    // Reveal-only request: the Resource Browser selects + scrolls to the entry, but the Inspector is
+    // not switched (suppressInspector_) and no resource editor tab is opened, so editing the current
+    // node is not interrupted. Clicking the asset in the browser still inspects it normally.
+    const auto request = MakeShared<OpenResourceRequest>(context_, name, /*revealOnly=*/true);
+    project_->ProcessRequest(request);
+    return true;
 }
 
 } // namespace Urho3D

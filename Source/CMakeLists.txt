@@ -41,6 +41,8 @@ endif ()
 add_subdirectory (Urho3D)
 if (URHO3D_LUA)
     add_subdirectory (LuaScript)
+    # Standalone Lua-game host depends on the shared RbfxLuaScript module.
+    add_subdirectory (LuaGamePlayer)
 endif ()
 add_subdirectory (Tools)
 add_subdirectory (Samples)

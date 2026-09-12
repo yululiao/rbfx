@@ -2,10 +2,12 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 
+#include "../Urho3D/Precompiled.h"
+
 #include "LuaGameScript.h"
 
-#include <Urho3D/Core/Context.h>
-#include <Urho3D/Core/ObjectCategory.h>
+#include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Core/ObjectCategory.h"
 
 namespace Urho3D
 {
@@ -21,7 +23,11 @@ void LuaGameScript::RegisterObject(Context* context)
 {
     context->AddFactoryReflection<LuaGameScript>(Category_Scene);
 
-    URHO3D_ATTRIBUTE("Script Path", ea::string, scriptPath_, EMPTY_STRING, AM_DEFAULT);
+    // The FileFilter metadata tells the inspector this string is a lua file path, so it renders a
+    // native browse button; the stored value is project-root-relative (e.g. "Scripts/main.lua"),
+    // matching how LuaGameRunner and LuaGamePlayer resolve it against the project/data root.
+    URHO3D_ATTRIBUTE("Script Path", ea::string, scriptPath_, EMPTY_STRING, AM_DEFAULT)
+        .SetMetadata(AttributeMetadata::FileFilter, "lua");
 }
 
 void LuaGameScript::SetScriptPath(const ea::string& path)

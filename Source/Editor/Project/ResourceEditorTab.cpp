@@ -161,6 +161,9 @@ void ResourceEditorTab::OnProjectRequest(ProjectRequest* request)
 {
     if (const auto openResourceRequest = dynamic_cast<OpenResourceRequest*>(request))
     {
+        // A "reveal" only locates the asset in the Resource Browser; do not open a tab or steal focus.
+        if (openResourceRequest->IsRevealOnly())
+            return;
         const ResourceFileDescriptor& desc = openResourceRequest->GetResource();
         if (!desc.isDirectory_ && CanOpenResource(desc))
         {

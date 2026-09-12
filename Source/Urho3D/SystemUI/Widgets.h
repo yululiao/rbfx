@@ -26,6 +26,7 @@
 #include "../Graphics/Texture2D.h"
 #include "../SystemUI/ImGui.h"
 
+#include <EASTL/functional.h>
 #include <EASTL/optional.h>
 
 namespace Urho3D
@@ -79,6 +80,9 @@ struct EditVariantOptions
     bool asBitmask_{};
     /// Whether to extract elements metadata dynamically from the inspected StringVariantMap itself.
     bool dynamicMetadata_{};
+    /// When non-null, the string value is a browseable file path; the value is a comma-separated
+    /// extension filter (e.g. "lua"). Enables a native browse button next to the string editor.
+    const char* fileFilter_{};
     /// Enum values used to convert integer to string.
     const StringVector* intToString_{};
     /// Allowed resource types.
@@ -96,10 +100,38 @@ struct EditVariantOptions
     EditVariantOptions& AllowResize() { allowResize_ = true; return *this; }
     EditVariantOptions& AllowTypeChange() { allowTypeChange_ = true; return *this; }
     EditVariantOptions& DynamicMetadata() { dynamicMetadata_ = true; return *this; }
+    EditVariantOptions& FileFilter(const char* filter) { fileFilter_ = filter; return *this; }
 };
 
 /// Render reference to resource with optional type constraints. If allowed types are not specified, only current type is allowed.
 URHO3D_API bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* allowedTypes);
+
+/// Callback that opens a resource picker (typically a blocking native OS dialog) and, on user
+/// selection, writes the chosen resource name (and optionally type) into the referenced arguments
+/// and returns true to mark the field modified. EditResourceRef invokes it directly when its browse
+/// button is clicked. The editor installs the concrete browser so the engine stays decoupled from
+/// project/resource-browser logic (the file-to-resource-type mapping is a project concern). An empty
+/// function hides the browse button.
+using ResourceBrowseFunction = ea::function<bool(StringHash& type, ea::string& name, const StringVector* allowedTypes)>;
+/// Install the editor-provided resource browser used by EditResourceRef's browse button.
+URHO3D_API void SetResourceBrowser(const ResourceBrowseFunction& browser);
+
+/// Callback that opens a native OS file picker for a plain string file-path attribute (marked via
+/// AttributeMetadata::FileFilter). 'filter' is the extension spec carried by that metadata (e.g.
+/// "lua"). On selection it writes the chosen path back into 'value' and returns true. The editor
+/// installs it so the engine stays decoupled from project path resolution. An empty function hides
+/// the browse button.
+using FilePathBrowseFunction = ea::function<bool(ea::string& value, const char* filter)>;
+/// Install the editor-provided file-path browser used by the string editor's browse button.
+URHO3D_API void SetFilePathBrowser(const FilePathBrowseFunction& browser);
+
+/// Callback that reveals the resource with the given project-relative name in the editor's
+/// Resource Browser window (selection + scroll into view). EditResourceRef shows a navigate button
+/// that invokes it for the currently referenced resource. The editor installs the concrete handler
+/// so the engine stays decoupled from project navigation. An empty function hides the button.
+using ResourceNavigateFunction = ea::function<bool(const ea::string& name)>;
+/// Install the editor-provided resource navigator used by EditResourceRef's navigate button.
+URHO3D_API void SetResourceNavigator(const ResourceNavigateFunction& navigator);
 
 /// Render vector of resource references with optional type constraints. If allowed types are not specified, only current type is allowed.
 URHO3D_API bool EditResourceRefList(StringHash& type, StringVector& names, const StringVector* allowedTypes,
