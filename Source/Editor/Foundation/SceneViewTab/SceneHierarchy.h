@@ -68,6 +68,7 @@ private:
 
     bool reentrant_{};
     SharedPtr<SceneHierarchyWidget> widget_;
+    SceneSelection gameSelection_;
 };
 
 }

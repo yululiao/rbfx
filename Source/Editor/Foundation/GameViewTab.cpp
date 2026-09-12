@@ -26,6 +26,7 @@
 
 #include <Urho3D/Core/WorkQueue.h>
 #include <Urho3D/Engine/Engine.h>
+#include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Engine/EngineDefs.h>
 #include <Urho3D/Engine/StateManager.h>
 #include <Urho3D/Graphics/Graphics.h>
@@ -33,6 +34,11 @@
 #include <Urho3D/Graphics/Renderer.h>
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/Input/Input.h>
+#ifdef URHO3D_LUA
+#include <Urho3D/Graphics/DebugRenderer.h>
+#include <Urho3D/Graphics/Octree.h>
+#include <Urho3D/LuaScript/LuaScript.h>
+#endif
 #include <Urho3D/Plugins/PluginManager.h>
 #include <Urho3D/RenderAPI/RenderContext.h>
 #include <Urho3D/RenderAPI/RenderDevice.h>
@@ -69,7 +75,7 @@ class GameViewTab::PlayState : public Object
     URHO3D_OBJECT(PlayState, Object);
 
 public:
-    PlayState(Context* context, CustomBackbufferTexture* backbuffer)
+    PlayState(Context* context, CustomBackbufferTexture* backbuffer, Scene* gameScene)
         : Object(context)
         , engine_(GetSubsystem<Engine>())
         , renderer_(GetSubsystem<Renderer>())
@@ -97,6 +103,36 @@ public:
 
         pluginManager_->StartApplication();
         UpdatePreferredMouseSetup();
+
+#ifdef URHO3D_LUA
+        // Expose the editor-provided game scene to Lua so GetGameScene() works.
+        if (auto* luaScript = GetSubsystem<LuaScript>())
+            luaScript->SetGameScene(gameScene);
+
+        // Execute the project's main.lua entry point if it exists.
+        if (auto* luaScript = GetSubsystem<LuaScript>())
+        {
+            const ea::string mainLuaPath = project_->GetProjectPath() + "Scripts/main.lua";
+            URHO3D_LOGINFO("Looking for main.lua at: {}", mainLuaPath.c_str());
+            auto* fs = GetSubsystem<FileSystem>();
+            if (fs && fs->FileExists(mainLuaPath))
+            {
+                URHO3D_LOGINFO("Executing main.lua...");
+                if (!luaScript->ExecuteFileAbsolute(mainLuaPath))
+                    URHO3D_LOGERROR("Failed to execute main.lua");
+                else
+                    URHO3D_LOGINFO("main.lua executed successfully.");
+            }
+            else
+            {
+                URHO3D_LOGWARNING("No main.lua found at: {}", mainLuaPath.c_str());
+            }
+        }
+        else
+        {
+            URHO3D_LOGERROR("LuaScript subsystem is not available!");
+        }
+#endif
 
         SubscribeToEvent(E_BEGINRENDERING, [this]
         {
@@ -146,6 +182,14 @@ public:
     {
         input_->SetExplicitWindowRect(windowRect);
         UpdateRenderSurface();
+
+        // Force cursor visible and absolute mode every frame so the user can always
+        // click the Stop button or click outside the game view to release input,
+        // even when the game sets MM_RELATIVE / hides the cursor.
+        if (!input_->IsMouseVisible())
+            input_->SetMouseVisible(true);
+        if (input_->GetMouseMode() != MM_ABSOLUTE)
+            input_->SetMouseMode(MM_ABSOLUTE);
     }
 
     bool IsInputGrabbed() const { return inputGrabbed_; }
@@ -153,6 +197,12 @@ public:
     ~PlayState()
     {
         ReleaseInput();
+
+#ifdef URHO3D_LUA
+        // Reset Lua state so next play session starts clean.
+        if (auto* luaScript = GetSubsystem<LuaScript>())
+            luaScript->Reinitialize();
+#endif
 
         pluginManager_->StopApplication();
         backbuffer_->SetActive(false);
@@ -247,7 +297,15 @@ void GameViewTab::Play()
     if (state_)
         Stop();
 
-    state_ = ea::make_unique<PlayState>(context_, backbuffer_);
+#ifdef URHO3D_LUA
+    // Create a game scene for the play session so Lua can use GetGameScene().
+    gameScene_ = MakeShared<Scene>(context_);
+    gameScene_->CreateComponent<Octree>();
+    gameScene_->CreateComponent<DebugRenderer>();
+    gameScene_->SetUpdateEnabled(true);
+#endif
+
+    state_ = ea::make_unique<PlayState>(context_, backbuffer_, gameScene_.Get());
     OnSimulationStarted(this);
 }
 
@@ -256,8 +314,20 @@ void GameViewTab::Stop()
     if (!state_)
         return;
 
+#ifdef URHO3D_LUA
+    // Clear the game scene before Lua reinitialization.
+    if (auto* luaScript = GetSubsystem<LuaScript>())
+        luaScript->SetGameScene(nullptr);
+    gameScene_ = nullptr;
+#endif
+
     state_ = nullptr;
     OnSimulationStopped(this);
+}
+
+Scene* GameViewTab::GetGameScene() const
+{
+    return gameScene_;
 }
 
 void GameViewTab::TogglePlayed()
@@ -276,10 +346,21 @@ void GameViewTab::ReleaseInput()
 
 void GameViewTab::RenderToolbar()
 {
+    if (IsPlaying())
+    {
+        if (Widgets::ToolbarButton(ICON_FA_STOP, "Stop"))
+            Stop();
+        Widgets::ToolbarSeparator();
+    }
+
     if (Widgets::ToolbarButton(ICON_FA_BUG, "Toggle Debug HUD", hudVisible_))
         hudVisible_ = !hudVisible_;
 
     Widgets::ToolbarSeparator();
+}
+
+void GameViewTab::PreRenderUpdate()
+{
 }
 
 void GameViewTab::RenderContent()

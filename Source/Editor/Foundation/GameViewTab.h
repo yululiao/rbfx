@@ -49,6 +49,9 @@ public:
     bool IsPlaying() const { return !!state_; }
     bool IsInputGrabbed() const;
 
+    /// Return the game scene created for the current play session.
+    Scene* GetGameScene() const;
+
     /// Commands
     /// @{
     void Stop();
@@ -58,6 +61,7 @@ public:
 
     /// Implement EditorTab
     /// @{
+    void PreRenderUpdate() override;
     void RenderToolbar() override;
     void RenderContent() override;
     void RenderContextMenuItems() override;
@@ -74,7 +78,9 @@ private:
     SharedPtr<CustomBackbufferTexture> backbuffer_;
 
     ea::unique_ptr<PlayState> state_;
+    SharedPtr<Scene> gameScene_;
     bool hudVisible_{};
+    IntRect gameViewRect_{};
 };
 
 } // namespace Urho3D

@@ -14,9 +14,11 @@
 #include "../Core/Variant.h"
 #include "../Engine/EngineEvents.h"
 #include "../IO/File.h"
+#include "../IO/FileSystem.h"
 #include "../IO/Log.h"
 #include "../Resource/ResourceCache.h"
 #include "../Scene/Node.h"
+#include "../Scene/Scene.h"
 
 #include <sol/sol.hpp>
 
@@ -130,10 +132,58 @@ bool LuaScript::ExecuteFile(const ea::string& fileName)
     return ExecuteString(code, fileName);
 }
 
+bool LuaScript::ExecuteFileAbsolute(const ea::string& absolutePath)
+{
+    if (!luaState_)
+    {
+        URHO3D_LOGERROR("LuaScript is not initialized.");
+        return false;
+    }
+
+    auto* fs = context_->GetSubsystem<FileSystem>();
+    if (!fs || !fs->FileExists(absolutePath))
+    {
+        URHO3D_LOGERRORF("Lua script file not found: %s", absolutePath.c_str());
+        return false;
+    }
+
+    File file(context_, absolutePath, FILE_READ);
+    if (!file.IsOpen())
+    {
+        URHO3D_LOGERRORF("Failed to open Lua script: %s", absolutePath.c_str());
+        return false;
+    }
+
+    ea::string code = file.ReadString();
+    URHO3D_LOGINFO("Read {} bytes from {}", code.length(), absolutePath);
+    return ExecuteString(code, absolutePath);
+}
+
+void LuaScript::Reinitialize()
+{
+    if (!luaState_)
+        return;
+
+    gameScene_ = nullptr;
+    UnsubscribeFromAllEvents();
+    luaState_.reset();
+    Initialize();
+}
+
 void LuaScript::SetGlobalNode(const ea::string& name, Node* node)
 {
     if (luaState_)
         (*luaState_)[name.c_str()] = node;
+}
+
+void LuaScript::SetGameScene(Scene* scene)
+{
+    gameScene_ = scene;
+}
+
+Scene* LuaScript::GetGameScene() const
+{
+    return gameScene_;
 }
 
 void LuaScript::SubscribeGlobalEvent(const char* eventName, sol::protected_function callback)

@@ -64,7 +64,9 @@
 #include <Urho3D/IO/ArchiveSerialization.h>
 #include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Input/Input.h>
+#ifdef URHO3D_LUA
 #include <Urho3D/LuaScript/LuaScript.h>
+#endif
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/SystemUI/Console.h>
 #include <Urho3D/SystemUI/DebugHud.h>
@@ -162,8 +164,10 @@ void EditorApplication::Setup()
 
     // Lua scripting subsystem for editor plugins and game logic prototyping.
     // Registers itself as a "LuaScript" interpreter in the console command dropdown.
+#ifdef URHO3D_LUA
     const auto luaScript = MakeShared<LuaScript>(context_);
     context_->RegisterSubsystem(luaScript);
+#endif
 
 #ifdef _WIN32
     // Required until SDL supports hdpi on windows
@@ -295,7 +299,9 @@ void EditorApplication::Stop()
 
     context_->RemoveSubsystem<WorkQueue>(); // Prevents deadlock when unloading plugin AppDomain in managed host.
     context_->RemoveSubsystem<EditorPluginManager>();
+#ifdef URHO3D_LUA
     context_->RemoveSubsystem<LuaScript>();
+#endif
 
     NFD_Quit();
 }

@@ -20,6 +20,7 @@ namespace Urho3D
 {
 
 class Node;
+class Scene;
 
 }
 
@@ -62,9 +63,20 @@ public:
     bool ExecuteString(const ea::string& code, const ea::string& chunkName = EMPTY_STRING);
     /// Execute Lua code from a resource file.
     bool ExecuteFile(const ea::string& fileName);
+    /// Execute Lua code from a file specified by absolute path.
+    bool ExecuteFileAbsolute(const ea::string& absolutePath);
+    /// Destroy and recreate Lua state. Used by the editor to reset game state between play sessions.
+    void Reinitialize();
 
     /// Expose a Node (or a Scene subclass) as a global Lua variable.
     void SetGlobalNode(const ea::string& name, Node* node);
+    /// Return whether Lua state is initialized.
+    bool IsInitialized() const { return !!luaState_; }
+
+    /// Set the game scene provided by the editor (or nullptr to clear).
+    void SetGameScene(Scene* scene);
+    /// Return the game scene, or nullptr if not set (standalone player).
+    Scene* GetGameScene() const;
 
     /// Subscribe Lua callback to an event from any sender.
     void SubscribeGlobalEvent(const char* eventName, sol::protected_function callback);
@@ -90,6 +102,9 @@ private:
 
     /// Lua virtual machine state.
     ea::unique_ptr<sol::state> luaState_;
+
+    /// Game scene provided by the editor during play mode.
+    SharedPtr<Scene> gameScene_;
 };
 
 } // namespace Urho3D

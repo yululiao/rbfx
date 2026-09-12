@@ -7,6 +7,7 @@
 #include "../Precompiled.h"
 
 #include "../LuaScript/LuaBindings.h"
+#include "../LuaScript/LuaScript.h"
 
 #include "../Core/Context.h"
 #include "../Graphics/AnimatedModel.h"
@@ -969,6 +970,12 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             : SharedPtr<Viewport>(new Viewport(context, scene, camera)));
         renderer->SetViewport(index, viewport);
         return sol::make_object(sol::state_view(s), viewport);
+    });
+
+    // Global helper: return the game scene provided by the editor (or nil in standalone player).
+    lua.set_function("GetGameScene", [context]() -> Scene* {
+        auto* luaScript = context->GetSubsystem<LuaScript>();
+        return luaScript ? luaScript->GetGameScene() : nullptr;
     });
 
     // Light type constants.
