@@ -40,6 +40,8 @@
 
 #include <Urho3D/Graphics/DebugRenderer.h>
 #include <Urho3D/Graphics/Octree.h>
+#include <Urho3D/Graphics/RenderSurface.h>
+#include <Urho3D/Graphics/Viewport.h>
 #include <LuaScript/LuaScript.h>
 #endif
 #include <Urho3D/Plugins/PluginManager.h>
@@ -105,13 +107,35 @@ public:
         backbuffer_->SetActive(true);
         GrabInput();
 
+#ifdef URHO3D_LUA
+        // Lua play mode: the scene has a LuaGameScript component.
+        // The Lua script is the game entry point, so plugins (e.g. Builtin.SceneViewer)
+        // must NOT be started — they would load a duplicate scene and overwrite
+        // the Lua viewport on the Renderer.
+        bool luaPlayMode = false;
+        if (auto* luaScript = GetSubsystem<LuaScript>())
+        {
+            ea::vector<LuaGameScript*> components;
+            editorScene->GetComponents<LuaGameScript>(components);
+            luaPlayMode = !components.empty();
+        }
+#endif
+
+#ifndef URHO3D_LUA
         pluginManager_->StartApplication();
+#else
+        if (!luaPlayMode)
+            pluginManager_->StartApplication();
+        else
+            pluginsSkipped_ = true;
+#endif
         UpdatePreferredMouseSetup();
 
 #ifdef URHO3D_LUA
         // Expose the editor scene as a global Lua variable.
-        if (auto* luaScript = GetSubsystem<LuaScript>())
+        if (luaPlayMode)
         {
+            auto* luaScript = GetSubsystem<LuaScript>();
             luaScript->SetGlobalScene("scene", editorScene);
 
             // Find LuaGameScript component and execute its script.
@@ -132,23 +156,20 @@ public:
                     URHO3D_LOGWARNING("Lua script not found: {}", scriptPath.c_str());
                 }
             }
-            else
-            {
-                URHO3D_LOGWARNING("No LuaGameScript component found in the scene.");
-            }
+
+            // After Lua execution, get the viewport and store it for later use.
+            // We'll set it on the backbuffer's RenderSurface in UpdateRenderSurface().
+            luaViewport_ = renderer_->GetViewport(0);
         }
 #endif
 
-        SubscribeToEvent(E_BEGINRENDERING, [this]
+        // Subscribe to backbuffer texture creation to set up viewport when texture is ready.
+        backbuffer_->OnRenderSurfaceCreated.Subscribe(this, [this](RenderSurface* renderSurface)
         {
-            auto renderDevice = GetSubsystem<RenderDevice>();
-            RenderContext* renderContext = renderDevice->GetRenderContext();
-
-            RenderTargetView renderTargets[] = {RenderTargetView::Texture(backbuffer_->GetTexture())};
-            renderContext->SetRenderTargets(ea::nullopt, renderTargets);
-            renderContext->ClearRenderTarget(0, 0x245953_rgb);
-
-            UnsubscribeFromEvent(E_BEGINRENDERING);
+#ifdef URHO3D_LUA
+            if (luaViewport_)
+                renderSurface->SetViewport(0, luaViewport_);
+#endif
         });
     }
 
@@ -220,7 +241,12 @@ public:
         if (auto scene = editorScene_.Get())
             scene->SetUpdateEnabled(false);
 
+#ifdef URHO3D_LUA
+        if (!pluginsSkipped_)
+            pluginManager_->StopApplication();
+#else
         pluginManager_->StopApplication();
+#endif
         backbuffer_->SetActive(false);
 
         legacyUI_->SetRenderTarget(nullptr);
@@ -236,6 +262,10 @@ public:
 
         renderer_->SetBackbufferRenderSurface(nullptr);
         renderer_->SetNumViewports(0);
+
+#ifdef URHO3D_LUA
+        luaViewport_.Reset();
+#endif
 
         stateManager_->Reset();
 
@@ -261,6 +291,14 @@ private:
             rmlUI_->SetRenderTarget(backbufferSurface_);
 #endif
         }
+
+#ifdef URHO3D_LUA
+        // Set Lua viewport on the backbuffer RenderSurface.
+        // The RenderSurface will be automatically queued for rendering by Texture::Update()
+        // because it has SURFACE_UPDATEALWAYS mode (set by backbuffer_->SetActive(true)).
+        if (backbufferSurface && luaViewport_)
+            backbufferSurface->SetViewport(0, luaViewport_);
+#endif
     }
 
     Engine* engine_{};
@@ -278,6 +316,11 @@ private:
     CustomBackbufferTexture* backbuffer_{};
     WeakPtr<RenderSurface> backbufferSurface_;
     WeakPtr<Scene> editorScene_;
+#ifdef URHO3D_LUA
+    SharedPtr<Viewport> luaViewport_;
+    /// True when plugin application was not started because Lua play mode is active.
+    bool pluginsSkipped_{};
+#endif
 
     bool inputGrabbed_{};
 

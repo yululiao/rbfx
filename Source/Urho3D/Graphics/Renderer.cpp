@@ -306,6 +306,7 @@ void Renderer::SetViewport(unsigned index, Viewport* viewport)
         viewports_.resize(index + 1);
 
     viewports_[index] = viewport;
+    backbufferSurfaceViewportsDirty_ = true;
 }
 
 void Renderer::SetDefaultTechnique(Technique* technique)
