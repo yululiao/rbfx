@@ -23,6 +23,7 @@ namespace Urho3D
 
 class Node;
 class Scene;
+class LuaPackageLoader;
 
 }
 
@@ -63,9 +64,13 @@ public:
 
     /// Execute Lua code from a string.
     bool ExecuteString(const ea::string& code, const ea::string& chunkName = EMPTY_STRING);
-    /// Execute Lua code from a resource file.
+    /// Execute Lua code from a resource file. The name is resolved through the virtual file
+    /// system, so a packaged .luc is preferred over a .lua of the same base name. Registers the
+    /// script as a reload root.
     bool ExecuteFile(const ea::string& fileName);
-    /// Execute Lua code from a file specified by absolute path.
+    /// Same, for a path on disk: it is translated into the resource name of the mounted
+    /// directory that contains it, and refused when it belongs to none, because a script with no
+    /// resource identity could neither be watched nor reloaded.
     bool ExecuteFileAbsolute(const ea::string& absolutePath);
     /// Destroy and recreate Lua state. Used by the editor to reset game state between play sessions.
     void Reinitialize();
@@ -91,6 +96,10 @@ public:
     /// Return raw Lua state.
     lua_State* GetLuaState() const;
 
+    /// Return the require()/hot-reload bookkeeping installed on this VM, or null before
+    /// Initialize(). Hosts use it to add search prefixes or to reset the tracked module graph.
+    LuaPackageLoader* GetPackageLoader() const { return packageLoader_.get(); }
+
 private:
     /// Register Urho3D types available to Lua.
     void RegisterEngineBindings();
@@ -101,6 +110,9 @@ private:
 
     /// Lua virtual machine state.
     ea::unique_ptr<sol::state> luaState_;
+    /// VFS backed require() and the module dependency graph of this VM. Must be destroyed
+    /// before luaState_ because the searcher closure refers to it.
+    ea::unique_ptr<LuaPackageLoader> packageLoader_;
 };
 
 } // namespace Urho3D

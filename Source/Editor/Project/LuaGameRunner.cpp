@@ -13,7 +13,6 @@
 #include <Urho3D/Graphics/RenderSurface.h>
 #include <Urho3D/Graphics/StaticModel.h>
 #include <Urho3D/Graphics/Viewport.h>
-#include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Scene.h>
@@ -67,18 +66,20 @@ bool LuaGameRunner::Start(Scene* scene, Project* project)
     // not covered by the Play-time scene snapshot).
     CollectReferencedMaterials(scene);
 
-    // Execute the entry script referenced by the first LuaGameScript component.
-    const ea::string scriptPath = project->GetProjectPath() + components[0]->GetScriptPath();
-    auto* fs = context_->GetSubsystem<FileSystem>();
-    if (fs && fs->FileExists(scriptPath))
+    // Execute the entry script referenced by the first LuaGameScript component. The stored path
+    // is a resource name (relative to a mounted data directory), exactly like the value the
+    // standalone player uses, so Play in the editor and shipping the same scene resolve the
+    // script the same way: through the VFS, which means it is cached, watched and reloadable.
+    const ea::string scriptPath = components[0]->GetScriptPath();
+    if (scriptPath.empty())
     {
-        URHO3D_LOGINFO("Executing Lua script: {}", scriptPath.c_str());
-        if (!luaScript->ExecuteFileAbsolute(scriptPath))
-            URHO3D_LOGERROR("Failed to execute Lua script: {}", scriptPath.c_str());
+        URHO3D_LOGWARNING("LuaGameRunner: LuaGameScript component has no Script Path set");
     }
     else
     {
-        URHO3D_LOGWARNING("Lua script not found: {}", scriptPath.c_str());
+        URHO3D_LOGINFO("Executing Lua script: {}", scriptPath.c_str());
+        if (!luaScript->ExecuteFile(scriptPath))
+            URHO3D_LOGERROR("Failed to execute Lua script: {}", scriptPath.c_str());
     }
 
     // Collect the viewport the script registered on the main renderer.

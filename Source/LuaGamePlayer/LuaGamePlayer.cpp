@@ -25,10 +25,13 @@
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/Renderer.h>
 #include <Urho3D/Graphics/Viewport.h>
+#include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Resource/JSONFile.h>
 #include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Scene/Scene.h>
+#include <Urho3D/Scene/SceneResource.h>
 
 #include <LuaScript/LuaGameScript.h>
 #include <LuaScript/LuaScript.h>
@@ -55,16 +58,33 @@ public:
 
     void Setup() override
     {
+        auto* fs = context_->GetSubsystem<FileSystem>();
+
         engineParameters_[EP_WINDOW_TITLE] = "LuaGamePlayer";
         engineParameters_[EP_APPLICATION_NAME] = "LuaGamePlayer";
         engineParameters_[EP_LOG_NAME] = "player.log";
+        // Narrower on purpose than the engine default ("CoreData;Cache;Data"): a shipped game has
+        // no asset cache next to it. Each name is looked for under every prefix path below.
         engineParameters_[EP_RESOURCE_PATHS] = "CoreData;Data";
+        // A packaged game needs nothing here: the executable already sits next to its Data/ and
+        // the engine always mounts the program directory. For running straight out of the build
+        // tree, use the same discovery the editor does, which finds the CoreData of the engine
+        // checkout by walking up from the working directory. A ResourceRoot.ini beside the
+        // executable, or an explicit --pp/--pr, is still honoured and takes precedence.
+        if (const ea::string prefixPath = fs->FindResourcePrefixPath(); !prefixPath.empty())
+            engineParameters_[EP_RESOURCE_PREFIX_PATHS] = prefixPath;
         engineParameters_[EP_HEADLESS] = false;
         engineParameters_[EP_SOUND] = true;
     }
 
     void Start() override
     {
+        // Ask the VFS to watch the mounted directories before anything is loaded. New mount
+        // points inherit this flag, so a hot reload of Lua scripts works here exactly like it
+        // does in the editor, where EditorApplication turns watching on for the whole session.
+        if (auto* vfs = context_->GetSubsystem<VirtualFileSystem>())
+            vfs->SetWatching(true);
+
         // 1) Bring up the Lua runtime and make the game entry component known to
         //    the reflection system so scenes referencing it can be deserialized.
         const auto luaScript = MakeShared<LuaScript>(context_);
@@ -76,9 +96,12 @@ public:
         auto* cache = GetSubsystem<ResourceCache>();
         ea::string startupScene = ReadStartupScene(cache);
 
-        // 3) Load the scene. A freshly loaded Scene is update-enabled by default
-        //    and subscribes to E_UPDATE, so it ticks on its own once started.
-        scene_ = cache->GetResource<Scene>(startupScene);
+        // 3) Load the scene. Scene is not a Resource in rbfx - it is wrapped by SceneResource,
+        //    which owns the live Scene (that is also what the editor uses to open .scene files).
+        //    A freshly created Scene is update-enabled by default and subscribes to E_UPDATE,
+        //    so it ticks on its own once started.
+        sceneResource_ = cache->GetResource<SceneResource>(startupScene);
+        scene_ = sceneResource_ ? sceneResource_->GetScene() : nullptr;
         if (!scene_)
         {
             URHO3D_LOGERROR("LuaGamePlayer: failed to load startup scene '{}'", startupScene);
@@ -90,6 +113,8 @@ public:
 
         // 4) Expose the active scene and run the entry script(s) the scene asks for.
         luaScript->SetGlobalScene("scene", scene_);
+        // The LuaGameScript component is looked up on the scene root node only, mirroring
+        // LuaGameRunner::Start() so Play in the editor and this host agree.
         ea::vector<LuaGameScript*> entryScripts;
         scene_->GetComponents<LuaGameScript>(entryScripts);
         if (entryScripts.empty())
@@ -111,7 +136,9 @@ public:
     {
         if (auto* luaScript = context_->GetSubsystem<LuaScript>())
             luaScript->SetGlobalScene("scene", nullptr);
+        // Drop the scene first - it is owned by the resource wrapper.
         scene_ = nullptr;
+        sceneResource_ = nullptr;
     }
 
 private:
@@ -143,7 +170,8 @@ private:
         if (!renderer)
             return;
 
-        Camera* camera = scene_->GetComponent<Camera>();
+        // Camera is usually on a child node, so search the whole hierarchy.
+        Camera* camera = scene_->FindComponent<Camera>();
         if (!camera)
         {
             URHO3D_LOGWARNING("LuaGamePlayer: startup scene has no Camera, nothing will be rendered");
@@ -156,6 +184,8 @@ private:
         renderer->SetViewport(0, viewport);
     }
 
+    /// Wrapper that owns the running scene; kept alive so a cache release cannot pull it away.
+    SharedPtr<SceneResource> sceneResource_;
     SharedPtr<Scene> scene_;
 };
 

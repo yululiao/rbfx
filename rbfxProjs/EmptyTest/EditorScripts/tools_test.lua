@@ -251,7 +251,7 @@ Editor.addMenuItem("Tools/About This Plugin", function()
     Editor.log("This is the editor Lua ImGui widget test plugin (tools_test.lua)")
 end)
 
-Editor.addMenuItem("Tools/Test EdiorScripts subdir", function()
+Editor.addMenuItem("Tools/Test EditorScripts subdir", function()
     require("subdir.subdir_files_no_auto_run").Run()
 end)
 

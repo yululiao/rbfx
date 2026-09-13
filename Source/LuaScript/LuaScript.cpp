@@ -9,13 +9,18 @@
 #include "LuaScript.h"
 
 #include "LuaBindings.h"
+#include "LuaFile.h"
 #include "LuaNodeBindings.h"
+#include "LuaPackageLoader.h"
+#include "LuaScriptContainer.h"
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Core/Variant.h"
 #include "../Urho3D/Engine/EngineEvents.h"
 #include "../Urho3D/IO/File.h"
+#include "../Urho3D/IO/FileIdentifier.h"
 #include "../Urho3D/IO/FileSystem.h"
 #include "../Urho3D/IO/Log.h"
+#include "../Urho3D/IO/VirtualFileSystem.h"
 #include "../Urho3D/Resource/ResourceCache.h"
 #include "../Urho3D/Scene/Node.h"
 #include "../Urho3D/Scene/Scene.h"
@@ -29,10 +34,6 @@ LuaScript::LuaScript(Context* context)
     : Object(context)
 {
     Initialize();
-
-    // Register as a console command interpreter. The editor console shows
-    // every subscriber of E_CONSOLECOMMAND in its interpreter dropdown.
-    SubscribeToEvent(E_CONSOLECOMMAND, &LuaScript::HandleConsoleCommand);
 }
 
 LuaScript::~LuaScript()
@@ -47,6 +48,31 @@ bool LuaScript::Initialize()
     if (luaState_)
         return true;
 
+    // Scripts are resources: that is what gives require() the virtual file system, the
+    // container decoding and the file watcher for free.
+    LuaFile::RegisterObject(context_);
+
+    // A key that does not match what was packaged shows up as a load error per file, which points
+    // everywhere except at the cause, so name the source once per process. The codec itself stays
+    // silent because the offline bundler links it and has no log to write to.
+    static bool keySourceReported = false;
+    if (!keySourceReported)
+    {
+        keySourceReported = true;
+        switch (LuaScriptContainerGetKeySource())
+        {
+        case LuaScriptContainerKeySource::RejectedEnvironment:
+            URHO3D_LOGWARNING("RBFX_LUA_SCRIPT_KEY is not 64 hex digits, so the compiled key is in use. "
+                              "Packaged scripts will fail to load until the two agree.");
+            break;
+        case LuaScriptContainerKeySource::Environment:
+            URHO3D_LOGINFO("Lua script containers use the key from RBFX_LUA_SCRIPT_KEY.");
+            break;
+        default:
+            break;
+        }
+    }
+
     luaState_ = ea::make_unique<sol::state>();
     luaState_->open_libraries(
         sol::lib::base,
@@ -60,6 +86,12 @@ bool LuaScript::Initialize()
         sol::lib::os
     );
 
+    // Install the VFS searcher while the stack is empty and before any script can run. The one
+    // prefix is the empty string: game modules are addressed relative to the mounted resource
+    // directories, which is the same naming every other asset in the engine uses.
+    packageLoader_ = ea::make_unique<LuaPackageLoader>(context_);
+    packageLoader_->Attach(luaState_->lua_state(), { EMPTY_STRING });
+
     RegisterEngineBindings();
 
     // Redirect Lua print into the engine log so it is visible in the editor console.
@@ -71,6 +103,11 @@ bool LuaScript::Initialize()
         "__urho_log_info(table.concat(parts, ' ')) "
         "end",
         "=[print-redirect]");
+
+    // Register as a console command interpreter. The editor console shows
+    // every subscriber of E_CONSOLECOMMAND in its interpreter dropdown. Subscribed here rather
+    // than in the constructor because Reinitialize() drops every handler and then calls this.
+    SubscribeToEvent(E_CONSOLECOMMAND, &LuaScript::HandleConsoleCommand);
 
     return true;
 }
@@ -114,49 +151,39 @@ bool LuaScript::ExecuteString(const ea::string& code, const ea::string& chunkNam
 
 bool LuaScript::ExecuteFile(const ea::string& fileName)
 {
-    auto* cache = context_->GetSubsystem<ResourceCache>();
-    if (!cache)
-    {
-        URHO3D_LOGERROR("ResourceCache subsystem is required to execute Lua files.");
-        return false;
-    }
-
-    AbstractFilePtr file = cache->GetFile(fileName);
-    if (!file)
-    {
-        URHO3D_LOGERRORF("Lua script file not found: %s", fileName.c_str());
-        return false;
-    }
-
-    ea::string code = file->ReadString();
-    return ExecuteString(code, fileName);
-}
-
-bool LuaScript::ExecuteFileAbsolute(const ea::string& absolutePath)
-{
-    if (!luaState_)
+    if (!packageLoader_)
     {
         URHO3D_LOGERROR("LuaScript is not initialized.");
         return false;
     }
 
-    auto* fs = context_->GetSubsystem<FileSystem>();
-    if (!fs || !fs->FileExists(absolutePath))
+    // A file a host names explicitly is a reload root: a change anywhere below it re-executes
+    // this script, which is what makes editing game code while it runs useful.
+    return packageLoader_->ExecuteScript(fileName, true);
+}
+
+bool LuaScript::ExecuteFileAbsolute(const ea::string& absolutePath)
+{
+    if (!packageLoader_)
     {
-        URHO3D_LOGERRORF("Lua script file not found: %s", absolutePath.c_str());
+        URHO3D_LOGERROR("LuaScript is not initialized.");
         return false;
     }
 
-    File file(context_, absolutePath, FILE_READ);
-    if (!file.IsOpen())
+    // Deliberately not a second way to run a script: the absolute path is translated into the
+    // resource name of a mounted directory, so what executes is still a watched, cacheable
+    // resource whose requires are tracked. A path outside every mount has no resource identity,
+    // and therefore no reload story, so it is refused instead of silently bypassing the system.
+    auto* vfs = context_->GetSubsystem<VirtualFileSystem>();
+    const FileIdentifier identifier = vfs ? vfs->GetIdentifierFromAbsoluteName(absolutePath) : FileIdentifier::Empty;
+    if (!identifier)
     {
-        URHO3D_LOGERRORF("Failed to open Lua script: %s", absolutePath.c_str());
+        URHO3D_LOGERRORF(
+            "Lua script '%s' is not inside a mounted resource directory, so it cannot be executed as a resource.", absolutePath.c_str());
         return false;
     }
 
-    ea::string code = file.ReadString();
-    URHO3D_LOGINFO("Read {} bytes from {}", code.length(), absolutePath);
-    return ExecuteString(code, absolutePath);
+    return ExecuteFile(identifier.ToUri());
 }
 
 void LuaScript::Reinitialize()
@@ -165,6 +192,10 @@ void LuaScript::Reinitialize()
         return;
 
     UnsubscribeFromAllEvents();
+
+    // The searcher closure holds a pointer to the loader and the loader holds the raw
+    // lua_State*, so neither may outlive the state in the other direction either.
+    packageLoader_.reset();
     luaState_.reset();
     Initialize();
 }

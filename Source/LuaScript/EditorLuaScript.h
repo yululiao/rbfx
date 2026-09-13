@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "../Urho3D/Container/Ptr.h"
 #include "../Urho3D/Core/Object.h"
 #include "../Urho3D/Core/Variant.h"
 
@@ -19,6 +20,9 @@
 
 namespace Urho3D
 {
+
+class LuaPackageLoader;
+class MountPoint;
 
 /// Editor-facing Lua scripting subsystem used to author editor plugins in Lua, inspired by
 /// Godot's script-based editor extensions.
@@ -79,11 +83,21 @@ private:
     void RegisterEditorBindings();
     /// Invoke a Lua event callback with a read-only EventData wrapper.
     void InvokeEventCallback(sol::protected_function& callback, VariantMap& eventData);
+    /// Expose the plugin directory to the virtual file system under its own scheme, so that
+    /// require() can reach modules in subfolders. Re-mounts only when the directory changed.
+    void MountPluginDir(const ea::string& absoluteDir);
 
     /// Lua virtual machine state dedicated to editor plugins.
     ea::unique_ptr<sol::state> luaState_;
+    /// require() through the virtual file system, plus the module graph of the editor VM.
+    /// Destroyed before luaState_ (declaration order), which is the order the searcher requires.
+    ea::unique_ptr<LuaPackageLoader> packageLoader_;
     /// Last plugin directory passed to LoadPlugins, for reload support.
     ea::string pluginDir_;
+    /// Mount point created for pluginDir_, kept alive so project switches can replace it.
+    SharedPtr<MountPoint> pluginMount_;
+    /// Directory pluginMount_ points at, normalized. Lets reloads skip the re-mount.
+    ea::string mountedPluginDir_;
 };
 
 } // namespace Urho3D

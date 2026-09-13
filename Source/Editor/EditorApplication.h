@@ -62,9 +62,9 @@ protected:
     bool BrowseResource(StringHash& type, ea::string& name, const StringVector* allowedTypes);
 
     /// Native file picker for string file-path attributes (marked via AttributeMetadata::FileFilter).
-    /// Opens the OS dialog inside the current project's root and rewrites value to the project-root-
-    /// relative path (matching how LuaGameRunner resolves the stored script path). Installed as the
-    /// engine file-path browser via Widgets::SetFilePathBrowser.
+    /// Opens the OS dialog inside the current project's Data directory and rewrites value to the
+    /// data-relative resource path (matching how hosts resolve LuaGameScript.Script Path through the
+    /// VFS). Installed as the engine file-path browser via Widgets::SetFilePathBrowser.
     bool BrowseFilePath(ea::string& value, const char* filter);
 
     /// Reveal the resource with the given project-relative name in the Resource Browser window by

@@ -24,6 +24,15 @@ endif ()
 target_compile_definitions(RbfxLuaScript PRIVATE RBFXLUA_EXPORTS)
 target_compile_definitions(RbfxLuaScript PUBLIC RBFXLUA_SHARED)
 
+# Content key of packaged Lua scripts. The compiled-in default is the development key; a release
+# build passes its own with -DRBFX_LUA_SCRIPT_KEY_HEX=<64 hex digits> so that the key inside the
+# shipped binary is not the one in the repository. The environment variable
+# RBFX_LUA_SCRIPT_KEY overrides both at run time, which is how a development build opens a
+# shipping package. Only the library and the bundler that links it need the value.
+if (RBFX_LUA_SCRIPT_KEY_HEX)
+    target_compile_definitions(RbfxLuaScript PRIVATE RBFX_LUA_SCRIPT_KEY_HEX="${RBFX_LUA_SCRIPT_KEY_HEX}")
+endif ()
+
 # Ensure import library (.lib) and DLL (.dll) go to the same output directories as Urho3D.
 set_target_properties(RbfxLuaScript PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
@@ -37,6 +46,9 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaNodeBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaHooks.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/LuaFile.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/LuaPackageLoader.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/LuaScriptContainer.h
               ${CMAKE_CURRENT_SOURCE_DIR}/Export.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LuaScript
 )

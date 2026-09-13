@@ -24,8 +24,9 @@ void LuaGameScript::RegisterObject(Context* context)
     context->AddFactoryReflection<LuaGameScript>(Category_Scene);
 
     // The FileFilter metadata tells the inspector this string is a lua file path, so it renders a
-    // native browse button; the stored value is project-root-relative (e.g. "Scripts/main.lua"),
-    // matching how LuaGameRunner and LuaGamePlayer resolve it against the project/data root.
+    // native browse button; the stored value is a resource name relative to the mounted data
+    // directory (e.g. "Scripts/main.lua"), which is exactly how every host resolves it - through
+    // the VFS, so the same string works in the editor, in the standalone player and in a package.
     URHO3D_ATTRIBUTE("Script Path", ea::string, scriptPath_, EMPTY_STRING, AM_DEFAULT)
         .SetMetadata(AttributeMetadata::FileFilter, "lua");
 }

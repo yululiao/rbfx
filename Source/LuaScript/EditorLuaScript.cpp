@@ -10,14 +10,19 @@
 
 #include "EditorLuaHooks.h"
 #include "LuaBindings.h"
+#include "LuaFile.h"
 #include "LuaNodeBindings.h"
+#include "LuaPackageLoader.h"
 #include "LuaScript.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Core/StringUtils.h"
 #include "../Urho3D/IO/File.h"
+#include "../Urho3D/IO/FileIdentifier.h"
 #include "../Urho3D/IO/FileSystem.h"
 #include "../Urho3D/IO/Log.h"
+#include "../Urho3D/IO/MountPoint.h"
+#include "../Urho3D/IO/VirtualFileSystem.h"
 #include "../Urho3D/Scene/Node.h"
 #include "../Urho3D/Scene/Component.h"
 #include "../Urho3D/Scene/Scene.h"
@@ -82,12 +87,25 @@ EditorLuaScript::~EditorLuaScript()
     UICallbacks().clear();
     // Drop event handlers too: their lambdas capture sol references for the same reason.
     UnsubscribeFromAllEvents();
+
+    // Give back the mount point: the virtual file system holds it with a strong reference, so
+    // leaving it behind would keep a previous project's EditorScripts folder reachable under
+    // the same scheme after a project switch.
+    if (pluginMount_)
+    {
+        auto* vfs = context_->GetSubsystem<VirtualFileSystem>();
+        if (vfs)
+            vfs->Unmount(pluginMount_);
+        pluginMount_ = nullptr;
+    }
 }
 
 bool EditorLuaScript::Initialize()
 {
     if (luaState_)
         return true;
+
+    LuaFile::RegisterObject(context_);
 
     luaState_ = ea::make_unique<sol::state>();
     luaState_->open_libraries(
@@ -101,6 +119,13 @@ bool EditorLuaScript::Initialize()
         sol::lib::io,
         sol::lib::os
     );
+
+    // Editor plugins resolve from their own folder first, then from the ordinary resource
+    // directories, so a project can require its own modules and engine-provided ones with the
+    // same call. The plugin scheme is only useful once LoadPlugins has mounted the folder; a
+    // miss simply falls through to the next prefix, which is why attaching here is safe.
+    packageLoader_ = ea::make_unique<LuaPackageLoader>(context_);
+    packageLoader_->Attach(luaState_->lua_state(), { "editorlua://", EMPTY_STRING });
 
     RegisterEngineBindings();
     RegisterEditorBindings();
@@ -123,10 +148,15 @@ bool EditorLuaScript::Initialize()
 
 void EditorLuaScript::LoadPlugins(const ea::string& absoluteDir)
 {
-    pluginDir_ = absoluteDir;
+    // Normalize once here so that the mount, the scan and the resource names derived from the
+    // paths all agree; a trailing slash would produce "dir//file.lua" as a resource name.
+    ea::string dir = absoluteDir;
+    while (!dir.empty() && (dir.back() == '/' || dir.back() == '\\'))
+        dir.pop_back();
+    pluginDir_ = dir;
 
     auto* fs = context_->GetSubsystem<FileSystem>();
-    if (!fs || absoluteDir.empty() || !fs->DirExists(absoluteDir))
+    if (!fs || dir.empty() || !fs->DirExists(dir))
         return;
 
     // Reload starts from a clean UI slate; plugins below re-register their tabs and menu items.
@@ -134,32 +164,53 @@ void EditorLuaScript::LoadPlugins(const ea::string& absoluteDir)
     if (GetEditorLuaHooks().resetUI)
         GetEditorLuaHooks().resetUI();
 
-    // Put the plugin folder on require()'s search path so a project can factor shared code into
-    // subfolders -- those are deliberately not auto-loaded (see the non-recursive scan below) and
-    // are meant to be pulled in explicitly, e.g. require("subdir/module"). Idempotent across
-    // reloads because the entry is only prepended when absent.
-    {
-        std::string dir = absoluteDir.c_str();
-        for (char& c : dir)
-        {
-            if (c == '\\')
-                c = '/';
-        }
-        const std::string needle = dir + "/?.lua;";
-        sol::table package = (*luaState_)["package"];
-        std::string path = package["path"].get<std::string>();
-        if (path.find(needle) == std::string::npos)
-            package["path"] = needle + path;
-    }
+    MountPluginDir(dir);
+
+    // Every plugin body is about to run again, and modules they require must run again with it.
+    // Without this the second load would hand plugins the module tables of the first load,
+    // because require() answers from package.loaded before any searcher is consulted.
+    if (packageLoader_)
+        packageLoader_->ResetTracking();
 
     // Top-level only: everything in this folder is a plugin that must run on its own; anything in
-    // a subfolder is a module the plugins opt into via require().
+    // a subfolder is a module the plugins opt into via require(), resolved through the mount.
     ea::vector<ea::string> files;
-    fs->ScanDir(files, absoluteDir, "*.lua", SCAN_FILES);
+    fs->ScanDir(files, dir, "*.lua", SCAN_FILES);
     ea::sort(files.begin(), files.end());
 
     for (const ea::string& file : files)
-        ExecuteFileAbsolute(absoluteDir + "/" + file);
+        ExecuteFileAbsolute(dir + "/" + file);
+}
+
+void EditorLuaScript::MountPluginDir(const ea::string& absoluteDir)
+{
+    auto* vfs = context_->GetSubsystem<VirtualFileSystem>();
+    if (!vfs || absoluteDir.empty())
+        return;
+
+    if (pluginMount_ && mountedPluginDir_ == absoluteDir)
+        return;
+
+    if (pluginMount_)
+    {
+        vfs->Unmount(pluginMount_);
+        pluginMount_ = nullptr;
+        mountedPluginDir_.clear();
+    }
+
+    // The folder becomes a resource directory with a scheme of its own, which buys three things
+    // over injecting a package.path entry: subfolders resolve without touching the working
+    // directory, the plugin sources take part in the same watching/reloading pipeline as every
+    // other asset, and packaged .luc siblings are preferred transparently.
+    MountPoint* mountPoint = vfs->MountDir("editorlua", absoluteDir);
+    if (!mountPoint)
+    {
+        URHO3D_LOGERRORF("Failed to mount the editor plugin directory '%s'", absoluteDir.c_str());
+        return;
+    }
+
+    pluginMount_ = mountPoint;
+    mountedPluginDir_ = absoluteDir;
 }
 
 bool EditorLuaScript::ExecuteString(const ea::string& code, const ea::string& chunkName)
@@ -201,28 +252,25 @@ bool EditorLuaScript::ExecuteString(const ea::string& code, const ea::string& ch
 
 bool EditorLuaScript::ExecuteFileAbsolute(const ea::string& absolutePath)
 {
-    if (!luaState_)
+    if (!packageLoader_)
     {
         URHO3D_LOGERROR("EditorLuaScript is not initialized.");
         return false;
     }
 
-    auto* fs = context_->GetSubsystem<FileSystem>();
-    if (!fs || !fs->FileExists(absolutePath))
+    // Translate to a resource name instead of opening the file: plugin bodies then share one
+    // execution path with required modules, which is what lets a change be attributed to a
+    // module at all. Editor plugins are not registered as reload roots; Editor.reloadPlugins()
+    // remains the entry point, because re-running a plugin body has to come with the UI reset.
+    auto* vfs = context_->GetSubsystem<VirtualFileSystem>();
+    const FileIdentifier identifier = vfs ? vfs->GetIdentifierFromAbsoluteName(absolutePath) : FileIdentifier::Empty;
+    if (!identifier)
     {
-        URHO3D_LOGERRORF("EditorLua script file not found: %s", absolutePath.c_str());
+        URHO3D_LOGERRORF("EditorLua script '%s' is not reachable through the mounted resource directories.", absolutePath.c_str());
         return false;
     }
 
-    File file(context_, absolutePath, FILE_READ);
-    if (!file.IsOpen())
-    {
-        URHO3D_LOGERRORF("Failed to open EditorLua script: %s", absolutePath.c_str());
-        return false;
-    }
-
-    const ea::string code = file.ReadString();
-    return ExecuteString(code, absolutePath);
+    return packageLoader_->ExecuteScript(identifier.ToUri(), false);
 }
 
 sol::state& EditorLuaScript::GetState()

@@ -32,5 +32,6 @@ add_subdirectory(RampGenerator)
 add_subdirectory(SpritePacker)
 add_subdirectory(ScriptPlayer)
 add_subdirectory(AssetImporter)
+add_subdirectory(LuaCompiler)
 
 vs_group_subdirectory_targets(${CMAKE_CURRENT_SOURCE_DIR} Tools)

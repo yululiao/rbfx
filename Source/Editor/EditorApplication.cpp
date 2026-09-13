@@ -1075,9 +1075,10 @@ bool EditorApplication::BrowseFilePath(ea::string& value, const char* filter)
     if (!project_)
         return false;
 
-    // File-path attributes (e.g. LuaGameScript.Script Path) are stored relative to the project root,
-    // matching how LuaGameRunner resolves them during Play.
-    const ea::optional<ea::string> relative = PickProjectFile(project_->GetProjectPath(), filter);
+    // File-path attributes (e.g. LuaGameScript.Script Path) are stored as data-relative resource
+    // names, because that is what hosts feed to the VFS: rooting the dialog at Data/ makes the
+    // picker produce exactly such a name, so no rewriting is needed afterwards.
+    const ea::optional<ea::string> relative = PickProjectFile(project_->GetDataPath(), filter);
     if (!relative)
         return false;
 

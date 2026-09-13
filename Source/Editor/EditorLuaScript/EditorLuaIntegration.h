@@ -17,8 +17,10 @@ class Context;
 /// EditorLuaScript subsystem (the dedicated editor Lua VM). Call once at editor startup.
 void SetupEditorLua(Context* context);
 
-/// (Re)load editor plugins from "<projectData>/Scripts/Editor". Call every time a project
-/// finishes loading so per-project editor plugins are picked up.
+/// (Re)load editor plugins from the "EditorScripts" folder at the project root. Call every time a
+/// project finishes loading so per-project editor plugins are picked up. The folder deliberately
+/// stays outside Data: editor tooling is a development-time asset and must not be packaged with
+/// the game, and it reaches the Lua VM through its own mount scheme rather than the resource cache.
 void ReloadEditorLuaPlugins(Context* context);
 
 /// Draw the persistent floating windows registered by Lua plugins. Call once per frame from the
