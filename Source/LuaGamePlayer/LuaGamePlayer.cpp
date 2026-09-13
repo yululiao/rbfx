@@ -108,10 +108,11 @@ public:
         // main.lua also runs inside the editor's Play session, where quitting on Escape would
         // take the editor down with it; and a shipped game may well want Escape for a pause
         // menu, in which case this is the one subscription to remove or gate, not the script.
-        SubscribeToEvent(E_KEYDOWN, [](StringHash /*eventType*/, VariantMap& eventData) {
+        auto engine = GetContext()->GetSubsystem<Engine>();
+        SubscribeToEvent(E_KEYDOWN, [engine](StringHash /*eventType*/, VariantMap& eventData) {
             using namespace KeyDown;
             if (eventData[P_KEY].GetInt() == KEY_ESCAPE)
-                GetContext()->GetSubsystem<Engine>()->Exit();
+                engine->Exit();
         });
 
         if (auto* graphics = context_->GetSubsystem<Graphics>())
