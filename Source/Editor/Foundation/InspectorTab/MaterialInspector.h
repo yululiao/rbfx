@@ -33,8 +33,6 @@
 namespace Urho3D
 {
 
-class StaticModel;
-
 void Foundation_MaterialInspector(Context* context, InspectorTab* inspectorTab);
 
 /// Scene hierarchy provider for hierarchy browser tab.
@@ -68,12 +66,14 @@ private:
     /// This edits the same shared Material resource as the standalone inspector, so it reuses
     /// ModifyResourceAction for undo and SaveFileDelayed for persistence.
     ///
-    /// Unity-like behavior: the inline editor is rendered right after the material path row and is
-    /// collapsible; a material that lives in the project's Data folder is expandable/editable, while
-    /// a built-in material (loaded from engine CoreData) is shown greyed and cannot be expanded.
+    /// Unity-like layout: the standalone material path row is removed and each referenced material
+    /// slot is rendered as a collapsing header whose label is the material path and which carries
+    /// the browse/reveal buttons on the same line. Expanding it shows the material properties inline.
+    /// A project material (under the project's Data folder) is expandable/editable; a built-in
+    /// material (loaded from engine CoreData) is shown greyed and cannot be expanded.
     /// @{
     bool OnMaterialAttribute(const AttributeHookContext& ctx, Variant& boxedValue);
-    void RenderInlineMaterials(StaticModel* model);
+    bool RenderInlineMaterials(Variant& boxedValue);
     void InlineBeginEdit();
     void InlineEndEdit();
     /// @}

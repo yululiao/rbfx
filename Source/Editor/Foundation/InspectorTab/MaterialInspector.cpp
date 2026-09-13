@@ -134,70 +134,51 @@ void MaterialInspector::EndEdit()
 
 bool MaterialInspector::OnMaterialAttribute(const AttributeHookContext& ctx, Variant& boxedValue)
 {
-    // An attribute hook replaces the default rendering entirely, so reproduce it first: draw the
-    // "Material" label and the resource-reference list. This keeps assignment/removal working and
-    // still surfaces the browse + reveal buttons on every material slot.
+    // Draw the attribute label the default renderer would have shown.
     Widgets::ItemLabel(ctx.info_->name_.c_str(),
         Widgets::GetItemLabelColor(ctx.isUndefined_, ctx.isDefaultValue_));
-    const bool pathModified = Widgets::EditVariant(boxedValue, Widgets::EditVariantOptions());
 
-    // Inline per-material editing is only meaningful for a single selected component.
-    if (ctx.objects_ && ctx.objects_->size() == 1)
-    {
-        if (auto* model = dynamic_cast<StaticModel*>(ctx.objects_->front().Get()))
-            RenderInlineMaterials(model);
-    }
+    // Single selection of a material reference list: render each slot as a collapsing header that
+    // also carries the browse/reveal buttons, replacing the standalone path row (Unity-style).
+    if (ctx.objects_ && ctx.objects_->size() == 1 && boxedValue.GetType() == VAR_RESOURCEREFLIST)
+        return RenderInlineMaterials(boxedValue);
 
-    return pathModified;
+    // Multi-selection or unexpected layout: fall back to the standard resource-reference list editor.
+    return Widgets::EditVariant(boxedValue, Widgets::EditVariantOptions());
 }
 
-void MaterialInspector::RenderInlineMaterials(StaticModel* model)
+bool MaterialInspector::RenderInlineMaterials(Variant& boxedValue)
 {
+    ResourceRefList list = boxedValue.GetResourceRefList();
+    auto cache = GetSubsystem<ResourceCache>();
     const ea::string dataPath = project_ ? project_->GetDataPath() : EMPTY_STRING;
 
-    // Collect unique referenced materials in geometry order, tagging each as project or built-in.
-    StringVector names;
-    MaterialInspectorWidget::MaterialVector materials;
-    ea::vector<bool> isProject;
-    for (unsigned i = 0; i < model->GetNumGeometries(); ++i)
-    {
-        Material* material = model->GetMaterial(i);
-        if (!material)
-            continue;
-        const ea::string name = material->GetName();
-        if (names.end() != ea::find(names.begin(), names.end(), name))
-            continue;
-        names.push_back(name);
-        materials.emplace_back(material);
-        // A material is editable inline only when the file it was loaded from lives under the
-        // project's Data directory. Built-in materials resolve from engine CoreData (a different
-        // absolute root) and are shown greyed and non-expandable, mirroring Unity.
-        const ea::string& abs = material->GetAbsoluteFileName();
-        isProject.push_back(!dataPath.empty() && !abs.empty() && abs.starts_with(dataPath));
-    }
+    // No slots referenced: show the plain list editor so an entry can still be managed.
+    if (list.names_.empty())
+        return Widgets::EditVariant(boxedValue, Widgets::EditVariantOptions());
 
-    if (names.empty())
+    // Rebuild cached widgets only when the referenced set changes, so preview scenes are not
+    // recreated every frame. One entry per geometry/material slot, mirroring the list order.
+    if (inlineMaterialNames_ != list.names_ || inlineMaterials_.size() != list.names_.size())
     {
         inlineMaterials_.clear();
-        inlineMaterialNames_.clear();
-        return;
-    }
-
-    // Rebuild widgets only when the referenced set changes, so preview scenes are not recreated
-    // every frame.
-    if (inlineMaterialNames_ != names || inlineMaterials_.size() != names.size())
-    {
-        inlineMaterialNames_ = names;
-        inlineMaterials_.clear();
-        for (size_t k = 0; k < names.size(); ++k)
+        inlineMaterialNames_ = list.names_;
+        for (const ea::string& name : list.names_)
         {
             InlineMaterial entry;
-            entry.name_ = names[k];
-            entry.isProjectAsset_ = isProject[k];
+            entry.name_ = name;
+            // GetResource<Material> returns a raw pointer owned by the ResourceCache.
+            Material* material = name.empty() ? nullptr : cache->GetResource<Material>(name);
+            // A material is editable inline only when the file it was loaded from lives under the
+            // project's Data directory. Built-in materials resolve from engine CoreData (a different
+            // absolute root) and are shown greyed and non-expandable, mirroring Unity.
+            const ea::string abs = material ? material->GetAbsoluteFileName() : EMPTY_STRING;
+            entry.isProjectAsset_ = material && !dataPath.empty() && !abs.empty() && abs.starts_with(dataPath);
             if (entry.isProjectAsset_)
             {
-                entry.widget_ = MakeShared<MaterialInspectorWidget>(context_,
-                    MaterialInspectorWidget::MaterialVector{ materials[k] });
+                MaterialInspectorWidget::MaterialVector materials;
+                materials.emplace_back(material);
+                entry.widget_ = MakeShared<MaterialInspectorWidget>(context_, materials);
                 entry.widget_->UpdateTechniques(techniquePath_);
                 entry.widget_->OnEditBegin.Subscribe(this, &MaterialInspector::InlineBeginEdit);
                 entry.widget_->OnEditEnd.Subscribe(this, &MaterialInspector::InlineEndEdit);
@@ -206,25 +187,66 @@ void MaterialInspector::RenderInlineMaterials(StaticModel* model)
         }
     }
 
-    // Render each material: project assets as expandable/editable sections, built-in as greyed.
-    for (InlineMaterial& entry : inlineMaterials_)
+    bool modified = false;
+    for (unsigned i = 0; i < inlineMaterials_.size(); ++i)
     {
+        InlineMaterial& entry = inlineMaterials_[i];
+
+        // Scratch copy of the reference so a browse/drop can rewrite this slot in place.
+        ea::string name = list.names_[i];
+        StringHash type = list.type_;
+
+        ui::Separator();
+
+        bool open = false;
         if (entry.isProjectAsset_ && entry.widget_)
         {
-            ui::Separator();
-            if (ui::CollapsingHeader(entry.name_.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-            {
-                ui::Indent();
-                entry.widget_->RenderContent();
-                ui::Unindent();
-            }
+            // Project material: collapsible header labeled with the path. SpanTextWidth narrows the
+            // header hit box (and the drop target bound to it) to the label text only, so the
+            // trailing browse/reveal buttons rendered on the same line are not overlapped and stay
+            // clickable (a default CollapsingHeader is Framed and would span the whole row).
+            open = ui::CollapsingHeader(entry.name_.c_str(),
+                ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanTextWidth);
         }
         else
         {
-            // Built-in material: greyed, no foldout, not editable (matches Unity's built-in assets).
-            ui::TextDisabled(ICON_FA_LOCK " %s (built-in material)", entry.name_.c_str());
+            // Built-in or empty material: greyed leaf line (not expandable).
+            if (!entry.name_.empty())
+                ui::TextDisabled(ICON_FA_LOCK " %s (built-in material)", entry.name_.c_str());
+            else
+                ui::TextDisabled("(no material)");
+        }
+
+        // The drag-drop target binds to the header/text item rendered just above, so a resource can
+        // be dropped onto the row to (re)assign this slot; the browse/reveal buttons follow on the
+        // same line. Each may rewrite the scratch reference, which is committed back to the list.
+        bool refModified = false;
+        if (Widgets::EditResourceRefDropTarget(type, name, nullptr))
+            refModified = true;
+        // Invisible spacer between the path label and the trailing buttons so the browse/reveal
+        // icons are not glued to the text. Placed after the drop target so the header stays the
+        // item the drag-drop binds to; the buttons' own SameLine follows this spacer.
+        ui::SameLine();
+        ui::Dummy(ImVec2(8.0f, 1.0f));
+        if (Widgets::EditResourceRefButtons(type, name, nullptr))
+            refModified = true;
+        if (refModified)
+        {
+            list.names_[i] = name;
+            modified = true;
+        }
+
+        if (open)
+        {
+            ui::Indent();
+            entry.widget_->RenderContent();
+            ui::Unindent();
         }
     }
+
+    if (modified)
+        boxedValue = list;
+    return modified;
 }
 
 void MaterialInspector::InlineBeginEdit()

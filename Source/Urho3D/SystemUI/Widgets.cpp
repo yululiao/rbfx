@@ -289,6 +289,68 @@ void SetResourceNavigator(const ResourceNavigateFunction& navigator)
     resourceNavigator = navigator;
 }
 
+bool EditResourceRefButtons(StringHash& type, ea::string& name, const StringVector* allowedTypes)
+{
+    bool modified = false;
+
+    // Browse button: opens the editor-provided native resource picker. Hidden until a
+    // browser is installed (editor sets it via SetResourceBrowser). The picker is a blocking
+    // OS dialog, so it is invoked directly on click instead of from inside an ImGui popup.
+    if (resourceBrowser)
+    {
+        ui::SameLine();
+        if (ui::Button(ICON_FA_FOLDER_OPEN))
+        {
+            if (resourceBrowser(type, name, allowedTypes))
+                modified = true;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Browse...");
+    }
+
+    // Navigate button: reveals the currently referenced resource in the Resource Browser window.
+    // Disabled while the reference is empty.
+    if (resourceNavigator)
+    {
+        ui::SameLine();
+        ui::BeginDisabled(name.empty());
+        if (ui::Button(ICON_FA_LOCATION_ARROW))
+            resourceNavigator(name);
+        ui::EndDisabled();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Reveal in Resource Browser");
+    }
+
+    return modified;
+}
+
+bool EditResourceRefDropTarget(StringHash& type, ea::string& name, const StringVector* allowedTypes)
+{
+    // Accept a single non-directory resource dragged onto the previously rendered item (an input
+    // field, a collapsing header, ...). Extracted so the same drop behavior can back the inline
+    // material editor's header rows. Returns true when an accepted drop rewrote the reference.
+    if (!ui::BeginDragDropTarget())
+        return false;
+
+    bool modified = false;
+    auto payload = dynamic_cast<ResourceDragDropPayload*>(DragDropPayload::Get());
+    if (payload && payload->resources_.size() == 1 && !payload->resources_[0].isDirectory_)
+    {
+        const ResourceFileDescriptor& desc = payload->resources_[0];
+        if (const auto matchingType = GetMatchingType(desc, type, allowedTypes))
+        {
+            if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str()))
+            {
+                name = desc.resourceName_;
+                type = *matchingType;
+                modified = true;
+            }
+        }
+    }
+    ui::EndDragDropTarget();
+    return modified;
+}
+
 bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* allowedTypes)
 {
     bool modified = false;
@@ -327,33 +389,10 @@ bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* all
     if (ui::InputText("##Name", &name, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_NoUndoRedo))
         modified = true;
 
-    // Browse button: opens the editor-provided native resource picker. Hidden until a
-    // browser is installed (editor sets it via SetResourceBrowser). The picker is a blocking
-    // OS dialog, so it is invoked directly on click instead of from inside an ImGui popup.
-    if (resourceBrowser)
-    {
-        ui::SameLine();
-        if (ui::Button(ICON_FA_FOLDER_OPEN))
-        {
-            if (resourceBrowser(type, name, allowedTypes))
-                modified = true;
-        }
-        if (ui::IsItemHovered())
-            ui::SetTooltip("Browse...");
-    }
-
-    // Navigate button: reveals the currently referenced resource in the Resource Browser window.
-    // Disabled while the reference is empty.
-    if (resourceNavigator)
-    {
-        ui::SameLine();
-        ui::BeginDisabled(name.empty());
-        if (ui::Button(ICON_FA_LOCATION_ARROW))
-            resourceNavigator(name);
-        ui::EndDisabled();
-        if (ui::IsItemHovered())
-            ui::SetTooltip("Reveal in Resource Browser");
-    }
+    // Browse + navigate icon buttons. Extracted into a shared helper so the same controls can be
+    // appended after a collapsing header (e.g. the inline material editor) without a duplicate path row.
+    if (EditResourceRefButtons(type, name, allowedTypes))
+        modified = true;
 
     if (allowedTypes != nullptr)
     {
@@ -377,24 +416,8 @@ bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* all
         }
     }
 
-    if (ui::BeginDragDropTarget())
-    {
-        auto payload = dynamic_cast<ResourceDragDropPayload*>(DragDropPayload::Get());
-        if (payload && payload->resources_.size() == 1 && !payload->resources_[0].isDirectory_)
-        {
-            const ResourceFileDescriptor& desc = payload->resources_[0];
-            if (const auto matchingType = GetMatchingType(desc, type, allowedTypes))
-            {
-                if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str()))
-                {
-                    name = desc.resourceName_;
-                    type = *matchingType;
-                    modified = true;
-                }
-            }
-        }
-        ui::EndDragDropTarget();
-    }
+    if (EditResourceRefDropTarget(type, name, allowedTypes))
+        modified = true;
 
     return modified;
 }

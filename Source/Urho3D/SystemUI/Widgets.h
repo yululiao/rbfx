@@ -137,6 +137,16 @@ URHO3D_API void SetResourceNavigator(const ResourceNavigateFunction& navigator);
 URHO3D_API bool EditResourceRefList(StringHash& type, StringVector& names, const StringVector* allowedTypes,
     bool resizable, const StringVector* elementNames = nullptr);
 
+/// Render only the trailing browse + reveal icon buttons for a resource reference, as a standalone
+/// line item. Reuses the same editor-installed providers as EditResourceRef (each button hides when
+/// its provider is not set). It issues ui::SameLine itself, so it can be appended after an input
+/// field or a collapsing header on the current line. Returns true if browsing changed the reference.
+URHO3D_API bool EditResourceRefButtons(StringHash& type, ea::string& name, const StringVector* allowedTypes);
+
+/// Register the previously rendered item as a resource drag-drop target (same behavior as the one
+/// EditResourceRef installs). Returns true when an accepted drop rewrote the referenced name/type.
+URHO3D_API bool EditResourceRefDropTarget(StringHash& type, ea::string& name, const StringVector* allowedTypes);
+
 /// Render bitmask.
 URHO3D_API bool EditBitmask(unsigned& value);
 
