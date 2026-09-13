@@ -70,6 +70,7 @@
 #ifdef URHO3D_LUA
 #include <LuaScript/LuaScript.h>
 #include <LuaScript/LuaGameScript.h>
+#include "EditorLuaScript/EditorLuaIntegration.h"
 #endif
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/SystemUI/Console.h>
@@ -173,6 +174,10 @@ void EditorApplication::Setup()
     context_->RegisterSubsystem(luaScript);
     luaScript->Initialize();
     LuaGameScript::RegisterObject(context_);
+
+    // Dedicated editor Lua VM for authoring editor plugins in Lua (Godot-style).
+    // Installs the editor hook bridge, then creates + initializes EditorLuaScript.
+    SetupEditorLua(context_);
 #endif
 
 #ifdef _WIN32
@@ -315,6 +320,8 @@ void EditorApplication::Stop()
     context_->RemoveSubsystem<WorkQueue>(); // Prevents deadlock when unloading plugin AppDomain in managed host.
     context_->RemoveSubsystem<EditorPluginManager>();
 #ifdef URHO3D_LUA
+    // Tear down the editor Lua VM before the game LuaScript subsystem it coexists with.
+    ShutdownEditorLua(context_);
     context_->RemoveSubsystem<LuaScript>();
 #endif
 
@@ -412,6 +419,12 @@ void EditorApplication::Render()
 
     RenderMenuBar();
     RenderAboutDialog();
+
+#ifdef URHO3D_LUA
+    // Draw Lua plugin windows at the top level (like the About dialog) so they stay open and
+    // keep rendering regardless of which dock tab currently has focus.
+    RenderLuaWindows(context_);
+#endif
 
     if (project_)
     {
@@ -605,8 +618,22 @@ void EditorApplication::RenderMenuBar()
         {
             if (ui::MenuItem("Profiler"))
                 OpenProfilerApplication();
+#ifdef URHO3D_LUA
+            // Merge plugin items such as Editor.addMenuItem("Tools/Test") into this menu instead of
+            // creating a second top-level "Tools" entry.
+            RenderLuaMenuEntries(context_, "Tools");
+#endif
             ui::EndMenu();
         }
+#endif
+
+#ifdef URHO3D_LUA
+        // Plugin menu paths whose first segment has no built-in menu get their own top-level entry.
+#if URHO3D_PROFILING
+        RenderLuaTopMenus(context_, "Tools");
+#else
+        RenderLuaTopMenus(context_);
+#endif
 #endif
 
         if (ui::BeginMenu("Help"))
@@ -698,6 +725,11 @@ void EditorApplication::UpdateProjectStatus()
         recentProjects_.push_front(pendingOpenProject_);
 
         pendingOpenProject_.clear();
+
+#ifdef URHO3D_LUA
+        // Pick up per-project editor Lua plugins now that the project subsystem is live.
+        ReloadEditorLuaPlugins(context_);
+#endif
 
         if (!command_.empty())
         {

@@ -35,6 +35,8 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaGameScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaNodeBindings.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaScript.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaHooks.h
               ${CMAKE_CURRENT_SOURCE_DIR}/Export.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LuaScript
 )

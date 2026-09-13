@@ -1,0 +1,89 @@
+//
+// Copyright (c) 2026 the rbfx project.
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+//
+
+#pragma once
+
+#include "../Urho3D/Core/Object.h"
+#include "../Urho3D/Core/Variant.h"
+
+#include "Export.h"
+
+#include <EASTL/unique_ptr.h>
+
+// Lightweight forward declarations for sol types; the heavy <sol/sol.hpp> stays in the .cpp
+// so consumers that merely reference the subsystem (the editor) do not pull the bindings.
+#include <sol/forward.hpp>
+
+namespace Urho3D
+{
+
+/// Editor-facing Lua scripting subsystem used to author editor plugins in Lua, inspired by
+/// Godot's script-based editor extensions.
+///
+/// It owns a DEDICATED sol state (a separate lua_State) that is populated with the full set
+/// of engine bindings plus the editor "Editor" API, so editor plugins see Node/Component/
+/// Scene/resources and editor capabilities in one environment. Because the state is created
+/// and driven entirely inside RbfxLuaScript, it shares the module's single Lua VM and single
+/// sol3 instance and is therefore safe. It is intentionally NOT the game's "LuaScript" state:
+/// that one is reinitialized on every play/stop cycle, which would wipe editor plugins.
+///
+/// Editor behavior that requires editor-only types is injected at runtime through the
+/// EditorLuaHooks table (see EditorLuaHooks.h), keeping the dependency direction intact.
+class RBFXLUA_API EditorLuaScript : public Object
+{
+    URHO3D_OBJECT(EditorLuaScript, Object);
+
+public:
+    /// Construct.
+    explicit EditorLuaScript(Context* context);
+    /// Destruct. Unsubscribes from all events before destroying the Lua state.
+    ~EditorLuaScript() override;
+
+    /// Create the editor Lua state, register engine + editor bindings. Idempotent.
+    bool Initialize();
+
+    /// Scan an absolute directory for "*.lua" and execute each as an editor plugin.
+    /// The directory is remembered so Editor.reloadPlugins() can re-run it.
+    void LoadPlugins(const ea::string& absoluteDir);
+
+    /// Execute Lua code from a string against the editor state.
+    bool ExecuteString(const ea::string& code, const ea::string& chunkName = EMPTY_STRING);
+    /// Execute Lua code from an absolute file path against the editor state.
+    bool ExecuteFileAbsolute(const ea::string& absolutePath);
+
+    /// Return whether the editor Lua state is initialized.
+    bool IsInitialized() const { return !!luaState_; }
+
+    /// Return sol state.
+    sol::state& GetState();
+
+    /// Subscribe a Lua callback to an engine event broadcast on the Context.
+    void SubscribeGlobalEvent(const char* eventName, sol::protected_function callback);
+    /// Unsubscribe Lua callbacks from an event type, any sender.
+    void UnsubscribeEvent(const char* eventName);
+
+    /// Invoke a UI callback (tab draw / menu click) previously registered by Editor.addTab or
+    /// Editor.addMenuItem. Called by the editor from within the ImGui frame. Unknown handles are
+    /// ignored so a plugin that was removed across a reload cannot crash the editor.
+    void InvokeUICallback(unsigned long long handle);
+
+private:
+    /// Store a Lua UI callback and return an opaque handle the editor uses to invoke it.
+    unsigned long long RegisterUICallback(sol::protected_function callback);
+    /// Register the engine usertypes/bindings onto the editor state and the event bridge.
+    void RegisterEngineBindings();
+    /// Register the "Editor" API table (log, subscribe, project access, exec, reload).
+    void RegisterEditorBindings();
+    /// Invoke a Lua event callback with a read-only EventData wrapper.
+    void InvokeEventCallback(sol::protected_function& callback, VariantMap& eventData);
+
+    /// Lua virtual machine state dedicated to editor plugins.
+    ea::unique_ptr<sol::state> luaState_;
+    /// Last plugin directory passed to LoadPlugins, for reload support.
+    ea::string pluginDir_;
+};
+
+} // namespace Urho3D
