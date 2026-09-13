@@ -25,6 +25,9 @@
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/Renderer.h>
 #include <Urho3D/Graphics/Viewport.h>
+#include <Urho3D/Graphics/Graphics.h>
+#include <Urho3D/Input/Input.h>
+#include <Urho3D/Input/InputEvents.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Resource/JSONFile.h>
@@ -75,6 +78,11 @@ public:
             engineParameters_[EP_RESOURCE_PREFIX_PATHS] = prefixPath;
         engineParameters_[EP_HEADLESS] = false;
         engineParameters_[EP_SOUND] = true;
+        // The engine default for this parameter is true, which creates a window without a title
+        // bar - and a window with no close button is a window the player cannot leave. A plain
+        // bordered window is the right default for a standalone game. An explicit --borderless or
+        // a config file still wins, because overriding only replaces a value that was not set.
+        engineParameters_[EP_BORDERLESS] = false;
     }
 
     void Start() override
@@ -84,6 +92,34 @@ public:
         // does in the editor, where EditorApplication turns watching on for the whole session.
         if (auto* vfs = context_->GetSubsystem<VirtualFileSystem>())
             vfs->SetWatching(true);
+
+        // The mouse starts hidden and confined to the window on purpose: Input defaults to
+        // invisible + MM_ABSOLUTE, and that combination grabs the cursor (SDL_SetWindowGrab) so a
+        // game can draw its own cursor sprite. This host has no cursor sprite, so ask for the
+        // ordinary desktop pointer instead. Order matters - showing the cursor releases the grab,
+        // and only then does MM_FREE keep the pointer free to travel outside the window.
+        if (auto* input = context_->GetSubsystem<Input>())
+        {
+            input->SetMouseVisible(true);
+            input->SetMouseMode(MM_FREE);
+        }
+
+        // Escape quits. Kept here rather than in the game script for two reasons: the same
+        // main.lua also runs inside the editor's Play session, where quitting on Escape would
+        // take the editor down with it; and a shipped game may well want Escape for a pause
+        // menu, in which case this is the one subscription to remove or gate, not the script.
+        SubscribeToEvent(E_KEYDOWN, [](StringHash /*eventType*/, VariantMap& eventData) {
+            using namespace KeyDown;
+            if (eventData[P_KEY].GetInt() == KEY_ESCAPE)
+                GetContext()->GetSubsystem<Engine>()->Exit();
+        });
+
+        if (auto* graphics = context_->GetSubsystem<Graphics>())
+        {
+            URHO3D_LOGINFO("LuaGamePlayer: window '{}' {}x{} borderless={}, cursor visible={}",
+                graphics->GetWindowTitle(), graphics->GetWidth(), graphics->GetHeight(),
+                graphics->GetBorderless(), GetSubsystem<Input>() ? GetSubsystem<Input>()->IsMouseVisible() : false);
+        }
 
         // 1) Bring up the Lua runtime and make the game entry component known to
         //    the reflection system so scenes referencing it can be deserialized.

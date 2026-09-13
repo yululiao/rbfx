@@ -100,7 +100,7 @@ end
 -- Main
 ----------------------------------------------------------------------
 local movers = CreateScene()
-CreateInstructions("Kachujin Test - WASD + Mouse to move\nClick Stop to reset the scene")
+CreateInstructions("Kachujin Test - WASD to move, mouse to look\nPackaged game: close the window to exit. Editor Play: click Stop to reset the scene")
 
 -- Per-frame movement: walk forward, yaw when hitting bounds
 SubscribeToEvent("Update", function(data)
