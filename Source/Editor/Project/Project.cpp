@@ -191,6 +191,8 @@ Project::Project(
     , pluginManager_(MakeShared<PluginManager>(context_))
     , launchManager_(MakeShared<LaunchManager>(context_))
     , toolManager_(MakeShared<ToolManager>(context_))
+    , buildSettings_(MakeShared<BuildSettings>(context_))
+    , buildSystem_(MakeShared<BuildSystem>(context_))
     , closeDialog_(MakeShared<CloseDialog>(context_))
 {
     auto initializationGuard = ea::make_shared<int>(0);
@@ -227,6 +229,13 @@ Project::Project(
 
     settingsManager_->LoadFile(settingsJsonPath_);
     assetManager_->LoadFile(cacheJsonPath_);
+
+    // Build profiles live in a file of their own, so that adding one cannot break the schema that
+    // already lives in Project.json. The engine data directory is the parent of the CoreData mount
+    // the editor was constructed with: that mount is the tree these very binaries read their own
+    // resources from, which makes it the only answer that cannot disagree with the running engine.
+    const ea::string engineData = RemoveTrailingSlash(GetPath(RemoveTrailingSlash(oldCacheState_.GetCoreData())));
+    buildSettings_->LoadProject(projectPath_, engineData, !flags_.Test(ProjectFlag::ReadOnly));
 
     JSONFile projectJsonFile(context_);
     projectJsonFile.LoadFile(projectJsonPath_);
@@ -660,6 +669,13 @@ void Project::InitializeResourceCache()
 
     const auto vfs = GetSubsystem<VirtualFileSystem>();
 
+    // A headless session is a batch run: it opens the project, does the work it was asked for and
+    // leaves, so there is nobody whose external edits could be reacted to. Watching is skipped
+    // entirely rather than only skipped at the end, because a watcher cannot be stopped without
+    // writing into the directory it watches - on a preferences directory the process has no write
+    // access to, stopping it would never return.
+    const bool watch = !engine->IsHeadless();
+
     vfs->SetWatching(false);
 
     vfs->UnmountAll();
@@ -676,7 +692,7 @@ void Project::InitializeResourceCache()
 
     vfs->MountDir("conf" , engine->GetAppPreferencesDir());
 
-    vfs->SetWatching(true);
+    vfs->SetWatching(watch);
 }
 
 void Project::ResetLayout()
@@ -751,6 +767,12 @@ void Project::SaveGitIgnore()
 
     content += "# Ignore artifacts\n";
     content += "/Artifacts/\n";
+    content += "\n";
+
+    // Built games are reproducible from Build.json plus the sources, and they are hundreds of
+    // megabytes each time somebody presses Build.
+    content += "# Ignore build output\n";
+    content += "/Build/\n";
     content += "\n";
 
     content += "# Ignore internal files\n";

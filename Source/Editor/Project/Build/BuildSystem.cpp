@@ -1,0 +1,843 @@
+// Copyright (c) 2026 the rbfx project.
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
+
+#include "../../Project/Build/AndroidScaffold.h"
+#include "../../Project/Build/BuildSettings.h"
+#include "../../Project/Build/BuildSystem.h"
+#include "../../Project/Project.h"
+
+#include <Urho3D/Core/CoreEvents.h>
+#include <Urho3D/Core/ProcessUtils.h>
+#include <Urho3D/Core/StringUtils.h>
+#include <Urho3D/Core/Timer.h>
+#include <Urho3D/IO/File.h>
+#include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/IO/IOEvents.h>
+#include <Urho3D/IO/Log.h>
+#include <Urho3D/IO/PackageFile.h>
+
+#include <EASTL/algorithm.h>
+
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+
+namespace Urho3D
+{
+
+const StringHash E_BUILD_FINISHED("buildFinished");
+
+namespace
+{
+
+/// Names the runtime mounts by. LuaGamePlayer sets EP_RESOURCE_PATHS to "CoreData;Data" and the
+/// virtual file system looks for "<prefix>/Data.pak" before "<prefix>/Data/", so a package named
+/// anything else is simply invisible to the game. Stated once here because every stage that places
+/// a resource file has to agree on it.
+const ea::string DataDirName = "Data/";
+const ea::string CoreDataDirName = "CoreData/";
+const ea::string DataPackageName = "Data.pak";
+const ea::string CoreDataPackageName = "CoreData.pak";
+
+/// Host binary the package is built from and the two shared libraries it cannot start without.
+/// Missing any of the three yields a directory that looks finished and does nothing.
+const ea::string HostName = "LuaGamePlayer";
+const ea::string EngineLibraryName = "Urho3D";
+const ea::string LuaLibraryName = "RbfxLuaScript";
+
+ea::string ForwardSlashes(ea::string text)
+{
+    text.replace("\\", "/");
+    return text;
+}
+
+ea::string NormalizeDir(const ea::string& path)
+{
+    return AddTrailingSlash(RemoveTrailingSlash(ForwardSlashes(path)));
+}
+
+/// Case insensitive extension test. Package entry names keep the case of the file on disk, so
+/// comparing them to a literal would make the check depend on how somebody named a folder.
+bool ExtensionIs(const ea::string& name, const char* lowerCaseExtension)
+{
+    const size_t dot = name.rfind('.');
+    if (dot == ea::string::npos)
+        return false;
+    const size_t length = name.size() - dot - 1;
+    if (length != strlen(lowerCaseExtension))
+        return false;
+    for (size_t i = 0; i < length; ++i)
+    {
+        if (tolower(name[dot + 1 + i]) != lowerCaseExtension[i])
+            return false;
+    }
+    return true;
+}
+
+bool StartsMinusKey(const ea::string& text)
+{
+    return strncmp(text.c_str(), "--key=", 6) == 0;
+}
+
+/// Copy a directory tree on top of another one. FileSystem::CopyDir is the merge this needs - it
+/// creates missing directories and opens destinations for writing, so a later copy replaces what an
+/// earlier one put there. It reports success for a source that does not exist though, which cannot
+/// be told apart from an empty directory, so the existence check happens here.
+bool MergeDirectory(FileSystem* fs, const ea::string& source, const ea::string& destination, ea::string& message)
+{
+    if (!fs->DirExists(source))
+    {
+        message = Format("Nothing to copy from '{}': the directory does not exist.", source);
+        return false;
+    }
+    if (!fs->CopyDir(source, destination))
+    {
+        message = Format("Failed to copy '{}' into '{}'.", source, destination);
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+const char* BuildStageName(BuildStage stage)
+{
+    switch (stage)
+    {
+    case BuildStage::Validate:
+        return "Validate profile";
+    case BuildStage::CleanOutput:
+        return "Clean output directory";
+    case BuildStage::StageData:
+        return "Stage Data";
+    case BuildStage::CompileScripts:
+        return "Compile Lua scripts";
+    case BuildStage::StageCoreData:
+        return "Stage CoreData";
+    case BuildStage::ExportData:
+        return "Export Data";
+    case BuildStage::ExportCoreData:
+        return "Export CoreData";
+    case BuildStage::StageRuntime:
+        return "Copy runtime binaries";
+    case BuildStage::AndroidProject:
+        return "Write Android project";
+    case BuildStage::Summary:
+        return "Summary";
+    case BuildStage::Idle:
+        break;
+    }
+    return "Idle";
+}
+
+BuildSystem::BuildSystem(Context* context)
+    : Object(context)
+{
+    // BeginFrame is the clock of this state machine. The timer subsystem sends it even when the
+    // engine is headless, which is what makes `Editor --build` work without a window.
+    SubscribeToEvent(E_BEGINFRAME, URHO3D_HANDLER(BuildSystem, HandleBeginFrame));
+    SubscribeToEvent(E_ASYNCEXECFINISHED, URHO3D_HANDLER(BuildSystem, HandleAsyncExecFinished));
+}
+
+BuildSettings* BuildSystem::GetSettings() const
+{
+    const auto project = GetSubsystem<Project>();
+    return project ? project->GetBuildSettings() : nullptr;
+}
+
+bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outputOverride, DoneHandler onDone)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    auto* project = GetSubsystem<Project>();
+    auto* settings = GetSettings();
+
+    if (IsBuilding())
+    {
+        URHO3D_LOGERROR("[Build] Profile '{}' is still building", profileName_);
+        return false;
+    }
+    if (!project || !settings)
+    {
+        URHO3D_LOGERROR("[Build] No project is loaded, there is nothing to build");
+        return false;
+    }
+
+    profile_ = settings->FindProfile(profileName);
+    if (!profile_)
+    {
+        ea::string known;
+        for (const ea::string& name : settings->GetProfileNames())
+        {
+            if (!known.empty())
+                known += ", ";
+            known += name;
+        }
+        URHO3D_LOGERROR("[Build] No build profile named '{}' (known profiles: {})", profileName,
+            known.empty() ? "none" : known.c_str());
+        return false;
+    }
+
+    profileName_ = profileName;
+    onDone_ = ea::move(onDone);
+    errors_.clear();
+    cancelRequested_ = false;
+    pendingRequest_ = 0;
+    processFinished_ = false;
+    stageResume_ = nullptr;
+    progress_ = 0.0f;
+
+    if (outputOverride.empty())
+        outputDir_ = profile_->ResolveOutputDir(project->GetProjectPath());
+    else
+    {
+        ea::string resolved = ForwardSlashes(outputOverride);
+        if (!IsAbsolutePath(resolved))
+            resolved = NormalizeDir(fs->GetCurrentDir()) + resolved;
+        outputDir_ = NormalizeDir(resolved);
+    }
+
+    // Resources are found by name, not by position, so the only difference between the two
+    // platforms is where the mounted directories live: beside the executable on a desktop, inside
+    // the assets folder of the generated gradle project on a phone.
+    resourceDir_ = profile_->IsAndroid() ? outputDir_ + "assets/" : outputDir_;
+    stagingDir_ = NormalizeDir(project->GetRandomTemporaryPath());
+
+    plan_.clear();
+    plan_.push_back(BuildStage::Validate);
+    plan_.push_back(BuildStage::CleanOutput);
+    plan_.push_back(BuildStage::StageData);
+    if (profile_->encryptScripts_)
+        plan_.push_back(BuildStage::CompileScripts);
+    plan_.push_back(BuildStage::StageCoreData);
+    plan_.push_back(BuildStage::ExportData);
+    plan_.push_back(BuildStage::ExportCoreData);
+    if (profile_->IsAndroid())
+        plan_.push_back(BuildStage::AndroidProject);
+    else
+        plan_.push_back(BuildStage::StageRuntime);
+    plan_.push_back(BuildStage::Summary);
+
+    stageIndex_ = 0;
+    stage_ = plan_[0];
+    startTime_ = GetSubsystem<Time>()->GetElapsedTime();
+
+    URHO3D_LOGINFO("[Build] Profile '{}' ({}) -> {}", profileName_, profile_->platform_, outputDir_);
+    return true;
+}
+
+void BuildSystem::Cancel()
+{
+    if (!IsBuilding())
+        return;
+    cancelRequested_ = true;
+    URHO3D_LOGWARNING("[Build] Cancellation requested; the build stops at the next stage boundary");
+}
+
+void BuildSystem::HandleBeginFrame(StringHash eventType, VariantMap& eventData)
+{
+    if (stage_ == BuildStage::Idle)
+        return;
+
+    if (cancelRequested_ && pendingRequest_ == 0)
+    {
+        Finish(false, "Build cancelled.");
+        return;
+    }
+
+    // A stage that handed its work to a continuation is only advanced by the frame after the one in
+    // which the process reported back, so the continuation never runs inside an event handler that
+    // the file system is still iterating over.
+    if (pendingRequest_ != 0)
+    {
+        if (!processFinished_)
+            return;
+
+        pendingRequest_ = 0;
+        processFinished_ = false;
+
+        if (processExitCode_ != 0)
+        {
+            stageResume_ = nullptr;
+            Finish(false, Format("'{}' exited with code {}.", pendingCommandLine_, processExitCode_));
+            return;
+        }
+
+        const auto resume = ea::move(stageResume_);
+        stageResume_ = nullptr;
+        if (resume)
+        {
+            ea::string message;
+            if (!resume(message))
+            {
+                Finish(false, message);
+                return;
+            }
+        }
+        AdvanceStage();
+        return;
+    }
+
+    ea::string message;
+    if (!RunStage(message))
+    {
+        Finish(false, message);
+        return;
+    }
+    if (pendingRequest_ != 0)
+        return;
+    AdvanceStage();
+}
+
+void BuildSystem::HandleAsyncExecFinished(StringHash eventType, VariantMap& eventData)
+{
+    using namespace AsyncExecFinished;
+    if (pendingRequest_ == 0 || eventData[P_REQUESTID].GetUInt() != pendingRequest_)
+        return;
+    processExitCode_ = eventData[P_EXITCODE].GetInt();
+    processFinished_ = true;
+}
+
+bool BuildSystem::RunStage(ea::string& message)
+{
+    switch (stage_)
+    {
+    case BuildStage::Validate:
+        return StageValidate(message);
+    case BuildStage::CleanOutput:
+        return StageCleanOutput(message);
+    case BuildStage::StageData:
+        return StageStageData(message);
+    case BuildStage::CompileScripts:
+        return StageCompileScripts(message);
+    case BuildStage::StageCoreData:
+        return StageStageCoreData(message);
+    case BuildStage::ExportData:
+        return StageExportData(message, false);
+    case BuildStage::ExportCoreData:
+        return StageExportData(message, true);
+    case BuildStage::StageRuntime:
+        return StageStageRuntime(message);
+    case BuildStage::AndroidProject:
+        return StageAndroidProject(message);
+    case BuildStage::Summary:
+        return StageSummary(message);
+    case BuildStage::Idle:
+        break;
+    }
+    message = "There is no stage to run.";
+    return false;
+}
+
+bool BuildSystem::StageValidate(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    auto* settings = GetSettings();
+    auto* project = GetSubsystem<Project>();
+
+    errors_.clear();
+    settings->Validate(*profile_, errors_);
+
+    // Two facts a profile cannot speak for, because they are about the project rather than about
+    // the toolchain: that there is a data tree at all, and that it names an entry point. Without
+    // Game.json the shipped game starts, prints a warning and shows an empty scene, which a user
+    // will read as "the build is broken" instead of "the project is incomplete".
+    const ea::string dataPath = NormalizeDir(project->GetDataPath());
+    if (!fs->DirExists(dataPath))
+        errors_.push_back(Format("The project has no data directory: '{}'.", dataPath));
+    else if (!fs->FileExists(dataPath + "Game.json"))
+    {
+        errors_.push_back(Format("'{}' has no Game.json. The shipped game would not know which scene "
+            "to load or which script to run.", dataPath));
+    }
+
+    // The output directory is emptied at the start of a build, so a mistyped path must not be
+    // allowed to cost somebody a source tree or a volume.
+    const ea::string output = RemoveTrailingSlash(outputDir_);
+    const ea::string parent = RemoveTrailingSlash(GetPath(output));
+    if (parent.empty() || parent == output)
+    {
+        errors_.push_back(Format("Refusing to build into '{}' because the whole directory is deleted "
+            "first. Point OutputDir at a dedicated build directory.", outputDir_));
+    }
+    else
+    {
+        const ea::string protectedDirs[] = {
+            RemoveTrailingSlash(ForwardSlashes(project->GetProjectPath())),
+            RemoveTrailingSlash(ForwardSlashes(profile_->engineData_)),
+            RemoveTrailingSlash(ForwardSlashes(profile_->engineBin_)),
+        };
+        for (const ea::string& protectedDir : protectedDirs)
+        {
+            if (!protectedDir.empty() && output == protectedDir)
+            {
+                errors_.push_back(Format("Refusing to empty '{}' because a build reads from it.", outputDir_));
+                break;
+            }
+        }
+    }
+
+    if (errors_.empty())
+        return true;
+
+    for (const ea::string& error : errors_)
+        URHO3D_LOGERROR("[Build] {}", error);
+    message = Format("Profile '{}' is not buildable, {} problem(s) above.", profileName_, errors_.size());
+    return false;
+}
+
+bool BuildSystem::StageCleanOutput(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    if (fs->DirExists(outputDir_) && !fs->RemoveDir(outputDir_, true))
+    {
+        message = Format("Could not empty '{}'. A game launched from a previous build is the usual "
+            "reason; close it and build again.", outputDir_);
+        return false;
+    }
+    if (!fs->CreateDirsRecursive(outputDir_))
+    {
+        message = Format("Could not create '{}'.", outputDir_);
+        return false;
+    }
+    return true;
+}
+
+bool BuildSystem::StageStageData(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    auto* project = GetSubsystem<Project>();
+
+    const ea::string staged = stagingDir_ + DataDirName;
+
+    // Engine resources first, project resources on top: a project can then replace a single engine
+    // file by carrying a file of the same name, without anybody editing the engine working tree.
+    if (profile_->includeEngineData_)
+    {
+        const ea::string engineData = AddTrailingSlash(ForwardSlashes(profile_->engineData_)) + DataDirName;
+        if (!MergeDirectory(fs, engineData, staged, message))
+            return false;
+    }
+    return MergeDirectory(fs, NormalizeDir(project->GetDataPath()), staged, message);
+}
+
+bool BuildSystem::StageCompileScripts(ea::string& message)
+{
+    auto* settings = GetSettings();
+
+    const ea::string compiler = settings->FindTool(*profile_, "LuaCompiler");
+    if (compiler.empty())
+    {
+        message = "LuaCompiler disappeared between validation and this stage.";
+        return false;
+    }
+
+    const ea::string staged = stagingDir_ + DataDirName;
+
+    // Input root and output root are the same directory on purpose: the tool mirrors every source
+    // path onto itself with a .luc extension, so the containers land exactly where the resource
+    // names in the scenes already point. Encrypting the whole staged tree rather than only the
+    // project's folder is also what makes the "no plain source ships" check afterwards meaningful,
+    // because engine samples carry .lua files too.
+    ea::vector<ea::string> arguments;
+    arguments.push_back("--recursive");
+    arguments.push_back("--encrypt");
+    arguments.push_back("--out=" + staged);
+
+    if (!profile_->scriptKeyEnvVar_.empty())
+    {
+        if (const char* key = getenv(profile_->scriptKeyEnvVar_.c_str()); key && *key)
+            arguments.push_back("--key=" + ea::string(key));
+    }
+    arguments.push_back(staged);
+
+    return StartProcess(compiler, arguments,
+        [this](ea::string& resumeMessage) { return PruneStagedSources(resumeMessage); }, message);
+}
+
+bool BuildSystem::PruneStagedSources(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    const ea::string staged = stagingDir_ + DataDirName;
+
+    ea::vector<ea::string> sources;
+    fs->ScanDir(sources, staged, "*.lua", SCAN_FILES | SCAN_RECURSIVE);
+
+    unsigned removed = 0;
+    for (const ea::string& relative : sources)
+    {
+        const ea::string source = staged + relative;
+        const size_t dot = source.rfind('.');
+        const ea::string container = source.substr(0, dot) + ".luc";
+
+        // A source without its compiled twin would leave the game without that script if the plain
+        // file were deleted, and shipping both would defeat the encryption. Neither is acceptable,
+        // so an incomplete compile fails the build instead of warning about it.
+        if (!fs->FileExists(container))
+        {
+            message = Format("LuaCompiler produced no '{}' for '{}'.", container, source);
+            return false;
+        }
+        if (!fs->Delete(source))
+        {
+            message = Format("Could not delete the plain script '{}'.", source);
+            return false;
+        }
+        ++removed;
+    }
+
+    URHO3D_LOGINFO("[Build] Compiled scripts now ship as .luc; removed {} plain source file(s)", removed);
+    return true;
+}
+
+bool BuildSystem::StageStageCoreData(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    const ea::string source = AddTrailingSlash(ForwardSlashes(profile_->engineData_)) + CoreDataDirName;
+    return MergeDirectory(fs, source, stagingDir_ + CoreDataDirName, message);
+}
+
+bool BuildSystem::StageExportData(ea::string& message, bool coreData)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    auto* settings = GetSettings();
+
+    const ea::string dirName = coreData ? CoreDataDirName : DataDirName;
+    const ea::string packageName = coreData ? CoreDataPackageName : DataPackageName;
+    const ea::string staged = stagingDir_ + dirName;
+
+    if (!profile_->packData_)
+    {
+        if (!MergeDirectory(fs, staged, resourceDir_ + dirName, message))
+            return false;
+        return VerifyExportedResources(message, coreData);
+    }
+
+    const ea::string package = resourceDir_ + packageName;
+    const ea::string tool = settings->FindTool(*profile_, "PackageTool");
+    if (tool.empty())
+    {
+        message = "PackageTool disappeared between validation and this stage.";
+        return false;
+    }
+
+    // PackageTool leaves an existing package alone when it considers it up to date, comparing
+    // timestamps against whatever is already there. A package that another profile wrote into the
+    // same destination is exactly the artifact that must not survive that check, so it goes first.
+    if (fs->FileExists(package) && !fs->Delete(package))
+    {
+        message = Format("Could not delete the stale package '{}'.", package);
+        return false;
+    }
+    if (!fs->CreateDirsRecursive(GetPath(package)))
+    {
+        message = Format("Could not create '{}'.", GetPath(package));
+        return false;
+    }
+
+    // No basepath argument: package entries have to be relative to the directory being packed,
+    // which is what makes them match the resource names the runtime asks for.
+    ea::vector<ea::string> arguments{ staged, package };
+    if (profile_->compressPackages_)
+        arguments.push_back("-c");
+
+    return StartProcess(tool, arguments,
+        [this, coreData](ea::string& resumeMessage) { return VerifyExportedResources(resumeMessage, coreData); },
+        message);
+}
+
+bool BuildSystem::VerifyExportedResources(ea::string& message, bool coreData)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    const ea::string dirName = coreData ? CoreDataDirName : DataDirName;
+    const ea::string packageName = coreData ? CoreDataPackageName : DataPackageName;
+
+    if (!profile_->packData_)
+    {
+        // Loose directories: proving the entry configuration arrived is enough, because a copy that
+        // partially failed already made CopyDir report failure.
+        const ea::string entry = resourceDir_ + dirName + "Game.json";
+        if (!coreData && !fs->FileExists(entry))
+        {
+            message = Format("'{}' is missing from the output.", entry);
+            return false;
+        }
+        return true;
+    }
+
+    const ea::string package = resourceDir_ + packageName;
+
+    // Read the result back with the same class the game will use, rather than asking the bundler to
+    // describe its own output: this proves the header, the entry table and the data offsets all
+    // agree, which is more than a tool printing a number it just computed.
+    PackageFile reader(context_);
+    if (!reader.Open(package))
+    {
+        message = Format("'{}' was written but cannot be read back.", package);
+        return false;
+    }
+    if (reader.GetNumFiles() == 0)
+    {
+        message = Format("'{}' contains no files.", package);
+        return false;
+    }
+    URHO3D_LOGINFO("[Build] {} holds {} file(s), {} bytes, {}", packageName, reader.GetNumFiles(),
+        reader.GetTotalDataSize(), reader.IsCompressed() ? "LZ4 compressed" : "uncompressed");
+
+    if (coreData)
+        return true;
+
+    if (!reader.Exists("Game.json"))
+    {
+        message = Format("'{}' does not contain Game.json, so the shipped game cannot find its entry "
+            "configuration.", package);
+        return false;
+    }
+
+    // Only a profile that encrypts has something to prove about script formats: for every other
+    // build the plain .lua file IS the shipped artifact, and refusing it would reject the common
+    // case. When encryption is on, a surviving source file is worse than a missing container - the
+    // runtime prefers the .luc, so the source is dead weight that reads as an unprotected script.
+    if (profile_->encryptScripts_)
+    {
+        unsigned containers = 0;
+        for (const auto& entry : reader.GetEntries())
+        {
+            if (ExtensionIs(entry.first, "luc"))
+                ++containers;
+            else if (ExtensionIs(entry.first, "lua"))
+            {
+                message = Format("'{}' still contains the plain script '{}'.", package, entry.first);
+                return false;
+            }
+        }
+        if (containers == 0)
+        {
+            message = Format("EncryptScripts is on but '{}' holds no .luc container.", package);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool BuildSystem::StageStageRuntime(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    const ea::string bin = NormalizeDir(profile_->engineBin_);
+    const ea::string suffix = GetExecutableSuffix();
+
+    struct Artifact
+    {
+        ea::string source_;
+        ea::string destination_;
+    };
+
+    const Artifact artifacts[] = {
+        { bin + HostName + suffix, outputDir_ + profile_->executableName_ + suffix },
+        { bin + EngineLibraryName + DYN_LIB_SUFFIX, outputDir_ + EngineLibraryName + DYN_LIB_SUFFIX },
+        { bin + LuaLibraryName + DYN_LIB_SUFFIX, outputDir_ + LuaLibraryName + DYN_LIB_SUFFIX },
+    };
+
+    for (const Artifact& artifact : artifacts)
+    {
+        if (!fs->FileExists(artifact.source_))
+        {
+            message = Format("'{}' is not there to be copied.", artifact.source_);
+            return false;
+        }
+        if (!fs->Copy(artifact.source_, artifact.destination_))
+        {
+            message = Format("Could not copy '{}' to '{}'.", artifact.source_, artifact.destination_);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool BuildSystem::StageAndroidProject(ea::string& message)
+{
+    auto* project = GetSubsystem<Project>();
+
+    ea::vector<ea::string> scaffoldErrors;
+    if (GenerateAndroidScaffold(context_, *profile_, ForwardSlashes(project->GetProjectPath()), outputDir_,
+        resourceDir_, scaffoldErrors))
+    {
+        return true;
+    }
+
+    errors_.insert(errors_.end(), scaffoldErrors.begin(), scaffoldErrors.end());
+    for (const ea::string& error : scaffoldErrors)
+        URHO3D_LOGERROR("[Build] {}", error);
+    message = Format("The Android project could not be written, {} problem(s) above.", scaffoldErrors.size());
+    return false;
+}
+
+bool BuildSystem::StageSummary(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    ea::vector<ea::string> entries;
+    fs->ScanDir(entries, outputDir_, "*", SCAN_DIRS | SCAN_FILES);
+    // A scan that includes directories also answers with '.' and '..', which are this very output
+    // directory and the directory around it. Left in, the summary would report the package once as
+    // its contents and once again as a directory containing them.
+    entries.erase(ea::remove_if(entries.begin(), entries.end(),
+                    [](const ea::string& entry) { return entry == "." || entry == ".."; }),
+        entries.end());
+    ea::sort(entries.begin(), entries.end());
+
+    unsigned long long total = 0;
+    for (const ea::string& entry : entries)
+    {
+        const ea::string path = outputDir_ + entry;
+        const unsigned long long size = fs->DirExists(path) ? DirectorySize(path) : [&]()
+        {
+            File file(context_, path, FILE_READ);
+            return file.IsOpen() ? static_cast<unsigned long long>(file.GetSize()) : 0ULL;
+        }();
+        total += size;
+        URHO3D_LOGINFO("[Build]   {:>14} bytes  {}", size, entry);
+    }
+
+    URHO3D_LOGINFO("[Build]   {:>14} bytes  total, {} top level entr{} in {}", total, entries.size(),
+        entries.size() == 1 ? "y" : "ies", outputDir_);
+    return true;
+}
+
+void BuildSystem::AdvanceStage()
+{
+    ++stageIndex_;
+    if (stageIndex_ >= plan_.size())
+    {
+        Finish(true, EMPTY_STRING);
+        return;
+    }
+    stage_ = plan_[stageIndex_];
+    progress_ = static_cast<float>(stageIndex_) / static_cast<float>(plan_.size());
+    URHO3D_LOGINFO("[Build] {} ({}/{})", BuildStageName(stage_), stageIndex_ + 1, plan_.size());
+}
+
+bool BuildSystem::StartProcess(const ea::string& program, const ea::vector<ea::string>& arguments,
+    ea::function<bool(ea::string&)> resume, ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    // An asynchronously started process writes its output where nobody reads it, so the command
+    // line is logged before it runs; that is the line a user pastes when a stage fails. A content
+    // key is the one argument that must not be repeated here.
+    ea::string commandLine = program;
+    for (const ea::string& argument : arguments)
+    {
+        commandLine += ' ';
+        commandLine += StartsMinusKey(argument) ? "--key=<redacted>" : argument;
+    }
+
+    const unsigned request = fs->SystemRunAsync(program, arguments);
+    if (request == M_MAX_UNSIGNED)
+    {
+        message = Format("Could not start '{}'.", commandLine);
+        return false;
+    }
+
+    URHO3D_LOGINFO("[Build] $ {}", commandLine);
+    pendingRequest_ = request;
+    pendingCommandLine_ = commandLine;
+    processFinished_ = false;
+    stageResume_ = ea::move(resume);
+    return true;
+}
+
+unsigned long long BuildSystem::DirectorySize(const ea::string& directory) const
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    ea::vector<ea::string> files;
+    fs->ScanDir(files, directory, "*", SCAN_FILES | SCAN_RECURSIVE);
+
+    unsigned long long total = 0;
+    for (const ea::string& file : files)
+    {
+        const ea::string path = AddTrailingSlash(directory) + file;
+        if (!fs->FileExists(path))
+            continue;
+        File handle(context_, path, FILE_READ);
+        if (handle.IsOpen())
+            total += handle.GetSize();
+    }
+    return total;
+}
+
+void BuildSystem::Finish(bool success, const ea::string& message)
+{
+    const float elapsed = GetSubsystem<Time>()->GetElapsedTime() - startTime_;
+    const bool autoRun = success && profile_ && profile_->autoRunAfterBuild_ && profile_->IsWindowsDesktop();
+    const ea::string executable =
+        profile_ ? outputDir_ + profile_->executableName_ + GetExecutableSuffix() : EMPTY_STRING;
+
+    if (success)
+    {
+        progress_ = 1.0f;
+        URHO3D_LOGINFO("[Build] Profile '{}' finished in {:.1f}s", profileName_, elapsed);
+    }
+    else
+    {
+        if (!message.empty() && ea::find(errors_.begin(), errors_.end(), message) == errors_.end())
+            errors_.push_back(message);
+        URHO3D_LOGERROR("[Build] Profile '{}' failed after {:.1f}s: {}", profileName_, elapsed, message);
+    }
+
+    CleanupStaging();
+
+    stage_ = BuildStage::Idle;
+    stageIndex_ = 0;
+    plan_.clear();
+    profile_ = nullptr;
+    pendingRequest_ = 0;
+    pendingCommandLine_.clear();
+    stageResume_ = nullptr;
+    processFinished_ = false;
+    cancelRequested_ = false;
+
+    VariantMap eventData;
+    eventData["Success"] = success;
+    eventData["Profile"] = profileName_;
+    eventData["Message"] = success ? EMPTY_STRING : message;
+    eventData["OutputDir"] = outputDir_;
+    SendEvent(E_BUILD_FINISHED, eventData);
+
+    const auto handler = ea::move(onDone_);
+    onDone_ = nullptr;
+    if (handler)
+        handler(success, success ? EMPTY_STRING : message, outputDir_);
+
+    // Launching is the last thing a successful build does, and the process is not waited for: the
+    // point of the switch is to see the result, which means a window that stays open until the user
+    // closes it.
+    if (autoRun)
+    {
+        auto* fs = GetSubsystem<FileSystem>();
+        if (fs->FileExists(executable))
+        {
+            URHO3D_LOGINFO("[Build] Launching {}", executable);
+            fs->SystemRunAsync(executable, {});
+        }
+        else
+            URHO3D_LOGERROR("[Build] Cannot run '{}': it is not in the output directory", executable);
+    }
+}
+
+void BuildSystem::CleanupStaging()
+{
+    if (stagingDir_.empty())
+        return;
+
+    auto* fs = GetSubsystem<FileSystem>();
+    if (!fs->RemoveDir(stagingDir_, true))
+        URHO3D_LOGWARNING("[Build] Left temporary files behind in '{}'", stagingDir_);
+    stagingDir_.clear();
+}
+
+} // namespace Urho3D

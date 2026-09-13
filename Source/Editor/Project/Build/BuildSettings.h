@@ -1,0 +1,149 @@
+// Copyright (c) 2026 the rbfx project.
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
+
+#pragma once
+
+#include <Urho3D/Core/Object.h>
+
+#include <EASTL/string.h>
+#include <EASTL/vector.h>
+
+namespace Urho3D
+{
+
+class Archive;
+
+/// Suffix every operating system puts on runnable binaries. The build steps need it to locate the
+/// offline tools (PackageTool, LuaCompiler) next to the engine binaries a profile points at.
+ea::string GetExecutableSuffix();
+
+/// Android specific part of a build profile. Ignored by desktop platforms, and the only part the
+/// Android scaffold generator reads.
+///
+/// The initializers below and the serialization fallbacks in the .cpp are the same numbers on
+/// purpose: a Build.json that predates one of these fields, or that a user trimmed by hand, still
+/// has to describe a buildable app.
+struct AndroidBuildSettings
+{
+    ea::string applicationId_ = "com.example.game";
+    int versionCode_ = 1;
+    ea::string versionName_ = "0.1.0";
+    int minSdk_ = 24;
+    int targetSdk_ = 35;
+    /// AndroidManifest screenOrientation, verbatim ("sensorLandscape", "portrait", ...).
+    ea::string orientation_ = "sensorLandscape";
+    /// ABIs to compile for. Each one becomes an abiFilters entry and an androgen arm-arch argument.
+    ea::vector<ea::string> abis_ = { "arm64-v8a" };
+    /// Optional path to a launcher icon; empty keeps the template icon.
+    ea::string icon_;
+    /// Name of the environment variable holding the keystore path. Never the value itself: a
+    /// password or a keystore location must not end up committed inside the project folder.
+    ea::string keystoreEnvVar_;
+    /// Name of the environment variable holding the key alias inside that keystore.
+    ea::string keystoreAliasEnvVar_;
+
+    void SerializeInBlock(Archive& archive);
+};
+
+/// One named build configuration. Persisted in <project>/Build.json, which this struct family
+/// owns exclusively - Project.json stays untouched so adding build settings cannot break the
+/// plugin/launch schema that already lives there.
+///
+/// Every field is serialized with an explicit fallback (see the .cpp), which is what lets a
+/// hand-edited Build.json omit anything it is happy with while every profile still round-trips
+/// to itself instead of inheriting the defaults of whichever profile was written last.
+struct BuildProfile
+{
+    /// Display name, unique inside the file. Doubles as the argument to `--build`. Deliberately
+    /// without a fallback: a profile nobody can name is an error, not something to guess at.
+    ea::string name_;
+    /// "WindowsDesktop" or "Android". Kept as a string on purpose: an unknown value has to be
+    /// reported as an error rather than quietly resolved to one of the known platforms, and a
+    /// missing one is reported the same way instead of defaulting an Android profile to desktop.
+    ea::string platform_;
+    /// Absolute directory holding the already-built host binary and shared libraries.
+    ea::string engineBin_;
+    /// Absolute directory holding CoreData/ and Data/ of the engine working tree.
+    ea::string engineData_;
+    /// Output directory, absolute or relative to the project. Empty resolves to Build/<Name>,
+    /// which is why there is no per-field fallback for it - the default depends on the profile.
+    ea::string outputDir_;
+    /// Host binary name without suffix.
+    ea::string executableName_;
+    /// Fold Data/ and CoreData/ into .pak files instead of shipping loose directories.
+    bool packData_{};
+    /// Ask PackageTool for LZ4 compression. Only meaningful with packData_.
+    bool compressPackages_{};
+    /// Run the project's Lua sources through LuaCompiler into encrypted .luc containers.
+    bool encryptScripts_{};
+    /// Copy the engine's own Data/ into the package underneath the project files.
+    bool includeEngineData_{};
+    /// Launch the produced executable once the build finished. A convenience for iteration.
+    bool autoRunAfterBuild_{};
+    /// Name of the environment variable holding the 64-hex content key handed to LuaCompiler.
+    /// Defaults to RBFX_LUA_SCRIPT_KEY, which is also the variable the runtime reads, so the two
+    /// ends cannot disagree without somebody going out of their way to make it happen.
+    ea::string scriptKeyEnvVar_;
+    AndroidBuildSettings android_;
+
+    void SerializeInBlock(Archive& archive);
+
+    bool IsAndroid() const { return platform_ == "Android"; }
+    bool IsWindowsDesktop() const { return platform_ == "WindowsDesktop"; }
+
+    /// Output directory made absolute against the project and normalized to end with a slash.
+    ea::string ResolveOutputDir(const ea::string& projectPath) const;
+};
+
+using BuildProfileVector = ea::vector<BuildProfile>;
+
+/// Holds the build profiles of a project and reads/writes the file they live in.
+class BuildSettings : public Object
+{
+    URHO3D_OBJECT(BuildSettings, Object);
+
+public:
+    explicit BuildSettings(Context* context);
+
+    void SerializeInBlock(Archive& archive) override;
+
+    /// Load the profiles from a JSON file. Missing files are not an error, the editor creates the
+    /// defaults on first use; a file that exists but does not parse is.
+    bool LoadFile(const ea::string& fileName);
+    bool SaveFile(const ea::string& fileName);
+    const ea::string& GetFilePath() const { return filePath_; }
+
+    /// Open the Build.json of a project. A file that does not exist yet gets the default profiles
+    /// written into it, because a project without a profile has nothing to build. seedDefaults is
+    /// off for a project opened read only, which must not gain files just by being looked at.
+    /// projectPath resolves the relative default output directories, engineData is the directory
+    /// that holds CoreData/ and Data/ of the engine working tree - only the caller can know it.
+    bool LoadProject(const ea::string& projectPath, const ea::string& engineData, bool seedDefaults);
+
+    const BuildProfileVector& GetProfiles() const { return profiles_; }
+    BuildProfileVector& GetMutableProfiles() { return profiles_; }
+    const BuildProfile* FindProfile(const ea::string& name) const;
+    BuildProfile* FindProfileMutable(const ea::string& name);
+    ea::vector<ea::string> GetProfileNames() const;
+
+    /// Seed a profile when no profile of that name exists yet, so a fresh project has something to
+    /// pick. engineData is the directory that holds CoreData/ and Data/, which only the caller can
+    /// know; the engine binary directory is wherever the editor itself was launched from. Returns
+    /// whether a profile was added.
+    bool EnsureProfile(const ea::string& name, const ea::string& projectPath, const ea::string& engineData);
+
+    /// Every reason the profile cannot be built right now, one string each. Collects all of them:
+    /// a user who is missing three things should not have to run the check three times.
+    bool Validate(const BuildProfile& profile, ea::vector<ea::string>& errors) const;
+
+    /// Locate an offline build tool by name, looking in the profile's engine binary directory
+    /// first and next to the editor second. Returns an empty string when it is nowhere to be found.
+    ea::string FindTool(const BuildProfile& profile, const ea::string& toolName) const;
+
+private:
+    BuildProfileVector profiles_;
+    ea::string filePath_;
+};
+
+} // namespace Urho3D

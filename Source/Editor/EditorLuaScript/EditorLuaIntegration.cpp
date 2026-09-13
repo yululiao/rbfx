@@ -18,6 +18,7 @@
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Object.h>
+#include <Urho3D/IO/Log.h>
 #include <Urho3D/SystemUI/SystemUI.h>
 
 #include <EASTL/algorithm.h>
@@ -258,6 +259,61 @@ void SetupEditorLua(Context* context)
             if (Component* raw = component.Get())
                 outComponents.push_back(raw);
         }
+    };
+
+    // Build pipeline. Every hook resolves the project afresh, so closing a project turns them
+    // into refusals rather than accesses through a pointer to a destroyed BuildSystem.
+    hooks.getBuildProfiles = [context]() -> ea::vector<ea::string>
+    {
+        auto* project = context->GetSubsystem<Project>();
+        auto* settings = project ? project->GetBuildSettings() : nullptr;
+        return settings ? settings->GetProfileNames() : ea::vector<ea::string>();
+    };
+
+    hooks.buildProfile = [context](const ea::string& profile, unsigned long long handle) -> bool
+    {
+        auto* project = context->GetSubsystem<Project>();
+        auto* build = project ? project->GetBuildSystem() : nullptr;
+        if (!build)
+        {
+            URHO3D_LOGERROR("Editor.build needs an open project, and none is open");
+            return false;
+        }
+
+        // The reason a refused build is not reported here is that BuildNow already logged it: a
+        // missing profile names the profiles that do exist, and a running build says which.
+        return build->BuildNow(profile, EMPTY_STRING,
+            [context, handle, profile](bool success, const ea::string& message, const ea::string& outputDir)
+            {
+                auto* lua = context->GetSubsystem<EditorLuaScript>();
+                if (!lua || handle == 0ull)
+                    return;
+                // Spelled out rather than forwarded from the event, because the handler of a build
+                // runs before the build is torn down and gets the same values the event carried.
+                VariantMap eventData;
+                eventData["Success"] = success;
+                eventData["Profile"] = profile;
+                eventData["Message"] = success ? EMPTY_STRING : message;
+                eventData["OutputDir"] = outputDir;
+                lua->InvokeOneShotCallback(handle, eventData);
+            });
+    };
+
+    hooks.getBuildStatus = [context]() -> EditorBuildStatus
+    {
+        EditorBuildStatus status;
+        auto* project = context->GetSubsystem<Project>();
+        auto* build = project ? project->GetBuildSystem() : nullptr;
+        if (build)
+        {
+            status.building = build->IsBuilding();
+            status.progress = build->GetProgress();
+            status.stage = build->GetStageName();
+            status.profile = build->GetProfileName();
+            status.outputDir = build->GetOutputDir();
+            status.errors = build->GetErrors();
+        }
+        return status;
     };
 
     hooks.resetUI = []()

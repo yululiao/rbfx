@@ -21,11 +21,23 @@
 		{
 			"key": "Scenes/Default.scene",
 			"value": {
-				"modificationTime": 1789198761
+				"modificationTime": 1789240365
 			}
 		},
 		{
 			"key": "Fonts/Anonymous Pro.ttf",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Scenes/Test.scene",
+			"value": {
+				"modificationTime": 1789240365
+			}
+		},
+		{
+			"key": "Textures/StoneNormal.dds",
 			"value": {
 				"modificationTime": 1789183221
 			}
@@ -37,9 +49,9 @@
 			}
 		},
 		{
-			"key": "Textures/StoneNormal.dds",
+			"key": "Scenes/Test1.scene",
 			"value": {
-				"modificationTime": 1789183221
+				"modificationTime": 1789240365
 			}
 		},
 		{
@@ -73,15 +85,27 @@
 			}
 		},
 		{
-			"key": "Models/Kachujin/Kachujin_Walk.ani",
+			"key": "Scripts/main.lua",
 			"value": {
-				"modificationTime": 1789183221
+				"modificationTime": 1789208857
 			}
 		},
 		{
 			"key": "Materials/StoneTiled.xml",
 			"value": {
 				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Models/Kachujin/Kachujin_Walk.ani",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
+			"key": "Textures/test.png",
+			"value": {
+				"modificationTime": 1789280124
 			}
 		},
 		{
@@ -97,15 +121,21 @@
 			}
 		},
 		{
+			"key": "Models/Kachujin/License.txt",
+			"value": {
+				"modificationTime": 1789183221
+			}
+		},
+		{
 			"key": "Models/Kachujin/Textures/Kachujin_normal.png",
 			"value": {
 				"modificationTime": 1789183221
 			}
 		},
 		{
-			"key": "Models/Kachujin/License.txt",
+			"key": "Game.json",
 			"value": {
-				"modificationTime": 1789183221
+				"modificationTime": 1789301119
 			}
 		}
 	]

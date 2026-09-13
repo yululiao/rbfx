@@ -265,3 +265,47 @@ end)
 Editor.addMenuItem("Show Widget Test Window", function()
     Editor.showWindow(WINDOW_TITLE)
 end)
+
+-- ---------------------------------------------------------------------------
+-- 构建管线（出包）
+--
+-- profile 名来自工程根目录的 Build.json，由编辑器维护，脚本里不硬编码：换一个工程、
+-- 改一个 profile，下面的代码不用动。
+--
+-- 出包是异步的：Editor.build 只回答「有没有接受这次请求」，结果稍后通过
+-- buildFinished 事件（所有观察者）或那次调用自带的回调（只此一次）送达。
+-- 想连续出多个平台就在回调里链下一次 build，这样任一环节失败都不会串错顺序。
+-- ---------------------------------------------------------------------------
+
+local profiles = Editor.buildProfiles()
+Editor.log("Build profiles: " .. table.concat(profiles, ", "))
+
+-- 事件里的字段就是构建结束时那四个值，跟 BuildTab 显示的是同一份数据
+Editor.subscribe("buildFinished", function(data)
+    Editor.log(string.format("buildFinished event: profile=%s success=%s output=%s message=%s",
+        tostring(data.Profile), tostring(data.Success), tostring(data.OutputDir), tostring(data.Message)))
+end)
+
+Editor.addMenuItem("Tools/Build First Profile (Lua)", function()
+    local names = Editor.buildProfiles()
+    if #names == 0 then
+        Editor.logWarning("No build profile in Build.json - open Project > Build Settings first")
+        return
+    end
+
+    local started = Editor.build(names[1], function(data)
+        local status = Editor.buildStatus()
+        Editor.log(string.format("build callback: %s success=%s stage=%s problems=%d",
+            tostring(data.Profile), tostring(data.Success), status.stage, #status.errors))
+        for i = 1, #status.errors do
+            Editor.logError(status.errors[i])
+        end
+    end)
+
+    if not started then
+        Editor.logError("Editor.build was refused; the reason is in the log above")
+    else
+        local status = Editor.buildStatus()
+        Editor.log("Building " .. status.profile .. " into " .. status.outputDir)
+    end
+end)

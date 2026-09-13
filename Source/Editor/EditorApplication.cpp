@@ -7,6 +7,7 @@
 #include "Assets/FbxImport.h"
 #include "Assets/ModelImporter.h"
 #include "Foundation/AnimationViewTab.h"
+#include "Foundation/BuildTab.h"
 #include "Foundation/ConcurrentAssetProcessing.h"
 #include "Foundation/ConsoleTab.h"
 #include "Foundation/GameViewTab.h"
@@ -106,6 +107,7 @@ EditorApplication::EditorApplication(Context* context)
     editorPluginManager_->AddPlugin("Foundation.ModelView", &Foundation_ModelViewTab);
     editorPluginManager_->AddPlugin("Foundation.AnimationView", &Foundation_AnimationViewTab);
     editorPluginManager_->AddPlugin("Foundation.Console", &Foundation_ConsoleTab);
+    editorPluginManager_->AddPlugin("Foundation.Build", &Foundation_BuildTab);
     editorPluginManager_->AddPlugin("Foundation.ResourceBrowser", &Foundation_ResourceBrowserTab);
     editorPluginManager_->AddPlugin("Foundation.HierarchyBrowser", &Foundation_HierarchyBrowserTab);
     editorPluginManager_->AddPlugin("Foundation.Settings", &Foundation_SettingsTab);
@@ -205,6 +207,11 @@ void EditorApplication::Setup()
     cmd.add_option("--command", command_, "Command to execute on startup.")->type_name("command");
     cmd.add_flag("--exit", exitAfterCommand_, "Forces Editor to exit after command execution.");
     cmd.add_option("project", pendingOpenProject_, "Project to open or create on startup.")->type_name("dir");
+    cmd.add_option("--build", buildProfile_,
+        "Build the named profile of the project and exit with its result as exit code. "
+        "Intended for batch use, combine with --headless.")->type_name("profile");
+    cmd.add_option("--build-output-override", buildOutputOverride_,
+        "Directory the build writes into instead of the output directory of the profile.")->type_name("dir");
 
     engineParameters_[EP_WINDOW_TITLE] = GetTypeName();
     engineParameters_[EP_APPLICATION_NAME] = GetWindowTitle();
@@ -277,7 +284,11 @@ void EditorApplication::Start()
     input->SetMouseVisible(true);
     input->SetEnabled(false);
 
-    vfs->SetWatching(true);
+    // Watching is what lets a running editor notice that an asset changed outside of it, a question
+    // a headless batch run has nobody to ask. It is also the one thing here that cannot be undone
+    // without write access to every watched directory, so the run that cannot answer a change would
+    // not be able to stop answering either.
+    vfs->SetWatching(!isHeadless);
 
     engine_->SetAutoExit(false);
 
@@ -307,7 +318,24 @@ void EditorApplication::Start()
     if (!pendingOpenProject_.empty())
         OpenProject(pendingOpenProject_);
     else
+    {
         command_.clear(); // Execute commands only if the project is opened too.
+
+        if (!buildProfile_.empty())
+        {
+            URHO3D_LOGERROR("Option --build needs a project to build, and none was given");
+            buildProfile_.clear();
+            buildOutputOverride_.clear();
+            // A failing code here makes Run() return right after Start() instead of entering the main
+            // loop, so a batch caller is handed its answer rather than a window to close.
+            exitCode_ = EXIT_FAILURE;
+        }
+        else if (!buildOutputOverride_.empty())
+        {
+            URHO3D_LOGWARNING("Option --build-output-override is only read together with --build");
+            buildOutputOverride_.clear();
+        }
+    }
 }
 
 void EditorApplication::Stop()
@@ -731,11 +759,46 @@ void EditorApplication::UpdateProjectStatus()
         ReloadEditorLuaPlugins(context_);
 #endif
 
+        // A batch build owns the rest of the run, because it ends the process when it reports back.
+        // Starting a command on top of that would only queue work the exit then cuts short.
+        if (!buildProfile_.empty())
+        {
+            if (!command_.empty())
+                URHO3D_LOGWARNING("Ignoring --command: --build keeps the process until the build finishes");
+            StartCommandLineBuild();
+            return;
+        }
+
         if (!command_.empty())
         {
             project_->ExecuteCommand(command_, exitAfterCommand_);
             command_.clear();
         }
+    }
+}
+
+void EditorApplication::StartCommandLineBuild()
+{
+    const ea::string profile = buildProfile_;
+    const ea::string outputOverride = buildOutputOverride_;
+    buildProfile_.clear();
+    buildOutputOverride_.clear();
+
+    // The handler only decides how the process ends. What a build did is already in the log by the
+    // time it runs, because BuildSystem reports every failed stage and its reason itself.
+    if (!project_->GetBuildSystem()->BuildNow(profile, outputOverride,
+        [this](bool success, const ea::string&, const ea::string&)
+        {
+            if (!success)
+                exitCode_ = EXIT_FAILURE;
+            // The exit of a `--command --exit` run, for the same reason: the answer is known, so a
+            // dialog asking about unsaved assets would only be a question nobody is there to answer.
+            SendEvent(E_EXITREQUESTED);
+        }))
+    {
+        // BuildNow has logged why it refused to start; all that is left is not to stay open.
+        exitCode_ = EXIT_FAILURE;
+        SendEvent(E_EXITREQUESTED);
     }
 }
 

@@ -1,0 +1,511 @@
+// Copyright (c) 2026 the rbfx project.
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
+
+#include "../../Project/Build/AndroidScaffold.h"
+
+#include "../../Project/Build/BuildSettings.h"
+
+#include <Urho3D/Core/Context.h>
+#include <Urho3D/Core/StringUtils.h>
+#include <Urho3D/IO/File.h>
+#include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/IO/Log.h>
+
+#include <cstdlib>
+
+namespace Urho3D
+{
+
+namespace
+{
+
+/// Everything a gradle build needs from the engine checkout, in the order the generated script
+/// refers to them. Kept as one list so the three markers used to recognise a checkout cannot drift
+/// apart from the files the generated project reads.
+const char* const EngineCheckoutMarkers[] = { "CMakeLists.txt", "android/build.gradle",
+    "Source/LuaGamePlayer/CMakeLists.txt", "Source/ThirdParty/SDL/android-project/app/src/main/java" };
+
+/// Java sources and resources the application module is not allowed to lack: SDLActivity is the
+/// base class of the activity the manifest names, and the icon its layout refers to.
+const char* const TemplateDirectories[] = { "src", "res" };
+
+ea::string ForwardSlashes(ea::string text)
+{
+    text.replace("\\", "/");
+    return text;
+}
+
+ea::string NormalizeDir(const ea::string& path)
+{
+    return AddTrailingSlash(RemoveTrailingSlash(ForwardSlashes(path)));
+}
+
+/// A path usable in a Java properties file, which treats a backslash as an escape character.
+ea::string PropertyPath(const ea::string& path)
+{
+    return ForwardSlashes(RemoveTrailingSlash(path));
+}
+
+/// Groovy single quoted literal. Quotes and backslashes inside a value would otherwise end the
+/// string, and a project folder name is allowed to contain almost anything.
+ea::string GroovyString(const ea::string& text)
+{
+    ea::string result = "'";
+    for (const char ch : text)
+    {
+        if (ch == '\'' || ch == '\\')
+            result.push_back('\\');
+        result.push_back(ch);
+    }
+    result += '\'';
+    return result;
+}
+
+void AppendLine(ea::string& out, const ea::string& line)
+{
+    out += line;
+    out += '\n';
+}
+
+bool WriteText(Context* context, const ea::string& path, const ea::string& text, ea::vector<ea::string>& errors)
+{
+    auto* fs = context->GetSubsystem<FileSystem>();
+    if (!fs->CreateDirsRecursive(GetPath(path)))
+    {
+        errors.push_back(Format("Could not create the directory of '{}'.", path));
+        return false;
+    }
+
+    File file(context, path, FILE_WRITE);
+    if (!file.IsOpen())
+    {
+        errors.push_back(Format("Could not open '{}' for writing.", path));
+        return false;
+    }
+    if (file.Write(text.c_str(), text.size()) != text.size())
+    {
+        errors.push_back(Format("Could not write all of '{}'.", path));
+        return false;
+    }
+    return true;
+}
+
+/// Locate the engine source checkout that corresponds to the binaries a profile builds against.
+/// Searched rather than derived from a convention, because the answer depends on where somebody put
+/// their build directory, and a wrong guess produces a gradle project that fails two minutes into a
+/// native build instead of failing here.
+ea::string FindEngineCheckout(FileSystem* fs, const BuildProfile& profile, ea::vector<ea::string>& errors)
+{
+    ea::string candidate = RemoveTrailingSlash(ForwardSlashes(profile.engineBin_));
+    for (unsigned depth = 0; depth < 8 && !candidate.empty(); ++depth)
+    {
+        unsigned found = 0;
+        unsigned total = 0;
+        for (const char* marker : EngineCheckoutMarkers)
+        {
+            ++total;
+            const ea::string path = candidate + "/" + marker;
+            if (fs->FileExists(path) || fs->DirExists(path))
+                ++found;
+        }
+        if (found == total)
+            return candidate + "/";
+
+        const ea::string parent = RemoveTrailingSlash(GetPath(candidate));
+        if (parent == candidate)
+            break;
+        candidate = parent;
+    }
+
+    errors.push_back(Format("Could not find an engine source checkout above '{}'. The Android project needs "
+        "it because gradle compiles the engine from source for the phone; point EngineBin at a build "
+        "directory that lives inside the checkout.", profile.engineBin_));
+    return EMPTY_STRING;
+}
+
+const char* EnvironmentOrEmpty(const char* name)
+{
+    const char* value = getenv(name);
+    return value && *value ? value : nullptr;
+}
+
+ea::string BuildGradleText(const BuildProfile& profile, const ea::string& engineCheckout,
+    const ea::string& projectName)
+{
+    const AndroidBuildSettings& android = profile.android_;
+
+    ea::string abis;
+    for (const ea::string& abi : android.abis_)
+    {
+        if (!abis.empty())
+            abis += ", ";
+        abis += GroovyString(abi);
+    }
+
+    ea::string text;
+    AppendLine(text, "apply plugin: 'com.android.application'");
+    AppendLine(text, "");
+    AppendLine(text, "// Generated by the rbfx editor build. Rebuilding rewrites this file, so a change that has to");
+    AppendLine(text, "// survive belongs in Build.json under the profile named " + projectName + ".");
+    AppendLine(text, "//");
+    AppendLine(text, "// The application has no native sources of its own: the engine and the Lua host are built");
+    AppendLine(text, "// from the checkout below, and the game itself is the resource and script tree in assets/.");
+    AppendLine(text, "// That is why there is no project source directory here; a game that grows C++ code needs a");
+    AppendLine(text, "// plugin directory and an extra entry in the cmake arguments.");
+    AppendLine(text, "def rbfxSourceDir = " + GroovyString(engineCheckout));
+    AppendLine(text, "// Same version the top level CMakeLists.txt of the engine requires.");
+    AppendLine(text, "def cmakeVersion = '3.25.0+'");
+    AppendLine(text, "");
+    AppendLine(text, "buildscript {");
+    AppendLine(text, "    repositories {");
+    AppendLine(text, "        google()");
+    AppendLine(text, "        mavenCentral()");
+    AppendLine(text, "    }");
+    AppendLine(text, "    dependencies {");
+    AppendLine(text, "        classpath 'com.android.tools.build:gradle:8.13.0'");
+    AppendLine(text, "    }");
+    AppendLine(text, "}");
+    AppendLine(text, "");
+    AppendLine(text, "android {");
+    AppendLine(text, "    namespace " + GroovyString(android.applicationId_));
+    AppendLine(text, "    compileSdkVersion " + Format("{}", android.targetSdk_));
+    AppendLine(text, "    defaultConfig {");
+    AppendLine(text, "        applicationId " + GroovyString(android.applicationId_));
+    AppendLine(text, "        versionCode " + Format("{}", android.versionCode_));
+    AppendLine(text, "        versionName " + GroovyString(android.versionName_));
+    AppendLine(text, "        minSdkVersion " + Format("{}", android.minSdk_));
+    AppendLine(text, "        targetSdkVersion " + Format("{}", android.targetSdk_));
+    AppendLine(text, "        ndk {");
+    AppendLine(text, "            // From the profile, because a build for an ABI the engine was not configured");
+    AppendLine(text, "            // for fails in the native step rather than at install time.");
+    AppendLine(text, "            abiFilters " + abis);
+    AppendLine(text, "        }");
+    AppendLine(text, "        externalNativeBuild {");
+    AppendLine(text, "            cmake {");
+    AppendLine(text, "                // Samples and the C++ Player stay off: this apk runs LuaGamePlayer, and a");
+    AppendLine(text, "                // second module exporting the same entry point would be loaded by SDL in an");
+    AppendLine(text, "                // order nobody controls. The editor cannot be cross compiled for a phone.");
+    AppendLine(text, "                arguments '-DANDROID_STL=c++_static', "
+                     "'-DANDROID_PLATFORM=android-" + Format("{}", android.minSdk_) + "', '-DANDROID=1',");
+    AppendLine(text, "                          '-DBUILD_SHARED_LIBS=ON', '-DURHO3D_SAMPLES=OFF', '-DURHO3D_LUA=ON',");
+    AppendLine(text, "                          '-DURHO3D_PLAYER=OFF', '-DURHO3D_EDITOR=OFF',");
+    AppendLine(text, "                          '-DCMAKE_POLICY_VERSION_MINIMUM=3.5'");
+    AppendLine(text, "");
+    AppendLine(text, "                def cmakePrefixPath = System.getenv('CMAKE_PREFIX_PATH')");
+    AppendLine(text, "                if (cmakePrefixPath) {");
+    AppendLine(text, "                    arguments \"-DCMAKE_PREFIX_PATH=${cmakePrefixPath}\"");
+    AppendLine(text, "                }");
+    if (profile.encryptScripts_)
+    {
+        AppendLine(text, "");
+        AppendLine(text, "                // The script content key is read from the environment at build time and is");
+        AppendLine(text, "                // never stored in a generated file. It has to match the variable the");
+        AppendLine(text, "                // pipeline built the .luc containers with, which is the one named in");
+        AppendLine(text, "                // Build.json; without it both ends fall back to the compiled in default,");
+        AppendLine(text, "                // so a release key set for the tools but not for gradle is a loud failure");
+        AppendLine(text, "                // on the device rather than a quiet one in the script.");
+        AppendLine(text, "                def scriptKey = System.getenv(" +
+            GroovyString(profile.scriptKeyEnvVar_) + ")");
+        AppendLine(text, "                if (scriptKey) {");
+        AppendLine(text, "                    arguments \"-DRBFX_LUA_SCRIPT_KEY_HEX=${scriptKey}\"");
+        AppendLine(text, "                }");
+    }
+    AppendLine(text, "            }");
+    AppendLine(text, "        }");
+    AppendLine(text, "    }");
+    AppendLine(text, "    externalNativeBuild {");
+    AppendLine(text, "        cmake {");
+    AppendLine(text, "            version \"${cmakeVersion}\"");
+    AppendLine(text, "            path \"${rbfxSourceDir}/CMakeLists.txt\"");
+    AppendLine(text, "        }");
+    AppendLine(text, "    }");
+    AppendLine(text, "    sourceSets.main {");
+    AppendLine(text, "        manifest.srcFile 'AndroidManifest.xml'");
+    AppendLine(text, "        // The SDL activity this project extends lives in the engine checkout, not here.");
+    AppendLine(text, "        java.srcDirs = ['src', \"${rbfxSourceDir}/Source/ThirdParty/SDL/android-project/app/src/main/java\"]");
+    AppendLine(text, "        res.srcDirs = ['res']");
+    AppendLine(text, "        // Only 'assets': the engine working tree must not leak into the apk, that is what");
+    AppendLine(text, "        // the build pipeline staged and packed for this exact profile.");
+    AppendLine(text, "        assets.srcDirs = ['assets']");
+    AppendLine(text, "    }");
+    AppendLine(text, "    buildTypes {");
+    if (!android.keystoreEnvVar_.empty())
+    {
+        AppendLine(text, "        signingConfigs {");
+        AppendLine(text, "            release {");
+        AppendLine(text, "                // Every secret is read from the environment by name; the naming rule is");
+        AppendLine(text, "                // the variable in Build.json plus a _PASSWORD suffix, so that a keystore");
+        AppendLine(text, "                // never needs a path or a password written into a file.");
+        AppendLine(text, "                def storePath = System.getenv(" + GroovyString(android.keystoreEnvVar_) + ")");
+        AppendLine(text, "                if (storePath) {");
+        AppendLine(text, "                    storeFile file(storePath)");
+        AppendLine(text, "                    storePassword System.getenv(" +
+            GroovyString(android.keystoreEnvVar_ + "_PASSWORD") + ")");
+        AppendLine(text, "                    keyAlias System.getenv(" + GroovyString(android.keystoreAliasEnvVar_) + ")");
+        AppendLine(text, "                    keyPassword System.getenv(" +
+            GroovyString(android.keystoreAliasEnvVar_ + "_PASSWORD") + ")");
+        AppendLine(text, "                }");
+        AppendLine(text, "            }");
+        AppendLine(text, "        }");
+        AppendLine(text, "");
+    }
+    AppendLine(text, "        release {");
+    AppendLine(text, "            // Off, and it should stay off: every engine binding is reached through JNI or");
+    AppendLine(text, "            // from Lua by name, so shrinking the java layer hides methods the native code");
+    AppendLine(text, "            // still calls and the failure only shows up on a device.");
+    AppendLine(text, "            minifyEnabled false");
+    if (!android.keystoreEnvVar_.empty())
+        AppendLine(text, "            signingConfig signingConfigs.release");
+    AppendLine(text, "        }");
+    AppendLine(text, "    }");
+    AppendLine(text, "    compileOptions {");
+    AppendLine(text, "        sourceCompatibility JavaVersion.VERSION_1_8");
+    AppendLine(text, "        targetCompatibility JavaVersion.VERSION_1_8");
+    AppendLine(text, "    }");
+    AppendLine(text, "}");
+    AppendLine(text, "");
+    AppendLine(text, "allprojects {");
+    AppendLine(text, "    repositories {");
+    AppendLine(text, "        google()");
+    AppendLine(text, "        mavenCentral()");
+    AppendLine(text, "    }");
+    AppendLine(text, "}");
+    return text;
+}
+
+ea::string ManifestText(const BuildProfile& profile)
+{
+    ea::string text;
+    AppendLine(text, "<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+    AppendLine(text, "<!-- Generated by the rbfx editor build; the orientation and the label come from Build.json. -->");
+    AppendLine(text, "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"");
+    AppendLine(text, "          android:installLocation=\"auto\">");
+    AppendLine(text, "");
+    AppendLine(text, "    <uses-feature android:glEsVersion=\"0x00020000\"/>");
+    AppendLine(text, "    <uses-permission android:name=\"android.permission.INTERNET\"/>");
+    AppendLine(text, "    <uses-permission android:name=\"android.permission.VIBRATE\"/>");
+    AppendLine(text, "");
+    AppendLine(text, "    <application");
+    AppendLine(text, "        android:label=\"@string/app_name\"");
+    AppendLine(text, "        android:icon=\"@drawable/icon\"");
+    AppendLine(text, "        android:theme=\"@android:style/Theme.NoTitleBar.Fullscreen\"");
+    AppendLine(text, "        android:hardwareAccelerated=\"true\"");
+    AppendLine(text, "        android:largeHeap=\"true\"");
+    AppendLine(text, "        android:allowBackup=\"false\">");
+    AppendLine(text, "        <activity");
+    AppendLine(text, "            android:name=\"io.urho3d.UrhoActivity\"");
+    AppendLine(text, "            android:configChanges=\"keyboardHidden|orientation|screenSize\"");
+    AppendLine(text, "            android:screenOrientation=\"" + ForwardSlashes(profile.android_.orientation_) + "\"");
+    AppendLine(text, "            android:exported=\"true\">");
+    AppendLine(text, "            <intent-filter>");
+    AppendLine(text, "                <action android:name=\"android.intent.action.MAIN\"/>");
+    AppendLine(text, "                <category android:name=\"android.intent.category.LAUNCHER\"/>");
+    AppendLine(text, "            </intent-filter>");
+    AppendLine(text, "        </activity>");
+    AppendLine(text, "    </application>");
+    AppendLine(text, "</manifest>");
+    return text;
+}
+
+ea::string StringsXmlText(const ea::string& appName)
+{
+    ea::string text;
+    AppendLine(text, "<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+    AppendLine(text, "<resources>");
+    AppendLine(text, "    <string name=\"app_name\">" + appName + "</string>");
+    AppendLine(text, "</resources>");
+    return text;
+}
+
+ea::string GradlePropertiesText()
+{
+    ea::string text;
+    AppendLine(text, "# Generated by the rbfx editor build. The SDK location is in local.properties, which is");
+    AppendLine(text, "# machine specific and therefore never written into a source controlled directory.");
+    AppendLine(text, "org.gradle.jvmargs=-Xmx2048m");
+    return text;
+}
+
+/// Write the toolchain locations the current machine knows about. Anything not found is left as a
+/// comment saying what to install, which is more useful than a path that does not exist.
+ea::string LocalPropertiesText()
+{
+    ea::string text;
+    AppendLine(text, "# Generated by the rbfx editor build on this machine. Edit freely, it is not committed.");
+    if (const char* sdk = EnvironmentOrEmpty("ANDROID_HOME"); sdk)
+        AppendLine(text, "sdk.dir=" + PropertyPath(sdk));
+    else if (const char* sdk = EnvironmentOrEmpty("ANDROID_SDK_ROOT"); sdk)
+        AppendLine(text, "sdk.dir=" + PropertyPath(sdk));
+    else
+        AppendLine(text, "# sdk.dir=<Android SDK directory> - ANDROID_HOME was not set when this was generated");
+
+    if (const char* ndk = EnvironmentOrEmpty("NDK_ROOT"); ndk)
+        AppendLine(text, "ndk.dir=" + PropertyPath(ndk));
+    else
+        AppendLine(text, "# ndk.dir=<Android NDK directory> - NDK_ROOT was not set. Recent AGP versions also");
+    if (!EnvironmentOrEmpty("NDK_ROOT"))
+        AppendLine(text, "# accept an ndkVersion and an SDK installed NDK instead of a directory.");
+
+    if (const char* java = EnvironmentOrEmpty("JAVA_HOME"); java)
+        AppendLine(text, "java.home=" + PropertyPath(java));
+    else
+        AppendLine(text, "# java.home=<JDK directory> - JAVA_HOME was not set. Gradle 8 and AGP 8 want a JDK 17.");
+    return text;
+}
+
+ea::string BuildScriptText(const ea::string& profileName)
+{
+    ea::string text;
+    AppendLine(text, "# Generated by the rbfx editor build (profile " + profileName + ").");
+    AppendLine(text, "# Builds the apk this project was packaged for, and installs it when a device is attached.");
+    AppendLine(text, "$ErrorActionPreference = 'Stop'");
+    AppendLine(text, "");
+    AppendLine(text, "$missing = @()");
+    AppendLine(text, "if (-not $env:ANDROID_HOME -and -not $env:ANDROID_SDK_ROOT) {");
+    AppendLine(text, "    $missing += 'ANDROID_HOME or ANDROID_SDK_ROOT (the Android SDK directory)'");
+    AppendLine(text, "}");
+    AppendLine(text, "if (-not $env:JAVA_HOME) {");
+    AppendLine(text, "    $missing += 'JAVA_HOME (a JDK 17 installation)'");
+    AppendLine(text, "}");
+    AppendLine(text, "if (-not (Get-Command gradle -ErrorAction SilentlyContinue)) {");
+    AppendLine(text, "    $missing += 'gradle on PATH, or run: gradle wrapper --gradle-version 8.13'");
+    AppendLine(text, "}");
+    AppendLine(text, "");
+    AppendLine(text, "if ($missing.Count -gt 0) {");
+    AppendLine(text, "    Write-Host 'The Android toolchain is incomplete. Missing:'");
+    AppendLine(text, "    $missing | ForEach-Object { Write-Host \"  - $_\" }");
+    AppendLine(text, "    exit 1");
+    AppendLine(text, "}");
+    AppendLine(text, "");
+    AppendLine(text, "gradle -p $PSScriptRoot assembleDebug");
+    AppendLine(text, "if ($LASTEXITCODE -ne 0) {");
+    AppendLine(text, "    Write-Host 'gradle failed; the native build log is under build/intermediates/cmake.'");
+    AppendLine(text, "    exit $LASTEXITCODE");
+    AppendLine(text, "}");
+    AppendLine(text, "");
+    AppendLine(text, "$apk = Get-ChildItem -Path (Join-Path $PSScriptRoot 'build/outputs/apk') -Filter *.apk -Recurse |");
+    AppendLine(text, "    Select-Object -First 1");
+    AppendLine(text, "if (-not $apk) {");
+    AppendLine(text, "    Write-Host 'gradle reported success but no apk was found under build/outputs/apk.'");
+    AppendLine(text, "    exit 1");
+    AppendLine(text, "}");
+    AppendLine(text, "Write-Host \"Built: $($apk.FullName)\"");
+    AppendLine(text, "");
+    AppendLine(text, "# Installing is optional and only possible with a device in front of this machine.");
+    AppendLine(text, "if (Get-Command adb -ErrorAction SilentlyContinue) {");
+    AppendLine(text, "    $devices = @(adb devices | Select-Object -Skip 1 | Where-Object { $_ -match '\tdevice$' })");
+    AppendLine(text, "    if ($devices.Count -gt 0) {");
+    AppendLine(text, "        adb install -r $apk.FullName");
+    AppendLine(text, "        exit $LASTEXITCODE");
+    AppendLine(text, "    }");
+    AppendLine(text, "    Write-Host 'No device is attached; the apk was built but not installed.'");
+    AppendLine(text, "    exit 0");
+    AppendLine(text, "}");
+    AppendLine(text, "Write-Host 'adb is not on PATH; install the apk with any tool you prefer.'");
+    return text;
+}
+
+} // namespace
+
+bool GenerateAndroidScaffold(Context* context, const BuildProfile& profile, const ea::string& projectPath,
+    const ea::string& outputDir, const ea::string& resourceDir, ea::vector<ea::string>& errors)
+{
+    auto* fs = context->GetSubsystem<FileSystem>();
+
+    if (!profile.IsAndroid())
+    {
+        errors.push_back("The Android project can only be generated for an Android profile.");
+        return false;
+    }
+
+    const ea::string output = NormalizeDir(outputDir);
+    const ea::string projectName = GetFileNameAndExtension(RemoveTrailingSlash(ForwardSlashes(projectPath)));
+
+    // Gradle is going to compile the engine, so the checkout has to be there. Checked before any
+    // file is written, because a half generated project is worse than no project.
+    const ea::string engineCheckout = FindEngineCheckout(fs, profile, errors);
+    if (engineCheckout.empty())
+        return false;
+
+    const ea::string templateDir = engineCheckout + "android/";
+    if (!fs->DirExists(templateDir))
+    {
+        errors.push_back(Format("The engine template directory is missing: '{}'.", templateDir));
+        return false;
+    }
+
+    // The java sources and resources are not generated, they are the engine's own activity and the
+    // icons its manifest points at. Copied first so that anything generated below can overwrite a
+    // copied file, which is how the app name and an optional custom icon take effect.
+    for (const char* directory : TemplateDirectories)
+    {
+        const ea::string source = templateDir + directory;
+        if (!fs->DirExists(source))
+        {
+            errors.push_back(Format("The Android template has no '{}' directory: '{}'.", directory, source));
+            continue;
+        }
+        if (!fs->CopyDir(source, output + directory))
+            errors.push_back(Format("Could not copy '{}' into the generated project.", source));
+    }
+
+    // A profile that names an icon replaces the template one; the manifest refers to it by resource
+    // name, so the file goes into the density independent bucket and every screen finds it.
+    if (!profile.android_.icon_.empty())
+    {
+        const ea::string icon = ForwardSlashes(profile.android_.icon_);
+        if (!fs->FileExists(icon))
+        {
+            errors.push_back(Format("The launcher icon named in the profile does not exist: '{}'.", icon));
+        }
+        else if (!fs->Copy(icon, output + "res/drawable/icon.png"))
+        {
+            errors.push_back(Format("Could not copy the launcher icon '{}'.", icon));
+        }
+    }
+
+    // The packages this project was just built from. Checked rather than trusted: an empty assets
+    // directory produces an apk that installs, starts and then reports that it found no resources.
+    const ea::string dataResource = profile.packData_ ? "Data.pak" : "Data/";
+    const ea::string coreDataResource = profile.packData_ ? "CoreData.pak" : "CoreData/";
+    for (const ea::string& resource : { dataResource, coreDataResource })
+    {
+        const ea::string path = resourceDir + resource;
+        const bool present = resource.back() == '/' ? fs->DirExists(path) : fs->FileExists(path);
+        if (!present)
+            errors.push_back(Format("The generated project would ship without '{}'.", path));
+    }
+
+    ea::string settings;
+    AppendLine(settings, "// Generated by the rbfx editor build.");
+    AppendLine(settings, "rootProject.name = " + GroovyString(projectName));
+
+    bool ok = true;
+    ok &= WriteText(context, output + "settings.gradle", settings, errors);
+    ok &= WriteText(context, output + "build.gradle", BuildGradleText(profile, engineCheckout, projectName), errors);
+    ok &= WriteText(context, output + "AndroidManifest.xml", ManifestText(profile), errors);
+    ok &= WriteText(context, output + "res/values/strings.xml", StringsXmlText(projectName), errors);
+    ok &= WriteText(context, output + "gradle.properties", GradlePropertiesText(), errors);
+    ok &= WriteText(context, output + "local.properties", LocalPropertiesText(), errors);
+    ok &= WriteText(context, output + "build_android.ps1", BuildScriptText(profile.name_), errors);
+
+    // The whole directory is a build product: it contains two copies of the engine's data tree and
+    // is recreated by every build, so nothing in it belongs in version control.
+    ea::string gitIgnore;
+    AppendLine(gitIgnore, "# Generated by the rbfx editor build, including the resource packages. Nothing here is a");
+    AppendLine(gitIgnore, "# source file, and the next build replaces all of it.");
+    AppendLine(gitIgnore, "*");
+
+    ok &= WriteText(context, output + ".gitignore", gitIgnore, errors) && ok;
+
+    if (ok)
+    {
+        URHO3D_LOGINFO("[Build] Android project for '{}' written to {} (engine checkout {}, application id {})",
+            profile.name_, output, engineCheckout, profile.android_.applicationId_);
+        URHO3D_LOGINFO("[Build] Build it with {}build_android.ps1 - gradle is never started by the editor", output);
+    }
+    return ok;
+}
+
+} // namespace Urho3D

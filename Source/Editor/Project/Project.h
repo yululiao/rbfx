@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "../Project/Build/BuildSettings.h"
+#include "../Project/Build/BuildSystem.h"
 #include "../Project/CloseDialog.h"
 #include "../Project/EditorTab.h"
 #include "../Project/LaunchManager.h"
@@ -220,6 +222,8 @@ public:
     PluginManager* GetPluginManager() const { return pluginManager_; }
     LaunchManager* GetLaunchManager() const { return launchManager_; }
     ToolManager* GetToolManager() const { return toolManager_; }
+    BuildSettings* GetBuildSettings() const { return buildSettings_; }
+    BuildSystem* GetBuildSystem() const { return buildSystem_; }
     /// @}
 
     /// Internal
@@ -306,6 +310,8 @@ private:
     SharedPtr<PluginManager> pluginManager_;
     SharedPtr<LaunchManager> launchManager_;
     SharedPtr<ToolManager> toolManager_;
+    SharedPtr<BuildSettings> buildSettings_;
+    SharedPtr<BuildSystem> buildSystem_;
 
     bool assetManagerInitialized_{};
     ea::weak_ptr<void> initializationGuard_;

@@ -329,6 +329,23 @@ void EditorLuaScript::InvokeUICallback(unsigned long long handle)
     }
 }
 
+void EditorLuaScript::InvokeOneShotCallback(unsigned long long handle, VariantMap& eventData)
+{
+    if (!luaState_)
+        return;
+
+    const auto iter = UICallbacks().find(handle);
+    if (iter == UICallbacks().end())
+        return; // Dropped by a reload between the call and the build finishing.
+
+    // Taken out before it runs: a callback that starts another build would otherwise be invoked
+    // again by that build's completion through the same handle, and one that errors out must not
+    // be kept alive by the hope that the next build goes better.
+    sol::protected_function callback = ea::move(iter->second);
+    UICallbacks().erase(iter);
+    InvokeEventCallback(callback, eventData);
+}
+
 void EditorLuaScript::InvokeEventCallback(sol::protected_function& callback, VariantMap& eventData)
 {
     if (!luaState_)
@@ -524,6 +541,68 @@ void EditorLuaScript::RegisterEditorBindings()
         }
         result["nodes"] = nodes;
         result["components"] = components;
+        return result;
+    });
+
+    // Build pipeline. The editor keeps all of its state, so a plugin never holds a piece of a
+    // running build: it asks what can be built, asks for a build, and looks at the status.
+    editor.set_function("buildProfiles", [this](sol::this_state s) -> sol::object
+    {
+        sol::state_view lua(s);
+        sol::table result = lua.create_table();
+        const auto& hooks = GetEditorLuaHooks();
+        if (hooks.getBuildProfiles)
+        {
+            const ea::vector<ea::string> names = hooks.getBuildProfiles();
+            for (size_t i = 0; i < names.size(); ++i)
+                result[static_cast<int>(i) + 1] = std::string(names[i].c_str());
+        }
+        return result;
+    });
+
+    // Starting a build is asynchronous: the call answers whether it was accepted, and the outcome
+    // arrives later either through the optional callback (as the same EventData table the
+    // "buildFinished" event carries) or through that event alone. A plugin that builds several
+    // profiles in sequence chains them from the callback, which is why the callback is one-shot.
+    editor.set_function("build", [this](const std::string& profile,
+        sol::optional<sol::protected_function> callback) -> bool
+    {
+        if (callback && !callback->valid())
+        {
+            URHO3D_LOGERROR("Editor.build expects a Lua function as the completion callback");
+            return false;
+        }
+        const auto& hooks = GetEditorLuaHooks();
+        if (!hooks.buildProfile)
+            return false;
+
+        const unsigned long long handle = callback ? RegisterUICallback(std::move(*callback)) : 0ull;
+        if (!hooks.buildProfile(ea::string(profile.c_str()), handle))
+        {
+            // The build was refused before it ran, so nothing will ever echo the handle back.
+            UICallbacks().erase(handle);
+            return false;
+        }
+        return true;
+    });
+
+    editor.set_function("buildStatus", [this](sol::this_state s) -> sol::object
+    {
+        sol::state_view lua(s);
+        sol::table result = lua.create_table();
+
+        const auto& hooks = GetEditorLuaHooks();
+        const EditorBuildStatus status = hooks.getBuildStatus ? hooks.getBuildStatus() : EditorBuildStatus();
+        result["building"] = status.building;
+        result["progress"] = status.progress;
+        result["stage"] = std::string(status.stage.c_str());
+        result["profile"] = std::string(status.profile.c_str());
+        result["outputDir"] = std::string(status.outputDir.c_str());
+
+        sol::table errors = lua.create_table();
+        for (size_t i = 0; i < status.errors.size(); ++i)
+            errors[static_cast<int>(i) + 1] = std::string(status.errors[i].c_str());
+        result["errors"] = errors;
         return result;
     });
 

@@ -74,6 +74,11 @@ public:
     /// ignored so a plugin that was removed across a reload cannot crash the editor.
     void InvokeUICallback(unsigned long long handle);
 
+    /// Invoke a one-shot callback registered by Editor.build with the parameters of the event that
+    /// ended the build, then forget the handle. Unlike a tab or a menu item the registration has no
+    /// meaning after the one call, and the editor is the only party that knows when that is.
+    void InvokeOneShotCallback(unsigned long long handle, VariantMap& eventData);
+
 private:
     /// Store a Lua UI callback and return an opaque handle the editor uses to invoke it.
     unsigned long long RegisterUICallback(sol::protected_function callback);

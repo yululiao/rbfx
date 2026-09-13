@@ -19,6 +19,25 @@ class Node;
 class Component;
 class Scene;
 
+/// Snapshot of the build pipeline, spelled out here because the DLL may not include the editor
+/// headers. Fields are empty or false before the first build of the session has run.
+struct EditorBuildStatus
+{
+    /// Whether a build is walking its plan right now.
+    bool building = false;
+    /// Fraction of the plan of the current (or last) build, in [0, 1].
+    float progress = 0.0f;
+    /// Stage being executed, or the last one finished.
+    ea::string stage;
+    /// Profile of the current (or last) build.
+    ea::string profile;
+    /// Directory that build writes into, absolute with a trailing slash.
+    ea::string outputDir;
+    /// Problems found, kept after the build ends so a plugin can report them without having been
+    /// subscribed when the failure happened.
+    ea::vector<ea::string> errors;
+};
+
 /// Editor capabilities that the DLL-side "Editor" Lua API forwards to. All sol3/Lua code
 /// lives inside RbfxLuaScript (single Lua VM, single sol3 instance); the editor cannot be
 /// referenced from here (it would invert the EditorLibrary -> RbfxLuaScript dependency), so
@@ -77,6 +96,24 @@ struct EditorLuaHooks
     ea::function<Node*()> getActiveNode;
     /// Append every selected node/component to the outputs (leaving existing contents intact).
     ea::function<void(ea::vector<Node*>& outNodes, ea::vector<Component*>& outComponents)> getSelected;
+
+    // Build pipeline. The editor owns BuildSettings/BuildSystem; the DLL only ever sees profile
+    // names and the plain status struct below, so no editor type crosses the boundary and the
+    // values stay allocator-safe. Completion is announced twice on purpose: through the optional
+    // one-shot callback of buildProfile (per invocation) and through the engine event
+    // "buildFinished" (for whoever is interested), which is what lets a plugin that only observes
+    // a build stay completely unaware of who started it.
+
+    /// Names of the build profiles of the open project, in the order the editor shows them. Empty
+    /// when no project is open.
+    ea::function<ea::vector<ea::string>()> getBuildProfiles;
+    /// Start a build of the named profile. Returns false when the profile does not exist, when no
+    /// project is open or when a build is already running; the reason is in the log either way.
+    /// 'handle' identifies the Lua callback to invoke once when the build reports back, or is zero
+    /// to leave the event as the only notification.
+    ea::function<bool(const ea::string& profile, unsigned long long handle)> buildProfile;
+    /// State of the build pipeline of the open project, idle when there is none.
+    ea::function<EditorBuildStatus()> getBuildStatus;
 };
 
 /// Install the editor hooks. Called once by the editor during startup, before any plugin

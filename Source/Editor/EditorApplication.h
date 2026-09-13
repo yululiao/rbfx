@@ -54,6 +54,10 @@ protected:
     void OnConsoleUriClick(VariantMap& args);
     void OpenProfilerApplication();
 
+    /// Run the batch build asked for by --build against the project that has just been opened, and
+    /// take the process down with the result once the build reports back.
+    void StartCommandLineBuild();
+
     void OpenOrCreateProject();
 
     /// Native file picker for resource-reference attributes. Opens the OS dialog inside the
@@ -101,6 +105,11 @@ protected:
     ea::string command_;
     /// Whether to exit the editor after executing the command.
     bool exitAfterCommand_{};
+    /// Profile named by --build. Non empty turns the run into a batch build: the process owns its
+    /// own lifetime from then on and closes itself with the result of the build as exit code.
+    ea::string buildProfile_;
+    /// Directory named by --build-output-override, replacing the output directory of the profile.
+    ea::string buildOutputOverride_;
 
     /// UI state
     /// @{

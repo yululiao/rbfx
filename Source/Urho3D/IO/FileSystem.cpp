@@ -502,8 +502,9 @@ public:
 private:
     /// File to run.
     ea::string fileName_;
-    /// Command line split in arguments.
-    const ea::vector<ea::string>& arguments_;
+    /// Command line split in arguments. Held by value: the thread is started before the caller of
+    /// SystemRunAsync() returns, so a reference would dangle as soon as the caller's vector dies.
+    ea::vector<ea::string> arguments_;
 };
 
 FileSystem::FileSystem(Context* context) :

@@ -64,11 +64,6 @@ public class UrhoActivity extends SDLActivity {
                 // Static builds would not contain this library.
                 libraryNames.add(0, libraryNames.remove(index));
             }
-            index = libraryNames.indexOf("Player");
-            if (index >= 0) {
-                // Static builds would not contain this library.
-                libraryNames.add(libraryNames.size() - 1, libraryNames.remove(index));
-            }
             index = libraryNames.indexOf("c++_shared");
             if (index >= 0) {
                 // Static builds would not contain this library.
@@ -78,6 +73,18 @@ public class UrhoActivity extends SDLActivity {
             if (index >= 0) {
                 // Non-XR builds would not contain this library.
                 libraryNames.add(0, libraryNames.remove(index));
+            }
+            // SDL loads these in list order, so the hosts have to come last and the script binding
+            // has to be resident before whichever of them runs. The index is the size before the
+            // removal because Java evaluates arguments left to right, which makes it the last valid
+            // position afterwards - i.e. an append. The order below is the desired tail order:
+            // binding, then the C++ player, then the Lua game host.
+            for (final String host : new String[] { "RbfxLuaScript", "Player", "LuaGamePlayer" }) {
+                index = libraryNames.indexOf(host);
+                if (index >= 0) {
+                    // A build without Lua would not contain the binding nor the game host.
+                    libraryNames.add(libraryNames.size() - 1, libraryNames.remove(index));
+                }
             }
             return libraryNames;
         }

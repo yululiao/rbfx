@@ -1,0 +1,22 @@
+{
+	"Profiles": [
+		{
+			"Android": {},
+			"EngineBin": "D:/GameEngines/rbfx/msvc/bin/Release",
+			"EngineData": "D:/GameEngines/rbfx/bin",
+			"Name": "Windows",
+			"OutputDir": "Build/Windows",
+			"Platform": "WindowsDesktop"
+		},
+		{
+			"Android": {
+				"ApplicationId": "com.example.emptytest"
+			},
+			"EngineBin": "D:/GameEngines/rbfx/msvc/bin/Debug",
+			"EngineData": "D:/GameEngines/rbfx/bin",
+			"Name": "Android",
+			"OutputDir": "Build/Android",
+			"Platform": "Android"
+		}
+	]
+}

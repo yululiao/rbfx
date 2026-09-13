@@ -1,0 +1,800 @@
+<?xml version="1.0"?>
+<resource _id="1">
+	<attributes>
+		<attribute name="Next Node ID" type="Int" value="75" />
+		<attribute name="Next Component ID" type="Int" value="17" />
+	</attributes>
+	<components>
+		<component _id="1" _typeName="Octree" />
+		<component _id="2" _typeName="LuaGameScript">
+			<attributes>
+				<attribute name="Script Path" type="String" value="Scripts/main.lua" />
+			</attributes>
+		</component>
+		<component _id="3" _typeName="RenderPipeline">
+			<attributes>
+				<attribute name="Render Passes" type="VariantVector">
+					<value>
+						<element type="String" value="Postprocess: Exposure" />
+						<element type="Bool" value="true" />
+						<element type="String" value="Postprocess: SSAO" />
+						<element type="Bool" value="false" />
+						<element type="String" value="Postprocess: Bloom" />
+						<element type="Bool" value="false" />
+						<element type="String" value="Postprocess: Draw Outlines" />
+						<element type="Bool" value="true" />
+						<element type="String" value="Postprocess: Tone Mapping" />
+						<element type="Bool" value="true" />
+						<element type="String" value="Postprocess: Adjust Color" />
+						<element type="Bool" value="true" />
+						<element type="String" value="Postprocess: FXAA v2" />
+						<element type="Bool" value="false" />
+						<element type="String" value="Postprocess: FXAA v3" />
+						<element type="Bool" value="true" />
+						<element type="String" value="Postprocess: Chromatic Aberration" />
+						<element type="Bool" value="false" />
+						<element type="String" value="Postprocess: Vignette" />
+						<element type="Bool" value="false" />
+					</value>
+				</attribute>
+				<attribute name="Render Path Parameters" type="StringVariantMap">
+					<value>
+						<element key="Vignette: Radius" type="Float" value="0.500000" />
+						<element key="Adjust Color: ColorOffset" type="Vector4" value="0 0 0 0" />
+						<element key="Exposure: Max" type="Float" value="3.000000" />
+						<element key="Vignette: Intensity" type="Float" value="0.400000" />
+						<element key="SSAO: Far Distance" type="Float" value="100.000000" />
+						<element key="SSAO: Near Distance" type="Float" value="1.000000" />
+						<element key="Bloom: Base Intensity" type="Float" value="1.000000" />
+						<element key="SSAO: Begin Fade Distance" type="Float" value="100.000000" />
+						<element key="Adjust Color: HSVParams" type="Vector4" value="1 1 1 1" />
+						<element key="Bloom: Num Iterations" type="Int" value="5" />
+						<element key="Bloom: Min Brightness" type="Float" value="0.800000" />
+						<element key="SSAO: Strength" type="Float" value="0.700000" />
+						<element key="SSAO: Exponent" type="Float" value="1.500000" />
+						<element key="Chromatic Aberration: Amount" type="Float" value="0.400000" />
+						<element key="SSAO: Downscale" type="Int" value="0" />
+						<element key="Bloom: Max Brightness" type="Float" value="1.000000" />
+						<element key="Tone Mapping: Mode" type="Int" value="0" />
+						<element key="Exposure: Automatic" type="Bool" value="false" />
+						<element key="Tone Mapping: Mode@" type="StringVector">
+							<value>
+								<element value="None" />
+								<element value="Reinhard" />
+								<element value="ReinhardWhite" />
+								<element value="Uncharted2" />
+							</value>
+						</element>
+						<element key="Exposure: Adapt Rate" type="Float" value="0.600000" />
+						<element key="SSAO: Normal Threshold" type="Float" value="0.200000" />
+						<element key="Exposure: Min" type="Float" value="1.000000" />
+						<element key="SSAO: Depth Threshold" type="Float" value="0.100000" />
+						<element key="SSAO: Far Radius" type="Float" value="1.000000" />
+						<element key="Bloom: Iteration Intensity Factor" type="Float" value="1.000000" />
+						<element key="FXAA: FXAAParams" type="Vector3" value="0.4 0.5 0.75" />
+						<element key="SSAO: End Fade Distance" type="Float" value="200.000000" />
+						<element key="Adjust Color: ColorFilter" type="Vector4" value="1 1 1 1" />
+						<element key="SSAO: Near Radius" type="Float" value="0.050000" />
+						<element key="Vignette: Color" type="Color" value="0 0 0 0.4" />
+					</value>
+				</attribute>
+				<attribute name="Frame Shader Parameters" type="StringVariantMap">
+					<value />
+				</attribute>
+				<attribute name="Color Space" type="String" value="HDR Linear" />
+				<attribute name="PCF Kernel Size" type="Int" value="5" />
+			</attributes>
+		</component>
+		<component _id="12" _typeName="ReflectionProbeManager" />
+	</components>
+	<nodes>
+		<node _id="2">
+			<attributes>
+				<attribute name="Name" type="String" value="Skybox" />
+			</attributes>
+			<components>
+				<component _id="4" _typeName="Skybox">
+					<attributes>
+						<attribute name="Model" type="ResourceRef" value="Model;Models/Box.mdl" />
+						<attribute name="Material" type="ResourceRefList" value="Material;Materials/DefaultSkybox.xml" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+		<node _id="3">
+			<attributes>
+				<attribute name="Name" type="String" value="Global Zone" />
+			</attributes>
+			<components>
+				<component _id="5" _typeName="Zone">
+					<attributes>
+						<attribute name="Bounding Box Min" type="Vector3" value="-1000 -1000 -1000" />
+						<attribute name="Bounding Box Max" type="Vector3" value="1000 1000 1000" />
+						<attribute name="Ambient Color" type="Color" value="0 0 0 1" />
+						<attribute name="Background Brightness" type="Float" value="0.500000" />
+						<attribute name="Zone Texture" type="ResourceRef" value="TextureCube;Textures/DefaultSkybox.xml" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+		<node _id="4">
+			<attributes>
+				<attribute name="Name" type="String" value="Global Light" />
+				<attribute name="Rotation" type="Quaternion" value="0.888074 0.325058 0.325058 -0" />
+			</attributes>
+			<components>
+				<component _id="6" _typeName="Light">
+					<attributes>
+						<attribute name="Light Type" type="String" value="Directional" />
+						<attribute name="Brightness Multiplier" type="Float" value="0.500000" />
+						<attribute name="Cast Shadows" type="Bool" value="true" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+		<node _id="6">
+			<attributes>
+				<attribute name="Name" type="String" value="Ground Plane" />
+				<attribute name="Scale" type="Vector3" value="7 7 7" />
+			</attributes>
+			<components>
+				<component _id="8" _typeName="StaticModel">
+					<attributes>
+						<attribute name="Model" type="ResourceRef" value="Model;Models/Plane.mdl" />
+						<attribute name="Material" type="ResourceRefList" value="Material;Materials/DefaultGrey.xml" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+		<node _id="9" />
+		<node _id="10">
+			<attributes>
+				<attribute name="Name" type="String" value="Kachujin" />
+				<attribute name="Position" type="Vector3" value="0 9.53674e-07 0" />
+			</attributes>
+			<components>
+				<component _id="16" _typeName="AnimatedModel">
+					<attributes>
+						<attribute name="Model" type="ResourceRef" value="Model;Models/Kachujin/Kachujin.mdl" />
+						<attribute name="Material" type="ResourceRefList" value="Material;Models/Kachujin/Materials/Kachujin.xml" />
+						<attribute name="Cast Shadows" type="Bool" value="true" />
+						<attribute name="Bone Animation Enabled" type="VariantVector">
+							<value>
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+							</value>
+						</attribute>
+					</attributes>
+				</component>
+			</components>
+			<nodes>
+				<node _id="74">
+					<attributes>
+						<attribute name="Name" type="String" value="Hips" />
+						<attribute name="Position" type="Vector3" value="-0.000421 1.140532 0.003112" />
+						<attribute name="Rotation" type="Quaternion" value="4.37114e-08 -2.59399e-15 -1 -1.2206e-07" />
+					</attributes>
+					<nodes>
+						<node _id="63">
+							<attributes>
+								<attribute name="Name" type="String" value="Spine" />
+								<attribute name="Position" type="Vector3" value="-5.66981e-05 0.108958 0.012786" />
+								<attribute name="Rotation" type="Quaternion" value="0.998295 0.058376 1.51879e-05 0.00026" />
+							</attributes>
+							<nodes>
+								<node _id="62">
+									<attributes>
+										<attribute name="Name" type="String" value="Spine1" />
+										<attribute name="Position" type="Vector3" value="2.12311e-11 0.12799 -4.33839e-08" />
+										<attribute name="Rotation" type="Quaternion" value="1 2.79397e-08 -6.55958e-11 1.22192e-10" />
+									</attributes>
+									<nodes>
+										<node _id="61">
+											<attributes>
+												<attribute name="Name" type="String" value="Spine2" />
+												<attribute name="Position" type="Vector3" value="2.2287e-11 0.146274 -2.00289e-08" />
+												<attribute name="Rotation" type="Quaternion" value="1 -3.53903e-08 -5.19039e-11 -2.44707e-10" />
+											</attributes>
+											<nodes>
+												<node _id="12">
+													<attributes>
+														<attribute name="Name" type="String" value="Neck" />
+														<attribute name="Position" type="Vector3" value="2.81599e-09 0.164557 5.26157e-07" />
+														<attribute name="Rotation" type="Quaternion" value="0.998295 -0.058376 -1.51879e-05 -0.00026" />
+													</attributes>
+													<nodes>
+														<node _id="11">
+															<attributes>
+																<attribute name="Name" type="String" value="Head" />
+																<attribute name="Position" type="Vector3" value="-5.98457e-11 0.074726 -0.018977" />
+																<attribute name="Rotation" type="Quaternion" value="1 -4.24838e-08 4.16674e-11 -8.0086e-11" />
+															</attributes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="36">
+													<attributes>
+														<attribute name="Name" type="String" value="LeftShoulder" />
+														<attribute name="Position" type="Vector3" value="0.055577 0.139031 0.003082" />
+														<attribute name="Rotation" type="Quaternion" value="0.426403 -0.548619 -0.436902 -0.571239" />
+													</attributes>
+													<nodes>
+														<node _id="35">
+															<attributes>
+																<attribute name="Name" type="String" value="LeftArm" />
+																<attribute name="Position" type="Vector3" value="-8.64267e-07 0.122476 -1.20327e-06" />
+																<attribute name="Rotation" type="Quaternion" value="0.983252 0.122243 -0.130405 -0.035583" />
+															</attributes>
+															<nodes>
+																<node _id="34">
+																	<attributes>
+																		<attribute name="Name" type="String" value="LeftForeArm" />
+																		<attribute name="Position" type="Vector3" value="0.001221 0.29224 0.0097" />
+																		<attribute name="Rotation" type="Quaternion" value="0.999819 0.010345 0.013201 0.009031" />
+																	</attributes>
+																	<nodes>
+																		<node _id="33">
+																			<attributes>
+																				<attribute name="Name" type="String" value="LeftHand" />
+																				<attribute name="Position" type="Vector3" value="-0.015122 0.296263 0.000279" />
+																				<attribute name="Rotation" type="Quaternion" value="0.995476 0.004523 -0.092562 0.020956" />
+																			</attributes>
+																			<nodes>
+																				<node _id="16">
+																					<attributes>
+																						<attribute name="Name" type="String" value="LeftHandThumb1" />
+																						<attribute name="Position" type="Vector3" value="-0.040544 0.06088 -0.029996" />
+																						<attribute name="Rotation" type="Quaternion" value="0.160822 0.947605 0.263637 -0.081708" />
+																						<attribute name="Scale" type="Vector3" value="0.999999 1 1" />
+																					</attributes>
+																					<nodes>
+																						<node _id="15">
+																							<attributes>
+																								<attribute name="Name" type="String" value="LeftHandThumb2" />
+																								<attribute name="Position" type="Vector3" value="-0.001085 -0.023341 0.001126" />
+																								<attribute name="Rotation" type="Quaternion" value="0.99874 -0.019189 0.007784 -0.045722" />
+																							</attributes>
+																							<nodes>
+																								<node _id="14">
+																									<attributes>
+																										<attribute name="Name" type="String" value="LeftHandThumb3" />
+																										<attribute name="Position" type="Vector3" value="0.000711 -0.015929 0.000154" />
+																										<attribute name="Rotation" type="Quaternion" value="0.999407 -0.016497 8.14472e-05 0.030218" />
+																									</attributes>
+																									<nodes>
+																										<node _id="13">
+																											<attributes>
+																												<attribute name="Name" type="String" value="LeftHandThumb4" />
+																												<attribute name="Position" type="Vector3" value="-0.000404 -0.025464 -0.00059" />
+																												<attribute name="Rotation" type="Quaternion" value="0.78194 -0.096318 0.592099 0.169446" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="20">
+																					<attributes>
+																						<attribute name="Name" type="String" value="LeftHandIndex1" />
+																						<attribute name="Position" type="Vector3" value="-0.029382 0.13218 0.005243" />
+																						<attribute name="Rotation" type="Quaternion" value="0.002756 -0.984848 0.00753 -0.173236" />
+																						<attribute name="Scale" type="Vector3" value="1.000131 1 1.000044" />
+																					</attributes>
+																					<nodes>
+																						<node _id="19">
+																							<attributes>
+																								<attribute name="Name" type="String" value="LeftHandIndex2" />
+																								<attribute name="Position" type="Vector3" value="-0.000551 -0.021968 4.60034e-05" />
+																								<attribute name="Rotation" type="Quaternion" value="0.999459 0.012595 -0.027006 0.013914" />
+																							</attributes>
+																							<nodes>
+																								<node _id="18">
+																									<attributes>
+																										<attribute name="Name" type="String" value="LeftHandIndex3" />
+																										<attribute name="Position" type="Vector3" value="-0.000788 -0.015067 0.000443" />
+																										<attribute name="Rotation" type="Quaternion" value="0.999658 0.00527 0.003262 -0.025401" />
+																									</attributes>
+																									<nodes>
+																										<node _id="17">
+																											<attributes>
+																												<attribute name="Name" type="String" value="LeftHandIndex4" />
+																												<attribute name="Position" type="Vector3" value="0.000927 -0.016304 0.000188" />
+																												<attribute name="Rotation" type="Quaternion" value="0.038449 0.983746 0.148098 0.093979" />
+																												<attribute name="Scale" type="Vector3" value="0.999998 1 1" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="24">
+																					<attributes>
+																						<attribute name="Name" type="String" value="LeftHandMiddle1" />
+																						<attribute name="Position" type="Vector3" value="-0.001185 0.130973 -0.000335" />
+																						<attribute name="Rotation" type="Quaternion" value="0.000431 -0.999495 -0.011707 -0.02953" />
+																						<attribute name="Scale" type="Vector3" value="1.000097 1 1" />
+																					</attributes>
+																					<nodes>
+																						<node _id="23">
+																							<attributes>
+																								<attribute name="Name" type="String" value="LeftHandMiddle2" />
+																								<attribute name="Position" type="Vector3" value="0.000322 -0.022841 8.17657e-05" />
+																								<attribute name="Rotation" type="Quaternion" value="0.999134 -0.000942 -0.033283 0.024961" />
+																							</attributes>
+																							<nodes>
+																								<node _id="22">
+																									<attributes>
+																										<attribute name="Name" type="String" value="LeftHandMiddle3" />
+																										<attribute name="Position" type="Vector3" value="-0.000847 -0.023867 5.79341e-05" />
+																										<attribute name="Rotation" type="Quaternion" value="0.999865 0.016044 -0.001255 -0.003209" />
+																									</attributes>
+																									<nodes>
+																										<node _id="21">
+																											<attributes>
+																												<attribute name="Name" type="String" value="LeftHandMiddle4" />
+																												<attribute name="Position" type="Vector3" value="-0.00051 -0.017491 0.000604" />
+																												<attribute name="Rotation" type="Quaternion" value="0.723506 -0.00854 0.688348 0.051405" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="28">
+																					<attributes>
+																						<attribute name="Name" type="String" value="LeftHandRing1" />
+																						<attribute name="Position" type="Vector3" value="0.024993 0.122373 -0.009073" />
+																						<attribute name="Rotation" type="Quaternion" value="0.003359 -0.993403 0.001674 0.114616" />
+																						<attribute name="Scale" type="Vector3" value="1.000809 1 1.001913" />
+																					</attributes>
+																					<nodes>
+																						<node _id="27">
+																							<attributes>
+																								<attribute name="Name" type="String" value="LeftHandRing2" />
+																								<attribute name="Position" type="Vector3" value="-0.000234 -0.021661 0.00025" />
+																								<attribute name="Rotation" type="Quaternion" value="0.999823 -0.003456 -0.0145 -0.011509" />
+																							</attributes>
+																							<nodes>
+																								<node _id="26">
+																									<attributes>
+																										<attribute name="Name" type="String" value="LeftHandRing3" />
+																										<attribute name="Position" type="Vector3" value="0.000234 -0.01876 8.89888e-05" />
+																										<attribute name="Rotation" type="Quaternion" value="0.999807 -0.004506 0.018167 0.005882" />
+																									</attributes>
+																									<nodes>
+																										<node _id="25">
+																											<attributes>
+																												<attribute name="Name" type="String" value="LeftHandRing4" />
+																												<attribute name="Position" type="Vector3" value="0.000273 -0.022392 -0.000476" />
+																												<attribute name="Rotation" type="Quaternion" value="0.624993 -0.009211 0.780513 0.009887" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="32">
+																					<attributes>
+																						<attribute name="Name" type="String" value="LeftHandPinky1" />
+																						<attribute name="Position" type="Vector3" value="0.046267 0.1095 -0.017871" />
+																						<attribute name="Rotation" type="Quaternion" value="0.01798 0.972664 0.009033 -0.231345" />
+																						<attribute name="Scale" type="Vector3" value="1.00005 1 1.000106" />
+																					</attributes>
+																					<nodes>
+																						<node _id="31">
+																							<attributes>
+																								<attribute name="Name" type="String" value="LeftHandPinky2" />
+																								<attribute name="Position" type="Vector3" value="-2.23641e-05 -0.015626 -0.000528" />
+																								<attribute name="Rotation" type="Quaternion" value="0.996306 0.018709 0.083662 0.004958" />
+																							</attributes>
+																							<nodes>
+																								<node _id="30">
+																									<attributes>
+																										<attribute name="Name" type="String" value="LeftHandPinky3" />
+																										<attribute name="Position" type="Vector3" value="-0.000113 -0.012784 3.92322e-05" />
+																										<attribute name="Rotation" type="Quaternion" value="0.997565 -0.013154 -0.06849 0.000108" />
+																									</attributes>
+																									<nodes>
+																										<node _id="29">
+																											<attributes>
+																												<attribute name="Name" type="String" value="LeftHandPinky4" />
+																												<attribute name="Position" type="Vector3" value="-0.000637 -0.017349 -0.000248" />
+																												<attribute name="Rotation" type="Quaternion" value="0.51801 0.11823 0.847141 0.006202" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="60">
+													<attributes>
+														<attribute name="Name" type="String" value="RightShoulder" />
+														<attribute name="Position" type="Vector3" value="-0.056499 0.139089 0.003076" />
+														<attribute name="Rotation" type="Quaternion" value="0.426403 -0.54862 0.436902 0.571239" />
+													</attributes>
+													<nodes>
+														<node _id="59">
+															<attributes>
+																<attribute name="Name" type="String" value="RightArm" />
+																<attribute name="Position" type="Vector3" value="1.70693e-05 0.122474 0.000127" />
+																<attribute name="Rotation" type="Quaternion" value="0.983253 0.122242 0.130404 0.035584" />
+															</attributes>
+															<nodes>
+																<node _id="58">
+																	<attributes>
+																		<attribute name="Name" type="String" value="RightForeArm" />
+																		<attribute name="Position" type="Vector3" value="-0.001265 0.29223 0.01" />
+																		<attribute name="Rotation" type="Quaternion" value="0.999817 0.010357 -0.013343 -0.009032" />
+																	</attributes>
+																	<nodes>
+																		<node _id="57">
+																			<attributes>
+																				<attribute name="Name" type="String" value="RightHand" />
+																				<attribute name="Position" type="Vector3" value="0.015087 0.296264 0.000575" />
+																				<attribute name="Rotation" type="Quaternion" value="0.995476 0.004508 0.092605 -0.020789" />
+																			</attributes>
+																			<nodes>
+																				<node _id="40">
+																					<attributes>
+																						<attribute name="Name" type="String" value="RightHandIndex1" />
+																						<attribute name="Position" type="Vector3" value="0.029387 0.132174 0.005375" />
+																						<attribute name="Rotation" type="Quaternion" value="0.042247 -0.976996 -0.116594 0.173494" />
+																						<attribute name="Scale" type="Vector3" value="1.00111 1 1.000376" />
+																					</attributes>
+																					<nodes>
+																						<node _id="39">
+																							<attributes>
+																								<attribute name="Name" type="String" value="RightHandIndex2" />
+																								<attribute name="Position" type="Vector3" value="0.000545 -0.021967 2.81943e-05" />
+																								<attribute name="Rotation" type="Quaternion" value="0.999459 0.012632 0.026996 -0.013901" />
+																							</attributes>
+																							<nodes>
+																								<node _id="38">
+																									<attributes>
+																										<attribute name="Name" type="String" value="RightHandIndex3" />
+																										<attribute name="Position" type="Vector3" value="0.00078 -0.015068 0.00043" />
+																										<attribute name="Rotation" type="Quaternion" value="0.999659 0.005238 -0.003282 0.025377" />
+																									</attributes>
+																									<nodes>
+																										<node _id="37">
+																											<attributes>
+																												<attribute name="Name" type="String" value="RightHandIndex4" />
+																												<attribute name="Position" type="Vector3" value="-0.000932 -0.016303 0.000172" />
+																												<attribute name="Rotation" type="Quaternion" value="0.038358 0.983808 -0.147947 -0.093606" />
+																												<attribute name="Scale" type="Vector3" value="1.000002 1 1" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="44">
+																					<attributes>
+																						<attribute name="Name" type="String" value="RightHandThumb1" />
+																						<attribute name="Position" type="Vector3" value="0.040541 0.06091 -0.02994" />
+																						<attribute name="Rotation" type="Quaternion" value="0.160762 0.947573 -0.26376 0.081807" />
+																					</attributes>
+																					<nodes>
+																						<node _id="43">
+																							<attributes>
+																								<attribute name="Name" type="String" value="RightHandThumb2" />
+																								<attribute name="Position" type="Vector3" value="0.001078 -0.023342 0.001112" />
+																								<attribute name="Rotation" type="Quaternion" value="0.998737 -0.019275 -0.007881 0.045733" />
+																							</attributes>
+																							<nodes>
+																								<node _id="42">
+																									<attributes>
+																										<attribute name="Name" type="String" value="RightHandThumb3" />
+																										<attribute name="Position" type="Vector3" value="-0.000716 -0.015928 0.000143" />
+																										<attribute name="Rotation" type="Quaternion" value="0.999405 -0.016562 -0.000203 -0.030247" />
+																									</attributes>
+																									<nodes>
+																										<node _id="41">
+																											<attributes>
+																												<attribute name="Name" type="String" value="RightHandThumb4" />
+																												<attribute name="Position" type="Vector3" value="0.000397 -0.025464 -0.000614" />
+																												<attribute name="Rotation" type="Quaternion" value="0.781942 -0.096316 -0.592096 -0.169448" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="48">
+																					<attributes>
+																						<attribute name="Name" type="String" value="RightHandMiddle1" />
+																						<attribute name="Position" type="Vector3" value="0.001188 0.130973 -0.0002" />
+																						<attribute name="Rotation" type="Quaternion" value="0.000446 -0.999494 0.01173 0.029562" />
+																						<attribute name="Scale" type="Vector3" value="1.000403 1 1" />
+																					</attributes>
+																					<nodes>
+																						<node _id="47">
+																							<attributes>
+																								<attribute name="Name" type="String" value="RightHandMiddle2" />
+																								<attribute name="Position" type="Vector3" value="-0.000323 -0.022842 5.81276e-05" />
+																								<attribute name="Rotation" type="Quaternion" value="0.999135 -0.000952 0.033288 -0.024923" />
+																							</attributes>
+																							<nodes>
+																								<node _id="46">
+																									<attributes>
+																										<attribute name="Name" type="String" value="RightHandMiddle3" />
+																										<attribute name="Position" type="Vector3" value="0.000846 -0.023867 3.42542e-05" />
+																										<attribute name="Rotation" type="Quaternion" value="0.994643 0.103262 0.004347 0.001718" />
+																									</attributes>
+																									<nodes>
+																										<node _id="45">
+																											<attributes>
+																												<attribute name="Name" type="String" value="RightHandMiddle4" />
+																												<attribute name="Position" type="Vector3" value="0.000737 -0.023113 0.004891" />
+																												<attribute name="Rotation" type="Quaternion" value="0.723503 -0.008535 -0.688353 -0.05139" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="52">
+																					<attributes>
+																						<attribute name="Name" type="String" value="RightHandRing1" />
+																						<attribute name="Position" type="Vector3" value="-0.024991 0.122383 -0.008942" />
+																						<attribute name="Rotation" type="Quaternion" value="0.063985 -0.956732 0.262187 -0.108757" />
+																						<attribute name="Scale" type="Vector3" value="0.998782 1 0.997114" />
+																					</attributes>
+																					<nodes>
+																						<node _id="51">
+																							<attributes>
+																								<attribute name="Name" type="String" value="RightHandRing2" />
+																								<attribute name="Position" type="Vector3" value="0.00024 -0.021661 0.00023" />
+																								<attribute name="Rotation" type="Quaternion" value="0.999822 -0.00339 0.014548 0.011529" />
+																							</attributes>
+																							<nodes>
+																								<node _id="50">
+																									<attributes>
+																										<attribute name="Name" type="String" value="RightHandRing3" />
+																										<attribute name="Position" type="Vector3" value="-0.000229 -0.018761 6.93207e-05" />
+																										<attribute name="Rotation" type="Quaternion" value="0.994684 0.097158 -0.018746 0.028489" />
+																									</attributes>
+																									<nodes>
+																										<node _id="49">
+																											<attributes>
+																												<attribute name="Name" type="String" value="RightHandRing4" />
+																												<attribute name="Position" type="Vector3" value="-0.001359 -0.02045 0.004151" />
+																												<attribute name="Rotation" type="Quaternion" value="0.625015 -0.009277 -0.780496 -0.009842" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																				<node _id="56">
+																					<attributes>
+																						<attribute name="Name" type="String" value="RightHandPinky1" />
+																						<attribute name="Position" type="Vector3" value="-0.046268 0.109519 -0.01775" />
+																						<attribute name="Rotation" type="Quaternion" value="0.018457 0.972708 -0.008048 0.231159" />
+																						<attribute name="Scale" type="Vector3" value="1.000023 1 1.000048" />
+																					</attributes>
+																					<nodes>
+																						<node _id="55">
+																							<attributes>
+																								<attribute name="Name" type="String" value="RightHandPinky2" />
+																								<attribute name="Position" type="Vector3" value="3.13871e-05 -0.015625 -0.000541" />
+																								<attribute name="Rotation" type="Quaternion" value="0.99631 0.018653 -0.083628 -0.004967" />
+																							</attributes>
+																							<nodes>
+																								<node _id="54">
+																									<attributes>
+																										<attribute name="Name" type="String" value="RightHandPinky3" />
+																										<attribute name="Position" type="Vector3" value="0.000117 -0.012785 2.70723e-05" />
+																										<attribute name="Rotation" type="Quaternion" value="0.992699 0.093263 0.068779 0.033482" />
+																									</attributes>
+																									<nodes>
+																										<node _id="53">
+																											<attributes>
+																												<attribute name="Name" type="String" value="RightHandPinky4" />
+																												<attribute name="Position" type="Vector3" value="-0.001239 -0.01725 0.003229" />
+																												<attribute name="Rotation" type="Quaternion" value="0.518008 0.118244 -0.847141 -0.006216" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+									</nodes>
+								</node>
+							</nodes>
+						</node>
+						<node _id="68">
+							<attributes>
+								<attribute name="Name" type="String" value="LeftUpLeg" />
+								<attribute name="Position" type="Vector3" value="0.121043 -0.060532 0.012332" />
+								<attribute name="Rotation" type="Quaternion" value="0.002974 0.000106 -0.010954 0.999936" />
+								<attribute name="Scale" type="Vector3" value="0.999985 1 0.999797" />
+							</attributes>
+							<nodes>
+								<node _id="67">
+									<attributes>
+										<attribute name="Name" type="String" value="LeftLeg" />
+										<attribute name="Position" type="Vector3" value="-0.003335 0.46605 0.001881" />
+										<attribute name="Rotation" type="Quaternion" value="0.998499 0.052485 0.015608 -0.001115" />
+									</attributes>
+									<nodes>
+										<node _id="66">
+											<attributes>
+												<attribute name="Name" type="String" value="LeftFoot" />
+												<attribute name="Position" type="Vector3" value="-0.004389 0.504789 -0.004052" />
+												<attribute name="Rotation" type="Quaternion" value="0.867692 -0.496429 -0.020621 -0.015625" />
+											</attributes>
+											<nodes>
+												<node _id="65">
+													<attributes>
+														<attribute name="Name" type="String" value="LeftToeBase" />
+														<attribute name="Position" type="Vector3" value="2.00234e-08 0.176985 -1.19966e-07" />
+														<attribute name="Rotation" type="Quaternion" value="0.953952 -0.29918 0.020814 0.00579" />
+													</attributes>
+													<nodes>
+														<node _id="64">
+															<attributes>
+																<attribute name="Name" type="String" value="LeftToe_End" />
+																<attribute name="Position" type="Vector3" value="-1.88593e-08 0.069371 9.0804e-09" />
+																<attribute name="Rotation" type="Quaternion" value="1 -3.84171e-08 -0.000795 -5.57484e-08" />
+															</attributes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+									</nodes>
+								</node>
+							</nodes>
+						</node>
+						<node _id="73">
+							<attributes>
+								<attribute name="Name" type="String" value="RightUpLeg" />
+								<attribute name="Position" type="Vector3" value="-0.122503 -0.060532 0.012332" />
+								<attribute name="Rotation" type="Quaternion" value="-0.003124 -0.000187 -0.010954 0.999935" />
+								<attribute name="Scale" type="Vector3" value="0.999942 0.999999 0.999287" />
+							</attributes>
+							<nodes>
+								<node _id="72">
+									<attributes>
+										<attribute name="Name" type="String" value="RightLeg" />
+										<attribute name="Position" type="Vector3" value="0.003334 0.46605 0.001882" />
+										<attribute name="Rotation" type="Quaternion" value="0.998495 0.052518 -0.015776 0.001123" />
+									</attributes>
+									<nodes>
+										<node _id="71">
+											<attributes>
+												<attribute name="Name" type="String" value="RightFoot" />
+												<attribute name="Position" type="Vector3" value="0.004389 0.504792 -0.004055" />
+												<attribute name="Rotation" type="Quaternion" value="0.867616 -0.496563 0.020691 0.015494" />
+											</attributes>
+											<nodes>
+												<node _id="70">
+													<attributes>
+														<attribute name="Name" type="String" value="RightToeBase" />
+														<attribute name="Position" type="Vector3" value="5.63159e-09 0.177041 -6.1118e-10" />
+														<attribute name="Rotation" type="Quaternion" value="0.954019 -0.299064 -0.019224 -0.006287" />
+													</attributes>
+													<nodes>
+														<node _id="69">
+															<attributes>
+																<attribute name="Name" type="String" value="RightToe_End" />
+																<attribute name="Position" type="Vector3" value="-3.40515e-09 0.069406 -3.49246e-10" />
+																<attribute name="Rotation" type="Quaternion" value="0.999997 1.87648e-08 -0.002414 -3.77674e-07" />
+															</attributes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+									</nodes>
+								</node>
+							</nodes>
+						</node>
+					</nodes>
+				</node>
+			</nodes>
+		</node>
+	</nodes>
+	<auxiliary />
+</resource>

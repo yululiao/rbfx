@@ -60,9 +60,11 @@ bool compress_ = false;
 bool quiet_ = false;
 unsigned blockSize_ = COMPRESSED_BLOCK_SIZE;
 
-ea::string ignoreExtensions_[] = {
-    ".bak",
-    ".rule"
+/// Extensions that never belong in a package. Compared against GetExtension(), which returns the
+/// extension without its dot.
+const ea::string ignoreExtensions_[] = {
+    "bak",
+    "rule"
 };
 
 int main(int argc, char** argv);
@@ -150,10 +152,10 @@ void Run(const ea::vector<ea::string>& arguments)
         // Check for extensions to ignore
         for (unsigned i = fileNames.size() - 1; i < fileNames.size(); --i)
         {
-            ea::string extension = GetExtension(fileNames[i]);
-            for (unsigned j = 0; j < ignoreExtensions_[j].length(); ++j)
+            const ea::string extension = GetExtension(fileNames[i]);
+            for (const ea::string& ignored : ignoreExtensions_)
             {
-                if (extension == ignoreExtensions_[j])
+                if (extension == ignored)
                 {
                     fileNames.erase(fileNames.begin() + i);
                     break;
