@@ -135,6 +135,17 @@ void AssetManager::SetProcessCallback(const OnProcessAssetQueued& callback, unsi
     maxConcurrentRequests_ = ea::max(maxConcurrency, 1u);
 }
 
+StringVector AssetManager::GetAllCacheOutputs() const
+{
+    StringVector outputs;
+    for (const auto& [resourceName, assetDesc] : assets_)
+    {
+        for (const ea::string& outputResourceName : assetDesc.outputs_)
+            outputs.push_back(outputResourceName);
+    }
+    return outputs;
+}
+
 void AssetManager::Initialize(bool readOnly)
 {
     autoProcessAssets_ = !readOnly;

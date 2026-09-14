@@ -5,6 +5,7 @@
 #include "../../Project/Build/AndroidScaffold.h"
 #include "../../Project/Build/BuildSettings.h"
 #include "../../Project/Build/BuildSystem.h"
+#include "../../Project/AssetManager.h"
 #include "../../Project/Project.h"
 
 #include <Urho3D/Core/CoreEvents.h>
@@ -107,6 +108,8 @@ const char* BuildStageName(BuildStage stage)
     {
     case BuildStage::Validate:
         return "Validate profile";
+    case BuildStage::AwaitAssets:
+        return "Wait for asset cooking";
     case BuildStage::CleanOutput:
         return "Clean output directory";
     case BuildStage::StageData:
@@ -184,6 +187,7 @@ bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outp
     cancelRequested_ = false;
     pendingRequest_ = 0;
     processFinished_ = false;
+    stageHold_ = false;
     stageResume_ = nullptr;
     progress_ = 0.0f;
 
@@ -205,6 +209,11 @@ bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outp
 
     plan_.clear();
     plan_.push_back(BuildStage::Validate);
+    // Cook imported assets before anything reads Cache: this is the stage that guarantees the Cache
+    // satellite outputs StageData copies are present and current. Placing it after Validate means the
+    // first BeginFrame runs Validate while AssetManager::Initialize (driven from the render phase of
+    // the same frame) enqueues cooking, so AwaitAssets sees real IsProcessing() state from frame two.
+    plan_.push_back(BuildStage::AwaitAssets);
     plan_.push_back(BuildStage::CleanOutput);
     plan_.push_back(BuildStage::StageData);
     if (profile_->encryptScripts_)
@@ -286,6 +295,13 @@ void BuildSystem::HandleBeginFrame(StringHash eventType, VariantMap& eventData)
     }
     if (pendingRequest_ != 0)
         return;
+    // A stage that asked to run again next frame (AwaitAssets while assets are still cooking) stays
+    // put instead of advancing; the flag is one-shot so the stage is re-evaluated from scratch.
+    if (stageHold_)
+    {
+        stageHold_ = false;
+        return;
+    }
     AdvanceStage();
 }
 
@@ -304,6 +320,8 @@ bool BuildSystem::RunStage(ea::string& message)
     {
     case BuildStage::Validate:
         return StageValidate(message);
+    case BuildStage::AwaitAssets:
+        return StageAwaitAssets(message);
     case BuildStage::CleanOutput:
         return StageCleanOutput(message);
     case BuildStage::StageData:
@@ -386,6 +404,26 @@ bool BuildSystem::StageValidate(ea::string& message)
     return false;
 }
 
+bool BuildSystem::StageAwaitAssets(ea::string& message)
+{
+    auto* project = GetSubsystem<Project>();
+    auto* assetManager = project ? project->GetAssetManager() : nullptr;
+
+    // Without an asset manager there is nothing cooking to wait for; the Cache simply contributes no
+    // outputs and StageData copies only the Data/ trees.
+    if (!assetManager)
+        return true;
+
+    if (assetManager->IsProcessing())
+    {
+        const auto progress = assetManager->GetProgress();
+        URHO3D_LOGINFO("[Build] Waiting for asset cooking ({}/{})", progress.first, progress.second);
+        // Hold on this stage; HandleBeginFrame re-runs it next frame instead of advancing.
+        stageHold_ = true;
+    }
+    return true;
+}
+
 bool BuildSystem::StageCleanOutput(ea::string& message)
 {
     auto* fs = GetSubsystem<FileSystem>();
@@ -419,7 +457,40 @@ bool BuildSystem::StageStageData(ea::string& message)
         if (!MergeDirectory(fs, engineData, staged, message))
             return false;
     }
-    return MergeDirectory(fs, NormalizeDir(project->GetDataPath()), staged, message);
+    if (!MergeDirectory(fs, NormalizeDir(project->GetDataPath()), staged, message))
+        return false;
+
+    // Imported assets cook their runtime-format products (the .mdl/.ani behind a source .fbx) into the
+    // Cache satellite directories, not into Data/, and scenes reference those satellite names directly.
+    // AwaitAssets already guaranteed cooking finished, so every output the manifest records must exist;
+    // copying it into the staged tree under the same relative name is what makes the packaged resource
+    // keys resolve at runtime. Last so a cooked output wins any name clash with a plain Data/ file.
+    if (auto* assetManager = project->GetAssetManager())
+    {
+        const ea::string cachePath = AddTrailingSlash(project->GetCachePath());
+        for (const ea::string& output : assetManager->GetAllCacheOutputs())
+        {
+            const ea::string source = cachePath + output;
+            if (!fs->FileExists(source))
+            {
+                message = Format("Cooked output '{}' is recorded in the manifest but missing from the "
+                    "Cache. Re-import the asset before shipping.", source);
+                return false;
+            }
+            const ea::string destination = staged + output;
+            if (!fs->CreateDirsRecursive(GetPath(destination)))
+            {
+                message = Format("Could not create the staging directory for '{}'.", destination);
+                return false;
+            }
+            if (!fs->Copy(source, destination))
+            {
+                message = Format("Could not stage cooked output '{}'.", destination);
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool BuildSystem::StageCompileScripts(ea::string& message)

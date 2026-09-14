@@ -79,6 +79,13 @@ public:
     /// Return whether asset manager is currently processing assets.
     bool IsProcessing() const { return !requestQueue_.empty() || numOngoingRequests_ != 0; }
 
+    /// Resource names, relative to the Cache directory, of every cooked output the manifest
+    /// currently records (for example "Models/foo.fbx.d/Models/foo.mdl"). Imported assets write
+    /// these runtime-format products into Cache rather than into the project's Data/ tree, so the
+    /// build stage that assembles Data/ uses this list to copy them into the package. The names
+    /// match what scenes reference, so they are already the correct in-package resource keys.
+    StringVector GetAllCacheOutputs() const;
+
     /// Serialize
     /// @{
     void SerializeInBlock(Archive& archive) override;

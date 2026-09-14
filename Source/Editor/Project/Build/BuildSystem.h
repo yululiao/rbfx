@@ -28,6 +28,10 @@ enum class BuildStage
     Idle,
     /// Preconditions of the profile; collects every problem instead of stopping at the first one.
     Validate,
+    /// Blocks until the AssetManager has finished cooking imported assets, so StageData can copy a
+    /// complete set of Cache outputs into the package. Held here rather than waited on inside a
+    /// process because asset cooking is asynchronous across frames.
+    AwaitAssets,
     /// Empties the output directory so a build can never ship a file an earlier build left behind.
     CleanOutput,
     /// Engine Data/ first, project Data/ on top of it, so a project can override any engine file.
@@ -109,6 +113,7 @@ private:
     BuildSettings* GetSettings() const;
     /// Stage implementations, one per BuildStage value that can appear in a plan.
     bool StageValidate(ea::string& message);
+    bool StageAwaitAssets(ea::string& message);
     bool StageCleanOutput(ea::string& message);
     bool StageStageData(ea::string& message);
     bool StageCompileScripts(ea::string& message);
@@ -158,6 +163,9 @@ private:
     ea::string pendingCommandLine_;
     /// True once the waiting stage learned how the process ended.
     bool processFinished_ = false;
+    /// Set by a stage that wants to run again on the next frame instead of advancing (see
+    /// StageAwaitAssets). Consumed by HandleBeginFrame, which then skips AdvanceStage for one frame.
+    bool stageHold_ = false;
     int processExitCode_{};
     /// Rest of the stage that started the process, run once the process exited cleanly.
     ea::function<bool(ea::string&)> stageResume_;

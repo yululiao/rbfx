@@ -40,9 +40,20 @@
 extern "C"
 {
 
+/// Content classification of an FBX, detected by parsing its ufbx scene rather than by any
+/// file-name convention. Reported as a bitmask after an "import" run through
+/// AssetImporterGetLastImportContent(), so the host can build its resource mapping (for example
+/// the Cache satellite layout) from the actual content: a file may carry only a mesh, only
+/// animations, or both.
+enum AssetImporterContentType
+{
+    ASSET_IMPORTER_CONTENT_MODEL     = 1 << 0, // FBX has at least one mesh (geometry)
+    ASSET_IMPORTER_CONTENT_ANIMATION = 1 << 1, // FBX has at least one animation stack
+};
+
 /// Run AssetImporter in-process.
 /// Arguments correspond to the tool command line without the executable name,
-/// e.g. {"model", "input.fbx", "output.mdl", "-nm", "-nt"}.
+/// e.g. {"import", "input.fbx", "path/to/asset.fbx.d/", "-nm", "-nt"}.
 /// Calls are not concurrent-safe and must be serialized by the caller.
 /// The host engine Context is reused if present (rbfx Context is a process-wide
 /// singleton), otherwise a private one is created on first use.
@@ -52,5 +63,9 @@ ASSETIMPORTER_API int AssetImporterRun(int numArguments, const char** arguments)
 /// Return message of the last error that caused AssetImporterRun to fail.
 /// The returned pointer is valid until the next AssetImporterRun call. Never null.
 ASSETIMPORTER_API const char* AssetImporterGetLastError();
+
+/// Bitmask of AssetImporterContentType detected by the most recent successful "import" run.
+/// Returns 0 if the last run was not an auto-detected import or produced nothing.
+ASSETIMPORTER_API unsigned AssetImporterGetLastImportContent();
 
 }

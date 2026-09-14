@@ -22,6 +22,8 @@
 
 #include "FbxImporter.h"
 
+#include "AssetImporterLibrary.h" // AssetImporterContentType flags for content detection
+
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Core/StringUtils.h>
@@ -83,6 +85,7 @@ extern ea::vector<ea::string> nonSkinningBoneIncludes_;
 extern ea::vector<ea::string> nonSkinningBoneExcludes_;
 extern float importStartTime_;
 extern float importEndTime_;
+extern unsigned lastImportContentFlags_;
 
 namespace Urho3D
 {
@@ -271,11 +274,42 @@ bool ImportFbx(const ea::string& inFile, const ea::string& outFile, const ea::st
         return true;
     }
 
-    if (command == "model")
-        FbxExportModel(scene, outFile, rootNode);
+    // Content-driven import: the file is parsed once above; here we export whatever it actually
+    // contains. Meshes go to "<satellite>/Models/" (with their animation stacks embedded beside the
+    // .mdl, unless -na was given); an animation-only FBX goes to "<satellite>/Animations/". The
+    // detected classification is reported through lastImportContentFlags_ so the host can build its
+    // resource mapping without relying on any file-name convention.
+    if (command == "import")
+    {
+        auto* fs = context_->GetSubsystem<FileSystem>();
+        const ea::string satDir = AddTrailingSlash(outFile);
 
-    if (command == "anim")
-        FbxExportAnimation(scene, outFile, rootNode);
+        ea::string nameNoExt = GetFileName(inFile);
+        const unsigned dot = nameNoExt.find_last_of('.');
+        if (dot != ea::string::npos)
+            nameNoExt = nameNoExt.substr(0, dot);
+        const ea::string base = SanitateAssetName(nameNoExt);
+
+        const bool hasMesh = scene->meshes.count > 0;
+        const bool hasAnim = scene->anim_stacks.count > 0;
+        lastImportContentFlags_ =
+            (hasMesh ? ASSET_IMPORTER_CONTENT_MODEL : 0) | (hasAnim ? ASSET_IMPORTER_CONTENT_ANIMATION : 0);
+
+        if (hasMesh)
+        {
+            fs->CreateDirsRecursive(satDir + "Models");
+            FbxExportModel(scene, satDir + "Models/" + base + ".mdl", rootNode);
+        }
+        else if (hasAnim)
+        {
+            fs->CreateDirsRecursive(satDir + "Animations");
+            FbxExportAnimation(scene, satDir + "Animations/" + base, rootNode);
+        }
+        else
+        {
+            ImporterErrorExit("FBX contains neither mesh geometry nor animations: " + inFile);
+        }
+    }
 
     if (command == "scene" || command == "node")
     {

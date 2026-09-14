@@ -4,7 +4,6 @@
 
 #include "EditorApplication.h"
 
-#include "Assets/FbxImport.h"
 #include "Assets/ModelImporter.h"
 #include "Foundation/AnimationViewTab.h"
 #include "Foundation/BuildTab.h"
@@ -95,7 +94,6 @@ EditorApplication::EditorApplication(Context* context)
     , editorPluginManager_(MakeShared<EditorPluginManager>(context_))
 {
     editorPluginManager_->AddPlugin("Assets.ModelImporter", &Assets_ModelImporter);
-    editorPluginManager_->AddPlugin("Assets.FbxImportSettings", &Assets_FbxImportSettings);
 
     editorPluginManager_->AddPlugin("Foundation.StandardFileTypes", &Foundation_StandardFileTypes);
     editorPluginManager_->AddPlugin("Foundation.ConcurrentAssetProcessing", &Foundation_ConcurrentAssetProcessing);

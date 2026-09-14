@@ -22,16 +22,13 @@
 
 #include "../Assets/FbxImport.h"
 
-#include "../Core/SettingsManager.h"
 #include "../Project/Project.h"
 
 #include <Tools/AssetImporter/AssetImporterLibrary.h>
 
 #include <Urho3D/Core/StringUtils.h>
-#include <Urho3D/IO/ArchiveSerialization.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
-#include <Urho3D/SystemUI/SystemUI.h>
 
 #include <EASTL/sort.h>
 
@@ -41,67 +38,12 @@ namespace Urho3D
 namespace
 {
 
-struct FbxImportSettings
+// Marshals arguments to the AssetImporter C API and reports failures uniformly. Not
+// concurrent-safe (AssetImporterRun reuses the process-wide Context singleton); the default
+// editor asset pipeline processes transformers inline on the main thread, so calls are already
+// serialized. A host that injects an asynchronous process callback must serialize them itself.
+bool RunAssetImporter(const ea::string& fileName, const StringVector& arguments)
 {
-    ea::string GetUniqueName() { return "Editor.Assets:FbxImport"; }
-
-    void SerializeInBlock(Archive& archive)
-    {
-        SerializeOptionalValue(archive, "UseUfbxBackend", useUfbxBackend_, FbxImportSettings{}.useUfbxBackend_);
-    }
-
-    void RenderSettings()
-    {
-        ui::Checkbox("Use ufbx backend", &useUfbxBackend_);
-        ui::TextDisabled("FBX files are imported with assimp when disabled (default).");
-    }
-
-    bool useUfbxBackend_{true};
-};
-using FbxImportSettingsPage = SimpleSettingsPage<FbxImportSettings>;
-
-bool ShouldUseUfbxBackend(Project* project)
-{
-    const auto settingsManager = project->GetSettingsManager();
-    if (!settingsManager)
-        return false;
-
-    const auto page = dynamic_cast<FbxImportSettingsPage*>(settingsManager->FindPage("Editor.Assets:FbxImport"));
-    return page && page->GetValues().useUfbxBackend_;
-}
-
-}
-
-void Assets_FbxImportSettings(Context* context, Project* project)
-{
-    const auto settingsManager = project->GetSettingsManager();
-    settingsManager->AddPage(MakeShared<FbxImportSettingsPage>(context));
-}
-
-bool ImportFbxFile(Project* project, const ea::string& fileName)
-{
-    auto context = project->GetContext();
-    auto fs = context->GetSubsystem<FileSystem>();
-
-    if (!fs->FileExists(fileName))
-    {
-        URHO3D_LOGERROR("Cannot import '{}': file not found", fileName);
-        return false;
-    }
-
-    const ea::string baseName = GetFileName(fileName);
-    const ea::string directoryName = GetPath(fileName);
-
-    StringVector arguments;
-    if (baseName.contains('@'))
-        arguments = {"anim", fileName, directoryName + baseName + ".ani"};
-    else
-        arguments = {"model", fileName, directoryName + baseName + ".mdl", "-nm", "-nt"};
-
-    // Backend selection: assimp by default, ufbx when enabled in the settings
-    if (ShouldUseUfbxBackend(project))
-        arguments.push_back("-ufbx");
-
     ea::vector<const char*> argv;
     argv.reserve(arguments.size());
     for (const ea::string& argument : arguments)
@@ -114,9 +56,56 @@ bool ImportFbxFile(Project* project, const ea::string& fileName)
         URHO3D_LOGERROR("Failed to import FBX file '{}':\n{}", fileName, AssetImporterGetLastError());
         return false;
     }
+    return true;
+}
+
+}
+
+bool ImportFbxToSatellite(Project* project, const ea::string& fileName, const ea::string& outSatelliteDir,
+    unsigned* outContent)
+{
+    auto fs = project->GetContext()->GetSubsystem<FileSystem>();
+    if (!fs->FileExists(fileName))
+    {
+        URHO3D_LOGERROR("Cannot import '{}': file not found", fileName);
+        return false;
+    }
+
+    // Single content-driven import: the importer parses the FBX once and writes "Models/" and/or
+    // "Animations/" under the satellite directory based on what the file actually contains. "-nm -nt"
+    // keep the output to a bare model (+ its animations) with no material/texture files, matching the
+    // previous pipeline behavior.
+    StringVector arguments{"import", fileName, outSatelliteDir, "-nm", "-nt"};
+    if (!RunAssetImporter(fileName, arguments))
+        return false;
+
+    if (outContent)
+        *outContent = AssetImporterGetLastImportContent();
 
     URHO3D_LOGINFO("Imported FBX file '{}'", fileName);
     return true;
+}
+
+bool ImportFbxFile(Project* project, const ea::string& fileName)
+{
+    auto fs = project->GetContext()->GetSubsystem<FileSystem>();
+    if (!fs->FileExists(fileName))
+    {
+        URHO3D_LOGERROR("Cannot import '{}': file not found", fileName);
+        return false;
+    }
+
+    // Mirror the automatic pipeline (ModelImporter::ImportFBXEmbedded): resolve the resource name
+    // relative to the Data/ root, then import into the Cache satellite "<resourceName>.d/". The importer
+    // auto-detects model vs animation content, so there is no '@' name check here and the generated
+    // runtime-format files never land next to the source in Data/.
+    const ea::string dataPath = AddTrailingSlash(project->GetDataPath());
+    ea::string resourceName = fileName;
+    if (resourceName.starts_with(dataPath))
+        resourceName = resourceName.substr(dataPath.size());
+
+    const ea::string satelliteDir = AddTrailingSlash(project->GetCachePath() + resourceName + ".d");
+    return ImportFbxToSatellite(project, fileName, satelliteDir);
 }
 
 unsigned ImportFbxFilesInDirectory(Project* project, const ea::string& directoryName)

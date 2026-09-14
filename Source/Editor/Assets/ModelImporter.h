@@ -104,6 +104,10 @@ private:
     bool ImportGLTF(GLTFFileHandle fileHandle, const TransformerParams& params, const AssetTransformerInput& input,
         AssetTransformerOutput& output, const AssetTransformerVector& transformers);
 
+    /// Import an FBX file with the embedded ufbx backend, writing the produced Model into
+    /// the temporary output folder. The base pipeline then copies it to the cache and registers it.
+    bool ImportFBXEmbedded(const AssetTransformerInput& input);
+
     ea::string GetParametersFileName(const ea::string& fileName) const;
     bool LoadParameters(TransformerParams& params, const ea::string& paramsFileName) const;
 

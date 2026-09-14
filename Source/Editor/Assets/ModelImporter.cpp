@@ -21,6 +21,7 @@
 //
 
 #include "../Assets/ModelImporter.h"
+#include "../Assets/FbxImport.h"
 
 #include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Graphics/Animation.h>
@@ -200,19 +201,10 @@ bool ModelImporter::IsApplicable(const AssetTransformerInput& input)
     if (IsFileNameGLTF(input.resourceName_))
         return true;
 
+    // FBX is imported in-process by the embedded ufbx backend, so it no longer depends on
+    // the external FBX2glTF tool.
     if (IsFileNameFBX(input.resourceName_))
-    {
-        if (!toolManager->HasFBX2glTF())
-        {
-            static bool logged = false;
-            if (!logged)
-                URHO3D_LOGERROR("FBX2glTF is not found, cannot import FBX files. See Settings/Editor/ExternalTools.");
-            logged = true;
-            return false;
-        }
-
         return true;
-    }
 
     if (IsFileNameBlend(input.resourceName_))
     {
@@ -234,6 +226,11 @@ bool ModelImporter::IsApplicable(const AssetTransformerInput& input)
 bool ModelImporter::Execute(
     const AssetTransformerInput& input, AssetTransformerOutput& output, const AssetTransformerVector& transformers)
 {
+    // FBX files no longer go through the external FBX2glTF -> GLTF route; import them in-process
+    // with the embedded ufbx backend and let the base pipeline store the result in the cache.
+    if (IsFileNameFBX(input.resourceName_))
+        return ImportFBXEmbedded(input);
+
     const ea::string paramsFileName = GetParametersFileName(input.inputFileName_);
     TransformerParams params;
     if (LoadParameters(params, paramsFileName))
@@ -245,6 +242,32 @@ bool ModelImporter::Execute(
         return false;
 
     return ImportGLTF(handle, params, input, output, transformers);
+}
+
+bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input)
+{
+    auto* project = GetSubsystem<Project>();
+    if (!project)
+    {
+        URHO3D_LOGERROR("Cannot import FBX '{}': no project is open.", input.resourceName_);
+        return false;
+    }
+
+    // Import into the transformer's temporary satellite directory ("<resourceName>.d"). The importer
+    // parses the FBX once and auto-detects its content, filling "Models/" and/or "Animations/" under it.
+    // The base pipeline (ExecuteTransformersAndStore) then copies the whole tree to Cache/ and registers
+    // every produced file, so output.outputResourceNames_ is filled automatically and the result matches
+    // the manual "Import FBX" button exactly (same satellite, same content-based layout).
+    const ea::string satelliteDir = AddTrailingSlash(input.outputFileName_);
+    unsigned content = 0;
+    if (!ImportFbxToSatellite(project, input.inputFileName_, satelliteDir, &content))
+    {
+        URHO3D_LOGERROR("Failed to import FBX asset '{}'.", input.resourceName_);
+        return false;
+    }
+
+    URHO3D_LOGDEBUG("Imported FBX asset '{}' (detected content flags {})", input.resourceName_, content);
+    return true;
 }
 
 bool ModelImporter::ImportGLTF(GLTFFileHandle fileHandle, const TransformerParams& params,

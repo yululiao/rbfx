@@ -30,16 +30,22 @@ namespace Urho3D
 class Context;
 class Project;
 
-/// Import single FBX file in-process using AssetImporter library.
-/// File name containing '@' is imported as Animation (.ani), otherwise as Model (.mdl).
-/// Output is placed next to the source file. Returns true on success.
+/// Import single FBX file in-process. Whether the file is a model, an animation, or both is
+/// auto-detected by the importer (no '@' file-name convention anymore). Output is written into the
+/// Cache satellite "<resourceName>.d/" exactly like the automatic asset pipeline, so the generated
+/// runtime-format resources stay transparent to the user. Returns true on success.
 bool ImportFbxFile(Project* project, const ea::string& fileName);
+
+/// Import FBX 'fileName' with the ufbx backend into the satellite output directory 'outSatelliteDir',
+/// which receives the auto-detected "Models/" and/or "Animations/" sub-trees (and "Materials/" unless
+/// disabled). On success, when 'outContent' is non-null it receives the AssetImporterContentType bitmask
+/// describing what the FBX actually contained. Shared by the automatic asset pipeline (ModelImporter) and
+/// the manual inspector import so the two paths cannot drift. Returns true on success.
+bool ImportFbxToSatellite(Project* project, const ea::string& fileName, const ea::string& outSatelliteDir,
+    unsigned* outContent = nullptr);
 
 /// Import all FBX files found in given directory (recursively).
 /// Returns number of successfully imported files.
 unsigned ImportFbxFilesInDirectory(Project* project, const ea::string& directoryName);
-
-/// Register FBX import settings page (assimp/ufbx backend selection).
-void Assets_FbxImportSettings(Context* context, Project* project);
 
 }
