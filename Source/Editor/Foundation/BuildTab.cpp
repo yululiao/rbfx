@@ -169,6 +169,7 @@ void BuildTab::RenderContent()
 
     ui::BeginDisabled(build->IsBuilding() || readOnly);
     RenderPackageOptions(*profile);
+    RenderTextureCompressionOptions(*profile);
     if (profile->IsAndroid())
         RenderAndroidOptions(*profile);
     ui::EndDisabled();
@@ -293,6 +294,54 @@ void BuildTab::RenderAndroidOptions(BuildProfile& profile)
     ui::TextWrapped("Both passwords follow the naming rule of the generated project: the variable "
         "above with _PASSWORD appended. Nothing is written into the generated gradle files but the "
         "names.");
+}
+
+void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)
+{
+    TextureCompressionSettings& tc = profile.textureCompression_;
+
+    if (!ui::CollapsingHeader(ICON_FA_IMAGE " Texture compression", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    Touch(ui::Checkbox("Compress textures for the target platform", &tc.enabled_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Off by default. When on, the build converts staged textures to a GPU compressed "
+            "format with the offline PVRTexTool and ships those instead of the png/jpg sources");
+
+    ui::Indent();
+    ui::BeginDisabled(!tc.enabled_);
+
+    // An empty format means "use the platform default", which is not obvious to edit. Resolving it
+    // into the fields keeps the widgets honest; the build resolves the same defaults anyway, so a
+    // profile that never touched these fields still compresses with the right format.
+    if (tc.enabled_)
+        tc = profile.GetEffectiveTextureCompression();
+
+    Touch(ui::InputText("Color format (no alpha)", &tc.colorFormatNoAlpha_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Desktop BC1, mobile ETC2_RGB");
+
+    Touch(ui::InputText("Color format (alpha)", &tc.colorFormatAlpha_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Desktop BC3, mobile ETC2_RGBA");
+
+    Touch(ui::InputText("Normal map format", &tc.normalFormat_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Desktop BC5 (two channel, linear). Diligent has no two channel mobile format, "
+            "so normal maps fall back to ETC2_RGBA there");
+
+    Touch(ui::InputText("Container", &tc.container_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Desktop dds, mobile ktx");
+
+    Touch(ui::InputText("Quality", &tc.quality_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("PVRTexTool -q token; empty uses the tool default");
+
+    Touch(ui::Checkbox("Generate mipmaps", &tc.mipmaps_));
+
+    ui::EndDisabled();
+    ui::Unindent();
 }
 
 void BuildTab::RenderStatus(BuildProfile* profile, BuildSettings* settings, Project* project)

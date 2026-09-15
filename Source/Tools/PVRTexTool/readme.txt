@@ -1,0 +1,1 @@
+https://docs.imgtec.com/tools-manuals/pvrtextool-manual/html/topics/pvrtextool-cli.html

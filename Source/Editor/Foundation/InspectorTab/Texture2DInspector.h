@@ -22,8 +22,11 @@
 
 #pragma once
 
+#include "../../Assets/TextureImportSettings.h"
 #include "../../Foundation/InspectorTab.h"
 #include "../../Foundation/Shared/InspectorWithPreview.h"
+
+#include <EASTL/functional.h>
 
 namespace Urho3D
 {
@@ -42,6 +45,21 @@ protected:
     StringHash GetResourceType() const override;
     SharedPtr<ResourceInspectorWidget> MakeInspectorWidget(const ResourceVector& resources) override;
     SharedPtr<BaseWidget> MakePreviewWidget(Resource* resource) override;
+    void RenderExtraInspectorContent() override;
+
+private:
+    /// Read the import params from the metadata file of the given (cache-relative) resource.
+    /// Defaults when the file is absent.
+    TextureImporterParams LoadParamsForResource(const ea::string& resourceName) const;
+    /// Apply a field edit to the metadata file of every selected project-owned resource, then
+    /// reload each texture so the preview shows the new settings immediately. The engine reads
+    /// the very same file while loading, so there is nothing else to keep in sync.
+    void SaveParamsForSelection(const ea::function<void(TextureImporterParams&)>& applyField);
+
+    /// Resource names the cached params were loaded for.
+    StringVector cachedResourceNames_;
+    /// Import params currently shown (taken from the first selected resource).
+    TextureImporterParams cachedParams_;
 };
 
 } // namespace Urho3D

@@ -101,6 +101,14 @@ bool CompressedLevel::Decompress(unsigned char* dest) const
         DecompressImageDXT(dest, data_, width_, height_, depth_, format_);
         return true;
 
+    // RGTC (BC4 = single channel, BC5 = two channels). BC5 is the standard desktop normal map format.
+    case TextureFormat::TEX_FORMAT_BC4_UNORM:
+    case TextureFormat::TEX_FORMAT_BC4_SNORM:
+    case TextureFormat::TEX_FORMAT_BC5_UNORM:
+    case TextureFormat::TEX_FORMAT_BC5_SNORM:
+        DecompressImageRGTC(dest, data_, width_, height_, depth_, format_);
+        return true;
+
     // ETC2 format is compatible with ETC1, so we just use the same function.
     case TextureFormat::TEX_FORMAT_ETC2_RGB8_UNORM:
         DecompressImageETC(dest, data_, width_, height_, false);
@@ -403,6 +411,27 @@ bool Image::BeginLoad(Deserializer& source)
             components_ = 4;
             break;
 
+        // RGTC (BC4/BC5): GL_COMPRESSED_[SIGNED_]RED_RGTC1 / _RG_RGTC2.
+        case 0x8dbb:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC4_UNORM;
+            components_ = 1;
+            break;
+
+        case 0x8dbc:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC4_SNORM;
+            components_ = 1;
+            break;
+
+        case 0x8dbd:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC5_UNORM;
+            components_ = 2;
+            break;
+
+        case 0x8dbe:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC5_SNORM;
+            components_ = 2;
+            break;
+
         default:
             compressedFormat_ = TextureFormat::TEX_FORMAT_UNKNOWN;
             break;
@@ -518,6 +547,27 @@ bool Image::BeginLoad(Deserializer& source)
         case 23:
             compressedFormat_ = TextureFormat::TEX_FORMAT_ETC2_RGBA8_UNORM;
             components_ = 4;
+            break;
+
+        // RGTC (BC4/BC5): PVR v3 pixel formats BC4U/BC4S/BC5U/BC5S.
+        case 12:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC4_UNORM;
+            components_ = 1;
+            break;
+
+        case 13:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC4_SNORM;
+            components_ = 1;
+            break;
+
+        case 14:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC5_UNORM;
+            components_ = 2;
+            break;
+
+        case 15:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_BC5_SNORM;
+            components_ = 2;
             break;
 
         default:

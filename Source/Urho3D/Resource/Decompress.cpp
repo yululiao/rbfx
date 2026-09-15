@@ -287,6 +287,101 @@ void DecompressImageDXT(unsigned char* rgba, const void* blocks, int width, int 
     }
 }
 
+// RGTC (BC4/BC5) decompression. Each 8-byte block encodes a single channel using the same
+// two-endpoint + 3-bit-index scheme as DXT5 alpha. BC4 stores one such block (red), BC5 stores
+// two (red and green). Signed (SNORM) variants are decoded through the same unsigned codebook:
+// this CPU path is a defensive fallback only, since desktop GPUs support BC4/BC5 natively.
+
+static void DecompressRGTCChannel(unsigned char* values, const unsigned char* block)
+{
+    const int red0 = block[0];
+    const int red1 = block[1];
+
+    // Build the 8-entry codebook (same rules as DXT5 alpha).
+    unsigned char codes[8];
+    codes[0] = (unsigned char)red0;
+    codes[1] = (unsigned char)red1;
+    if (red0 <= red1)
+    {
+        // Six interpolated values plus 0 and 255.
+        for (int i = 1; i < 5; ++i)
+            codes[1 + i] = (unsigned char)(((5 - i) * red0 + i * red1) / 5);
+        codes[6] = 0;
+        codes[7] = 255;
+    }
+    else
+    {
+        // Eight interpolated values.
+        for (int i = 1; i < 7; ++i)
+            codes[1 + i] = (unsigned char)(((7 - i) * red0 + i * red1) / 7);
+    }
+
+    // Decode 16 3-bit indices packed into 6 bytes (bytes 2..7).
+    unsigned char indices[16];
+    const unsigned char* src = block + 2;
+    for (int i = 0; i < 2; ++i)
+    {
+        int value = 0;
+        for (int j = 0; j < 3; ++j)
+        {
+            const int byte = *src++;
+            value |= (byte << (8 * j));
+        }
+        for (int j = 0; j < 8; ++j)
+            indices[8 * i + j] = (unsigned char)((value >> (3 * j)) & 0x7);
+    }
+
+    for (int i = 0; i < 16; ++i)
+        values[i] = codes[indices[i]];
+}
+
+void DecompressImageRGTC(unsigned char* rgba, const void* blocks, int width, int height, int depth, TextureFormat format)
+{
+    const bool isBC5 = format == TextureFormat::TEX_FORMAT_BC5_UNORM || format == TextureFormat::TEX_FORMAT_BC5_SNORM;
+
+    auto const* sourceBlock = reinterpret_cast< unsigned char const* >( blocks );
+    const int bytesPerBlock = isBC5 ? 16 : 8;
+
+    // loop over blocks
+    for (int z = 0; z < depth; ++z)
+    {
+        const int sz = width * height * 4 * z;
+        for (int y = 0; y < height; y += 4)
+        {
+            for (int x = 0; x < width; x += 4)
+            {
+                unsigned char channel0[16];
+                unsigned char channel1[16];
+                DecompressRGTCChannel(channel0, sourceBlock);
+                if (isBC5)
+                    DecompressRGTCChannel(channel1, sourceBlock + 8);
+
+                // write the decompressed pixels to the correct image locations
+                for (int py = 0; py < 4; ++py)
+                {
+                    for (int px = 0; px < 4; ++px)
+                    {
+                        const int sx = x + px;
+                        const int sy = y + py;
+                        if (sx < width && sy < height)
+                        {
+                            unsigned char* targetPixel = rgba + sz + 4 * (width * sy + sx);
+                            const int idx = py * 4 + px;
+                            targetPixel[0] = channel0[idx];                         // R
+                            targetPixel[1] = isBC5 ? channel1[idx] : channel0[idx]; // G (BC4 expands to grayscale)
+                            targetPixel[2] = isBC5 ? 255 : channel0[idx];           // B (normal Z is reconstructed in shader)
+                            targetPixel[3] = 255;                                   // A
+                        }
+                    }
+                }
+
+                // advance
+                sourceBlock += bytesPerBlock;
+            }
+        }
+    }
+}
+
 // PVRTC decompression based on the Oolong Engine, modified for Urho3D
 
 #define PT_INDEX    (2) /*The Punch-through index*/

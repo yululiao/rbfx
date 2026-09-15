@@ -2,6 +2,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 
+#include "../../Assets/TextureImportSettings.h"
 #include "../../Project/Build/AndroidScaffold.h"
 #include "../../Project/Build/BuildSettings.h"
 #include "../../Project/Build/BuildSystem.h"
@@ -17,6 +18,7 @@
 #include <Urho3D/IO/IOEvents.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/IO/PackageFile.h>
+#include <Urho3D/Resource/Image.h>
 
 #include <EASTL/algorithm.h>
 
@@ -81,6 +83,15 @@ bool StartsMinusKey(const ea::string& text)
     return strncmp(text.c_str(), "--key=", 6) == 0;
 }
 
+/// Texture sources the compressor reads. Already-cooked containers (.dds/.ktx/.pvr) are deliberately
+/// absent: they are output rather than input, and running them through the tool again would only
+/// discard quality a previous cook already spent.
+bool IsTextureSourceFile(const ea::string& name)
+{
+    return ExtensionIs(name, "png") || ExtensionIs(name, "jpg") || ExtensionIs(name, "jpeg") ||
+        ExtensionIs(name, "bmp") || ExtensionIs(name, "tga");
+}
+
 /// Copy a directory tree on top of another one. FileSystem::CopyDir is the merge this needs - it
 /// creates missing directories and opens destinations for writing, so a later copy replaces what an
 /// earlier one put there. It reports success for a source that does not exist though, which cannot
@@ -114,6 +125,8 @@ const char* BuildStageName(BuildStage stage)
         return "Clean output directory";
     case BuildStage::StageData:
         return "Stage Data";
+    case BuildStage::CompressTextures:
+        return "Compress textures";
     case BuildStage::CompileScripts:
         return "Compile Lua scripts";
     case BuildStage::StageCoreData:
@@ -190,6 +203,11 @@ bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outp
     stageHold_ = false;
     stageResume_ = nullptr;
     progress_ = 0.0f;
+    textureQueue_.clear();
+    textureQueueIndex_ = 0;
+    textureToolPath_.clear();
+    texturesCompressed_ = 0;
+    texturesCached_ = 0;
 
     if (outputOverride.empty())
         outputDir_ = profile_->ResolveOutputDir(project->GetProjectPath());
@@ -216,6 +234,9 @@ bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outp
     plan_.push_back(BuildStage::AwaitAssets);
     plan_.push_back(BuildStage::CleanOutput);
     plan_.push_back(BuildStage::StageData);
+    // Textures compress before scripts and export so every later stage sees the cooked tree it ships.
+    if (profile_->textureCompression_.enabled_)
+        plan_.push_back(BuildStage::CompressTextures);
     if (profile_->encryptScripts_)
         plan_.push_back(BuildStage::CompileScripts);
     plan_.push_back(BuildStage::StageCoreData);
@@ -283,6 +304,12 @@ void BuildSystem::HandleBeginFrame(StringHash eventType, VariantMap& eventData)
                 return;
             }
         }
+        // A continuation that started the next process of a multi-step stage - texture compression runs
+        // the tool once per texture - waits for it exactly like the stage that started the first one,
+        // instead of advancing past work still in flight. Existing continuations never start a process,
+        // so for them this is a no-op and the stage advances as before.
+        if (pendingRequest_ != 0)
+            return;
         AdvanceStage();
         return;
     }
@@ -326,6 +353,8 @@ bool BuildSystem::RunStage(ea::string& message)
         return StageCleanOutput(message);
     case BuildStage::StageData:
         return StageStageData(message);
+    case BuildStage::CompressTextures:
+        return StageCompressTextures(message);
     case BuildStage::CompileScripts:
         return StageCompileScripts(message);
     case BuildStage::StageCoreData:
@@ -560,6 +589,257 @@ bool BuildSystem::PruneStagedSources(ea::string& message)
 
     URHO3D_LOGINFO("[Build] Compiled scripts now ship as .luc; removed {} plain source file(s)", removed);
     return true;
+}
+
+bool BuildSystem::StageCompressTextures(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    auto* settings = GetSettings();
+    auto* project = GetSubsystem<Project>();
+
+    // Resolve the tool once, up front: a profile that enabled compression but cannot find the tool has
+    // to fail before a single texture is decoded, not halfway through the queue.
+    const ea::string tool = settings->FindTool(*profile_, "PVRTexToolCLI");
+    if (tool.empty())
+    {
+        message = "PVRTexToolCLI disappeared between validation and this stage.";
+        return false;
+    }
+    textureToolPath_ = tool;
+
+    const TextureCompressionSettings tc = profile_->GetEffectiveTextureCompression();
+    const ea::string container = tc.container_.empty() ? ea::string("dds") : tc.container_;
+    const ea::string staged = stagingDir_ + DataDirName;
+    // Artifacts survives between builds and, unlike Cache, is not mounted as a resource root, so a
+    // cooked texture parked here can never be mistaken for one the game loads by name.
+    const ea::string cacheRoot = NormalizeDir(project->GetArtifactsPath()) + "TextureCompression/";
+
+    ea::vector<ea::string> found;
+    fs->ScanDir(found, staged, "*", SCAN_FILES | SCAN_RECURSIVE);
+
+    textureQueue_.clear();
+    textureQueueIndex_ = 0;
+
+    for (const ea::string& rawRelative : found)
+    {
+        const ea::string relative = ForwardSlashes(rawRelative);
+        if (!IsTextureSourceFile(relative))
+            continue;
+
+        const ea::string stagedSource = staged + relative;
+        // The original in Data/, when there is one, supplies both the import metadata and the half of
+        // the cache key that has to outlive the build. The staged copy cannot: FileSystem::Copy rewrites
+        // it and stamps it with the build time, so its mtime differs on every run.
+        const ea::string original = FindOriginalDataFile(relative);
+        const ea::string& keySource = original.empty() ? stagedSource : original;
+
+        TextureImporterParams params;
+        LoadTextureImporterParams(context_, keySource, params);
+
+        // Normal maps are data and always cook linear, whatever a hand-edited metadata file claims.
+        const bool isLinear = params.textureType_ == TextureImportType::NormalMap
+            || params.colorSpace_ == TextureImportColorSpace::Linear;
+        // The per-file mipmap mode resolves against the profile here, so the fingerprint and the
+        // tool call always agree on what gets baked.
+        const bool bakeMipmaps = params.mipmapMode_ == TextureImportMipmapMode::Enabled
+            || (params.mipmapMode_ == TextureImportMipmapMode::Inherit && tc.mipmaps_);
+
+        unsigned sourceSize = 0;
+        {
+            File probe(context_, stagedSource, FILE_READ);
+            if (probe.IsOpen())
+                sourceSize = probe.GetSize();
+        }
+        const unsigned sourceTime = fs->GetLastModifiedTime(keySource);
+
+        // Everything that decides the output except the alpha channel, which only picks between the two
+        // color formats. Alpha stays out of the key on purpose: an edit that changes it changes the
+        // source mtime too, which the key already carries. Leaving it out is what lets a no-change
+        // rebuild skip the image decode entirely and go straight to the cached product.
+        const ea::string fingerprint = Format("{}|{}|{}|{}|{}|{}|{}|{}|{}", sourceTime, sourceSize,
+            params.textureType_ == TextureImportType::NormalMap ? "normal" : "color", isLinear ? "lRGB" : "sRGB",
+            tc.colorFormatNoAlpha_, tc.colorFormatAlpha_, tc.normalFormat_, bakeMipmaps ? "mip" : "nomip",
+            tc.quality_);
+
+        const size_t dot = relative.rfind('.');
+        const ea::string relativeNoExt = relative.substr(0, dot);
+
+        TextureJob job;
+        job.relative_ = relative;
+        job.stagedSource_ = stagedSource;
+        job.stagedDest_ = staged + relativeNoExt + "." + container;
+        job.legacySidecarDir_ = stagedSource + ".d";
+        job.cacheProduct_ = cacheRoot + relativeNoExt + "-" +
+            Format("{:08x}", StringHash(fingerprint + "|" + container, StringHash::NoReverse{}).Value()) + "." + container;
+        job.isNormal_ = params.textureType_ == TextureImportType::NormalMap;
+        job.params_ = params;
+        job.mipmaps_ = bakeMipmaps;
+
+        if (!fs->CreateDirsRecursive(GetPath(job.cacheProduct_)))
+        {
+            message = Format("Could not create the texture cache directory for '{}'.", job.relative_);
+            return false;
+        }
+        textureQueue_.push_back(ea::move(job));
+    }
+
+    if (textureQueue_.empty())
+    {
+        URHO3D_LOGINFO("[Build] No texture sources were staged; compression did nothing");
+        return true;
+    }
+    return RunTextureQueue(message);
+}
+
+bool BuildSystem::RunTextureQueue(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    const TextureCompressionSettings tc = profile_->GetEffectiveTextureCompression();
+
+    while (textureQueueIndex_ < textureQueue_.size())
+    {
+        TextureJob& job = textureQueue_[textureQueueIndex_];
+
+        // A product whose name still matches the fingerprint is byte-for-byte what this source and these
+        // settings produce, so it goes straight into staging and the tool is never woken.
+        if (fs->FileExists(job.cacheProduct_))
+        {
+            if (!InstallCookedTexture(job, message))
+                return false;
+            ++texturesCached_;
+            ++textureQueueIndex_;
+            continue;
+        }
+
+        // Cache miss: decode just enough to choose the format. A normal map always uses its own format
+        // and stays linear; anything else is a color texture whose alpha picks between the two formats.
+        bool hasAlpha = false;
+        {
+            File file(context_, job.stagedSource_, FILE_READ);
+            if (!file.IsOpen())
+            {
+                message = Format("Could not open the staged texture '{}'.", job.stagedSource_);
+                return false;
+            }
+            Image image(context_);
+            if (!image.BeginLoad(file))
+            {
+                message = Format("'{}' is not a readable image, so it cannot be compressed.", job.stagedSource_);
+                return false;
+            }
+            hasAlpha = image.HasAlphaChannel();
+        }
+
+        const ea::string format = job.isNormal_
+            ? tc.normalFormat_
+            : (hasAlpha ? tc.colorFormatAlpha_ : tc.colorFormatNoAlpha_);
+        if (format.empty())
+        {
+            message = Format("No texture format is configured for '{}'.", job.relative_);
+            return false;
+        }
+        // Normal maps store directions, not colors; encoding them as sRGB would bend every vector.
+        // Linear color textures (masks, LUTs) keep their data unconverted for the same reason.
+        const char* colorSpace = job.isNormal_ || job.params_.colorSpace_ == TextureImportColorSpace::Linear
+            ? "lRGB"
+            : "sRGB";
+
+        ea::vector<ea::string> arguments;
+        arguments.push_back("-i");
+        arguments.push_back(job.stagedSource_);
+        arguments.push_back("-o");
+        arguments.push_back(job.cacheProduct_);
+        arguments.push_back("-f");
+        arguments.push_back(Format("{},UBN,{}", format, colorSpace));
+        if (job.mipmaps_)
+            arguments.push_back("-m");
+        if (!tc.quality_.empty())
+        {
+            arguments.push_back("-q");
+            arguments.push_back(tc.quality_);
+        }
+        // The tool reports progress on stderr, which the async runner would otherwise surface as noise.
+        arguments.push_back("-shh");
+
+        const unsigned index = textureQueueIndex_;
+        return StartProcess(textureToolPath_, arguments,
+            [this, index](ea::string& resumeMessage) { return FinalizeCookedTexture(index, resumeMessage); },
+            message);
+    }
+
+    URHO3D_LOGINFO("[Build] Textures: {} compressed, {} reused from cache", texturesCompressed_, texturesCached_);
+    return true;
+}
+
+bool BuildSystem::FinalizeCookedTexture(unsigned index, ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    TextureJob& job = textureQueue_[index];
+
+    // A zero exit already gated getting here, but the product is the only proof that matters: the tool
+    // can exit cleanly and still write nothing when it dislikes the requested format.
+    if (!fs->FileExists(job.cacheProduct_))
+    {
+        message = Format("PVRTexToolCLI finished but produced no '{}'.", job.cacheProduct_);
+        return false;
+    }
+    if (!InstallCookedTexture(job, message))
+        return false;
+    ++texturesCompressed_;
+    ++textureQueueIndex_;
+    // Keep the queue moving; the next texture either hits the cache or suspends this stage again.
+    return RunTextureQueue(message);
+}
+
+bool BuildSystem::InstallCookedTexture(const TextureJob& job, ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    if (!fs->CreateDirsRecursive(GetPath(job.stagedDest_)))
+    {
+        message = Format("Could not create the staging directory for '{}'.", job.stagedDest_);
+        return false;
+    }
+    if (!fs->Copy(job.cacheProduct_, job.stagedDest_))
+    {
+        message = Format("Could not place the cooked texture '{}'.", job.stagedDest_);
+        return false;
+    }
+    // The source is dead weight now: the runtime router redirects its name to this product, so shipping
+    // both would carry the uncompressed pixels for nothing and roughly double the package.
+    if (!fs->Delete(job.stagedSource_))
+    {
+        message = Format("Could not remove the uncompressed source '{}'.", job.stagedSource_);
+        return false;
+    }
+    // Import metadata is editor-only in the legacy scheme; its leftover ".d" directories must not
+    // ship beside the cooked texture. The current ".texmeta" file is different: the runtime reads
+    // it, so it stays in staging exactly as it was copied from Data/ - nothing to generate, nothing
+    // to remove.
+    if (fs->DirExists(job.legacySidecarDir_) && !fs->RemoveDir(job.legacySidecarDir_, true))
+    {
+        message = Format("Could not remove the legacy import metadata '{}'.", job.legacySidecarDir_);
+        return false;
+    }
+    return true;
+}
+
+ea::string BuildSystem::FindOriginalDataFile(const ea::string& relative) const
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    auto* project = GetSubsystem<Project>();
+
+    // Project Data/ is copied over engine Data/, so a file present in both came from the project.
+    const ea::string projectData = NormalizeDir(project->GetDataPath());
+    if (fs->FileExists(projectData + relative))
+        return projectData + relative;
+    if (profile_->includeEngineData_)
+    {
+        const ea::string engineData = AddTrailingSlash(ForwardSlashes(profile_->engineData_)) + DataDirName;
+        if (fs->FileExists(engineData + relative))
+            return engineData + relative;
+    }
+    return EMPTY_STRING;
 }
 
 bool BuildSystem::StageStageCoreData(ea::string& message)

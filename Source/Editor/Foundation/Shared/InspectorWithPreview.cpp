@@ -155,6 +155,7 @@ void InspectorWithPreview::RenderContent()
                     project_->ProcessRequest(request);
                 }
                 inspector_->RenderContent();
+                RenderExtraInspectorContent();
             }
             ui::EndChild();
             if (ui::BeginChild("preview", previewSize, false, ImGuiWindowFlags_None))
@@ -178,6 +179,7 @@ void InspectorWithPreview::RenderContent()
             }
         }
         inspector_->RenderContent();
+        RenderExtraInspectorContent();
         if (preview_)
         {
             preview_->RenderContent();

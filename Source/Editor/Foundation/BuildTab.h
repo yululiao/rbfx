@@ -41,6 +41,8 @@ private:
     BuildProfile* ResolveProfile(BuildSettings* settings);
     /// Switches, names and engine paths that describe the produced package.
     void RenderPackageOptions(BuildProfile& profile);
+    /// Per-platform texture compression parameters: PVRTexTool formats, container and quality.
+    void RenderTextureCompressionOptions(BuildProfile& profile);
     /// The part of a profile only the Android scaffold generator reads.
     void RenderAndroidOptions(BuildProfile& profile);
     /// Progress of a build in flight, or the reason the last one did not succeed.

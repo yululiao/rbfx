@@ -30,6 +30,9 @@ namespace Urho3D
 /// Decompress a DXT compressed image to RGBA.
 URHO3D_API void
     DecompressImageDXT(unsigned char* rgba, const void* blocks, int width, int height, int depth, TextureFormat format);
+/// Decompress an RGTC (BC4/BC5) compressed image to RGBA. BC4 is single channel, BC5 is two channels (normal maps).
+URHO3D_API void
+    DecompressImageRGTC(unsigned char* rgba, const void* blocks, int width, int height, int depth, TextureFormat format);
 /// Decompress an ETC1/ETC2 compressed image to RGBA.
 URHO3D_API void DecompressImageETC(unsigned char* dstImage, const void* blocks, int width, int height, bool hasAlpha);
 /// Decompress a PVRTC compressed image to RGBA.

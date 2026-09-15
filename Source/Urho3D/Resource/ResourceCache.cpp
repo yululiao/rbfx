@@ -32,6 +32,7 @@
 #include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Resource/BackgroundLoader.h>
 #include <Urho3D/Resource/BinaryFile.h>
+#include <Urho3D/Resource/CookedTextureRouter.h>
 #include <Urho3D/Resource/Graph.h>
 #include <Urho3D/Resource/GraphNode.h>
 #include <Urho3D/Resource/Image.h>
@@ -95,6 +96,11 @@ ResourceCache::ResourceCache(Context* context) :
 
     // Subscribe to reflection removal to purge unloaded resource types
     context_->OnReflectionRemoved.Subscribe(this, &ResourceCache::HandleReflectionRemoved);
+
+    // Transparently redirect texture source requests to platform-specific cooked products. The router only
+    // rewrites an identifier when a cooked product actually exists, so it is safe to have always registered
+    // (in the editor, where only sources are present, requests are left untouched).
+    AddResourceRouter(new CookedTextureRouter(context_));
 }
 
 ResourceCache::~ResourceCache()

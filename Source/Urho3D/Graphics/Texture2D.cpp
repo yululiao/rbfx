@@ -73,10 +73,14 @@ bool Texture2D::BeginLoad(Deserializer& source)
     if (GetAsyncLoadState() == ASYNC_LOADING)
         loadImage_->PrecalculateLevels();
 
-    // Load the optional parameters file
+    // Load the optional parameters file. ".texmeta" is the editor-managed single source of
+    // texture import settings that doubles as the runtime parameters; a plain ".xml" of the
+    // same name (a hand-authored file shipped with the engine or an older project) still wins
+    // only when no .texmeta is present.
     auto* cache = GetSubsystem<ResourceCache>();
-    ea::string xmlName = ReplaceExtension(GetName(), ".xml");
-    loadParameters_ = cache->GetTempResource<XMLFile>(xmlName, false);
+    loadParameters_ = cache->GetTempResource<XMLFile>(ReplaceExtension(GetName(), ".texmeta"), false);
+    if (!loadParameters_)
+        loadParameters_ = cache->GetTempResource<XMLFile>(ReplaceExtension(GetName(), ".xml"), false);
 
     return true;
 }

@@ -68,6 +68,34 @@ bool IsHexKey(const ea::string& text)
     return true;
 }
 
+/// Fill every empty texture compression field with the platform default. Mobile has no two-channel
+/// normal format in Diligent (no EAC_RG11), so normal maps fall back to the RGBA color format there.
+void ApplyTextureCompressionDefaults(TextureCompressionSettings& settings, bool isAndroid)
+{
+    if (isAndroid)
+    {
+        if (settings.colorFormatNoAlpha_.empty())
+            settings.colorFormatNoAlpha_ = "ETC2_RGB";
+        if (settings.colorFormatAlpha_.empty())
+            settings.colorFormatAlpha_ = "ETC2_RGBA";
+        if (settings.normalFormat_.empty())
+            settings.normalFormat_ = "ETC2_RGBA";
+        if (settings.container_.empty())
+            settings.container_ = "ktx";
+    }
+    else
+    {
+        if (settings.colorFormatNoAlpha_.empty())
+            settings.colorFormatNoAlpha_ = "BC1";
+        if (settings.colorFormatAlpha_.empty())
+            settings.colorFormatAlpha_ = "BC3";
+        if (settings.normalFormat_.empty())
+            settings.normalFormat_ = "BC5";
+        if (settings.container_.empty())
+            settings.container_ = "dds";
+    }
+}
+
 } // namespace
 
 ea::string GetExecutableSuffix()
@@ -93,6 +121,17 @@ void AndroidBuildSettings::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "KeystoreAliasEnvVar", keystoreAliasEnvVar_, ea::string());
 }
 
+void TextureCompressionSettings::SerializeInBlock(Archive& archive)
+{
+    SerializeOptionalValue(archive, "Enabled", enabled_, false);
+    SerializeOptionalValue(archive, "ColorFormatNoAlpha", colorFormatNoAlpha_, ea::string());
+    SerializeOptionalValue(archive, "ColorFormatAlpha", colorFormatAlpha_, ea::string());
+    SerializeOptionalValue(archive, "NormalFormat", normalFormat_, ea::string());
+    SerializeOptionalValue(archive, "Container", container_, ea::string());
+    SerializeOptionalValue(archive, "Quality", quality_, ea::string());
+    SerializeOptionalValue(archive, "Mipmaps", mipmaps_, true);
+}
+
 void BuildProfile::SerializeInBlock(Archive& archive)
 {
     SerializeOptionalValue(archive, "Name", name_);
@@ -111,6 +150,7 @@ void BuildProfile::SerializeInBlock(Archive& archive)
     // differs from its fallback. Writing the block unconditionally keeps the reader from having to
     // tell "section absent" apart from "section present and complete".
     SerializeOptionalValue(archive, "Android", android_, AlwaysSerialize{});
+    SerializeOptionalValue(archive, "TextureCompression", textureCompression_, AlwaysSerialize{});
 }
 
 ea::string BuildProfile::ResolveOutputDir(const ea::string& projectPath) const
@@ -122,6 +162,13 @@ ea::string BuildProfile::ResolveOutputDir(const ea::string& projectPath) const
     // every consumer below concatenates with forward slashes.
     result.replace("\\", "/");
     return AddTrailingSlash(RemoveTrailingSlash(result));
+}
+
+TextureCompressionSettings BuildProfile::GetEffectiveTextureCompression() const
+{
+    TextureCompressionSettings result = textureCompression_;
+    ApplyTextureCompressionDefaults(result, IsAndroid());
+    return result;
 }
 
 BuildSettings::BuildSettings(Context* context)
@@ -240,6 +287,10 @@ bool BuildSettings::EnsureProfile(const ea::string& name, const ea::string& proj
         profile.android_.applicationId_ = "com.example." + projectName;
     }
 
+    // Seed concrete per-platform formats so a fresh Build.json documents what a build will do. The
+    // master switch stays off: texture compression is opt-in.
+    ApplyTextureCompressionDefaults(profile.textureCompression_, profile.IsAndroid());
+
     profiles_.push_back(profile);
     return true;
 }
@@ -320,6 +371,10 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
     if (profile.packData_ && FindTool(profile, "PackageTool").empty())
         errors.push_back("PackageTool was not found next to the engine binaries or the editor. "
             "Build it with: cmake --build msvc --target PackageTool --config Debug");
+
+    if (profile.textureCompression_.enabled_ && FindTool(profile, "PVRTexToolCLI").empty())
+        errors.push_back("Texture compression is enabled but PVRTexToolCLI was not found next to the "
+            "engine binaries or the editor.");
 
     if (profile.encryptScripts_)
     {

@@ -56,6 +56,11 @@ protected:
     virtual StringHash GetResourceType() const { return 0; }
     virtual SharedPtr<ResourceInspectorWidget> MakeInspectorWidget(const ResourceVector& resources) { return nullptr; }
     virtual SharedPtr<BaseWidget> MakePreviewWidget(Resource* resource) { return nullptr; }
+    /// Render additional editor-only content (e.g. per-file import metadata) after the standard resource properties.
+    virtual void RenderExtraInspectorContent() {}
+
+    /// Cache-relative names of the resources currently being inspected.
+    const StringVector& GetResourceNames() const { return resourceNames_; }
 
 private:
     void OnProjectRequest(ProjectRequest* request);

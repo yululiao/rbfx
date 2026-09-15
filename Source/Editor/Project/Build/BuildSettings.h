@@ -46,6 +46,31 @@ struct AndroidBuildSettings
     void SerializeInBlock(Archive& archive);
 };
 
+/// Per-platform texture compression parameters, applied at build time by the offline PVRTexTool.
+///
+/// Every string field treats "" as "use the platform default", resolved by
+/// BuildProfile::GetEffectiveTextureCompression. That keeps a hand-trimmed Build.json buildable and
+/// lets a profile written for one platform never accidentally carry the other platform's formats.
+struct TextureCompressionSettings
+{
+    /// Master switch. Off by default: enabling compression is opt-in so existing projects are unaffected.
+    bool enabled_{};
+    /// Format for color textures without an alpha channel ("BC1" desktop, "ETC2_RGB" mobile).
+    ea::string colorFormatNoAlpha_;
+    /// Format for color textures with an alpha channel ("BC3" desktop, "ETC2_RGBA" mobile).
+    ea::string colorFormatAlpha_;
+    /// Format for normal maps ("BC5" desktop, "ETC2_RGBA" mobile - Diligent has no EAC_RG11).
+    ea::string normalFormat_;
+    /// Container and extension of the cooked files ("dds" desktop, "ktx" mobile).
+    ea::string container_;
+    /// PVRTexTool quality token (-q). Empty means the tool's own default.
+    ea::string quality_;
+    /// Generate mipmaps for cooked textures.
+    bool mipmaps_{true};
+
+    void SerializeInBlock(Archive& archive);
+};
+
 /// One named build configuration. Persisted in <project>/Build.json, which this struct family
 /// owns exclusively - Project.json stays untouched so adding build settings cannot break the
 /// plugin/launch schema that already lives there.
@@ -86,11 +111,15 @@ struct BuildProfile
     /// ends cannot disagree without somebody going out of their way to make it happen.
     ea::string scriptKeyEnvVar_;
     AndroidBuildSettings android_;
+    TextureCompressionSettings textureCompression_;
 
     void SerializeInBlock(Archive& archive);
 
     bool IsAndroid() const { return platform_ == "Android"; }
     bool IsWindowsDesktop() const { return platform_ == "WindowsDesktop"; }
+
+    /// Texture compression settings with every empty field resolved to this profile's platform default.
+    TextureCompressionSettings GetEffectiveTextureCompression() const;
 
     /// Output directory made absolute against the project and normalized to end with a slash.
     ea::string ResolveOutputDir(const ea::string& projectPath) const;

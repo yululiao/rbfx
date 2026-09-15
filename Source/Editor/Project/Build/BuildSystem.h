@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "../../Assets/TextureImportSettings.h"
+
 #include <Urho3D/Core/Object.h>
 #include <Urho3D/Core/Variant.h>
 
@@ -36,6 +38,10 @@ enum class BuildStage
     CleanOutput,
     /// Engine Data/ first, project Data/ on top of it, so a project can override any engine file.
     StageData,
+    /// PVRTexTool over every staged texture, replacing each source with its platform format; only in
+    /// the plan when the profile enables texture compression. The tool runs once per texture, so this
+    /// stage chains its continuation across frames instead of finishing inside a single process.
+    CompressTextures,
     /// LuaCompiler over the staged tree; only in the plan when the profile encrypts scripts.
     CompileScripts,
     /// Engine CoreData/ into staging. No project override: that directory belongs to the engine.
@@ -100,6 +106,33 @@ public:
     const ea::vector<ea::string>& GetErrors() const { return errors_; }
 
 private:
+    /// One staged texture waiting to be compressed. Built once per build by StageCompressTextures and
+    /// walked by RunTextureQueue across as many frames as there are cache misses, which is why the
+    /// queue and its cursor live on the object rather than on a stage's local stack.
+    struct TextureJob
+    {
+        /// Path relative to the staged Data/, for logging.
+        ea::string relative_;
+        /// Staged source the tool reads, removed once its cooked product is in place.
+        ea::string stagedSource_;
+        /// Staged path of the cooked product: the same name with the container extension.
+        ea::string stagedDest_;
+        /// Staged legacy sidecar directory ("<source>.d"), removed so editor-only leftovers of the
+        /// previous metadata scheme never ship. The current scheme has no sidecar: the ".texmeta"
+        /// file staged from Data/ is both the import metadata and the runtime parameter file, so it
+        /// ships as-is and needs no handling here.
+        ea::string legacySidecarDir_;
+        /// Persistent product under Artifacts, named by a hash of the source fingerprint and settings.
+        ea::string cacheProduct_;
+        /// Whether the per-file metadata tagged this texture as a normal map.
+        bool isNormal_{};
+        /// Per-file import params resolved at staging time: drive the color space variant and
+        /// the mip chain.
+        TextureImporterParams params_;
+        /// Whether a mip chain is baked into the product: the per-file mode resolved against the profile.
+        bool mipmaps_{};
+    };
+
     /// Advance the plan. Runs on every frame while a build is active, and does nothing while the
     /// current stage is waiting for a process.
     void HandleBeginFrame(StringHash eventType, VariantMap& eventData);
@@ -116,15 +149,28 @@ private:
     bool StageAwaitAssets(ea::string& message);
     bool StageCleanOutput(ea::string& message);
     bool StageStageData(ea::string& message);
+    bool StageCompressTextures(ea::string& message);
     bool StageCompileScripts(ea::string& message);
     bool StageStageCoreData(ea::string& message);
     bool StageExportData(ea::string& message, bool coreData);
     bool StageStageRuntime(ea::string& message);
     bool StageAndroidProject(ea::string& message);
     bool StageSummary(ea::string& message);
-    /// Continuations of the two stages that shell out.
+    /// Continuations of the stages that shell out.
     bool PruneStagedSources(ea::string& message);
     bool VerifyExportedResources(ea::string& message, bool coreData);
+    /// Walk the texture queue: copy every cache hit into staging and run the tool for the rest one at
+    /// a time. Returns true only once all of them are placed; a tool run suspends it until the frame
+    /// after FinalizeCookedTexture reports back.
+    bool RunTextureQueue(ea::string& message);
+    /// Continuation after one texture finished cooking: install its product, then keep the queue going.
+    bool FinalizeCookedTexture(unsigned index, ea::string& message);
+    /// Place a cooked product into staging and drop the source and metadata it replaced.
+    bool InstallCookedTexture(const TextureJob& job, ea::string& message);
+    /// Absolute path of the Data/ file a staged texture was copied from, or empty when it came from
+    /// somewhere else. Feeds both the import metadata lookup and the half of the cache key that has to
+    /// survive a rebuild.
+    ea::string FindOriginalDataFile(const ea::string& relative) const;
 
     /// Move to the next stage of the plan; finishes the build when the plan is exhausted.
     void AdvanceStage();
@@ -177,6 +223,15 @@ private:
     ea::vector<ea::string> errors_;
     /// Seconds elapsed when the build started, so the summary can state the wall time honestly.
     float startTime_{};
+
+    /// Textures waiting to be compressed this build, and how far the walk has gotten through them.
+    ea::vector<TextureJob> textureQueue_;
+    unsigned textureQueueIndex_{};
+    /// PVRTexToolCLI resolved once per build, so a failure to find it aborts before any texture is touched.
+    ea::string textureToolPath_;
+    /// Cooked by the tool versus reused from the persistent cache, for the one-line summary.
+    unsigned texturesCompressed_{};
+    unsigned texturesCached_{};
 };
 
 } // namespace Urho3D
