@@ -69,6 +69,26 @@ bool IsHexKey(const ea::string& text)
     return true;
 }
 
+/// Names the EngineBuildMode values wear in Build.json. One word each, so a hand-edited file
+/// reads like the combo box that writes it.
+const char* const EngineBuildModeNames[] = {"Never", "Incremental", "Rebuild"};
+
+bool EngineBuildModeFromString(const ea::string& text, EngineBuildMode& mode)
+{
+    for (unsigned i = 0; i < sizeof(EngineBuildModeNames) / sizeof(EngineBuildModeNames[0]); ++i)
+    {
+        if (text.comparei(EngineBuildModeNames[i]) == 0)
+        {
+            mode = static_cast<EngineBuildMode>(i);
+            return true;
+        }
+    }
+    if (!text.empty())
+        URHO3D_LOGWARNING("Unknown EngineBuild mode '{}' in Build.json, falling back to 'Never'", text);
+    mode = EngineBuildMode::Never;
+    return false;
+}
+
 /// Fill every empty texture compression field with the platform default. Mobile and web have no
 /// two-channel normal format in Diligent (no EAC_RG11), so normal maps fall back to the RGBA
 /// color format there. Web reuses the mobile ETC2/KTX combination: ETC2 is a core WebGL2 format
@@ -150,6 +170,11 @@ void BuildProfile::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "AutoRunAfterBuild", autoRunAfterBuild_, false);
     SerializeOptionalValue(archive, "ScriptKeyEnvVar", scriptKeyEnvVar_, ea::string(DefaultScriptKeyEnvVar));
     SerializeOptionalValue(archive, "WebEmsdkRoot", webEmsdkRoot_, ea::string());
+    // The mode round-trips through its name: the file stays readable and an unknown word degrades
+    // to Never with a warning instead of failing the load over one bad token.
+    ea::string engineBuild = EngineBuildModeNames[static_cast<unsigned>(engineBuild_)];
+    SerializeOptionalValue(archive, "EngineBuild", engineBuild, ea::string(EngineBuildModeNames[0]));
+    EngineBuildModeFromString(engineBuild, engineBuild_);
     // The block itself is always written while every leaf inside it decides for itself whether it
     // differs from its fallback. Writing the block unconditionally keeps the reader from having to
     // tell "section absent" apart from "section present and complete".
@@ -357,14 +382,14 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
             const ea::string luaLib = RemoveTrailingSlash(profile.engineBin_) + "/RbfxLuaScript" + DYN_LIB_SUFFIX;
             const char* buildCommand = "cmake --build msvc --target LuaGamePlayer --config Debug";
             if (!fs->FileExists(host))
-                errors.push_back(ToString("Missing '%s'. Build it first, the editor will not start a "
-                    "multi-minute engine build on its own (%s).", host.c_str(), buildCommand));
+                errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
+                    "host' on this profile and the build does it itself.", host.c_str(), buildCommand));
             if (!fs->FileExists(engineLib))
-                errors.push_back(ToString("Missing '%s'. Build it first, the editor will not start a "
-                    "multi-minute engine build on its own (%s).", engineLib.c_str(), buildCommand));
+                errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
+                    "host' on this profile and the build does it itself.", engineLib.c_str(), buildCommand));
             if (!fs->FileExists(luaLib))
-                errors.push_back(ToString("Missing '%s'. Build it first, the editor will not start a "
-                    "multi-minute engine build on its own (%s).", luaLib.c_str(), buildCommand));
+                errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
+                    "host' on this profile and the build does it itself.", luaLib.c_str(), buildCommand));
         }
         else
         {
@@ -376,8 +401,9 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
             for (const char* artifact : webArtifacts)
             {
                 if (!fs->FileExists(bin + artifact))
-                    errors.push_back(ToString("Missing '%s'. Build the web host first, the editor will not "
-                        "start a multi-minute engine build on its own (%s).", (bin + artifact).c_str(), buildCommand));
+                    errors.push_back(ToString("Missing '%s'. Build the web host first (%s), or set "
+                        "'Compile engine host' on this profile and the build does it itself.",
+                        (bin + artifact).c_str(), buildCommand));
             }
         }
     }

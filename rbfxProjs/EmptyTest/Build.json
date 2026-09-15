@@ -3,6 +3,7 @@
 		{
 			"Android": {},
 			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineBuild": "Incremental",
 			"EngineData": "D:/openSrc/rbfx/bin",
 			"Name": "Windows",
 			"OutputDir": "Build/Windows",
@@ -33,7 +34,9 @@
 			}
 		},
 		{
+			"Android": {},
 			"EngineBin": "D:/openSrc/rbfx/web/bin/Release",
+			"EngineBuild": "Incremental",
 			"EngineData": "D:/openSrc/rbfx/bin",
 			"Name": "Web",
 			"OutputDir": "Build/Web",

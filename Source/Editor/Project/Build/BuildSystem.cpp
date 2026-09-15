@@ -117,6 +117,8 @@ const char* BuildStageName(BuildStage stage)
 {
     switch (stage)
     {
+    case BuildStage::EngineBuild:
+        return "Compile engine host";
     case BuildStage::Validate:
         return "Validate profile";
     case BuildStage::AwaitAssets:
@@ -228,6 +230,11 @@ bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outp
     stagingDir_ = NormalizeDir(project->GetRandomTemporaryPath());
 
     plan_.clear();
+    // The compile goes first when asked for: it produces the very artifacts the Validate stage
+    // checks for, so a profile that compiles never has to be built twice to get past validation.
+    // Android is left out because its gradle project compiles the engine itself.
+    if (profile_->engineBuild_ != EngineBuildMode::Never && !profile_->IsAndroid())
+        plan_.push_back(BuildStage::EngineBuild);
     plan_.push_back(BuildStage::Validate);
     // Cook imported assets before anything reads Cache: this is the stage that guarantees the Cache
     // satellite outputs StageData copies are present and current. Placing it after Validate means the
@@ -349,6 +356,8 @@ bool BuildSystem::RunStage(ea::string& message)
 {
     switch (stage_)
     {
+    case BuildStage::EngineBuild:
+        return StageEngineBuild(message);
     case BuildStage::Validate:
         return StageValidate(message);
     case BuildStage::AwaitAssets:
@@ -380,6 +389,194 @@ bool BuildSystem::RunStage(ea::string& message)
     }
     message = "There is no stage to run.";
     return false;
+}
+
+bool BuildSystem::StageEngineBuild(ea::string& message)
+{
+    ea::string tree, cmakeCommand, generator;
+    if (!LocateEngineBuildTree(tree, cmakeCommand, generator, message))
+        return false;
+
+    ea::vector<ea::string> arguments;
+    if (profile_->IsWeb())
+    {
+        // The emsdk toolchain lives on paths the editor process knows nothing about, and its
+        // scripts expect the variables an `emsdk activate` shell would export. `cmake -E env`
+        // injects them for the compile and for nothing else. The cache that configured the tree
+        // names the toolchain, which is the one that compiled everything already in it.
+        ea::string ignored;
+        ea::string toolchain = ReadCMakeCacheEntry(RemoveTrailingSlash(tree) + "/CMakeCache.txt",
+            "EMSCRIPTEN_ROOT_PATH");
+        if (toolchain.empty())
+            toolchain = ResolveEmscriptenRoot(ignored);
+        if (toolchain.empty())
+        {
+            message = "Could not determine the emsdk toolchain for the web build. Set the "
+                "WebEmsdkRoot profile field or activate emsdk before starting the editor.";
+            return false;
+        }
+
+        // The sdk root sits two levels above the toolchain directory ("<emsdk>/upstream/emscripten").
+        const ea::string emsdkRoot = NormalizeDir(
+            GetPath(RemoveTrailingSlash(GetPath(RemoveTrailingSlash(toolchain)))));
+        arguments.push_back("-E");
+        arguments.push_back("env");
+        arguments.push_back("EMSDK=" + RemoveTrailingSlash(emsdkRoot));
+        arguments.push_back("EM_CONFIG=" + RemoveTrailingSlash(emsdkRoot) + "/.emscripten");
+        // An activated shell also exports EMSDK_PYTHON and puts the bundled interpreter first on
+        // PATH. Both are reproduced here so the toolchain's python scripts (emcc, file_packager,
+        // ...) never depend on whatever python the user happens to have installed.
+        ea::string pythonDir;
+        const ea::string emsdkPython = FindBundledPython(emsdkRoot);
+        if (!emsdkPython.empty())
+        {
+            arguments.push_back("EMSDK_PYTHON=" + emsdkPython);
+            pythonDir = NormalizeDir(GetPath(RemoveTrailingSlash(emsdkPython)));
+        }
+        const char* const pathSeparator =
+#if defined(_WIN32)
+            ";";
+#else
+            ":";
+#endif
+        const char* const currentPath = getenv("PATH");
+        ea::string path = RemoveTrailingSlash(toolchain);
+        if (!pythonDir.empty())
+            path += pathSeparator + RemoveTrailingSlash(pythonDir);
+        if (currentPath && *currentPath)
+            path += ea::string(pathSeparator) + currentPath;
+        arguments.push_back("PATH=" + path);
+        arguments.push_back("--");
+        // `cmake -E env` runs the word after `--` as its command, so the build has to be spelled
+        // out as another cmake invocation inside the injected environment. Without it the `--build`
+        // below would be the command cmake tries and fails to execute.
+        arguments.push_back(cmakeCommand.empty() ? ea::string("cmake") : cmakeCommand);
+    }
+
+    arguments.push_back("--build");
+    arguments.push_back(RemoveTrailingSlash(tree));
+    arguments.push_back("--target");
+    arguments.push_back(HostName);
+
+    // Multi-config generators pick the configuration at build time, and the engine binary
+    // directory already names it (".../bin/Release"). Single-config trees baked theirs in at
+    // configure time and ignore --config, so it is not passed to them at all.
+    const bool multiConfig = generator.find("Visual Studio") != ea::string::npos
+        || generator.find("Xcode") != ea::string::npos
+        || generator.find("Multi-Config") != ea::string::npos;
+    if (multiConfig)
+    {
+        const ea::string config = GetFileNameAndExtension(RemoveTrailingSlash(NormalizeDir(profile_->engineBin_)));
+        const char* const knownConfigs[] = {"Debug", "Release", "RelWithDebInfo", "MinSizeRel"};
+        const char* const* const configEnd = knownConfigs + 4;
+        const bool configKnown = ea::find_if(knownConfigs, configEnd,
+            [&config](const char* known) { return config.comparei(known) == 0; }) != configEnd;
+        arguments.push_back("--config");
+        arguments.push_back(configKnown ? config : ea::string("Release"));
+    }
+
+    if (profile_->engineBuild_ == EngineBuildMode::Rebuild)
+        arguments.push_back("--clean-first");
+
+    // The cache names the exact cmake that configured the tree; only a tree configured by a cmake
+    // since gone from the machine falls back to whatever the editor finds on PATH.
+    return StartProcess(cmakeCommand.empty() ? ea::string("cmake") : cmakeCommand, arguments,
+        [this](ea::string& resumeMessage) { return FinalizeEngineBuild(resumeMessage); }, message);
+}
+
+bool BuildSystem::FinalizeEngineBuild(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+    const ea::string bin = NormalizeDir(profile_->engineBin_);
+
+    // The same artifacts Validate asks for, phrased for the step that just ran: a generator that
+    // exited zero while skipping a broken target must not pass silently into packaging.
+    ea::vector<ea::string> artifacts;
+    if (profile_->IsWeb())
+    {
+        for (const char* extension : {".html", ".js", ".wasm"})
+            artifacts.push_back(bin + HostName + extension);
+    }
+    else
+    {
+        const ea::string suffix = GetExecutableSuffix();
+        artifacts.push_back(bin + HostName + suffix);
+        artifacts.push_back(bin + EngineLibraryName + DYN_LIB_SUFFIX);
+        artifacts.push_back(bin + LuaLibraryName + DYN_LIB_SUFFIX);
+    }
+    for (const ea::string& artifact : artifacts)
+    {
+        if (!fs->FileExists(artifact))
+        {
+            message = Format("The engine build finished but '{}' is still not there.", artifact);
+            return false;
+        }
+    }
+
+    URHO3D_LOGINFO("[Build] Engine host is up to date in '{}'", bin);
+    return true;
+}
+
+bool BuildSystem::LocateEngineBuildTree(ea::string& tree, ea::string& cmakeCommand,
+    ea::string& generator, ea::string& message) const
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    if (profile_->engineBin_.empty())
+    {
+        message = "Engine binary directory is not set, so there is no build tree to compile into.";
+        return false;
+    }
+
+    // The binary directory sits somewhere inside the build tree (".../bin/Release"), so the tree
+    // is the first directory at or above it holding a CMake cache. The search starts at the
+    // binaries themselves because a tree with everything in its root is legal too.
+    ea::string candidate = RemoveTrailingSlash(NormalizeDir(profile_->engineBin_));
+    for (unsigned level = 0; level < 4; ++level)
+    {
+        const ea::string cache = candidate + "/CMakeCache.txt";
+        if (fs->FileExists(cache))
+        {
+            tree = NormalizeDir(candidate);
+            cmakeCommand = ReadCMakeCacheEntry(cache, "CMAKE_COMMAND");
+            generator = ReadCMakeCacheEntry(cache, "CMAKE_GENERATOR");
+            return true;
+        }
+        candidate = RemoveTrailingSlash(GetPath(candidate));
+        if (candidate.empty() || candidate.size() < 2)
+            break;
+    }
+
+    message = Format("Could not find a CMake build tree at or above '{}'. Configure one first, "
+        "for example: cmake -S <engine sources> -B <build tree> -G <generator> [toolchain flags].",
+        NormalizeDir(profile_->engineBin_));
+    return false;
+}
+
+ea::string BuildSystem::ReadCMakeCacheEntry(const ea::string& cachePath, const ea::string& key) const
+{
+    File file(context_, cachePath, FILE_READ);
+    if (!file.IsOpen())
+        return EMPTY_STRING;
+
+    // Cache lines look like "KEY:TYPE=value"; the type never contains '=' so the first one is the
+    // separator. A Windows cache can end the value with a carriage return, trimmed here so every
+    // caller can compare and concatenate the result as-is.
+    const ea::string prefix = key + ":";
+    while (!file.IsEof())
+    {
+        const ea::string line = file.ReadLine();
+        if (line.find(prefix) != 0)
+            continue;
+        const size_t separator = line.find('=');
+        if (separator == ea::string::npos)
+            continue;
+        const ea::string value = line.substr(separator + 1);
+        const size_t first = value.find_first_not_of(" \t\r\n");
+        const size_t last = value.find_last_not_of(" \t\r\n");
+        return first != ea::string::npos ? value.substr(first, last - first + 1) : EMPTY_STRING;
+    }
+    return EMPTY_STRING;
 }
 
 bool BuildSystem::StageValidate(ea::string& message)
@@ -1159,35 +1356,14 @@ ea::string BuildSystem::ResolveEmscriptenRoot(ea::string& message) const
     }
     if (result.empty())
     {
-        // Last resort: the web build directory is somewhere above the engine binary directory, and
-        // its CMake cache names the toolchain even on a machine where emsdk was never activated.
-        // How many levels up depends on the generator, so the parents are probed in turn.
-        ea::string parent = RemoveTrailingSlash(NormalizeDir(profile_->engineBin_));
-        for (unsigned level = 0; level < 3 && result.empty(); ++level)
+        // Last resort: the web build tree is somewhere above the engine binary directory, and its
+        // CMake cache names the toolchain even on a machine where emsdk was never activated.
+        ea::string tree, cmakeCommand, generator;
+        ea::string ignored;
+        if (LocateEngineBuildTree(tree, cmakeCommand, generator, ignored))
         {
-            parent = RemoveTrailingSlash(GetPath(parent));
-            if (parent.empty() || parent.size() < 2)
-                break;
-            const ea::string cache = parent + "/CMakeCache.txt";
-            if (!fs->FileExists(cache))
-                continue;
-            File file(context_, cache, FILE_READ);
-            while (result.empty() && file.IsOpen() && !file.IsEof())
-            {
-                const ea::string line = file.ReadLine();
-                if (line.find("EMSCRIPTEN_ROOT_PATH") != 0)
-                    continue;
-                const size_t separator = line.find('=');
-                if (separator == ea::string::npos)
-                    continue;
-                // CMake writes "KEY:TYPE=value"; a Windows cache can end the value with a carriage
-                // return that would turn every path test below into a miss.
-                ea::string value = line.substr(separator + 1);
-                const size_t first = value.find_first_not_of(" \t\r\n");
-                const size_t last = value.find_last_not_of(" \t\r\n");
-                if (first != ea::string::npos)
-                    result = hasPackager(value.substr(first, last - first + 1));
-            }
+            result = hasPackager(ReadCMakeCacheEntry(RemoveTrailingSlash(tree) + "/CMakeCache.txt",
+                "EMSCRIPTEN_ROOT_PATH"));
         }
     }
     if (result.empty())
@@ -1199,10 +1375,33 @@ ea::string BuildSystem::ResolveEmscriptenRoot(ea::string& message) const
     return result;
 }
 
-ea::string BuildSystem::ResolveEmsdkPython() const
+ea::string BuildSystem::FindBundledPython(const ea::string& emsdkRoot) const
 {
+    if (emsdkRoot.empty())
+        return EMPTY_STRING;
     auto* fs = GetSubsystem<FileSystem>();
 
+    // "<emsdk>/python/<version>" is where the sdk keeps the interpreter its own scripts are
+    // tested with. One version at a time is installed, so first hit wins.
+    ea::vector<ea::string> versions;
+    fs->ScanDir(versions, NormalizeDir(emsdkRoot) + "python", "*", SCAN_DIRS);
+    for (const ea::string& version : versions)
+    {
+        if (version == "." || version == "..")
+            continue;
+#if defined(_WIN32)
+        const ea::string candidate = NormalizeDir(emsdkRoot) + "python/" + version + "/python.exe";
+#else
+        const ea::string candidate = NormalizeDir(emsdkRoot) + "python/" + version + "/bin/python3";
+#endif
+        if (fs->FileExists(candidate))
+            return candidate;
+    }
+    return EMPTY_STRING;
+}
+
+ea::string BuildSystem::ResolveEmsdkPython() const
+{
     // The packager needs nothing beyond the standard library, but the interpreter emsdk ships is
     // the one its own scripts are tested with, so it wins when it is there. The sdk root is two
     // levels above the toolchain directory ResolveEmscriptenRoot answers with.
@@ -1212,20 +1411,9 @@ ea::string BuildSystem::ResolveEmsdkPython() const
     {
         const ea::string emsdkRoot = NormalizeDir(
             GetPath(RemoveTrailingSlash(GetPath(RemoveTrailingSlash(emscriptenRoot)))));
-        ea::vector<ea::string> versions;
-        fs->ScanDir(versions, emsdkRoot + "python", "*", SCAN_DIRS);
-        for (const ea::string& version : versions)
-        {
-            if (version == "." || version == "..")
-                continue;
-#if defined(_WIN32)
-            const ea::string candidate = emsdkRoot + "python/" + version + "/python.exe";
-#else
-            const ea::string candidate = emsdkRoot + "python/" + version + "/bin/python3";
-#endif
-            if (fs->FileExists(candidate))
-                return candidate;
-        }
+        const ea::string bundled = FindBundledPython(emsdkRoot);
+        if (!bundled.empty())
+            return bundled;
     }
     // Whatever is on PATH then; a machine without any python at all cannot run the packager anyway.
 #if defined(_WIN32)

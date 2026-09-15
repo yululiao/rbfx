@@ -32,6 +32,10 @@ const char* const SettingsKeyProfile = "SelectedProfile";
 /// fails two minutes into a native gradle build, which is a worse place to learn about it.
 const char* const AndroidAbis[] = { "arm64-v8a", "armeabi-v7a", "x86", "x86_64" };
 
+/// Labels of the engine build modes, in EngineBuildMode order so the combo index is the enum value.
+const char* const EngineBuildLabels[] = { "Do not compile", "Incremental build", "Rebuild from clean" };
+constexpr unsigned NumEngineBuildLabels = sizeof(EngineBuildLabels) / sizeof(EngineBuildLabels[0]);
+
 /// True when the named environment variable exists and is not empty. Only the name is ever shown:
 /// the value of a content key or a keystore password does not belong on screen, in a log, or in a
 /// generated file.
@@ -263,8 +267,32 @@ void BuildTab::RenderPackageOptions(BuildProfile& profile)
     ui::Separator();
     Touch(ui::InputText("Engine binaries", &profile.engineBin_));
     Touch(ui::InputText("Engine data", &profile.engineData_));
-    ui::TextWrapped("Both point at an engine you built yourself. A build never starts an engine "
-        "compile: a missing file is reported together with the command that produces it.");
+    ui::TextWrapped("Both point at an engine you built yourself. A missing host file is reported "
+        "together with the command that produces it, or compiled by the build itself when 'Compile "
+        "engine host' below is on.");
+
+    // Android hides the selector rather than disabling it: its gradle project compiles the engine
+    // on its own, so the choice would be dead weight on screen.
+    if (!profile.IsAndroid())
+    {
+        const int current = static_cast<int>(profile.engineBuild_);
+        if (ui::BeginCombo("Compile engine host", EngineBuildLabels[current]))
+        {
+            for (int i = 0; i < static_cast<int>(NumEngineBuildLabels); ++i)
+            {
+                if (ui::Selectable(EngineBuildLabels[i], i == current))
+                {
+                    profile.engineBuild_ = static_cast<EngineBuildMode>(i);
+                    Touch(true);
+                }
+            }
+            ui::EndCombo();
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Whether the build compiles the C++ engine host into the CMake build "
+                "tree above the engine binaries. Incremental reuses whatever is still up to date; "
+                "Rebuild cleans the host's previous products first");
+    }
 }
 
 void BuildTab::RenderAndroidOptions(BuildProfile& profile)

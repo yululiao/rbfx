@@ -495,7 +495,16 @@ public:
     {
         URHO3D_PROFILE_THREAD("AsyncSystemRun Thread");
         ea::string output;
-        exitCode_ = DoSystemRun(fileName_, arguments_, SR_WAIT_FOR_EXIT, output);
+        exitCode_ = DoSystemRun(fileName_, arguments_, SR_READ_OUTPUT, output);
+        // A process nobody reads is silent: the hidden console CREATE_NO_WINDOW hands it eats
+        // whatever it prints. The log stays quiet while the process succeeds, but a failure prints
+        // the tail of the output - that is where a build tool states why it stopped.
+        if (exitCode_ != 0 && !output.empty())
+        {
+            constexpr size_t maxTail = 4000;
+            const size_t start = output.size() > maxTail ? output.size() - maxTail : 0;
+            URHO3D_LOGERROR("Output of failed '{}':\n{}", fileName_, output.substr(start));
+        }
         completed_ = true;
     }
 

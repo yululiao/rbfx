@@ -14,6 +14,18 @@ namespace Urho3D
 
 class Archive;
 
+/// Whether and how a build compiles the C++ engine host itself before packaging it. Desktop and
+/// web read it; Android does not, its gradle project compiles the engine from source regardless.
+enum class EngineBuildMode
+{
+    /// Use the binaries that are already in the engine binary directory.
+    Never,
+    /// Compile the host into the existing build tree, reusing whatever is still up to date.
+    Incremental,
+    /// Compile the host after cleaning its previous products from the build tree.
+    Rebuild,
+};
+
 /// Suffix every operating system puts on runnable binaries. The build steps need it to locate the
 /// offline tools (PackageTool, LuaCompiler) next to the engine binaries a profile points at.
 ea::string GetExecutableSuffix();
@@ -114,6 +126,10 @@ struct BuildProfile
     /// empty the build resolves it from the EMSCRIPTEN environment variable or from the
     /// CMakeCache.txt next to the engine binaries. Only the Web platform reads it.
     ea::string webEmsdkRoot_;
+    /// Whether the build compiles the C++ engine host itself first. Never by default: a compile
+    /// takes minutes, so a profile opts in when it wants a one click turnaround of engine changes.
+    /// The stage runs before anything else because it produces the artifacts Validate checks.
+    EngineBuildMode engineBuild_{};
     AndroidBuildSettings android_;
     TextureCompressionSettings textureCompression_;
 

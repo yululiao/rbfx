@@ -28,6 +28,9 @@ class BuildSettings;
 enum class BuildStage
 {
     Idle,
+    /// Compiles the C++ engine host into its build tree; first when the profile asks for it,
+    /// because it produces the artifacts the Validate stage checks for.
+    EngineBuild,
     /// Preconditions of the profile; collects every problem instead of stopping at the first one.
     Validate,
     /// Blocks until the AssetManager has finished cooking imported assets, so StageData can copy a
@@ -150,6 +153,7 @@ private:
     /// pointer would have to be invalidated the moment one is closed.
     BuildSettings* GetSettings() const;
     /// Stage implementations, one per BuildStage value that can appear in a plan.
+    bool StageEngineBuild(ea::string& message);
     bool StageValidate(ea::string& message);
     bool StageAwaitAssets(ea::string& message);
     bool StageCleanOutput(ea::string& message);
@@ -176,10 +180,24 @@ private:
     /// data archive, and write the local serving script.
     bool StageWebRuntime(ea::string& message);
     bool FinalizeWebRuntime(ea::string& message);
+    /// Continuation of StageEngineBuild: prove the compile actually produced the host artifacts
+    /// before the rest of the plan starts relying on them.
+    bool FinalizeEngineBuild(ea::string& message);
+    /// The CMake build tree the engine binary directory belongs to, plus the cmake executable and
+    /// generator name its cache names. False (with a reason in 'message') when there is no cache
+    /// above the binaries - a tree that was never configured.
+    bool LocateEngineBuildTree(ea::string& tree, ea::string& cmakeCommand, ea::string& generator,
+        ea::string& message) const;
+    /// One entry out of a CMakeCache.txt, or empty when the file has no such key. The value keeps
+    /// the case it was written with; surrounding whitespace is trimmed.
+    ea::string ReadCMakeCacheEntry(const ea::string& cachePath, const ea::string& key) const;
     /// Directory of the emscripten toolchain that owns file_packager.py: the profile's emsdk root,
     /// the emsdk environment variables, or the CMake cache of the web build, whichever answers
     /// first. Empty (with a reason in 'message') when none of them does.
     ea::string ResolveEmscriptenRoot(ea::string& message) const;
+    /// Interpreter shipped inside an emsdk root ("<emsdk>/python/<version>/python.exe"), or empty
+    /// when that sdk bundles none.
+    ea::string FindBundledPython(const ea::string& emsdkRoot) const;
     /// serve.py next to the page: a wasm module only loads over http, never from file://.
     bool WriteWebServeScript(ea::string& message) const;
     /// Absolute path of the Data/ file a staged texture was copied from, or empty when it came from
