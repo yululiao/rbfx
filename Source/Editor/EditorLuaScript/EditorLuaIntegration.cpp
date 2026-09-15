@@ -8,20 +8,17 @@
 
 #ifdef URHO3D_LUA
 
-#include <LuaScript/EditorLuaHooks.h>
 #include <LuaScript/EditorLuaScript.h>
 
-#include "LuaEditorTab.h"
+#include "EditorLuaBindings.h"
+#include "LuaUIState.h"
 
 #include "../Project/Project.h"
-#include "../Foundation/SceneViewTab.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Object.h>
-#include <Urho3D/IO/Log.h>
 #include <Urho3D/SystemUI/SystemUI.h>
 
-#include <EASTL/algorithm.h>
 #include <EASTL/map.h>
 
 namespace Urho3D
@@ -29,55 +26,6 @@ namespace Urho3D
 
 namespace
 {
-
-// Menu item registered by a Lua plugin; clicking invokes the DLL-side callback by handle.
-struct LuaMenuItem
-{
-    ea::string label;
-    unsigned long long handle;
-};
-
-ea::vector<LuaMenuItem>& LuaMenuItems()
-{
-    static ea::vector<LuaMenuItem> items;
-    return items;
-}
-
-// Weak references to the tabs created for the current project, so a plugin reload can update an
-// existing tab's callback by title instead of stacking duplicates. Expired entries are pruned on
-// each (re)load, which also covers the case where the owning project has been closed.
-ea::vector<WeakPtr<LuaEditorTab>>& LuaTabs()
-{
-    static ea::vector<WeakPtr<LuaEditorTab>> tabs;
-    return tabs;
-}
-
-// Floating window registered by a Lua plugin. The editor draws it every frame (independent of
-// any dock tab), wrapping the content callback between its own Begin/End. 'visible' is owned by
-// the editor so the title-bar close works; Lua toggles it by title via showWindow/hideWindow.
-struct LuaWindow
-{
-    ea::string title;
-    unsigned long long handle;
-    bool visible;
-    unsigned int flags;
-};
-
-ea::vector<LuaWindow>& LuaWindows()
-{
-    static ea::vector<LuaWindow> windows;
-    return windows;
-}
-
-/// Return the scene-view page currently being edited (its scene + selection), or null.
-SceneViewPage* ActiveSceneViewPage(Context* context)
-{
-    auto* project = context->GetSubsystem<Project>();
-    if (!project)
-        return nullptr;
-    auto* view = project->FindTab<SceneViewTab>();
-    return view ? view->GetActivePage() : nullptr;
-}
 
 // A menu label expressed relative to the menu level currently being rendered, i.e. the leading
 // path segments of an "a/b/Item" style label have already been consumed by parent menus.
@@ -127,7 +75,7 @@ void RenderLuaMenuLevel(const ea::vector<LuaMenuSlice>& slices, EditorLuaScript*
 ea::vector<LuaMenuSlice> CollectLuaMenuChildren(const ea::string& topName)
 {
     ea::vector<LuaMenuSlice> slices;
-    for (const LuaMenuItem& item : LuaMenuItems())
+    for (const Detail::LuaMenuItem& item : Detail::LuaMenuItems())
     {
         const auto slash = item.label.find('/');
         if (slash == ea::string::npos)
@@ -142,196 +90,17 @@ ea::vector<LuaMenuSlice> CollectLuaMenuChildren(const ea::string& topName)
 
 void SetupEditorLua(Context* context)
 {
-    // Provide editor capabilities to the DLL-side "Editor" API. Each hook queries the live
-    // subsystems on call, so it stays correct as projects open/close. No editor type crosses
-    // into the DLL; only allocator-safe engine values are exchanged.
-    EditorLuaHooks hooks;
-    hooks.hasProject = [context]() { return context->GetSubsystem<Project>() != nullptr; };
-    hooks.getProjectDataPath = [context]() -> ea::string
-    {
-        auto* project = context->GetSubsystem<Project>();
-        return project ? project->GetDataPath() : ea::string();
-    };
-    hooks.getProjectPath = [context]() -> ea::string
-    {
-        auto* project = context->GetSubsystem<Project>();
-        return project ? project->GetProjectPath() : ea::string();
-    };
-
-    // A Lua plugin asks for a dockable panel; create it once per title and, on reload, retarget
-    // the existing tab at the newly registered callback so its content refreshes in place.
-    hooks.addTab = [context](const ea::string& title, unsigned long long handle) -> bool
-    {
-        auto* project = context->GetSubsystem<Project>();
-        if (!project)
-            return false;
-
-        for (WeakPtr<LuaEditorTab>& weak : LuaTabs())
-        {
-            if (LuaEditorTab* tab = weak.Get())
-            {
-                if (tab->GetTitle() == title)
-                {
-                    tab->SetHandle(handle);
-                    return true;
-                }
-            }
-        }
-
-        const auto tab = MakeShared<LuaEditorTab>(context, title, handle);
-        project->AddTab(tab);
-        // OpenByDefault only takes effect during a layout reset, which does not re-run for tabs
-        // added after project construction. Focus explicitly so the panel actually shows up and
-        // its content renders every frame.
-        tab->Focus();
-        LuaTabs().push_back(tab);
-        return true;
-    };
-
-    hooks.addMenuItem = [context](const ea::string& label, unsigned long long handle) -> bool
-    {
-        if (!context->GetSubsystem<Project>())
-            return false;
-        LuaMenuItems().push_back(LuaMenuItem{ label, handle });
-        return true;
-    };
-
-    hooks.addWindow = [context](const ea::string& title, unsigned long long handle, unsigned flags) -> bool
-    {
-        if (!context->GetSubsystem<Project>())
-            return false;
-        for (LuaWindow& window : LuaWindows())
-        {
-            if (window.title == title)
-            {
-                window.handle = handle;
-                window.flags = flags;
-                return true;
-            }
-        }
-        LuaWindows().push_back(LuaWindow{ title, handle, false, flags });
-        return true;
-    };
-    hooks.showWindow = [](const ea::string& title) -> bool
-    {
-        for (LuaWindow& window : LuaWindows())
-            if (window.title == title)
-            {
-                window.visible = true;
-                return true;
-            }
-        return false;
-    };
-    hooks.hideWindow = [](const ea::string& title) -> bool
-    {
-        for (LuaWindow& window : LuaWindows())
-            if (window.title == title)
-            {
-                window.visible = false;
-                return true;
-            }
-        return false;
-    };
-
-    hooks.getActiveScene = [context]() -> Scene*
-    {
-        auto* page = ActiveSceneViewPage(context);
-        return page ? page->scene_.Get() : nullptr;
-    };
-    hooks.getActiveNode = [context]() -> Node*
-    {
-        auto* page = ActiveSceneViewPage(context);
-        return page ? page->selection_.GetActiveNode() : nullptr;
-    };
-    hooks.getSelected = [context](ea::vector<Node*>& outNodes, ea::vector<Component*>& outComponents)
-    {
-        auto* page = ActiveSceneViewPage(context);
-        if (!page)
-            return;
-        SceneSelection& selection = page->selection_;
-        for (const WeakPtr<Node>& node : selection.GetNodes())
-        {
-            if (Node* raw = node.Get())
-                outNodes.push_back(raw);
-        }
-        for (const WeakPtr<Component>& component : selection.GetComponents())
-        {
-            if (Component* raw = component.Get())
-                outComponents.push_back(raw);
-        }
-    };
-
-    // Build pipeline. Every hook resolves the project afresh, so closing a project turns them
-    // into refusals rather than accesses through a pointer to a destroyed BuildSystem.
-    hooks.getBuildProfiles = [context]() -> ea::vector<ea::string>
-    {
-        auto* project = context->GetSubsystem<Project>();
-        auto* settings = project ? project->GetBuildSettings() : nullptr;
-        return settings ? settings->GetProfileNames() : ea::vector<ea::string>();
-    };
-
-    hooks.buildProfile = [context](const ea::string& profile, unsigned long long handle) -> bool
-    {
-        auto* project = context->GetSubsystem<Project>();
-        auto* build = project ? project->GetBuildSystem() : nullptr;
-        if (!build)
-        {
-            URHO3D_LOGERROR("Editor.build needs an open project, and none is open");
-            return false;
-        }
-
-        // The reason a refused build is not reported here is that BuildNow already logged it: a
-        // missing profile names the profiles that do exist, and a running build says which.
-        return build->BuildNow(profile, EMPTY_STRING,
-            [context, handle, profile](bool success, const ea::string& message, const ea::string& outputDir)
-            {
-                auto* lua = context->GetSubsystem<EditorLuaScript>();
-                if (!lua || handle == 0ull)
-                    return;
-                // Spelled out rather than forwarded from the event, because the handler of a build
-                // runs before the build is torn down and gets the same values the event carried.
-                VariantMap eventData;
-                eventData["Success"] = success;
-                eventData["Profile"] = profile;
-                eventData["Message"] = success ? EMPTY_STRING : message;
-                eventData["OutputDir"] = outputDir;
-                lua->InvokeOneShotCallback(handle, eventData);
-            });
-    };
-
-    hooks.getBuildStatus = [context]() -> EditorBuildStatus
-    {
-        EditorBuildStatus status;
-        auto* project = context->GetSubsystem<Project>();
-        auto* build = project ? project->GetBuildSystem() : nullptr;
-        if (build)
-        {
-            status.building = build->IsBuilding();
-            status.progress = build->GetProgress();
-            status.stage = build->GetStageName();
-            status.profile = build->GetProfileName();
-            status.outputDir = build->GetOutputDir();
-            status.errors = build->GetErrors();
-        }
-        return status;
-    };
-
-    hooks.resetUI = []()
-    {
-        LuaMenuItems().clear();
-        LuaWindows().clear();
-        auto& tabs = LuaTabs();
-        tabs.erase(ea::remove_if(tabs.begin(), tabs.end(),
-                       [](const WeakPtr<LuaEditorTab>& weak) { return !weak.Get(); }),
-            tabs.end());
-    };
-
-    SetEditorLuaHooks(hooks);
-
-    // Bring up the dedicated editor Lua VM (owned and driven inside RbfxLuaScript).
+    // Bring up the dedicated editor Lua VM (owned and driven inside RbfxLuaScript, which also
+    // registers the engine bindings and the VM-plumbing half of the "Editor" table: log,
+    // subscribe, exec). The editor then registers everything that needs editor types straight
+    // into the same state -- the imgui table and the editor-capability half of "Editor" -- with
+    // lambdas that capture the Context, so no injection table and no boundary crossing remain.
     const auto editorLua = MakeShared<EditorLuaScript>(context);
     context->RegisterSubsystem(editorLua);
     editorLua->Initialize();
+
+    RegisterImGuiLuaBindings(editorLua->GetState());
+    RegisterEditorLuaAPI(context);
 }
 
 void ReloadEditorLuaPlugins(Context* context)
@@ -347,14 +116,14 @@ void ReloadEditorLuaPlugins(Context* context)
     project->OnRenderProjectMenu.Subscribe(editorLua, [context]()
     {
         auto* lua = context->GetSubsystem<EditorLuaScript>();
-        if (!lua || LuaMenuItems().empty())
+        if (!lua || Detail::LuaMenuItems().empty())
             return;
 
         // Only plain labels (no '/') live in the Project menu. Path labels such as "Tools/Item"
         // describe their own top-level menu and are rendered by RenderLuaMenuEntries /
         // RenderLuaTopMenus in the main menu bar instead.
         bool separatorDrawn = false;
-        for (const LuaMenuItem& item : LuaMenuItems())
+        for (const Detail::LuaMenuItem& item : Detail::LuaMenuItems())
         {
             if (item.label.find('/') != ea::string::npos)
                 continue;
@@ -368,6 +137,10 @@ void ReloadEditorLuaPlugins(Context* context)
         }
     });
 
+    // Reload starts from a clean editor-side UI slate, mirroring the Lua-side callback registry
+    // clear inside LoadPlugins; the plugins below re-register their tabs, menus and windows.
+    Detail::ResetLuaUI();
+
     // Convention: per-project editor plugins live in an "EditorScripts" folder at the project root
     // (kept separate from the game's Data/Scripts so editor-only tooling never ships with a build).
     // GetProjectPath() already ends with a '/', so no separator is added here.
@@ -378,13 +151,13 @@ void RenderLuaWindows(Context* context)
 {
     // Draw every Lua window whose flag is set. This runs at the top level of the editor frame
     // (like the About dialog), so the windows persist regardless of which dock tab is focused.
-    if (LuaWindows().empty())
+    if (Detail::LuaWindows().empty())
         return;
     auto* lua = context->GetSubsystem<EditorLuaScript>();
     if (!lua)
         return;
 
-    for (LuaWindow& window : LuaWindows())
+    for (Detail::LuaWindow& window : Detail::LuaWindows())
     {
         if (!window.visible)
             continue;
@@ -417,7 +190,7 @@ void RenderLuaTopMenus(Context* context, const char* skipTopName)
     // Distinct top-level menu names taken from the plugin paths. ea::map keeps them ordered and
     // merges items that plugins put under the same heading.
     ea::map<ea::string, ea::vector<LuaMenuSlice>> menus;
-    for (const LuaMenuItem& item : LuaMenuItems())
+    for (const Detail::LuaMenuItem& item : Detail::LuaMenuItems())
     {
         const auto slash = item.label.find('/');
         if (slash == ea::string::npos)

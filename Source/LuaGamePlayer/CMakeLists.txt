@@ -24,7 +24,7 @@
 # reads the startup scene from Data/Game.json, loads it and executes the entry
 # scripts referenced by the scene's LuaGameScript components.
 #
-# It links the shared RbfxLuaScript module (which also provides the serializable
+# It links the RbfxLuaScript library (which also provides the serializable
 # LuaGameScript type) so scenes authored in the editor deserialize here. The
 # pure C++ Player application is intentionally left separate and untouched.
 

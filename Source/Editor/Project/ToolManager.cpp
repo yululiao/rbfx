@@ -22,6 +22,8 @@
 
 #include "../Project/ToolManager.h"
 
+#include "../Core/WidgetHelpers.h"
+
 #include <Urho3D/Core/CoreEvents.h>
 #include <Urho3D/IO/ArchiveSerialization.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -94,14 +96,14 @@ void ToolManager::RenderSettings()
 {
     ui::Text("Path to Blender executable (use system PATH if empty):");
     RenderStatus(blender_.found_, blender_.path_, blenderDownloadUrl);
-    if (ui::InputText("##BlenderPath", &blender_.path_))
+    if (PathField("##BlenderPath", blender_.path_, PathFieldKind::File))
         ScanBlender();
 
     ui::Separator();
 
     ui::Text("Path to FBX2glTF executable (use system PATH if empty):");
     RenderStatus(fbx2gltf_.found_, fbx2gltf_.path_, fbx2gltfDownloadUrl);
-    if (ui::InputText("##FBX2glTFPath", &fbx2gltf_.path_))
+    if (PathField("##FBX2glTFPath", fbx2gltf_.path_, PathFieldKind::File))
         ScanFBX2glTF();
 
     ui::Separator();

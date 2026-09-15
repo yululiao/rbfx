@@ -4,13 +4,11 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 //
 
-#include "../Urho3D/Precompiled.h"
-
-#include "LuaBindings.h"
+#include "EditorLuaBindings.h"
 
 // Dear ImGui is merged into Urho3D.dll and exported (IMGUI_EXPORTS on the Urho3D build);
 // consumers compile with IMGUI_IMPORTS (a PUBLIC definition of the ImGui target) so the
-// symbols below are imported from Urho3D.dll. RbfxLuaScript links Urho3D PUBLIC, which
+// symbols below are imported from Urho3D.dll. EditorLibrary links Urho3D PUBLIC, which
 // brings both the include directory and that definition transitively.
 #ifdef _MSC_VER
     #pragma warning(push)
@@ -18,12 +16,22 @@
 #endif
 #include <imgui.h>
 // Engine-side image widgets (Texture2D-aware) and Graphics/Texture2D.h come along with it.
-#include "../Urho3D/SystemUI/Widgets.h"
+#include <Urho3D/SystemUI/Widgets.h>
 #ifdef _MSC_VER
     #pragma warning(pop)
 #endif
 
+#include "../Core/WidgetHelpers.h"
+
+#include <Urho3D/Core/Context.h>
+#include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/IO/Log.h>
+
+#include <IconFontCppHeaders/IconsFontAwesome6.h>
+
 #include <cfloat>
+#include <cstring>
+#include <sol/sol.hpp>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -36,7 +44,7 @@ namespace Urho3D
 // frame (from Editor.addTab draw callbacks and Editor.addMenuItem click callbacks),
 // so it deliberately does NOT create/destroy a context or feed input -- the engine's
 // SystemUI subsystem already owns those. Only draw/layout/query calls are exposed.
-void RegisterImGuiBindings(sol::state& lua)
+void RegisterImGuiLuaBindings(sol::state& lua)
 {
     sol::table imgui = lua.create_named_table("imgui");
 
@@ -135,7 +143,7 @@ void RegisterImGuiBindings(sol::state& lua)
             sol::optional<int> framePadding,
             sol::optional<float> bgr, sol::optional<float> bgg, sol::optional<float> bgb, sol::optional<float> bga,
             sol::optional<float> tr, sol::optional<float> tg, sol::optional<float> tb, sol::optional<float> ta)
-            -> bool
+        -> bool
         {
             Texture2D* tex = texture.value_or(nullptr);
             if (!tex)
@@ -218,6 +226,94 @@ void RegisterImGuiBindings(sol::state& lua)
         const bool changed = ImGui::InputText(label, buf.data(), buf.size(), flags.value_or(0));
         return std::make_tuple(changed, std::string(buf.data()));
     });
+
+    // --------------------------------------------------------------- Path fields
+    // Combined path field and standalone picker, mirroring the editor's C++ WidgetHelpers.
+    // The native dialog is opened through PickNativePath, which is exactly why these bindings
+    // live in the editor: nfd only exists in desktop editor builds.
+    const auto pickNativePath = [](bool pickDirectory, const char* filter, const char* initialDir)
+        -> sol::optional<std::string>
+    {
+        const auto chosen = PickNativePath(pickDirectory, filter ? filter : "", initialDir ? initialDir : "");
+        return chosen ? sol::optional<std::string>(chosen->c_str()) : sol::nullopt;
+    };
+
+    // Opens the native picker alone and returns the chosen path, or nil when cancelled. kind is
+    // "dir" to pick a folder (anything else, the default "file", picks a file); filter is an
+    // extension spec ("png,jpg") for file picking; initialDir is where the dialog opens.
+    imgui.set_function("PickPath",
+        [pickNativePath](sol::optional<const char*> kind, sol::optional<const char*> filter,
+            sol::optional<const char*> initialDir) -> sol::optional<std::string>
+        {
+            const bool pickDirectory = kind && strcmp(*kind, "dir") == 0;
+            return pickNativePath(pickDirectory, filter.value_or(nullptr), initialDir.value_or(nullptr));
+        });
+
+    // A whole path field in one call: text input + native browse button + reveal button that
+    // opens the OS file manager at the value (disabled while the value points nowhere). kind and
+    // filter are PickPath's; the browse dialog starts where the current value points.
+    imgui.set_function("InputPath",
+        [pickNativePath](const char* label, const std::string& text, sol::optional<const char*> kind,
+            sol::optional<const char*> filter) -> std::tuple<bool, std::string>
+        {
+            const bool pickDirectory = kind && strcmp(*kind, "dir") == 0;
+
+            // Text half, same buffering scheme as InputText above.
+            std::vector<char> buf(text.begin(), text.end());
+            buf.push_back('\0');
+            buf.resize(buf.size() + 256, '\0');
+            bool changed = ImGui::InputText(label, buf.data(), buf.size());
+            std::string value(buf.data());
+
+            auto* fs = Context::GetInstance()->GetSubsystem<FileSystem>();
+
+            // Both buttons live in one ID scope derived from the label: several path fields in
+            // the same window would otherwise collide on the bare icon strings.
+            ImGui::PushID(label);
+
+            // Browse half: fixing a typo starts where the current value points; a value that
+            // points nowhere falls back to the picker's own default place.
+            std::string initialDir;
+            if (fs && !value.empty())
+            {
+                if (fs->DirExists(value.c_str()))
+                    initialDir = ResolvePath(value.c_str()).c_str();
+                else if (fs->FileExists(value.c_str()))
+                    initialDir = ResolvePath(GetPath(value.c_str())).c_str();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN))
+            {
+                const auto picked = pickNativePath(pickDirectory, filter.value_or(nullptr),
+                    initialDir.empty() ? nullptr : initialDir.c_str());
+                if (picked)
+                {
+                    value = *picked;
+                    changed = true;
+                }
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Browse...");
+
+            // Reveal half: opens the OS file manager at the value. A path that is not on disk
+            // has nothing to show, so the button waits until it is.
+            const bool canReveal = fs && !value.empty()
+                && (fs->FileExists(value.c_str()) || fs->DirExists(value.c_str()));
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!canReveal);
+            if (ImGui::Button(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE) && canReveal)
+            {
+                if (!fs->Reveal(value.c_str()))
+                    URHO3D_LOGERROR("Could not reveal '{}' in the OS file browser", value.c_str());
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Show in OS file browser");
+
+            ImGui::PopID();
+
+            return std::make_tuple(changed, value);
+        });
 
     // ---------------------------------------------------------------- Color
     imgui.set_function("ColorEdit4", [](const char* label, float r, float g, float b, float a,

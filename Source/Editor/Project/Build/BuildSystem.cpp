@@ -43,11 +43,11 @@ const ea::string CoreDataDirName = "CoreData/";
 const ea::string DataPackageName = "Data.pak";
 const ea::string CoreDataPackageName = "CoreData.pak";
 
-/// Host binary the package is built from and the two shared libraries it cannot start without.
-/// Missing any of the three yields a directory that looks finished and does nothing.
+/// Host binary the package is built from and the engine shared library it cannot start
+/// without. Missing either yields a directory that looks finished and does nothing. The Lua
+/// bindings library is linked statically into the host, so it needs no artifact here.
 const ea::string HostName = "LuaGamePlayer";
 const ea::string EngineLibraryName = "Urho3D";
-const ea::string LuaLibraryName = "RbfxLuaScript";
 
 ea::string ForwardSlashes(ea::string text)
 {
@@ -502,7 +502,6 @@ bool BuildSystem::FinalizeEngineBuild(ea::string& message)
         const ea::string suffix = GetExecutableSuffix();
         artifacts.push_back(bin + HostName + suffix);
         artifacts.push_back(bin + EngineLibraryName + DYN_LIB_SUFFIX);
-        artifacts.push_back(bin + LuaLibraryName + DYN_LIB_SUFFIX);
     }
     for (const ea::string& artifact : artifacts)
     {
@@ -1192,7 +1191,6 @@ bool BuildSystem::StageStageRuntime(ea::string& message)
     const Artifact artifacts[] = {
         { bin + HostName + suffix, outputDir_ + profile_->executableName_ + suffix },
         { bin + EngineLibraryName + DYN_LIB_SUFFIX, outputDir_ + EngineLibraryName + DYN_LIB_SUFFIX },
-        { bin + LuaLibraryName + DYN_LIB_SUFFIX, outputDir_ + LuaLibraryName + DYN_LIB_SUFFIX },
     };
 
     for (const Artifact& artifact : artifacts)

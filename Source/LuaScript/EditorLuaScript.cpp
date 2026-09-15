@@ -8,7 +8,6 @@
 
 #include "EditorLuaScript.h"
 
-#include "EditorLuaHooks.h"
 #include "LuaBindings.h"
 #include "LuaFile.h"
 #include "LuaNodeBindings.h"
@@ -23,9 +22,6 @@
 #include "../Urho3D/IO/Log.h"
 #include "../Urho3D/IO/MountPoint.h"
 #include "../Urho3D/IO/VirtualFileSystem.h"
-#include "../Urho3D/Scene/Node.h"
-#include "../Urho3D/Scene/Component.h"
-#include "../Urho3D/Scene/Scene.h"
 
 #include <EASTL/algorithm.h>
 #include <EASTL/unordered_map.h>
@@ -39,17 +35,9 @@ namespace Urho3D
 namespace
 {
 
-// Process-wide editor hook table. Installed by the editor at startup; the "Editor" API
-// forwards to it. Kept here (not in the header) so the exported accessors have one home.
-EditorLuaHooks& Hooks()
-{
-    static EditorLuaHooks hooks;
-    return hooks;
-}
-
-// UI callbacks (tab draw / menu click) registered by plugins, keyed by an opaque handle the
-// editor echoes back through InvokeUICallback. Kept in the DLL next to the sol state so the
-// editor never touches sol types. A single EditorLuaScript instance exists per editor session.
+// UI callbacks (tab draw / menu click / build completion) registered by plugins, keyed by an
+// opaque handle the editor echoes back through InvokeUICallback. Lives next to the sol state
+// it references. A single EditorLuaScript instance exists per editor session.
 ea::unordered_map<unsigned long long, sol::protected_function>& UICallbacks()
 {
     static ea::unordered_map<unsigned long long, sol::protected_function> callbacks;
@@ -63,16 +51,6 @@ unsigned long long NextUICallbackHandle()
 }
 
 } // namespace
-
-void SetEditorLuaHooks(const EditorLuaHooks& hooks)
-{
-    Hooks() = hooks;
-}
-
-EditorLuaHooks& GetEditorLuaHooks()
-{
-    return Hooks();
-}
 
 EditorLuaScript::EditorLuaScript(Context* context)
     : Object(context)
@@ -129,9 +107,6 @@ bool EditorLuaScript::Initialize()
 
     RegisterEngineBindings();
     RegisterEditorBindings();
-    // Dear ImGui is only meaningful inside the editor's render loop, so it is exposed
-    // exclusively to this editor state (never to the game LuaScript state).
-    RegisterImGuiBindings(*luaState_);
 
     // Redirect Lua print into the engine log so plugin output is visible in the editor console.
     (*luaState_)["__editor_log_info"] = [](const char* message) { URHO3D_LOGINFO("EditorLua: {}", message); };
@@ -159,10 +134,9 @@ void EditorLuaScript::LoadPlugins(const ea::string& absoluteDir)
     if (!fs || dir.empty() || !fs->DirExists(dir))
         return;
 
-    // Reload starts from a clean UI slate; plugins below re-register their tabs and menu items.
+    // Reload starts from a clean UI slate on the Lua side; the editor clears its own
+    // bookkeeping (tabs, menus, windows) around this call before the plugins re-register.
     UICallbacks().clear();
-    if (GetEditorLuaHooks().resetUI)
-        GetEditorLuaHooks().resetUI();
 
     MountPluginDir(dir);
 
@@ -312,6 +286,17 @@ unsigned long long EditorLuaScript::RegisterUICallback(sol::protected_function c
     return handle;
 }
 
+void EditorLuaScript::DropUICallback(unsigned long long handle)
+{
+    UICallbacks().erase(handle);
+}
+
+void EditorLuaScript::ReloadPlugins()
+{
+    if (!pluginDir_.empty())
+        LoadPlugins(pluginDir_);
+}
+
 void EditorLuaScript::InvokeUICallback(unsigned long long handle)
 {
     if (!luaState_)
@@ -409,27 +394,14 @@ void EditorLuaScript::RegisterEngineBindings()
 
 void EditorLuaScript::RegisterEditorBindings()
 {
+    // VM-plumbing half of the "Editor" table: the functions that need nothing but this
+    // subsystem itself.
     sol::table editor = luaState_->create_table();
 
     // Logging helpers, prefixed so plugin output is easy to spot in the editor console.
     editor.set_function("log", [](const char* message) { URHO3D_LOGINFO("[EditorLua] {}", message); });
     editor.set_function("logWarning", [](const char* message) { URHO3D_LOGWARNING("[EditorLua] {}", message); });
     editor.set_function("logError", [](const char* message) { URHO3D_LOGERROR("[EditorLua] {}", message); });
-
-    // Project access, forwarded to the editor through the hook table. Empty results when
-    // no hook is installed or no project is open.
-    editor.set_function("hasProject", []() {
-        const auto& hooks = GetEditorLuaHooks();
-        return hooks.hasProject ? hooks.hasProject() : false;
-    });
-    editor.set_function("getProjectDataPath", []() -> std::string {
-        const auto& hooks = GetEditorLuaHooks();
-        return hooks.getProjectDataPath ? std::string(hooks.getProjectDataPath().c_str()) : std::string();
-    });
-    editor.set_function("getProjectPath", []() -> std::string {
-        const auto& hooks = GetEditorLuaHooks();
-        return hooks.getProjectPath ? std::string(hooks.getProjectPath().c_str()) : std::string();
-    });
 
     // Event bridge aliases so plugins can use Editor.subscribe(...) as well as the global one.
     editor.set_function("subscribe", [this](const char* eventName, sol::protected_function callback) {
@@ -440,171 +412,9 @@ void EditorLuaScript::RegisterEditorBindings()
     // Evaluate a Lua chunk on demand (handy for console-driven experimentation).
     editor.set_function("exec", [this](const char* code) { return ExecuteString(code); });
 
-    // Re-run the last plugin directory (e.g. after editing plugin scripts).
-    editor.set_function("reloadPlugins", [this]() {
-        if (!pluginDir_.empty())
-            LoadPlugins(pluginDir_);
-    });
-
-    // Create (or update, for an existing title) a dockable panel whose content a Lua function
-    // draws every frame. Runs inside the ImGui frame, so any ui.* call is valid there.
-    editor.set_function("addTab",
-        [this](const std::string& title, sol::protected_function drawFunction) -> bool
-        {
-            if (!drawFunction.valid())
-            {
-                URHO3D_LOGERROR("Editor.addTab expects a Lua function as the draw callback");
-                return false;
-            }
-            const auto& hooks = GetEditorLuaHooks();
-            if (!hooks.addTab)
-                return false;
-            const auto handle = RegisterUICallback(std::move(drawFunction));
-            return hooks.addTab(ea::string(title.c_str()), handle);
-        });
-
-    // Append a clickable item to the Project menu backed by a Lua function.
-    editor.set_function("addMenuItem",
-        [this](const std::string& label, sol::protected_function clickFunction) -> bool
-        {
-            if (!clickFunction.valid())
-            {
-                URHO3D_LOGERROR("Editor.addMenuItem expects a Lua function as the click callback");
-                return false;
-            }
-            const auto& hooks = GetEditorLuaHooks();
-            if (!hooks.addMenuItem)
-                return false;
-            const auto handle = RegisterUICallback(std::move(clickFunction));
-            return hooks.addMenuItem(ea::string(label.c_str()), handle);
-        });
-
-    // Persistent floating window drawn every frame by the editor. The content function should
-    // only emit widgets (no Begin/End); the editor wraps them and owns the title-bar close.
-    // The window starts hidden; show it from a menu click via Editor.showWindow(title).
-    editor.set_function("addWindow",
-        [this](const std::string& title, sol::protected_function drawFunction, sol::optional<unsigned> flags) -> bool
-        {
-            if (!drawFunction.valid())
-            {
-                URHO3D_LOGERROR("Editor.addWindow expects a Lua function as the draw callback");
-                return false;
-            }
-            const auto& hooks = GetEditorLuaHooks();
-            if (!hooks.addWindow)
-                return false;
-            const auto handle = RegisterUICallback(std::move(drawFunction));
-            return hooks.addWindow(ea::string(title.c_str()), handle, flags.value_or(0u));
-        });
-    editor.set_function("showWindow", [](const std::string& title) -> bool {
-        const auto& hooks = GetEditorLuaHooks();
-        return hooks.showWindow ? hooks.showWindow(ea::string(title.c_str())) : false;
-    });
-    editor.set_function("hideWindow", [](const std::string& title) -> bool {
-        const auto& hooks = GetEditorLuaHooks();
-        return hooks.hideWindow ? hooks.hideWindow(ea::string(title.c_str())) : false;
-    });
-
-    // Live editor context. Wrapped engine objects come back as the same usertypes the engine
-    // bindings expose, so plugins can call e.g. node.Name or component.node directly.
-    editor.set_function("getActiveScene", [this]() -> sol::object {
-        const auto& hooks = GetEditorLuaHooks();
-        Scene* scene = hooks.getActiveScene ? hooks.getActiveScene() : nullptr;
-        return WrapLuaObject(*luaState_, scene);
-    });
-    editor.set_function("getActiveNode", [this]() -> sol::object {
-        const auto& hooks = GetEditorLuaHooks();
-        Node* node = hooks.getActiveNode ? hooks.getActiveNode() : nullptr;
-        return WrapLuaObject(*luaState_, node);
-    });
-    editor.set_function("getSelection", [this](sol::this_state s) -> sol::object {
-        sol::state_view lua(s);
-        sol::table result = lua.create_table();
-        const auto& hooks = GetEditorLuaHooks();
-
-        Scene* scene = hooks.getActiveScene ? hooks.getActiveScene() : nullptr;
-        Node* activeNode = hooks.getActiveNode ? hooks.getActiveNode() : nullptr;
-        result["scene"] = WrapLuaObject(lua, scene);
-        result["activeNode"] = WrapLuaObject(lua, activeNode);
-
-        sol::table nodes = lua.create_table();
-        sol::table components = lua.create_table();
-        if (hooks.getSelected)
-        {
-            ea::vector<Node*> selectedNodes;
-            ea::vector<Component*> selectedComponents;
-            hooks.getSelected(selectedNodes, selectedComponents);
-            for (size_t i = 0; i < selectedNodes.size(); ++i)
-                nodes[static_cast<int>(i) + 1] = WrapLuaObject(lua, selectedNodes[i]);
-            for (size_t i = 0; i < selectedComponents.size(); ++i)
-                components[static_cast<int>(i) + 1] = WrapLuaObject(lua, selectedComponents[i]);
-        }
-        result["nodes"] = nodes;
-        result["components"] = components;
-        return result;
-    });
-
-    // Build pipeline. The editor keeps all of its state, so a plugin never holds a piece of a
-    // running build: it asks what can be built, asks for a build, and looks at the status.
-    editor.set_function("buildProfiles", [this](sol::this_state s) -> sol::object
-    {
-        sol::state_view lua(s);
-        sol::table result = lua.create_table();
-        const auto& hooks = GetEditorLuaHooks();
-        if (hooks.getBuildProfiles)
-        {
-            const ea::vector<ea::string> names = hooks.getBuildProfiles();
-            for (size_t i = 0; i < names.size(); ++i)
-                result[static_cast<int>(i) + 1] = std::string(names[i].c_str());
-        }
-        return result;
-    });
-
-    // Starting a build is asynchronous: the call answers whether it was accepted, and the outcome
-    // arrives later either through the optional callback (as the same EventData table the
-    // "buildFinished" event carries) or through that event alone. A plugin that builds several
-    // profiles in sequence chains them from the callback, which is why the callback is one-shot.
-    editor.set_function("build", [this](const std::string& profile,
-        sol::optional<sol::protected_function> callback) -> bool
-    {
-        if (callback && !callback->valid())
-        {
-            URHO3D_LOGERROR("Editor.build expects a Lua function as the completion callback");
-            return false;
-        }
-        const auto& hooks = GetEditorLuaHooks();
-        if (!hooks.buildProfile)
-            return false;
-
-        const unsigned long long handle = callback ? RegisterUICallback(std::move(*callback)) : 0ull;
-        if (!hooks.buildProfile(ea::string(profile.c_str()), handle))
-        {
-            // The build was refused before it ran, so nothing will ever echo the handle back.
-            UICallbacks().erase(handle);
-            return false;
-        }
-        return true;
-    });
-
-    editor.set_function("buildStatus", [this](sol::this_state s) -> sol::object
-    {
-        sol::state_view lua(s);
-        sol::table result = lua.create_table();
-
-        const auto& hooks = GetEditorLuaHooks();
-        const EditorBuildStatus status = hooks.getBuildStatus ? hooks.getBuildStatus() : EditorBuildStatus();
-        result["building"] = status.building;
-        result["progress"] = status.progress;
-        result["stage"] = std::string(status.stage.c_str());
-        result["profile"] = std::string(status.profile.c_str());
-        result["outputDir"] = std::string(status.outputDir.c_str());
-
-        sol::table errors = lua.create_table();
-        for (size_t i = 0; i < status.errors.size(); ++i)
-            errors[static_cast<int>(i) + 1] = std::string(status.errors[i].c_str());
-        result["errors"] = errors;
-        return result;
-    });
+    // The editor-capability half of the table (project access, tabs, menus, windows, scene
+    // selection, build pipeline) is appended into this same table by the editor's
+    // RegisterEditorLuaAPI, which runs right after Initialize.
 
     (*luaState_)["Editor"] = editor;
 }

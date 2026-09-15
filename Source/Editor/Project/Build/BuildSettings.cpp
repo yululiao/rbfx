@@ -379,7 +379,6 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
         {
             const ea::string host = RemoveTrailingSlash(profile.engineBin_) + "/LuaGamePlayer" + exeSuffix;
             const ea::string engineLib = RemoveTrailingSlash(profile.engineBin_) + "/Urho3D" + DYN_LIB_SUFFIX;
-            const ea::string luaLib = RemoveTrailingSlash(profile.engineBin_) + "/RbfxLuaScript" + DYN_LIB_SUFFIX;
             const char* buildCommand = "cmake --build msvc --target LuaGamePlayer --config Debug";
             if (!fs->FileExists(host))
                 errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
@@ -387,9 +386,6 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
             if (!fs->FileExists(engineLib))
                 errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
                     "host' on this profile and the build does it itself.", engineLib.c_str(), buildCommand));
-            if (!fs->FileExists(luaLib))
-                errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
-                    "host' on this profile and the build does it itself.", luaLib.c_str(), buildCommand));
         }
         else
         {

@@ -29,6 +29,8 @@ local state = {
     check    = true,
     radio    = 1,
     text     = "Edit me",
+    pathFile = "",         -- InputPath 文件字段
+    pathDir  = "",         -- InputPath 目录字段
     num      = 1.5,
     i        = 3,
     slider   = 20.0,
@@ -105,6 +107,25 @@ local function render_controls()
     -- InputText -> changed, newText
     changed, v = imgui.InputText("InputText", state.text)
     if changed then state.text = v end
+
+    -- InputPath -> changed, newPath：输入框 + 原生选择按钮 + 系统文件管理器定位按钮三合一。
+    -- kind: "dir" 选文件夹（缺省选文件）；filter: 扩展名过滤（如 "png,jpg"，仅文件模式）。
+    -- 选择结果为正斜杠绝对路径；定位按钮在值指向磁盘上真实存在的东西时才可点。
+    -- 原生对话框是编辑器能力：脱离编辑器运行时选择按钮不绘制，PickPath 返回 nil。
+    changed, v = imgui.InputPath("InputPath (file)", state.pathFile, "file", "png")
+    if changed then state.pathFile = v end
+    changed, v = imgui.InputPath("InputPath (dir)", state.pathDir, "dir")
+    if changed then state.pathDir = v end
+
+    -- PickPath 单独弹原生选择框（不经输入框），返回路径或 nil（取消）。
+    -- 参数与 InputPath 的 kind/filter 一致，另可传第三个参数指定初始目录。
+    if imgui.Button("Pick a folder (PickPath)") then
+        local picked = imgui.PickPath("dir")
+        if picked then
+            state.pathDir = picked
+            Editor.log("Picked folder: " .. picked)
+        end
+    end
 
     -- InputFloat / InputInt
     changed, v = imgui.InputFloat("InputFloat", state.num)

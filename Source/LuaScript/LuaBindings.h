@@ -144,11 +144,6 @@ RBFXLUA_API void RegisterAudioBindings(sol::state& lua, Context* context);
 RBFXLUA_API void RegisterNavigationBindings(sol::state& lua, Context* context);
 RBFXLUA_API void RegisterNetworkBindings(sol::state& lua, Context* context);
 
-// Dear ImGui bindings for editor plugins. Registered only into the editor Lua state
-// (immediate-mode drawing happens inside the editor's existing ImGui frame). Does not
-// need the engine Context, so the signature differs from the modules above on purpose.
-RBFXLUA_API void RegisterImGuiBindings(sol::state& lua);
-
 /// Helper for binding modules: register the caster of a concrete type.
 /// Casters return a SharedPtr so the Lua reference keeps the object alive
 /// (RefCounted intrusive counting) and is released when Lua drops it.

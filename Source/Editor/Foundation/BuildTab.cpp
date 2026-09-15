@@ -5,6 +5,7 @@
 #include "../Foundation/BuildTab.h"
 
 #include "../Core/IniHelpers.h"
+#include "../Core/WidgetHelpers.h"
 #include "../Project/Build/BuildSettings.h"
 #include "../Project/Build/BuildSystem.h"
 #include "../Project/Project.h"
@@ -234,10 +235,9 @@ void BuildTab::RenderPackageOptions(BuildProfile& profile)
     if (ui::IsItemHovered())
         ui::SetTooltip("File name of the shipped game, without the platform suffix");
 
-    Touch(ui::InputText("Output directory", &profile.outputDir_));
-    if (ui::IsItemHovered())
-        ui::SetTooltip("Absolute, or relative to the project folder. It is emptied at the start of "
-            "every build, so point it at a directory the build owns");
+    Touch(PathField("Output directory", profile.outputDir_, PathFieldKind::Directory, nullptr,
+        "Absolute, or relative to the project folder. It is emptied at the start of "
+            "every build, so point it at a directory the build owns"));
 
     Touch(ui::Checkbox("Pack resources into .pak files", &profile.packData_));
     ui::Indent();
@@ -265,8 +265,8 @@ void BuildTab::RenderPackageOptions(BuildProfile& profile)
     Touch(ui::Checkbox("Run the game when the build finishes", &profile.autoRunAfterBuild_));
 
     ui::Separator();
-    Touch(ui::InputText("Engine binaries", &profile.engineBin_));
-    Touch(ui::InputText("Engine data", &profile.engineData_));
+    Touch(PathField("Engine binaries", profile.engineBin_, PathFieldKind::Directory));
+    Touch(PathField("Engine data", profile.engineData_, PathFieldKind::Directory));
     ui::TextWrapped("Both point at an engine you built yourself. A missing host file is reported "
         "together with the command that produces it, or compiled by the build itself when 'Compile "
         "engine host' below is on.");
@@ -308,9 +308,8 @@ void BuildTab::RenderAndroidOptions(BuildProfile& profile)
     Touch(ui::InputInt("Minimum SDK", &android.minSdk_));
     Touch(ui::InputInt("Target SDK", &android.targetSdk_));
     Touch(ui::InputText("Screen orientation", &android.orientation_));
-    Touch(ui::InputText("Launcher icon", &android.icon_));
-    if (ui::IsItemHovered())
-        ui::SetTooltip("Path to a png; empty keeps the icon the engine template ships with");
+    Touch(PathField("Launcher icon", android.icon_, PathFieldKind::File, "png",
+        "Path to a png; empty keeps the icon the engine template ships with"));
 
     if (ui::TreeNodeEx("ABIs", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -347,11 +346,10 @@ void BuildTab::RenderWebOptions(BuildProfile& profile)
     if (!ui::CollapsingHeader(ICON_FA_GLOBE " Web", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
-    Touch(ui::InputText("Emsdk root", &profile.webEmsdkRoot_));
-    if (ui::IsItemHovered())
-        ui::SetTooltip("Your emsdk directory, where the build finds file_packager.py. Empty tries "
+    Touch(PathField("Emsdk root", profile.webEmsdkRoot_, PathFieldKind::Directory, nullptr,
+        "Your emsdk directory, where the build finds file_packager.py. Empty tries "
             "the emsdk environment variables first and then the CMake cache of the web engine "
-            "build");
+            "build"));
 }
 
 void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)

@@ -44,6 +44,10 @@ target_include_directories(EditorLibrary PUBLIC
 )
 target_link_libraries (EditorLibrary PUBLIC Urho3D)
 if (URHO3D_LUA)
+    # The editor registers the imgui table and the editor-capability half of the "Editor" Lua
+    # table straight into the subsystem's state (EditorLuaBindings / ImGuiLuaBindings), which
+    # needs the sol3 headers and Lua symbols. Both arrive transitively: RbfxLuaScript links
+    # them PUBLIC because its own public headers expose sol types.
     target_link_libraries(EditorLibrary PUBLIC RbfxLuaScript)
 endif ()
 # FBX import is performed in-process through the AssetImporter dynamic library

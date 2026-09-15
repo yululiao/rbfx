@@ -1,5 +1,5 @@
 #
-# LuaScript as an independent shared library.
+# LuaScript as a static library.
 # Provides sol3-based Lua bindings for the Urho3D engine.
 #
 
@@ -7,18 +7,15 @@ project(RbfxLuaScript C CXX)
 
 file(GLOB SOURCE_FILES *.cpp *.h)
 
-# Emscripten has no dynamic libraries in the plain sense: a SHARED target would be linked as a
-# side module and fail to resolve the engine symbols it needs. The web host links Lua statically,
-# exactly like every other statically linked engine component.
-if (WEB)
-    add_library(RbfxLuaScript STATIC ${SOURCE_FILES})
-else ()
-    add_library(RbfxLuaScript SHARED ${SOURCE_FILES})
-endif ()
+# Static on every platform: the web target has no dynamic libraries in the plain sense, and a
+# single static form removes the Lua-version pairing constraint between the engine and its
+# consumers (editor, game player, Lua compiler tool) -- they all link the same code in.
+add_library(RbfxLuaScript STATIC ${SOURCE_FILES})
 
-target_link_libraries(RbfxLuaScript PUBLIC Urho3D)
-# Lua and sol3 must be linked directly since Urho3D links them privately.
-target_link_libraries(RbfxLuaScript PRIVATE Lua sol3)
+# Lua and sol3 are PUBLIC: the public headers (LuaScript.h, EditorLuaScript.h, LuaBindings.h)
+# expose sol types in their signatures, so every consumer of this library needs both the
+# headers and the Lua symbols. Urho3D links them privately and no longer re-exports them.
+target_link_libraries(RbfxLuaScript PUBLIC Urho3D Lua sol3)
 target_include_directories(RbfxLuaScript PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )
@@ -28,13 +25,8 @@ if (MSVC)
     set_source_files_properties(${SOURCE_FILES} PROPERTIES COMPILE_OPTIONS "/bigobj")
 endif ()
 
-# The Windows DLL export macros are only meaningful for the shared library; the static web build
-# must not define RBFXLUA_SHARED or the engine-side headers would look for a dllimport that is not
-# there.
-if (NOT WEB)
-    target_compile_definitions(RbfxLuaScript PRIVATE RBFXLUA_EXPORTS)
-    target_compile_definitions(RbfxLuaScript PUBLIC RBFXLUA_SHARED)
-endif ()
+# The library is static, so the RBFXLUA_API export/import macros in Export.h are permanently in
+# their empty branch: neither RBFXLUA_SHARED nor RBFXLUA_EXPORTS is defined here.
 
 # Content key of packaged Lua scripts. The compiled-in default is the development key; a release
 # build passes its own with -DRBFX_LUA_SCRIPT_KEY_HEX=<64 hex digits> so that the key inside the
@@ -45,9 +37,8 @@ if (RBFX_LUA_SCRIPT_KEY_HEX)
     target_compile_definitions(RbfxLuaScript PRIVATE RBFX_LUA_SCRIPT_KEY_HEX="${RBFX_LUA_SCRIPT_KEY_HEX}")
 endif ()
 
-# Ensure import library (.lib) and DLL (.dll) go to the same output directories as Urho3D.
+# Ensure the static library goes to the same output directory as Urho3D.
 set_target_properties(RbfxLuaScript PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
 )
 
@@ -57,7 +48,6 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaNodeBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaScript.h
-              ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaHooks.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaFile.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaPackageLoader.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaScriptContainer.h
@@ -65,11 +55,9 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaScript.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LuaScript
 )
 
-# Install the shared library
+# Install the library
 install(TARGETS RbfxLuaScript
     EXPORT Urho3D
-    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 

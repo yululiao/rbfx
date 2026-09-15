@@ -13,10 +13,10 @@ namespace Urho3D
 
 #ifdef URHO3D_LUA
 
-/// Editor tab whose content is drawn by a Lua callback owned by the DLL-side EditorLuaScript
+/// Editor tab whose content is drawn by a Lua callback owned by the EditorLuaScript
 /// subsystem. The tab itself knows nothing about Lua or sol3: it only carries an opaque handle
 /// and forwards each render to EditorLuaScript::InvokeUICallback, keeping all sol3 usage in the
-/// single Lua VM inside RbfxLuaScript.
+/// single Lua VM owned by that subsystem.
 class LuaEditorTab : public EditorTab
 {
     URHO3D_OBJECT(LuaEditorTab, EditorTab);

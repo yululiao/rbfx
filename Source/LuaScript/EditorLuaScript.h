@@ -28,14 +28,16 @@ class MountPoint;
 /// Godot's script-based editor extensions.
 ///
 /// It owns a DEDICATED sol state (a separate lua_State) that is populated with the full set
-/// of engine bindings plus the editor "Editor" API, so editor plugins see Node/Component/
-/// Scene/resources and editor capabilities in one environment. Because the state is created
-/// and driven entirely inside RbfxLuaScript, it shares the module's single Lua VM and single
-/// sol3 instance and is therefore safe. It is intentionally NOT the game's "LuaScript" state:
-/// that one is reinitialized on every play/stop cycle, which would wipe editor plugins.
+/// of engine bindings plus the VM-plumbing half of the "Editor" table (log, subscribe,
+/// exec), so editor plugins see Node/Component/Scene/resources and editor capabilities in
+/// one environment. Because the state is created and driven entirely inside RbfxLuaScript,
+/// it shares the module's single Lua VM and single sol3 instance and is therefore safe. It
+/// is intentionally NOT the game's "LuaScript" state: that one is reinitialized on every
+/// play/stop cycle, which would wipe editor plugins.
 ///
-/// Editor behavior that requires editor-only types is injected at runtime through the
-/// EditorLuaHooks table (see EditorLuaHooks.h), keeping the dependency direction intact.
+/// The editor-capability half of "Editor" (project access, tabs, menus, windows, selection,
+/// build pipeline) and the "imgui" table are registered into this state directly by the
+/// editor through GetState(), so editor types never cross into this library.
 class RBFXLUA_API EditorLuaScript : public Object
 {
     URHO3D_OBJECT(EditorLuaScript, Object);
@@ -79,12 +81,22 @@ public:
     /// meaning after the one call, and the editor is the only party that knows when that is.
     void InvokeOneShotCallback(unsigned long long handle, VariantMap& eventData);
 
-private:
-    /// Store a Lua UI callback and return an opaque handle the editor uses to invoke it.
+    /// Store a Lua UI callback and return an opaque handle the editor invokes it through. Used
+    /// by the editor-side registrations of Editor.addTab / addMenuItem / addWindow / build.
     unsigned long long RegisterUICallback(sol::protected_function callback);
+    /// Drop a registered UI callback. Called by the editor when a registration it handed out
+    /// turned out to not be needed after all (e.g. a build refused before it ran).
+    void DropUICallback(unsigned long long handle);
+
+    /// Re-run the last plugin directory passed to LoadPlugins (no-op before the first load).
+    /// The editor pairs this with resetting its own UI bookkeeping.
+    void ReloadPlugins();
+
+private:
     /// Register the engine usertypes/bindings onto the editor state and the event bridge.
     void RegisterEngineBindings();
-    /// Register the "Editor" API table (log, subscribe, project access, exec, reload).
+    /// Register the "Editor" table with its VM-plumbing functions (log, subscribe, exec,
+    /// reload). The editor-capability functions are appended by the editor itself.
     void RegisterEditorBindings();
     /// Invoke a Lua event callback with a read-only EventData wrapper.
     void InvokeEventCallback(sol::protected_function& callback, VariantMap& eventData);
