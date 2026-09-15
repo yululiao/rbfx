@@ -27,6 +27,7 @@ namespace
 /// Names the editor seeds into a fresh project.
 const ea::string DefaultWindowsName = "Windows";
 const ea::string DefaultAndroidName = "Android";
+const ea::string DefaultWebName = "Web";
 const ea::string DefaultExecutableName = "Game";
 
 /// Environment variable the runtime already consults for a content key override, so a profile that
@@ -68,11 +69,13 @@ bool IsHexKey(const ea::string& text)
     return true;
 }
 
-/// Fill every empty texture compression field with the platform default. Mobile has no two-channel
-/// normal format in Diligent (no EAC_RG11), so normal maps fall back to the RGBA color format there.
-void ApplyTextureCompressionDefaults(TextureCompressionSettings& settings, bool isAndroid)
+/// Fill every empty texture compression field with the platform default. Mobile and web have no
+/// two-channel normal format in Diligent (no EAC_RG11), so normal maps fall back to the RGBA
+/// color format there. Web reuses the mobile ETC2/KTX combination: ETC2 is a core WebGL2 format
+/// (hardware native on mobile browsers, ANGLE-translated on desktop ones).
+void ApplyTextureCompressionDefaults(TextureCompressionSettings& settings, bool isMobile, bool isWeb)
 {
-    if (isAndroid)
+    if (isMobile || isWeb)
     {
         if (settings.colorFormatNoAlpha_.empty())
             settings.colorFormatNoAlpha_ = "ETC2_RGB";
@@ -146,6 +149,7 @@ void BuildProfile::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "IncludeEngineData", includeEngineData_, true);
     SerializeOptionalValue(archive, "AutoRunAfterBuild", autoRunAfterBuild_, false);
     SerializeOptionalValue(archive, "ScriptKeyEnvVar", scriptKeyEnvVar_, ea::string(DefaultScriptKeyEnvVar));
+    SerializeOptionalValue(archive, "WebEmsdkRoot", webEmsdkRoot_, ea::string());
     // The block itself is always written while every leaf inside it decides for itself whether it
     // differs from its fallback. Writing the block unconditionally keeps the reader from having to
     // tell "section absent" apart from "section present and complete".
@@ -167,7 +171,7 @@ ea::string BuildProfile::ResolveOutputDir(const ea::string& projectPath) const
 TextureCompressionSettings BuildProfile::GetEffectiveTextureCompression() const
 {
     TextureCompressionSettings result = textureCompression_;
-    ApplyTextureCompressionDefaults(result, IsAndroid());
+    ApplyTextureCompressionDefaults(result, IsAndroid(), IsWeb());
     return result;
 }
 
@@ -229,6 +233,7 @@ bool BuildSettings::LoadProject(const ea::string& projectPath, const ea::string&
 
     EnsureProfile(DefaultWindowsName, projectPath, engineData);
     EnsureProfile(DefaultAndroidName, projectPath, engineData);
+    EnsureProfile(DefaultWebName, projectPath, engineData);
 
     if (!SaveFile(path))
     {
@@ -269,7 +274,12 @@ bool BuildSettings::EnsureProfile(const ea::string& name, const ea::string& proj
     auto* fs = GetSubsystem<FileSystem>();
     BuildProfile profile;
     profile.name_ = name;
-    profile.platform_ = name == DefaultAndroidName ? ea::string("Android") : ea::string("WindowsDesktop");
+    if (name == DefaultAndroidName)
+        profile.platform_ = "Android";
+    else if (name == DefaultWebName)
+        profile.platform_ = "Web";
+    else
+        profile.platform_ = "WindowsDesktop";
     profile.engineBin_ = RemoveTrailingSlash(fs->GetProgramDir());
     profile.engineData_ = engineData;
     profile.outputDir_ = "Build/" + name;
@@ -289,7 +299,7 @@ bool BuildSettings::EnsureProfile(const ea::string& name, const ea::string& proj
 
     // Seed concrete per-platform formats so a fresh Build.json documents what a build will do. The
     // master switch stays off: texture compression is opt-in.
-    ApplyTextureCompressionDefaults(profile.textureCompression_, profile.IsAndroid());
+    ApplyTextureCompressionDefaults(profile.textureCompression_, profile.IsAndroid(), profile.IsWeb());
 
     profiles_.push_back(profile);
     return true;
@@ -320,23 +330,27 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
 
     if (profile.name_.empty())
         errors.push_back("Profile has no name.");
-    if (!profile.IsAndroid() && !profile.IsWindowsDesktop())
+    if (!profile.IsAndroid() && !profile.IsWindowsDesktop() && !profile.IsWeb())
     {
-        errors.push_back(ToString("Profile '%s': unknown platform '%s', expected 'WindowsDesktop' or 'Android'.",
+        errors.push_back(ToString("Profile '%s': unknown platform '%s', expected 'WindowsDesktop', 'Android' or 'Web'.",
             profile.name_.c_str(), profile.platform_.c_str()));
     }
 
     const ea::string exeSuffix = GetExecutableSuffix();
 
-    // The engine binaries are only consumed by a desktop package. Android compiles the host from
-    // source inside gradle, so pointing it at a Windows build directory would be meaningless.
-    if (profile.IsWindowsDesktop())
+    // The engine binaries are only consumed by a desktop or web package. Android compiles the host
+    // from source inside gradle, so pointing it at a Windows build directory would be meaningless.
+    if (profile.IsWindowsDesktop() || profile.IsWeb())
     {
         if (profile.engineBin_.empty())
+        {
             errors.push_back("Engine binary directory is not set.");
+        }
         else if (!fs->DirExists(profile.engineBin_))
+        {
             errors.push_back(ToString("Engine binary directory does not exist: '%s'.", profile.engineBin_.c_str()));
-        else
+        }
+        else if (profile.IsWindowsDesktop())
         {
             const ea::string host = RemoveTrailingSlash(profile.engineBin_) + "/LuaGamePlayer" + exeSuffix;
             const ea::string engineLib = RemoveTrailingSlash(profile.engineBin_) + "/Urho3D" + DYN_LIB_SUFFIX;
@@ -351,6 +365,20 @@ bool BuildSettings::Validate(const BuildProfile& profile, ea::vector<ea::string>
             if (!fs->FileExists(luaLib))
                 errors.push_back(ToString("Missing '%s'. Build it first, the editor will not start a "
                     "multi-minute engine build on its own (%s).", luaLib.c_str(), buildCommand));
+        }
+        else
+        {
+            // The web host is one html page plus its script and binary sidecars, produced by the
+            // emscripten engine build into the engine binary directory.
+            const ea::string bin = RemoveTrailingSlash(profile.engineBin_);
+            const char* buildCommand = "cmake --build web --target LuaGamePlayer";
+            const char* const webArtifacts[] = {"/LuaGamePlayer.html", "/LuaGamePlayer.js", "/LuaGamePlayer.wasm"};
+            for (const char* artifact : webArtifacts)
+            {
+                if (!fs->FileExists(bin + artifact))
+                    errors.push_back(ToString("Missing '%s'. Build the web host first, the editor will not "
+                        "start a multi-minute engine build on its own (%s).", (bin + artifact).c_str(), buildCommand));
+            }
         }
     }
 

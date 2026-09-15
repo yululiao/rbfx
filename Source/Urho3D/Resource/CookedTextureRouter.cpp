@@ -61,13 +61,16 @@ void CookedTextureRouter::Route(FileIdentifier& name)
         return;
 
     // Cooked containers in probe order, most preferred first for the current platform. The platform is
-    // fixed for the process lifetime, so it is resolved once.
-    static const bool isMobile =
-        ApplicationFlavor::Platform.Matches(ApplicationFlavorPattern{"platform=mobile"}).has_value();
+    // fixed for the process lifetime, so it is resolved once. Mobile and web share the KTX-first
+    // order: ETC2 inside KTX is the one compressed combination WebGL2 guarantees and mobile GPUs
+    // read natively, which is also what the build profiles of both platforms cook.
+    static const bool prefersKtx =
+        ApplicationFlavor::Platform.Matches(ApplicationFlavorPattern{"platform=mobile"}).has_value()
+        || ApplicationFlavor::Platform.Matches(ApplicationFlavorPattern{"platform=web"}).has_value();
     static const char* const desktopContainers[] = {".dds", ".ktx", ".pvr"};
-    static const char* const mobileContainers[] = {".ktx", ".pvr", ".dds"};
+    static const char* const ktxFirstContainers[] = {".ktx", ".pvr", ".dds"};
 
-    const char* const* containers = isMobile ? mobileContainers : desktopContainers;
+    const char* const* containers = prefersKtx ? ktxFirstContainers : desktopContainers;
     const unsigned numContainers = sizeof(desktopContainers) / sizeof(desktopContainers[0]);
 
     for (unsigned i = 0; i < numContainers; ++i)

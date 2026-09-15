@@ -89,6 +89,7 @@ gradle*
 
 # CMake generated build files
 /cmake-build-*/
+/web/
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/

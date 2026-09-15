@@ -83,7 +83,7 @@ struct BuildProfile
     /// Display name, unique inside the file. Doubles as the argument to `--build`. Deliberately
     /// without a fallback: a profile nobody can name is an error, not something to guess at.
     ea::string name_;
-    /// "WindowsDesktop" or "Android". Kept as a string on purpose: an unknown value has to be
+    /// "WindowsDesktop", "Android" or "Web". Kept as a string on purpose: an unknown value has to be
     /// reported as an error rather than quietly resolved to one of the known platforms, and a
     /// missing one is reported the same way instead of defaulting an Android profile to desktop.
     ea::string platform_;
@@ -110,6 +110,10 @@ struct BuildProfile
     /// Defaults to RBFX_LUA_SCRIPT_KEY, which is also the variable the runtime reads, so the two
     /// ends cannot disagree without somebody going out of their way to make it happen.
     ea::string scriptKeyEnvVar_;
+    /// Root of the Emscripten SDK the web host was built with (".../emsdk"). Optional: when
+    /// empty the build resolves it from the EMSCRIPTEN environment variable or from the
+    /// CMakeCache.txt next to the engine binaries. Only the Web platform reads it.
+    ea::string webEmsdkRoot_;
     AndroidBuildSettings android_;
     TextureCompressionSettings textureCompression_;
 
@@ -117,6 +121,7 @@ struct BuildProfile
 
     bool IsAndroid() const { return platform_ == "Android"; }
     bool IsWindowsDesktop() const { return platform_ == "WindowsDesktop"; }
+    bool IsWeb() const { return platform_ == "Web"; }
 
     /// Texture compression settings with every empty field resolved to this profile's platform default.
     TextureCompressionSettings GetEffectiveTextureCompression() const;

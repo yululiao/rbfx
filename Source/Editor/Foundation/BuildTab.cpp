@@ -156,12 +156,28 @@ void BuildTab::RenderContent()
         if (!profile->IsAndroid())
         {
             ui::SameLine();
-            ui::BeginDisabled(building || !fs->FileExists(executable));
-            if (ui::Button(ICON_FA_PLAY " Run"))
-                fs->SystemRunAsync(executable, {});
-            ui::EndDisabled();
-            if (ui::IsItemHovered())
-                ui::SetTooltip("Launch the game that is currently in the output directory");
+            if (profile->IsWeb())
+            {
+                // A page is not something to launch but to serve: the script starts a local server
+                // and opens the browser as soon as it is listening.
+                const ea::string serve = outputDir + "serve.py";
+                ui::BeginDisabled(building || !fs->FileExists(serve));
+                if (ui::Button(ICON_FA_PLAY " Run"))
+                    fs->SystemRunAsync(build->ResolveEmsdkPython(), { serve });
+                ui::EndDisabled();
+                if (ui::IsItemHovered())
+                    ui::SetTooltip("Serve the package that is currently in the output directory "
+                        "and open it in the browser");
+            }
+            else
+            {
+                ui::BeginDisabled(building || !fs->FileExists(executable));
+                if (ui::Button(ICON_FA_PLAY " Run"))
+                    fs->SystemRunAsync(executable, {});
+                ui::EndDisabled();
+                if (ui::IsItemHovered())
+                    ui::SetTooltip("Launch the game that is currently in the output directory");
+            }
         }
     }
 
@@ -172,6 +188,8 @@ void BuildTab::RenderContent()
     RenderTextureCompressionOptions(*profile);
     if (profile->IsAndroid())
         RenderAndroidOptions(*profile);
+    if (profile->IsWeb())
+        RenderWebOptions(*profile);
     ui::EndDisabled();
 
     RenderStatus(profile, settings, project);
@@ -296,6 +314,18 @@ void BuildTab::RenderAndroidOptions(BuildProfile& profile)
         "names.");
 }
 
+void BuildTab::RenderWebOptions(BuildProfile& profile)
+{
+    if (!ui::CollapsingHeader(ICON_FA_GLOBE " Web", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    Touch(ui::InputText("Emsdk root", &profile.webEmsdkRoot_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Your emsdk directory, where the build finds file_packager.py. Empty tries "
+            "the emsdk environment variables first and then the CMake cache of the web engine "
+            "build");
+}
+
 void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)
 {
     TextureCompressionSettings& tc = profile.textureCompression_;
@@ -319,20 +349,20 @@ void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)
 
     Touch(ui::InputText("Color format (no alpha)", &tc.colorFormatNoAlpha_));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop BC1, mobile ETC2_RGB");
+        ui::SetTooltip("Desktop BC1, mobile and web ETC2_RGB");
 
     Touch(ui::InputText("Color format (alpha)", &tc.colorFormatAlpha_));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop BC3, mobile ETC2_RGBA");
+        ui::SetTooltip("Desktop BC3, mobile and web ETC2_RGBA");
 
     Touch(ui::InputText("Normal map format", &tc.normalFormat_));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop BC5 (two channel, linear). Diligent has no two channel mobile format, "
-            "so normal maps fall back to ETC2_RGBA there");
+        ui::SetTooltip("Desktop BC5 (two channel, linear). Diligent has no two channel mobile or "
+            "web format, so normal maps fall back to ETC2_RGBA there");
 
     Touch(ui::InputText("Container", &tc.container_));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop dds, mobile ktx");
+        ui::SetTooltip("Desktop dds, mobile and web ktx");
 
     Touch(ui::InputText("Quality", &tc.quality_));
     if (ui::IsItemHovered())

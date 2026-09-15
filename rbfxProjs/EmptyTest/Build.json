@@ -2,11 +2,18 @@
 	"Profiles": [
 		{
 			"Android": {},
-			"EngineBin": "D:/GameEngines/rbfx/msvc/bin/Release",
-			"EngineData": "D:/GameEngines/rbfx/bin",
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/bin",
 			"Name": "Windows",
 			"OutputDir": "Build/Windows",
-			"Platform": "WindowsDesktop"
+			"Platform": "WindowsDesktop",
+			"TextureCompression": {
+				"ColorFormatAlpha": "BC3",
+				"ColorFormatNoAlpha": "BC1",
+				"Container": "dds",
+				"Enabled": true,
+				"NormalFormat": "BC5"
+			}
 		},
 		{
 			"Android": {
@@ -16,7 +23,29 @@
 			"EngineData": "D:/GameEngines/rbfx/bin",
 			"Name": "Android",
 			"OutputDir": "Build/Android",
-			"Platform": "Android"
+			"Platform": "Android",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"Enabled": true,
+				"NormalFormat": "ETC2_RGBA"
+			}
+		},
+		{
+			"EngineBin": "D:/openSrc/rbfx/web/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/bin",
+			"Name": "Web",
+			"OutputDir": "Build/Web",
+			"Platform": "Web",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"Enabled": true,
+				"NormalFormat": "ETC2_RGBA"
+			},
+			"WebEmsdkRoot": "D:/openSrc/emsdk"
 		}
 	]
 }

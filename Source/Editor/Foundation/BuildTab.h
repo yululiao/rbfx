@@ -45,6 +45,8 @@ private:
     void RenderTextureCompressionOptions(BuildProfile& profile);
     /// The part of a profile only the Android scaffold generator reads.
     void RenderAndroidOptions(BuildProfile& profile);
+    /// The part of a profile only the web package assembler reads.
+    void RenderWebOptions(BuildProfile& profile);
     /// Progress of a build in flight, or the reason the last one did not succeed.
     void RenderStatus(BuildProfile* profile, BuildSettings* settings, Project* project);
     /// Remember that a widget changed the profile, so Build.json is rewritten once this frame.

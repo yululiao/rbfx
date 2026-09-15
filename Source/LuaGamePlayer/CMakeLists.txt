@@ -45,12 +45,31 @@ if (ANDROID)
     add_library (libLuaGamePlayer MODULE LuaGamePlayer.cpp)
     set_target_properties (libLuaGamePlayer PROPERTIES PREFIX "")
     set (LUA_GAME_PLAYER_TARGET libLuaGamePlayer)
-elseif (NOT WEB)
-    # A web build would have nothing to load the game with, same as for the C++ Player.
+elseif (WEB)
+    # The web host is a full game host, unlike the C++ Player: a Lua game loads its scene and
+    # scripts from the mounted resource directories, so there is user code to run - it just
+    # lives in Data/ instead of the binary. The executable becomes one emscripten HTML page.
+    add_executable (LuaGamePlayer LuaGamePlayer.cpp)
+    set (LUA_GAME_PLAYER_TARGET LuaGamePlayer)
+    web_executable (LuaGamePlayer)
+    # The preloaded resources are the engine's own Data/CoreData paks (a project build regenerates
+    # the pair with its own data; the loader only cares about the file names). Samples normally
+    # create these paks, but a build without samples still needs them to link against.
+    create_pak("${rbfx_SOURCE_DIR}/bin/Data"     "${CMAKE_BINARY_DIR}/bin/Data.pak")
+    create_pak("${rbfx_SOURCE_DIR}/bin/CoreData" "${CMAKE_BINARY_DIR}/bin/CoreData.pak")
+    # Link the resource loader (preRun hook that fetches Resources.js before main).
+    package_resources_web(
+        FILES        "${CMAKE_BINARY_DIR}/bin/Data.pak"
+                     "${CMAKE_BINARY_DIR}/bin/CoreData.pak"
+        RELATIVE_DIR "${CMAKE_BINARY_DIR}/bin"
+        OUTPUT       "Resources.js"
+        INSTALL_TO   "${CMAKE_INSTALL_BINDIR}"
+    )
+    web_link_resources(LuaGamePlayer "Resources.js")
+    target_link_libraries(LuaGamePlayer PRIVATE "--shell-file ${CMAKE_SOURCE_DIR}/bin/shell.html")
+else ()
     add_executable (LuaGamePlayer ${PLATFORM} LuaGamePlayer.cpp)
     set (LUA_GAME_PLAYER_TARGET LuaGamePlayer)
-else ()
-    set (LUA_GAME_PLAYER_TARGET)
 endif ()
 
 if (LUA_GAME_PLAYER_TARGET)
@@ -59,6 +78,16 @@ if (LUA_GAME_PLAYER_TARGET)
     install (TARGETS ${LUA_GAME_PLAYER_TARGET}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if (WEB)
+        # The html "executable" drags the engine side of the page along: the script glue and, for
+        # a wasm build, the binary itself.
+        install (FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/LuaGamePlayer.js"
+            DESTINATION ${CMAKE_INSTALL_BINDIR})
+        if (EMSCRIPTEN_WASM)
+            install (FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/LuaGamePlayer.wasm"
+                DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif ()
+    endif ()
 endif ()
 
 group_sources()

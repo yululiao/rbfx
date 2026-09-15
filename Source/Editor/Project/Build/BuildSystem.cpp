@@ -137,6 +137,8 @@ const char* BuildStageName(BuildStage stage)
         return "Export CoreData";
     case BuildStage::StageRuntime:
         return "Copy runtime binaries";
+    case BuildStage::WebRuntime:
+        return "Assemble web package";
     case BuildStage::AndroidProject:
         return "Write Android project";
     case BuildStage::Summary:
@@ -244,6 +246,8 @@ bool BuildSystem::BuildNow(const ea::string& profileName, const ea::string& outp
     plan_.push_back(BuildStage::ExportCoreData);
     if (profile_->IsAndroid())
         plan_.push_back(BuildStage::AndroidProject);
+    else if (profile_->IsWeb())
+        plan_.push_back(BuildStage::WebRuntime);
     else
         plan_.push_back(BuildStage::StageRuntime);
     plan_.push_back(BuildStage::Summary);
@@ -365,6 +369,8 @@ bool BuildSystem::RunStage(ea::string& message)
         return StageExportData(message, true);
     case BuildStage::StageRuntime:
         return StageStageRuntime(message);
+    case BuildStage::WebRuntime:
+        return StageWebRuntime(message);
     case BuildStage::AndroidProject:
         return StageAndroidProject(message);
     case BuildStage::Summary:
@@ -1008,6 +1014,288 @@ bool BuildSystem::StageStageRuntime(ea::string& message)
     return true;
 }
 
+bool BuildSystem::StageWebRuntime(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    const ea::string bin = NormalizeDir(profile_->engineBin_);
+
+    // Only the page carries the profile's executable name. The script cannot: it references the
+    // wasm by the file name baked into it at link time, so those two keep the host's names.
+    struct Artifact
+    {
+        ea::string source_;
+        ea::string destination_;
+    };
+    const Artifact artifacts[] = {
+        { bin + HostName + ".html", outputDir_ + profile_->executableName_ + ".html" },
+        { bin + HostName + ".js", outputDir_ + HostName + ".js" },
+        { bin + HostName + ".wasm", outputDir_ + HostName + ".wasm" },
+    };
+    for (const Artifact& artifact : artifacts)
+    {
+        if (!fs->FileExists(artifact.source_))
+        {
+            message = Format("'{}' is not there to be copied.", artifact.source_);
+            return false;
+        }
+        if (!fs->Copy(artifact.source_, artifact.destination_))
+        {
+            message = Format("Could not copy '{}' to '{}'.", artifact.source_, artifact.destination_);
+            return false;
+        }
+    }
+
+    // The page was linked against a preRun hook that fetches Resources.js, which in turn downloads
+    // the data archive next to it. Rebuilding that pair around the project's packages with the
+    // same packager the engine build used is the whole difference between a web package and a
+    // desktop one that happens to contain a browser.
+    const ea::string emscriptenRoot = ResolveEmscriptenRoot(message);
+    if (emscriptenRoot.empty())
+        return false;
+
+    ea::vector<ea::string> arguments;
+    arguments.push_back(emscriptenRoot + "tools/file_packager.py");
+    // Target first: that is where the archive goes, the --js-output names the loader beside it.
+    arguments.push_back(outputDir_ + "Resources.js.data");
+    arguments.push_back("--preload");
+    // Mount names are what LuaGamePlayer asks the virtual file system for. The packages sit in the
+    // root of the preloaded filesystem, exactly where package_resources_web put them during the
+    // engine build; loose directories mount under their EP_RESOURCE_PATHS names instead.
+    if (profile_->packData_)
+    {
+        arguments.push_back(resourceDir_ + DataPackageName + "@" + DataPackageName);
+        arguments.push_back(resourceDir_ + CoreDataPackageName + "@" + CoreDataPackageName);
+    }
+    else
+    {
+        arguments.push_back(resourceDir_ + DataDirName + "@/" + RemoveTrailingSlash(DataDirName));
+        arguments.push_back(resourceDir_ + CoreDataDirName + "@/" + RemoveTrailingSlash(CoreDataDirName));
+    }
+    arguments.push_back("--js-output=" + outputDir_ + "Resources.js");
+    arguments.push_back("--use-preload-cache");
+
+    return StartProcess(ResolveEmsdkPython(), arguments,
+        [this](ea::string& resumeMessage) { return FinalizeWebRuntime(resumeMessage); }, message);
+}
+
+bool BuildSystem::FinalizeWebRuntime(ea::string& message)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    // An exit code of zero proves little here - a packager that disliked its arguments can still
+    // write nothing - so the loader and the archive it should have produced are checked by hand.
+    const char* const artifacts[] = {"Resources.js", "Resources.js.data"};
+    for (const char* artifact : artifacts)
+    {
+        if (!fs->FileExists(outputDir_ + artifact))
+        {
+            message = Format("file_packager produced no '{}'.", outputDir_ + artifact);
+            return false;
+        }
+    }
+
+    // Everything the archive swallowed is dead weight beside the page: the browser downloads it
+    // inside Resources.js.data, so a copy next to it only doubles the package. A file somebody
+    // holds open stays behind with a warning rather than failing an otherwise finished build.
+    const auto discard = [&fs](const ea::string& path)
+    {
+        if (fs->DirExists(path))
+        {
+            if (!fs->RemoveDir(path, true))
+                URHO3D_LOGWARNING("[Build] Could not remove the inlined '{}'; delete it by hand", path);
+        }
+        else if (fs->FileExists(path) && !fs->Delete(path))
+            URHO3D_LOGWARNING("[Build] Could not remove the inlined '{}'; delete it by hand", path);
+    };
+    discard(resourceDir_ + DataPackageName);
+    discard(resourceDir_ + CoreDataPackageName);
+    if (!profile_->packData_)
+    {
+        discard(resourceDir_ + DataDirName);
+        discard(resourceDir_ + CoreDataDirName);
+    }
+
+    if (!WriteWebServeScript(message))
+        return false;
+
+    URHO3D_LOGINFO("[Build] Web package is ready; run 'python serve.py' in '{}' and the browser "
+        "opens {} by itself", outputDir_, profile_->executableName_ + ".html");
+    return true;
+}
+
+ea::string BuildSystem::ResolveEmscriptenRoot(ea::string& message) const
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    // A candidate is only as good as the packager inside it.
+    const auto hasPackager = [&fs](const ea::string& dir)
+    {
+        return dir.empty() || !fs->FileExists(NormalizeDir(dir) + "tools/file_packager.py")
+            ? EMPTY_STRING : NormalizeDir(dir);
+    };
+
+    ea::string result;
+    // What the profile says beats what the machine happens to have activated right now. Accept
+    // both the emsdk root and the toolchain directory itself; the field is a path people paste,
+    // and a paste of either should just work.
+    if (!profile_->webEmsdkRoot_.empty())
+    {
+        result = hasPackager(profile_->webEmsdkRoot_);
+        if (result.empty())
+            result = hasPackager(NormalizeDir(profile_->webEmsdkRoot_) + "upstream/emscripten");
+    }
+    // The variables below are what emsdk activation exports, so on a machine where emsdk was
+    // activated before the editor started no profile field is needed at all.
+    if (result.empty())
+    {
+        if (const char* emscripten = getenv("EMSCRIPTEN"); emscripten && *emscripten)
+            result = hasPackager(emscripten);
+    }
+    if (result.empty())
+    {
+        if (const char* emsdk = getenv("EMSDK"); emsdk && *emsdk)
+            result = hasPackager(NormalizeDir(emsdk) + "upstream/emscripten");
+    }
+    if (result.empty())
+    {
+        // Last resort: the web build directory is somewhere above the engine binary directory, and
+        // its CMake cache names the toolchain even on a machine where emsdk was never activated.
+        // How many levels up depends on the generator, so the parents are probed in turn.
+        ea::string parent = RemoveTrailingSlash(NormalizeDir(profile_->engineBin_));
+        for (unsigned level = 0; level < 3 && result.empty(); ++level)
+        {
+            parent = RemoveTrailingSlash(GetPath(parent));
+            if (parent.empty() || parent.size() < 2)
+                break;
+            const ea::string cache = parent + "/CMakeCache.txt";
+            if (!fs->FileExists(cache))
+                continue;
+            File file(context_, cache, FILE_READ);
+            while (result.empty() && file.IsOpen() && !file.IsEof())
+            {
+                const ea::string line = file.ReadLine();
+                if (line.find("EMSCRIPTEN_ROOT_PATH") != 0)
+                    continue;
+                const size_t separator = line.find('=');
+                if (separator == ea::string::npos)
+                    continue;
+                // CMake writes "KEY:TYPE=value"; a Windows cache can end the value with a carriage
+                // return that would turn every path test below into a miss.
+                ea::string value = line.substr(separator + 1);
+                const size_t first = value.find_first_not_of(" \t\r\n");
+                const size_t last = value.find_last_not_of(" \t\r\n");
+                if (first != ea::string::npos)
+                    result = hasPackager(value.substr(first, last - first + 1));
+            }
+        }
+    }
+    if (result.empty())
+    {
+        message = "Could not find file_packager.py. Point the WebEmsdkRoot profile field at the "
+            "emsdk directory, or activate emsdk before starting the editor.";
+        return EMPTY_STRING;
+    }
+    return result;
+}
+
+ea::string BuildSystem::ResolveEmsdkPython() const
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    // The packager needs nothing beyond the standard library, but the interpreter emsdk ships is
+    // the one its own scripts are tested with, so it wins when it is there. The sdk root is two
+    // levels above the toolchain directory ResolveEmscriptenRoot answers with.
+    ea::string ignored;
+    const ea::string emscriptenRoot = ResolveEmscriptenRoot(ignored);
+    if (!emscriptenRoot.empty())
+    {
+        const ea::string emsdkRoot = NormalizeDir(
+            GetPath(RemoveTrailingSlash(GetPath(RemoveTrailingSlash(emscriptenRoot)))));
+        ea::vector<ea::string> versions;
+        fs->ScanDir(versions, emsdkRoot + "python", "*", SCAN_DIRS);
+        for (const ea::string& version : versions)
+        {
+            if (version == "." || version == "..")
+                continue;
+#if defined(_WIN32)
+            const ea::string candidate = emsdkRoot + "python/" + version + "/python.exe";
+#else
+            const ea::string candidate = emsdkRoot + "python/" + version + "/bin/python3";
+#endif
+            if (fs->FileExists(candidate))
+                return candidate;
+        }
+    }
+    // Whatever is on PATH then; a machine without any python at all cannot run the packager anyway.
+#if defined(_WIN32)
+    return "python";
+#else
+    return "python3";
+#endif
+}
+
+bool BuildSystem::WriteWebServeScript(ea::string& message) const
+{
+    // A raw literal keeps the script readable where it is written; the single substitution is the
+    // page name, which is the profile's executable name, matching what StageWebRuntime copied.
+    const char* const script = R"PY(import http.server
+import os
+import socket
+import socketserver
+import webbrowser
+
+# Generated by the editor next to the game page it serves. A wasm module refuses to load over
+# file://, so playing a web package always goes through a local http server like this one.
+PAGE = "{page}"
+
+DEFAULT_PORT = 8000
+
+
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+
+
+def pick_port():
+    # A previous build may still be serving on the default port; take the next free one instead
+    # of failing, so a rebuild-and-play loop never stalls on a stale server.
+    for port in range(DEFAULT_PORT, DEFAULT_PORT + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("", port))
+                return port
+            except OSError:
+                continue
+    raise SystemExit(f"No free port in {DEFAULT_PORT}..{DEFAULT_PORT + 19}")
+
+
+if __name__ == "__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    port = pick_port()
+    url = f"http://localhost:{port}/{PAGE}"
+    print(f"Serving {url} - press Ctrl+C to stop")
+    webbrowser.open(url)
+    with Server(("", port), http.server.SimpleHTTPRequestHandler) as server:
+        server.serve_forever()
+)PY";
+
+    const ea::string path = outputDir_ + "serve.py";
+    File file(context_, path, FILE_WRITE);
+    if (!file.IsOpen())
+    {
+        message = Format("Could not write '{}'.", path);
+        return false;
+    }
+    ea::string text{script};
+    text.replace("{page}", profile_->executableName_ + ".html");
+    if (file.Write(text.data(), text.size()) != text.size())
+    {
+        message = Format("Could not write '{}'.", path);
+        return false;
+    }
+    return true;
+}
+
 bool BuildSystem::StageAndroidProject(ea::string& message)
 {
     auto* project = GetSubsystem<Project>();
@@ -1124,9 +1412,15 @@ unsigned long long BuildSystem::DirectorySize(const ea::string& directory) const
 void BuildSystem::Finish(bool success, const ea::string& message)
 {
     const float elapsed = GetSubsystem<Time>()->GetElapsedTime() - startTime_;
-    const bool autoRun = success && profile_ && profile_->autoRunAfterBuild_ && profile_->IsWindowsDesktop();
+    const bool isWeb = profile_ && profile_->IsWeb();
+    const bool autoRun = success && profile_ && profile_->autoRunAfterBuild_
+        && (profile_->IsWindowsDesktop() || isWeb);
     const ea::string executable =
         profile_ ? outputDir_ + profile_->executableName_ + GetExecutableSuffix() : EMPTY_STRING;
+    // Resolved while the profile is still alive: the web launch runs the serving script, and the
+    // interpreter that packaged the resources is the one that should serve them.
+    const ea::string serveInterpreter = isWeb ? ResolveEmsdkPython() : EMPTY_STRING;
+    const ea::string serveScript = outputDir_ + "serve.py";
 
     if (success)
     {
@@ -1166,11 +1460,22 @@ void BuildSystem::Finish(bool success, const ea::string& message)
 
     // Launching is the last thing a successful build does, and the process is not waited for: the
     // point of the switch is to see the result, which means a window that stays open until the user
-    // closes it.
+    // closes it. The web equivalent is the serving script, which opens the browser once it is
+    // listening, and which stays running for exactly the same reason.
     if (autoRun)
     {
         auto* fs = GetSubsystem<FileSystem>();
-        if (fs->FileExists(executable))
+        if (isWeb)
+        {
+            if (fs->FileExists(serveScript))
+            {
+                URHO3D_LOGINFO("[Build] Launching {}", serveScript);
+                fs->SystemRunAsync(serveInterpreter, {serveScript});
+            }
+            else
+                URHO3D_LOGERROR("[Build] Cannot run '{}': it is not in the output directory", serveScript);
+        }
+        else if (fs->FileExists(executable))
         {
             URHO3D_LOGINFO("[Build] Launching {}", executable);
             fs->SystemRunAsync(executable, {});

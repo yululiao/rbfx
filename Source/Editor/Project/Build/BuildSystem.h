@@ -52,6 +52,8 @@ enum class BuildStage
     ExportCoreData,
     /// Host executable and the shared libraries it needs; desktop only, gradle compiles its own.
     StageRuntime,
+    /// The web host page and its sidecars plus the preloaded resource bundle; web only.
+    WebRuntime,
     /// Self contained gradle project next to the assets; Android only.
     AndroidProject,
     /// What ended up where, and how long it took.
@@ -104,6 +106,9 @@ public:
     BuildStage GetStage() const { return stage_; }
     ea::string GetStageName() const { return BuildStageName(stage_); }
     const ea::vector<ea::string>& GetErrors() const { return errors_; }
+    /// Interpreter to run the emsdk python scripts with, preferring the python emsdk ships over
+    /// whatever happens to be on PATH. Also what a web package is served with.
+    ea::string ResolveEmsdkPython() const;
 
 private:
     /// One staged texture waiting to be compressed. Built once per build by StageCompressTextures and
@@ -167,6 +172,16 @@ private:
     bool FinalizeCookedTexture(unsigned index, ea::string& message);
     /// Place a cooked product into staging and drop the source and metadata it replaced.
     bool InstallCookedTexture(const TextureJob& job, ea::string& message);
+    /// Place the web host page and its sidecars, bundle the exported resources into the preloaded
+    /// data archive, and write the local serving script.
+    bool StageWebRuntime(ea::string& message);
+    bool FinalizeWebRuntime(ea::string& message);
+    /// Directory of the emscripten toolchain that owns file_packager.py: the profile's emsdk root,
+    /// the emsdk environment variables, or the CMake cache of the web build, whichever answers
+    /// first. Empty (with a reason in 'message') when none of them does.
+    ea::string ResolveEmscriptenRoot(ea::string& message) const;
+    /// serve.py next to the page: a wasm module only loads over http, never from file://.
+    bool WriteWebServeScript(ea::string& message) const;
     /// Absolute path of the Data/ file a staged texture was copied from, or empty when it came from
     /// somewhere else. Feeds both the import metadata lookup and the half of the cache key that has to
     /// survive a rebuild.

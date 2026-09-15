@@ -7,7 +7,14 @@ project(RbfxLuaScript C CXX)
 
 file(GLOB SOURCE_FILES *.cpp *.h)
 
-add_library(RbfxLuaScript SHARED ${SOURCE_FILES})
+# Emscripten has no dynamic libraries in the plain sense: a SHARED target would be linked as a
+# side module and fail to resolve the engine symbols it needs. The web host links Lua statically,
+# exactly like every other statically linked engine component.
+if (WEB)
+    add_library(RbfxLuaScript STATIC ${SOURCE_FILES})
+else ()
+    add_library(RbfxLuaScript SHARED ${SOURCE_FILES})
+endif ()
 
 target_link_libraries(RbfxLuaScript PUBLIC Urho3D)
 # Lua and sol3 must be linked directly since Urho3D links them privately.
@@ -21,8 +28,13 @@ if (MSVC)
     set_source_files_properties(${SOURCE_FILES} PROPERTIES COMPILE_OPTIONS "/bigobj")
 endif ()
 
-target_compile_definitions(RbfxLuaScript PRIVATE RBFXLUA_EXPORTS)
-target_compile_definitions(RbfxLuaScript PUBLIC RBFXLUA_SHARED)
+# The Windows DLL export macros are only meaningful for the shared library; the static web build
+# must not define RBFXLUA_SHARED or the engine-side headers would look for a dllimport that is not
+# there.
+if (NOT WEB)
+    target_compile_definitions(RbfxLuaScript PRIVATE RBFXLUA_EXPORTS)
+    target_compile_definitions(RbfxLuaScript PUBLIC RBFXLUA_SHARED)
+endif ()
 
 # Content key of packaged Lua scripts. The compiled-in default is the development key; a release
 # build passes its own with -DRBFX_LUA_SCRIPT_KEY_HEX=<64 hex digits> so that the key inside the
