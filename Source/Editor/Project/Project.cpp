@@ -29,7 +29,7 @@
 #include "../Core/UndoManager.h"
 #include "../Project/AssetManager.h"
 #include "../Project/CreateDefaultScene.h"
-#include "../Project/ResourceEditorTab.h"
+#include "../Tabs/ResourceEditorTab.h"
 
 #include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Engine/Engine.h>

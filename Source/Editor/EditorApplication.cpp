@@ -5,54 +5,54 @@
 #include "EditorApplication.h"
 
 #include "Assets/ModelImporter.h"
-#include "Foundation/AnimationViewTab.h"
-#include "Foundation/BuildTab.h"
-#include "Foundation/ConcurrentAssetProcessing.h"
-#include "Foundation/ConsoleTab.h"
-#include "Foundation/GameViewTab.h"
-#include "Foundation/Glue/ProjectGlue.h"
-#include "Foundation/Glue/ResourceBrowserGlue.h"
-#include "Foundation/Glue/SceneViewGlue.h"
-#include "Foundation/HierarchyBrowserTab.h"
-#include "Foundation/InspectorTab.h"
-#include "Foundation/InspectorTab/AnimationInspector.h"
-#include "Foundation/InspectorTab/AssetPipelineInspector.h"
-#include "Foundation/InspectorTab/EmptyInspector.h"
-#include "Foundation/InspectorTab/FbxAssetInspector.h"
-#include "Foundation/InspectorTab/MaterialInspector.h"
-#include "Foundation/InspectorTab/ModelInspector.h"
-#include "Foundation/InspectorTab/NodeComponentInspector.h"
-#include "Foundation/InspectorTab/PlaceholderResourceInspector.h"
-#include "Foundation/InspectorTab/PrefabInspector.h"
-#include "Foundation/InspectorTab/RenderPathInspector.h"
-#include "Foundation/InspectorTab/SerializableResourceInspector.h"
-#include "Foundation/InspectorTab/SoundInspector.h"
-#include "Foundation/InspectorTab/Texture2DInspector.h"
-#include "Foundation/InspectorTab/TextureCubeInspector.h"
-#include "Foundation/ModelViewTab.h"
-#include "Foundation/ResourceBrowserTab.h"
-#include "Foundation/ResourceBrowserTab/AssetPipelineFactory.h"
-#include "Foundation/ResourceBrowserTab/MaterialFactory.h"
-#include "Foundation/ResourceBrowserTab/SceneFactory.h"
-#include "Foundation/SceneViewTab.h"
-#include "Foundation/SceneViewTab/CreatePrefabFromNode.h"
-#include "Foundation/SceneViewTab/EditorCamera.h"
-#include "Foundation/SceneViewTab/SceneDebugInfo.h"
-#include "Foundation/SceneViewTab/SceneDragAndDropAnimation.h"
-#include "Foundation/SceneViewTab/SceneDragAndDropMaterial.h"
-#include "Foundation/SceneViewTab/SceneDragAndDropPrefab.h"
-#include "Foundation/SceneViewTab/SceneHierarchy.h"
-#include "Foundation/SceneViewTab/SceneScreenshot.h"
-#include "Foundation/SceneViewTab/SceneSelectionRenderer.h"
-#include "Foundation/SceneViewTab/SceneSelector.h"
-#include "Foundation/SceneViewTab/TransformManipulator.h"
-#include "Foundation/SettingsTab.h"
-#include "Foundation/SettingsTab/KeyBindingsPage.h"
-#include "Foundation/SettingsTab/LaunchPage.h"
-#include "Foundation/SettingsTab/PluginsPage.h"
-#include "Foundation/StandardFileTypes.h"
-#include "Foundation/Texture2DViewTab.h"
-#include "Foundation/TextureCubeViewTab.h"
+#include "Tabs/AnimationViewTab.h"
+#include "Build/BuildTab.h"
+#include "Assets/ConcurrentAssetProcessing.h"
+#include "Tabs/ConsoleTab.h"
+#include "Tabs/GameViewTab.h"
+#include "Tabs/Glue/ProjectGlue.h"
+#include "Tabs/Glue/ResourceBrowserGlue.h"
+#include "Tabs/Glue/SceneViewGlue.h"
+#include "Tabs/HierarchyBrowserTab.h"
+#include "Tabs/InspectorTab.h"
+#include "Tabs/InspectorTab/AnimationInspector.h"
+#include "Tabs/InspectorTab/AssetPipelineInspector.h"
+#include "Tabs/InspectorTab/EmptyInspector.h"
+#include "Tabs/InspectorTab/FbxAssetInspector.h"
+#include "Tabs/InspectorTab/MaterialInspector.h"
+#include "Tabs/InspectorTab/ModelInspector.h"
+#include "Tabs/InspectorTab/NodeComponentInspector.h"
+#include "Tabs/InspectorTab/PlaceholderResourceInspector.h"
+#include "Tabs/InspectorTab/PrefabInspector.h"
+#include "Tabs/InspectorTab/RenderPathInspector.h"
+#include "Tabs/InspectorTab/SerializableResourceInspector.h"
+#include "Tabs/InspectorTab/SoundInspector.h"
+#include "Tabs/InspectorTab/Texture2DInspector.h"
+#include "Tabs/InspectorTab/TextureCubeInspector.h"
+#include "Tabs/ModelViewTab.h"
+#include "Tabs/ResourceBrowserTab.h"
+#include "Tabs/ResourceBrowserTab/AssetPipelineFactory.h"
+#include "Tabs/ResourceBrowserTab/MaterialFactory.h"
+#include "Tabs/ResourceBrowserTab/SceneFactory.h"
+#include "Tabs/SceneViewTab.h"
+#include "Tabs/SceneViewTab/CreatePrefabFromNode.h"
+#include "Tabs/SceneViewTab/EditorCamera.h"
+#include "Tabs/SceneViewTab/SceneDebugInfo.h"
+#include "Tabs/SceneViewTab/SceneDragAndDropAnimation.h"
+#include "Tabs/SceneViewTab/SceneDragAndDropMaterial.h"
+#include "Tabs/SceneViewTab/SceneDragAndDropPrefab.h"
+#include "Tabs/SceneViewTab/SceneHierarchy.h"
+#include "Tabs/SceneViewTab/SceneScreenshot.h"
+#include "Tabs/SceneViewTab/SceneSelectionRenderer.h"
+#include "Tabs/SceneViewTab/SceneSelector.h"
+#include "Tabs/SceneViewTab/TransformManipulator.h"
+#include "Tabs/SettingsTab.h"
+#include "Tabs/SettingsTab/KeyBindingsPage.h"
+#include "Tabs/SettingsTab/LaunchPage.h"
+#include "Tabs/SettingsTab/PluginsPage.h"
+#include "Assets/StandardFileTypes.h"
+#include "Tabs/Texture2DViewTab.h"
+#include "Tabs/TextureCubeViewTab.h"
 
 #include "Project/ProjectRequest.h"
 
@@ -95,60 +95,60 @@ EditorApplication::EditorApplication(Context* context)
 {
     editorPluginManager_->AddPlugin("Assets.ModelImporter", &Assets_ModelImporter);
 
-    editorPluginManager_->AddPlugin("Foundation.StandardFileTypes", &Foundation_StandardFileTypes);
-    editorPluginManager_->AddPlugin("Foundation.ConcurrentAssetProcessing", &Foundation_ConcurrentAssetProcessing);
+    editorPluginManager_->AddPlugin("Assets.StandardFileTypes", &Assets_StandardFileTypes);
+    editorPluginManager_->AddPlugin("Assets.ConcurrentAssetProcessing", &Assets_ConcurrentAssetProcessing);
 
-    editorPluginManager_->AddPlugin("Foundation.GameView", &Foundation_GameViewTab);
-    editorPluginManager_->AddPlugin("Foundation.SceneView", &Foundation_SceneViewTab);
-    editorPluginManager_->AddPlugin("Foundation.Texture2DView", &Foundation_Texture2DViewTab);
-    editorPluginManager_->AddPlugin("Foundation.TextureCubeView", &Foundation_TextureCubeViewTab);
-    editorPluginManager_->AddPlugin("Foundation.ModelView", &Foundation_ModelViewTab);
-    editorPluginManager_->AddPlugin("Foundation.AnimationView", &Foundation_AnimationViewTab);
-    editorPluginManager_->AddPlugin("Foundation.Console", &Foundation_ConsoleTab);
-    editorPluginManager_->AddPlugin("Foundation.Build", &Foundation_BuildTab);
-    editorPluginManager_->AddPlugin("Foundation.ResourceBrowser", &Foundation_ResourceBrowserTab);
-    editorPluginManager_->AddPlugin("Foundation.HierarchyBrowser", &Foundation_HierarchyBrowserTab);
-    editorPluginManager_->AddPlugin("Foundation.Settings", &Foundation_SettingsTab);
-    editorPluginManager_->AddPlugin("Foundation.Inspector", &Foundation_InspectorTab);
+    editorPluginManager_->AddPlugin("Tabs.GameView", &Tabs_GameViewTab);
+    editorPluginManager_->AddPlugin("Tabs.SceneView", &Tabs_SceneViewTab);
+    editorPluginManager_->AddPlugin("Tabs.Texture2DView", &Tabs_Texture2DViewTab);
+    editorPluginManager_->AddPlugin("Tabs.TextureCubeView", &Tabs_TextureCubeViewTab);
+    editorPluginManager_->AddPlugin("Tabs.ModelView", &Tabs_ModelViewTab);
+    editorPluginManager_->AddPlugin("Tabs.AnimationView", &Tabs_AnimationViewTab);
+    editorPluginManager_->AddPlugin("Tabs.Console", &Tabs_ConsoleTab);
+    editorPluginManager_->AddPlugin("Build.Build", &Build_BuildTab);
+    editorPluginManager_->AddPlugin("Tabs.ResourceBrowser", &Tabs_ResourceBrowserTab);
+    editorPluginManager_->AddPlugin("Tabs.HierarchyBrowser", &Tabs_HierarchyBrowserTab);
+    editorPluginManager_->AddPlugin("Tabs.Settings", &Tabs_SettingsTab);
+    editorPluginManager_->AddPlugin("Tabs.Inspector", &Tabs_InspectorTab);
 
-    editorPluginManager_->AddPlugin("Foundation.Settings.KeyBindings", &Foundation_KeyBindingsPage);
-    editorPluginManager_->AddPlugin("Foundation.Settings.Launch", &Foundation_LaunchPage);
-    editorPluginManager_->AddPlugin("Foundation.Settings.Plugins", &Foundation_PluginsPage);
+    editorPluginManager_->AddPlugin("Tabs.Settings.KeyBindings", &Tabs_KeyBindingsPage);
+    editorPluginManager_->AddPlugin("Tabs.Settings.Launch", &Tabs_LaunchPage);
+    editorPluginManager_->AddPlugin("Tabs.Settings.Plugins", &Tabs_PluginsPage);
 
-    editorPluginManager_->AddPlugin("Foundation.SceneView.CreatePrefabFromNode", &Foundation_CreatePrefabFromNode);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.EditorCamera", &Foundation_EditorCamera);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.Selector", &Foundation_SceneSelector);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.Hierarchy", &Foundation_SceneHierarchy);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.SelectionRenderer", &Foundation_SceneSelectionRenderer);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.TransformGizmo", &Foundation_TransformManipulator);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.DragAndDropPrefab", &Foundation_SceneDragAndDropPrefab);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.DragAndDropMaterial", &Foundation_SceneDragAndDropMaterial);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.DragAndDropAnimation", &Foundation_SceneDragAndDropAnimation);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.DebugInfo", &Foundation_SceneDebugInfo);
-    editorPluginManager_->AddPlugin("Foundation.SceneView.Screenshot", &Foundation_SceneScreenshot);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.CreatePrefabFromNode", &Tabs_CreatePrefabFromNode);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.EditorCamera", &Tabs_EditorCamera);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.Selector", &Tabs_SceneSelector);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.Hierarchy", &Tabs_SceneHierarchy);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.SelectionRenderer", &Tabs_SceneSelectionRenderer);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.TransformGizmo", &Tabs_TransformManipulator);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.DragAndDropPrefab", &Tabs_SceneDragAndDropPrefab);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.DragAndDropMaterial", &Tabs_SceneDragAndDropMaterial);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.DragAndDropAnimation", &Tabs_SceneDragAndDropAnimation);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.DebugInfo", &Tabs_SceneDebugInfo);
+    editorPluginManager_->AddPlugin("Tabs.SceneView.Screenshot", &Tabs_SceneScreenshot);
 
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Empty", &Foundation_EmptyInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.AssetPipeline", &Foundation_AssetPipelineInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Animation", &Foundation_AnimationInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.FbxAsset", &Foundation_FbxAssetInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Texture2D", &Foundation_Texture2DInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.TextureCube", &Foundation_TextureCubeInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Model", &Foundation_ModelInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Prefab", &Foundation_PrefabInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Material", &Foundation_MaterialInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.NodeComponent", &Foundation_NodeComponentInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.PlaceholderResource", &Foundation_PlaceholderResourceInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.RenderPath", &Foundation_RenderPathInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.SerializableResource", &Foundation_SerializableResourceInspector);
-    editorPluginManager_->AddPlugin("Foundation.Inspector.Sound", &Foundation_SoundInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Empty", &Tabs_EmptyInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.AssetPipeline", &Tabs_AssetPipelineInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Animation", &Tabs_AnimationInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.FbxAsset", &Tabs_FbxAssetInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Texture2D", &Tabs_Texture2DInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.TextureCube", &Tabs_TextureCubeInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Model", &Tabs_ModelInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Prefab", &Tabs_PrefabInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Material", &Tabs_MaterialInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.NodeComponent", &Tabs_NodeComponentInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.PlaceholderResource", &Tabs_PlaceholderResourceInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.RenderPath", &Tabs_RenderPathInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.SerializableResource", &Tabs_SerializableResourceInspector);
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Sound", &Tabs_SoundInspector);
 
-    editorPluginManager_->AddPlugin("Foundation.ResourceBrowser.AssetPipelineFactory", &Foundation_AssetPipelineFactory);
-    editorPluginManager_->AddPlugin("Foundation.ResourceBrowser.MaterialFactory", &Foundation_MaterialFactory);
-    editorPluginManager_->AddPlugin("Foundation.ResourceBrowser.SceneFactory", &Foundation_SceneFactory);
+    editorPluginManager_->AddPlugin("Tabs.ResourceBrowser.AssetPipelineFactory", &Tabs_AssetPipelineFactory);
+    editorPluginManager_->AddPlugin("Tabs.ResourceBrowser.MaterialFactory", &Tabs_MaterialFactory);
+    editorPluginManager_->AddPlugin("Tabs.ResourceBrowser.SceneFactory", &Tabs_SceneFactory);
 
-    editorPluginManager_->AddPlugin("Foundation.Glue.Project", &Foundation_ProjectGlue);
-    editorPluginManager_->AddPlugin("Foundation.Glue.ResourceBrowser", &Foundation_ResourceBrowserGlue);
-    editorPluginManager_->AddPlugin("Foundation.Glue.SceneView", &Foundation_SceneViewGlue);
+    editorPluginManager_->AddPlugin("Tabs.Glue.Project", &Tabs_ProjectGlue);
+    editorPluginManager_->AddPlugin("Tabs.Glue.ResourceBrowser", &Tabs_ResourceBrowserGlue);
+    editorPluginManager_->AddPlugin("Tabs.Glue.SceneView", &Tabs_SceneViewGlue);
 }
 
 void EditorApplication::SerializeInBlock(Archive& archive)

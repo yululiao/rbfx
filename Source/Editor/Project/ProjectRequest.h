@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "../Project/EditorTab.h"
+#include "../Tabs/EditorTab.h"
 #include "../Project/ResourceFactory.h"
 
 #include <Urho3D/Core/Object.h>

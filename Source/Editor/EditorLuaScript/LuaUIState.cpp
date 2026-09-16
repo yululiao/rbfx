@@ -6,7 +6,7 @@
 
 #include "LuaUIState.h"
 
-#include "../Foundation/SceneViewTab.h"
+#include "../Tabs/SceneViewTab.h"
 #include "../Project/Project.h"
 
 #include <Urho3D/Core/Context.h>

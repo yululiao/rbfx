@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "../Project/Build/BuildSettings.h"
-#include "../Project/Build/BuildSystem.h"
+#include "../Build/BuildSettings.h"
+#include "../Build/BuildSystem.h"
 #include "../Project/CloseDialog.h"
-#include "../Project/EditorTab.h"
+#include "../Tabs/EditorTab.h"
 #include "../Project/LaunchManager.h"
 #include "../Project/ProjectRequest.h"
 #include "../Project/ToolManager.h"

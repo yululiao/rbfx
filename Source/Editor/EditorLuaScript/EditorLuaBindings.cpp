@@ -12,9 +12,9 @@
 
 #include <LuaScript/LuaBindings.h>
 
-#include "../Foundation/SceneViewTab.h"
-#include "../Project/Build/BuildSettings.h"
-#include "../Project/Build/BuildSystem.h"
+#include "../Tabs/SceneViewTab.h"
+#include "../Build/BuildSettings.h"
+#include "../Build/BuildSystem.h"
 #include "../Project/Project.h"
 
 #include <Urho3D/Core/Context.h>

@@ -27,7 +27,7 @@ endif ()
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME Tools)
 
 file (GLOB_RECURSE SOURCE_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.cpp *.h *.hpp)
-list (REMOVE_ITEM SOURCE_FILES Editor.cpp EditorWrapper.cpp)
+list (REMOVE_ITEM SOURCE_FILES Editor.cpp)
 
 #
 # Groups sources so that they're displayed in IDE matching their layout in the filesystem
@@ -68,30 +68,6 @@ if (NOT URHO3D_NO_EDITOR_PLAYER_EXE)
     target_link_libraries (Editor PRIVATE ${EDITOR_ASSETIMPORTER_LINK})
     list (APPEND EDITOR_TARGETS Editor)
 
-    if (URHO3D_CSHARP)
-        # Add native application as shared library to be loaded by C# executable.
-        add_library (libEditorWrapper SHARED EditorWrapper.cpp)
-        set_target_properties(libEditorWrapper PROPERTIES PREFIX "")
-        target_link_libraries (libEditorWrapper PUBLIC EditorLibrary)
-        list (APPEND EDITOR_TARGETS libEditorWrapper)
-
-        # Add C# executable to host .net runtime and load editor.
-        add_target_csharp(
-            TARGET EditorManaged
-            EXE
-            PROJECT ${CMAKE_CURRENT_SOURCE_DIR}/EditorManaged/EditorManaged.csproj
-            OUTPUT ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/EditorManaged
-            DEPENDS Urho3DNet)
-
-        if (TARGET EditorManaged)
-            add_dependencies(EditorManaged libEditorWrapper Urho3DNet)
-            install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/EditorManaged${CMAKE_EXECUTABLE_SUFFIX}"
-                DESTINATION ${CMAKE_INSTALL_BINDIR}
-            )
-        endif ()
-    else ()
-        # No C# or pugins support, editor can be a true native executable.
-    endif ()
 endif ()
 
 foreach (EDITOR_TARGET ${EDITOR_TARGETS})

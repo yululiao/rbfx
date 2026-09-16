@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "../Project/EditorTab.h"
+#include "../Tabs/EditorTab.h"
 
 namespace Urho3D
 {
