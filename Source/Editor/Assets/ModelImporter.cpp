@@ -21,7 +21,8 @@
 //
 
 #include "../Assets/ModelImporter.h"
-#include "../Assets/FbxImport.h"
+
+#include <Tools/AssetImporter/AssetImporterLibrary.h>
 
 #include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Graphics/Animation.h>
@@ -64,6 +65,27 @@ bool IsFileNameBlend(const ea::string& fileName, bool strict = true)
         return true;
 
     return fileName.ends_with(".blend", false);
+}
+
+// Marshals arguments to the AssetImporter C API and reports failures uniformly. Not
+// concurrent-safe (AssetImporterRun reuses the process-wide Context singleton); the default
+// editor asset pipeline processes transformers inline on the main thread, so calls are already
+// serialized. A host that injects an asynchronous process callback must serialize them itself.
+bool RunAssetImporter(const ea::string& fileName, const StringVector& arguments)
+{
+    ea::vector<const char*> argv;
+    argv.reserve(arguments.size());
+    for (const ea::string& argument : arguments)
+        argv.push_back(argument.c_str());
+
+    // Import in-process through the AssetImporter library, so import failures
+    // can be debugged directly in the Editor debugger session
+    if (AssetImporterRun(static_cast<int>(argv.size()), argv.data()) != 0)
+    {
+        URHO3D_LOGERROR("Failed to import FBX file '{}':\n{}", fileName, AssetImporterGetLastError());
+        return false;
+    }
+    return true;
 }
 
 bool IsAnimationLooped(const Animation& animation)
@@ -253,20 +275,30 @@ bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input)
         return false;
     }
 
+    auto fs = context_->GetSubsystem<FileSystem>();
+    if (!fs->FileExists(input.inputFileName_))
+    {
+        URHO3D_LOGERROR("Cannot import FBX '{}': file not found.", input.resourceName_);
+        return false;
+    }
+
     // Import into the transformer's temporary satellite directory ("<resourceName>.d"). The importer
-    // parses the FBX once and auto-detects its content, filling "Models/" and/or "Animations/" under it.
-    // The base pipeline (ExecuteTransformersAndStore) then copies the whole tree to Cache/ and registers
-    // every produced file, so output.outputResourceNames_ is filled automatically and the result matches
-    // the manual "Import FBX" button exactly (same satellite, same content-based layout).
+    // parses the FBX once and auto-detects its content, filling "Models/" and/or "Animations/" under
+    // it; "-nm -nt" keep the output to a bare model (+ its animations) with no material/texture
+    // files. The base pipeline (ExecuteTransformersAndStore) then copies the whole tree to Cache/ and
+    // registers every produced file, so output.outputResourceNames_ is filled automatically. The
+    // manual import buttons (inspector and resource browser) trigger this same pipeline via
+    // AssetManager::MarkCacheDirty, so manual and automatic imports share a single code path.
     const ea::string satelliteDir = AddTrailingSlash(input.outputFileName_);
-    unsigned content = 0;
-    if (!ImportFbxToSatellite(project, input.inputFileName_, satelliteDir, &content))
+    StringVector arguments{"import", input.inputFileName_, satelliteDir, "-nm", "-nt"};
+    if (!RunAssetImporter(input.inputFileName_, arguments))
     {
         URHO3D_LOGERROR("Failed to import FBX asset '{}'.", input.resourceName_);
         return false;
     }
 
-    URHO3D_LOGDEBUG("Imported FBX asset '{}' (detected content flags {})", input.resourceName_, content);
+    URHO3D_LOGDEBUG("Imported FBX asset '{}' (detected content flags {})",
+        input.resourceName_, AssetImporterGetLastImportContent());
     return true;
 }
 

@@ -22,7 +22,7 @@
 
 #include "../../Tabs/InspectorTab/FbxAssetInspector.h"
 
-#include "../../Assets/FbxImport.h"
+#include "../../Project/AssetManager.h"
 #include "../../Project/Project.h"
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
@@ -72,12 +72,12 @@ void FbxAssetInspector::RenderContent()
         return;
 
     if (ui::Button(ICON_FA_FILE_IMPORT " Import FBX"))
-        ImportFbxFile(project_.Get(), *fbxFileName_);
+        project_->GetAssetManager()->MarkCacheDirty(*fbxResourceName_);
     if (ui::IsItemHovered())
     {
-        ui::SetTooltip("Import this FBX file in-process using AssetImporter library.\n"
-            "Files with '@' in name are imported as Animation (.ani),\n"
-            "others as Model (.mdl). Output is placed next to the source file.");
+        ui::SetTooltip("Re-import this FBX file through the asset pipeline.\n"
+            "Models and animations are auto-detected; the output is written into\n"
+            "the Cache satellite directory and registered in the asset cache.");
     }
 
     ui::TextWrapped("%s", fbxResourceName_->c_str());

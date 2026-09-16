@@ -513,7 +513,7 @@ void AssetManager::CleanupCacheFolder()
         for (const ea::string& outputResourceName : assetDesc.outputs_)
         {
             for (unsigned i = outputResourceName.find('/'); i != ea::string::npos; i = outputResourceName.find('/', i + 1))
-                foldersToKeep.insert(outputResourceName.substr(0, i));
+                foldersToKeep.insert(outputResourceName.substr(0, i).to_lower());
         }
     }
 
@@ -527,9 +527,13 @@ void AssetManager::CleanupCacheFolder()
 
     ea::erase_if(allFolders, [](const ea::string& folder) { return folder.ends_with(".") || folder.ends_with(".."); });
 
+    // Compare folder names case-insensitively: on case-insensitive file systems (Windows)
+    // the on-disk cache folder name may differ in case from the recorded output name,
+    // e.g. after renaming the source file. Cleanup is a garbage collection pass, so
+    // prefer keeping a stale folder over deleting a still-referenced one.
     for (const ea::string& resourcePath : allFolders)
     {
-        if (!foldersToKeep.contains(resourcePath))
+        if (!foldersToKeep.contains(resourcePath.to_lower()))
             fs->RemoveDir(project_->GetCachePath() + resourcePath, true);
     }
 }
