@@ -389,11 +389,6 @@ bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* all
     if (ui::InputText("##Name", &name, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_NoUndoRedo))
         modified = true;
 
-    // Browse + navigate icon buttons. Extracted into a shared helper so the same controls can be
-    // appended after a collapsing header (e.g. the inline material editor) without a duplicate path row.
-    if (EditResourceRefButtons(type, name, allowedTypes))
-        modified = true;
-
     if (allowedTypes != nullptr)
     {
         if (ui::IsItemHovered())
@@ -416,7 +411,14 @@ bool EditResourceRef(StringHash& type, ea::string& name, const StringVector* all
         }
     }
 
+    // The drop target must bind to the name input (the bulk of the row). ImGui drag-drop targets
+    // bind to the last submitted item, so this call has to stay before the trailing buttons.
     if (EditResourceRefDropTarget(type, name, allowedTypes))
+        modified = true;
+
+    // Browse + navigate icon buttons. Extracted into a shared helper so the same controls can be
+    // appended after a collapsing header (e.g. the inline material editor) without a duplicate path row.
+    if (EditResourceRefButtons(type, name, allowedTypes))
         modified = true;
 
     return modified;
