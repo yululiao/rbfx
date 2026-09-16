@@ -14,7 +14,7 @@
 #include <Urho3D/Engine/Engine.h>
 #include <Urho3D/Engine/EngineDefs.h>
 #include <Urho3D/IO/Log.h>
-#include <LuaScript/LuaScript.h>
+#include <LuaScript/EngineLuaVM.h>
 #include <Urho3D/Graphics/Octree.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/Console.h>
@@ -91,10 +91,9 @@ public:
 
     void Start() override
     {
-        // Create and register the LuaScript subsystem.
-        const auto luaScript = MakeShared<LuaScript>(context_);
+        // Create and register the game-logic Lua subsystem.
+        const auto luaScript = MakeShared<EngineLuaVM>(context_);
         context_->RegisterSubsystem(luaScript);
-        luaScript->Initialize();
 
         // Create a scene and expose it as a global Lua variable.
         auto scene = MakeShared<Scene>(context_);

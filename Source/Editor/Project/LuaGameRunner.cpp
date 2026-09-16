@@ -17,7 +17,7 @@
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/Utility/SceneRendererToTexture.h>
-#include <LuaScript/LuaScript.h>
+#include <LuaScript/EngineLuaVM.h>
 
 namespace Urho3D
 {
@@ -36,7 +36,7 @@ bool LuaGameRunner::IsLuaPlayMode(Scene* scene)
 {
     if (!scene)
         return false;
-    auto* luaScript = scene->GetContext()->GetSubsystem<LuaScript>();
+    auto* luaScript = scene->GetContext()->GetSubsystem<EngineLuaVM>();
     if (!luaScript)
         return false;
     ea::vector<LuaGameScript*> components;
@@ -49,7 +49,7 @@ bool LuaGameRunner::Start(Scene* scene, Project* project)
     if (!scene || !project)
         return false;
 
-    auto* luaScript = context_->GetSubsystem<LuaScript>();
+    auto* luaScript = context_->GetSubsystem<EngineLuaVM>();
     if (!luaScript)
         return false;
 
@@ -108,7 +108,7 @@ void LuaGameRunner::Stop()
     if (!scene_)
         return;
 
-    if (auto* luaScript = context_->GetSubsystem<LuaScript>())
+    if (auto* luaScript = context_->GetSubsystem<EngineLuaVM>())
     {
         // Reset globals and the Lua state for the next play session.
         // Scene cleanup is not needed here: the editor restores the scene

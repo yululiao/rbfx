@@ -68,7 +68,7 @@
 #include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Input/Input.h>
 #ifdef URHO3D_LUA
-#include <LuaScript/LuaScript.h>
+#include <LuaScript/EngineLuaVM.h>
 #include <LuaScript/LuaGameScript.h>
 #include "EditorLuaScript/EditorLuaIntegration.h"
 #endif
@@ -170,13 +170,12 @@ void EditorApplication::Setup()
     // Lua scripting subsystem for editor plugins and game logic prototyping.
     // Registers itself as a "LuaScript" interpreter in the console command dropdown.
 #ifdef URHO3D_LUA
-    const auto luaScript = MakeShared<LuaScript>(context_);
+    const auto luaScript = MakeShared<EngineLuaVM>(context_);
     context_->RegisterSubsystem(luaScript);
-    luaScript->Initialize();
     LuaGameScript::RegisterObject(context_);
 
-    // Dedicated editor Lua VM for authoring editor plugins in Lua (Godot-style).
-    // Installs the editor hook bridge, then creates + initializes EditorLuaScript.
+    // Dedicated Lua VM for authoring editor plugins in Lua (Godot-style): brings up the
+    // LuaVMHost subsystem and registers the editor-side Lua APIs into its state.
     SetupEditorLua(context_);
 #endif
 
@@ -346,9 +345,9 @@ void EditorApplication::Stop()
     context_->RemoveSubsystem<WorkQueue>(); // Prevents deadlock when unloading plugin AppDomain in managed host.
     context_->RemoveSubsystem<EditorPluginManager>();
 #ifdef URHO3D_LUA
-    // Tear down the editor Lua VM before the game LuaScript subsystem it coexists with.
+    // Tear down the editor Lua VM before the game-logic EngineLuaVM it coexists with.
     ShutdownEditorLua(context_);
-    context_->RemoveSubsystem<LuaScript>();
+    context_->RemoveSubsystem<EngineLuaVM>();
 #endif
 
     NFD_Quit();

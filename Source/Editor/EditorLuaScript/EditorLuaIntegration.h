@@ -13,8 +13,9 @@ class Context;
 
 #ifdef URHO3D_LUA
 
-/// Install the editor capability hooks, then create and initialize the DLL-side
-/// EditorLuaScript subsystem (the dedicated editor Lua VM). Call once at editor startup.
+/// Create and initialize the EditorLuaVMHost subsystem (the dedicated Lua VM for editor
+/// plugins) and register the editor-side Lua APIs into it: the "imgui" table and the
+/// whole "Editor" table. Call once at editor startup.
 void SetupEditorLua(Context* context);
 
 /// (Re)load editor plugins from the "EditorScripts" folder at the project root. Call every time a
@@ -37,7 +38,7 @@ void RenderLuaMenuEntries(Context* context, const char* topName);
 /// RenderLuaMenuEntries, so it is not created twice.
 void RenderLuaTopMenus(Context* context, const char* skipTopName = nullptr);
 
-/// Tear down the editor Lua subsystem. Call before the LuaScript subsystem is removed.
+/// Tear down the editor Lua subsystem. Call before the game-logic EngineLuaVM is removed.
 void ShutdownEditorLua(Context* context);
 
 #endif

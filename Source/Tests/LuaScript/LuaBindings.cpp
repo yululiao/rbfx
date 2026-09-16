@@ -9,17 +9,33 @@
 #include "../CommonUtils.h"
 
 #include <Urho3D/Graphics/StaticModel.h>
-#include <LuaScript/LuaScript.h>
+#include <LuaScript/EngineLuaVM.h>
 #include <Urho3D/Math/Vector3.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Scene.h>
+
+namespace
+{
+
+// The shared test context does not bring the game-logic VM up on its own, so the first Lua
+// test that runs creates it. Later tests find it already registered.
+Urho3D::EngineLuaVM* GetOrCreateEngineLua(Urho3D::Context* context)
+{
+    if (auto* existing = context->GetSubsystem<Urho3D::EngineLuaVM>())
+        return existing;
+    const auto engineLua = Urho3D::MakeShared<Urho3D::EngineLuaVM>(context);
+    context->RegisterSubsystem(engineLua);
+    return engineLua.Get();
+}
+
+}
 
 TEST_CASE("Lua binding creates and manipulates Node")
 {
     auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
     auto scene = MakeShared<Scene>(context);
 
-    auto* luaScript = context->GetSubsystem<LuaScript>();
+    auto* luaScript = GetOrCreateEngineLua(context.Get());
     REQUIRE(luaScript);
 
     // Expose the scene to Lua. The SharedPtr is kept alive by C++ for the
@@ -63,7 +79,7 @@ TEST_CASE("Lua binding creates and manipulates Node")
 TEST_CASE("Lua binding Vector3 math")
 {
     auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
-    auto* luaScript = context->GetSubsystem<LuaScript>();
+    auto* luaScript = GetOrCreateEngineLua(context.Get());
     REQUIRE(luaScript);
 
     const char* code = R"(

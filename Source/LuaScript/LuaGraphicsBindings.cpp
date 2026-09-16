@@ -7,7 +7,6 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
-#include "LuaScript.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Graphics/AnimatedModel.h"

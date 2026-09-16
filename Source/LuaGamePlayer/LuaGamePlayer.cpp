@@ -6,7 +6,7 @@
 // project scenes instead of self-contained samples.
 //
 // Boot flow (the game's whole logic is driven from Lua):
-//   1. Register the LuaScript subsystem and the serializable LuaGameScript type
+//   1. Register the game-logic EngineLuaVM subsystem and the serializable LuaGameScript type
 //      (the latter ships in the shared RbfxLuaScript module so both the editor
 //      and this player can deserialize scenes that reference it).
 //   2. Read the startup scene path from Data/Game.json:
@@ -37,7 +37,7 @@
 #include <Urho3D/Scene/SceneResource.h>
 
 #include <LuaScript/LuaGameScript.h>
-#include <LuaScript/LuaScript.h>
+#include <LuaScript/EngineLuaVM.h>
 
 using namespace Urho3D;
 
@@ -124,9 +124,8 @@ public:
 
         // 1) Bring up the Lua runtime and make the game entry component known to
         //    the reflection system so scenes referencing it can be deserialized.
-        const auto luaScript = MakeShared<LuaScript>(context_);
+        const auto luaScript = MakeShared<EngineLuaVM>(context_);
         context_->RegisterSubsystem(luaScript);
-        luaScript->Initialize();
         LuaGameScript::RegisterObject(context_);
 
         // 2) Resolve the startup scene from Data/Game.json (fall back to default).
@@ -171,7 +170,7 @@ public:
 
     void Stop() override
     {
-        if (auto* luaScript = context_->GetSubsystem<LuaScript>())
+        if (auto* luaScript = context_->GetSubsystem<EngineLuaVM>())
             luaScript->SetGlobalScene("scene", nullptr);
         // Drop the scene first - it is owned by the resource wrapper.
         scene_ = nullptr;

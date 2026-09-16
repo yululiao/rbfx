@@ -28,7 +28,7 @@ class Material;
 /// Scene cleanup is handled by the editor via a Play-time scene snapshot.
 ///
 /// UI tabs should only call Start/Update/Stop; all subsystem orchestration
-/// (LuaScript, Renderer viewports) stays inside this class.
+/// (EngineLuaVM, Renderer viewports) stays inside this class.
 class LuaGameRunner : public Object
 {
     URHO3D_OBJECT(LuaGameRunner, Object);
@@ -38,7 +38,7 @@ public:
     ~LuaGameRunner() override;
 
     /// Detect whether the scene has a Lua game entry (LuaGameScript component).
-    /// Returns false if LuaScript subsystem is missing or scene is null.
+    /// Returns false if the EngineLuaVM subsystem is missing or scene is null.
     static bool IsLuaPlayMode(Scene* scene);
 
     /// Start the play session: expose the scene to Lua, execute the entry script,

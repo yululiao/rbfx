@@ -12,9 +12,9 @@ file(GLOB SOURCE_FILES *.cpp *.h)
 # consumers (editor, game player, Lua compiler tool) -- they all link the same code in.
 add_library(RbfxLuaScript STATIC ${SOURCE_FILES})
 
-# Lua and sol3 are PUBLIC: the public headers (LuaScript.h, EditorLuaScript.h, LuaBindings.h)
-# expose sol types in their signatures, so every consumer of this library needs both the
-# headers and the Lua symbols. Urho3D links them privately and no longer re-exports them.
+# Lua and sol3 are PUBLIC: the public headers (LuaVM.h, LuaVMHost.h, EngineLuaVM.h,
+# LuaBindings.h) expose sol types in their signatures, so every consumer of this library needs
+# both the headers and the Lua symbols. Urho3D links them privately and no longer re-exports them.
 target_link_libraries(RbfxLuaScript PUBLIC Urho3D Lua sol3)
 target_include_directories(RbfxLuaScript PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
@@ -43,11 +43,12 @@ set_target_properties(RbfxLuaScript PROPERTIES
 )
 
 # Install public headers
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaScript.h
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LuaVM.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaGameScript.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaBindings.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaNodeBindings.h
-              ${CMAKE_CURRENT_SOURCE_DIR}/EditorLuaScript.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/LuaVMHost.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/EngineLuaVM.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaFile.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaPackageLoader.h
               ${CMAKE_CURRENT_SOURCE_DIR}/LuaScriptContainer.h

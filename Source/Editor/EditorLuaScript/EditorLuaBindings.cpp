@@ -6,10 +6,10 @@
 
 #include "EditorLuaBindings.h"
 
+#include "EditorLuaVMHost.h"
 #include "LuaEditorTab.h"
 #include "LuaUIState.h"
 
-#include <LuaScript/EditorLuaScript.h>
 #include <LuaScript/LuaBindings.h>
 
 #include "../Foundation/SceneViewTab.h"
@@ -30,20 +30,36 @@
 namespace Urho3D
 {
 
-// The editor-capability half of the "Editor" Lua table. RbfxLuaScript creates the table and
-// fills in the VM-plumbing functions (log, subscribe, exec) while initializing its state; this
-// appends everything that needs editor types: project access, UI registration, live scene
-// context and the build pipeline. Each lambda resolves the live subsystems on call, so the
-// functions stay correct as projects open and close -- the same property the old hook table
-// had, minus the boundary crossing.
+// The "Editor" Lua table, created and fully owned by the editor. The host (LuaVMHost) is a
+// generic VM with no API tables of its own; this fills the state with everything a plugin
+// sees: VM plumbing (log, subscribe, exec) plus the capabilities that need editor types
+// (project access, UI registration, live scene context, build pipeline). Each lambda resolves
+// the live subsystems on call, so the functions stay correct as projects open and close.
 void RegisterEditorLuaAPI(Context* context)
 {
-    auto* editorLua = context->GetSubsystem<EditorLuaScript>();
+    auto* editorLua = context->GetSubsystem<EditorLuaVMHost>();
     if (!editorLua)
         return;
 
     sol::state_view lua(editorLua->GetState());
-    sol::table editor = lua["Editor"];
+    sol::table editor = lua.create_named_table("Editor");
+
+    // Logging helpers, prefixed so plugin output is easy to spot in the editor console.
+    editor.set_function("log", [](const char* message) { URHO3D_LOGINFO("[EditorLua] {}", message); });
+    editor.set_function("logWarning", [](const char* message) { URHO3D_LOGWARNING("[EditorLua] {}", message); });
+    editor.set_function("logError", [](const char* message) { URHO3D_LOGERROR("[EditorLua] {}", message); });
+
+    // Event bridge aliases so plugins can use Editor.subscribe(...) as well as the global one.
+    editor.set_function("subscribe",
+        [host = editorLua](const char* eventName, sol::protected_function callback)
+        {
+            host->SubscribeGlobalEvent(eventName, std::move(callback));
+        });
+    editor.set_function("unsubscribe",
+        [host = editorLua](const char* eventName) { host->UnsubscribeEvent(eventName); });
+
+    // Evaluate a Lua chunk on demand (handy for console-driven experimentation).
+    editor.set_function("exec", [host = editorLua](const char* code) { return host->ExecuteString(code); });
 
     // Project access. Empty results when no project is open.
     editor.set_function("hasProject", [context]() {
@@ -61,7 +77,7 @@ void RegisterEditorLuaAPI(Context* context)
     // Re-run the last plugin directory. Resetting the editor-side UI bookkeeping has to happen
     // on this side of the boundary, which is why the function lives here.
     editor.set_function("reloadPlugins", [context]() {
-        auto* lua = context->GetSubsystem<EditorLuaScript>();
+        auto* lua = context->GetSubsystem<EditorLuaVMHost>();
         if (!lua)
             return;
         Detail::ResetLuaUI();
@@ -89,14 +105,14 @@ void RegisterEditorLuaAPI(Context* context)
                 {
                     if (tab->GetTitle() == titleStr)
                     {
-                        tab->SetHandle(editorLua->RegisterUICallback(std::move(drawFunction)));
+                        tab->SetHandle(editorLua->RegisterCallback(std::move(drawFunction)));
                         return true;
                     }
                 }
             }
 
             const auto tab = MakeShared<LuaEditorTab>(context, titleStr,
-                editorLua->RegisterUICallback(std::move(drawFunction)));
+                editorLua->RegisterCallback(std::move(drawFunction)));
             project->AddTab(tab);
             // OpenByDefault only takes effect during a layout reset, which does not re-run for
             // tabs added after project construction. Focus explicitly so the panel actually
@@ -120,7 +136,7 @@ void RegisterEditorLuaAPI(Context* context)
             }
             if (!context->GetSubsystem<Project>())
                 return false;
-            const auto handle = editorLua->RegisterUICallback(std::move(clickFunction));
+            const auto handle = editorLua->RegisterCallback(std::move(clickFunction));
             Detail::LuaMenuItems().push_back(Detail::LuaMenuItem{ ea::string(label.c_str()), handle });
             return true;
         });
@@ -140,7 +156,7 @@ void RegisterEditorLuaAPI(Context* context)
             if (!context->GetSubsystem<Project>())
                 return false;
             const ea::string titleStr = ea::string(title.c_str());
-            const auto handle = editorLua->RegisterUICallback(std::move(drawFunction));
+            const auto handle = editorLua->RegisterCallback(std::move(drawFunction));
             for (Detail::LuaWindow& window : Detail::LuaWindows())
             {
                 if (window.title == titleStr)
@@ -252,13 +268,13 @@ void RegisterEditorLuaAPI(Context* context)
 
             const ea::string profileName = ea::string(profile.c_str());
             const unsigned long long handle =
-                callback ? editorLua->RegisterUICallback(std::move(*callback)) : 0ull;
+                callback ? editorLua->RegisterCallback(std::move(*callback)) : 0ull;
             // The reason a refused build is not reported here is that BuildNow already logged it:
             // a missing profile names the profiles that do exist, and a running build says which.
             if (!build->BuildNow(profileName, EMPTY_STRING,
                 [context, handle, profileName](bool success, const ea::string& message, const ea::string& outputDir)
                 {
-                    auto* lua = context->GetSubsystem<EditorLuaScript>();
+                    auto* lua = context->GetSubsystem<EditorLuaVMHost>();
                     if (!lua || handle == 0ull)
                         return;
                     // Spelled out rather than forwarded from the event, because the handler of a
@@ -272,7 +288,7 @@ void RegisterEditorLuaAPI(Context* context)
                 }))
             {
                 // The build was refused before it ran, so nothing will ever echo the handle back.
-                editorLua->DropUICallback(handle);
+                editorLua->DropCallback(handle);
                 return false;
             }
             return true;

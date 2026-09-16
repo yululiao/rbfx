@@ -8,8 +8,7 @@
 
 #ifdef URHO3D_LUA
 
-#include <LuaScript/EditorLuaScript.h>
-
+#include "EditorLuaVMHost.h"
 #include "EditorLuaBindings.h"
 #include "LuaUIState.h"
 
@@ -37,7 +36,7 @@ struct LuaMenuSlice
 
 /// Render one menu level inside the currently open menu: slices without '/' become clickable
 /// items, the rest are grouped by their next segment into submenus rendered recursively.
-void RenderLuaMenuLevel(const ea::vector<LuaMenuSlice>& slices, EditorLuaScript* lua)
+void RenderLuaMenuLevel(const ea::vector<LuaMenuSlice>& slices, LuaVMHost* lua)
 {
     ea::vector<const LuaMenuSlice*> leaves;
     ea::map<ea::string, ea::vector<const LuaMenuSlice*>> submenus;
@@ -53,7 +52,7 @@ void RenderLuaMenuLevel(const ea::vector<LuaMenuSlice>& slices, EditorLuaScript*
     for (const LuaMenuSlice* leaf : leaves)
     {
         if (ui::MenuItem(leaf->path.c_str()))
-            lua->InvokeUICallback(leaf->handle);
+            lua->InvokeCallback(leaf->handle);
     }
     for (auto& pair : submenus)
     {
@@ -90,12 +89,11 @@ ea::vector<LuaMenuSlice> CollectLuaMenuChildren(const ea::string& topName)
 
 void SetupEditorLua(Context* context)
 {
-    // Bring up the dedicated editor Lua VM (owned and driven inside RbfxLuaScript, which also
-    // registers the engine bindings and the VM-plumbing half of the "Editor" table: log,
-    // subscribe, exec). The editor then registers everything that needs editor types straight
-    // into the same state -- the imgui table and the editor-capability half of "Editor" -- with
-    // lambdas that capture the Context, so no injection table and no boundary crossing remain.
-    const auto editorLua = MakeShared<EditorLuaScript>(context);
+    // Bring up the dedicated Lua VM for editor plugins. EditorLuaVMHost is the editor's flavor
+    // of the generic engine-side VM (engine bindings, print redirection, event bridge, plugin
+    // pipeline -- no API tables of its own). Everything plugin-visible is registered right
+    // here by the editor: the imgui table and the whole "Editor" table.
+    const auto editorLua = MakeShared<EditorLuaVMHost>(context);
     context->RegisterSubsystem(editorLua);
     editorLua->Initialize();
 
@@ -106,7 +104,7 @@ void SetupEditorLua(Context* context)
 void ReloadEditorLuaPlugins(Context* context)
 {
     auto* project = context->GetSubsystem<Project>();
-    auto* editorLua = context->GetSubsystem<EditorLuaScript>();
+    auto* editorLua = context->GetSubsystem<EditorLuaVMHost>();
     if (!project || !editorLua)
         return;
 
@@ -115,7 +113,7 @@ void ReloadEditorLuaPlugins(Context* context)
     // subscription is added for every newly opened project (Project is recreated on each open).
     project->OnRenderProjectMenu.Subscribe(editorLua, [context]()
     {
-        auto* lua = context->GetSubsystem<EditorLuaScript>();
+        auto* lua = context->GetSubsystem<EditorLuaVMHost>();
         if (!lua || Detail::LuaMenuItems().empty())
             return;
 
@@ -133,7 +131,7 @@ void ReloadEditorLuaPlugins(Context* context)
                 separatorDrawn = true;
             }
             if (ui::MenuItem(item.label.c_str()))
-                lua->InvokeUICallback(item.handle);
+                lua->InvokeCallback(item.handle);
         }
     });
 
@@ -153,7 +151,7 @@ void RenderLuaWindows(Context* context)
     // (like the About dialog), so the windows persist regardless of which dock tab is focused.
     if (Detail::LuaWindows().empty())
         return;
-    auto* lua = context->GetSubsystem<EditorLuaScript>();
+    auto* lua = context->GetSubsystem<EditorLuaVMHost>();
     if (!lua)
         return;
 
@@ -164,7 +162,7 @@ void RenderLuaWindows(Context* context)
         bool open = true;
         const bool expanded = ui::Begin(window.title.c_str(), &open, static_cast<ImGuiWindowFlags>(window.flags));
         if (expanded)
-            lua->InvokeUICallback(window.handle);
+            lua->InvokeCallback(window.handle);
         ui::End();
         if (!open)
             window.visible = false; // User closed it from the title bar.
@@ -173,7 +171,7 @@ void RenderLuaWindows(Context* context)
 
 void RenderLuaMenuEntries(Context* context, const char* topName)
 {
-    auto* lua = context->GetSubsystem<EditorLuaScript>();
+    auto* lua = context->GetSubsystem<EditorLuaVMHost>();
     if (!lua)
         return;
     const ea::vector<LuaMenuSlice> slices = CollectLuaMenuChildren(ea::string(topName));
@@ -183,7 +181,7 @@ void RenderLuaMenuEntries(Context* context, const char* topName)
 
 void RenderLuaTopMenus(Context* context, const char* skipTopName)
 {
-    auto* lua = context->GetSubsystem<EditorLuaScript>();
+    auto* lua = context->GetSubsystem<EditorLuaVMHost>();
     if (!lua)
         return;
 
@@ -214,7 +212,7 @@ void RenderLuaTopMenus(Context* context, const char* skipTopName)
 
 void ShutdownEditorLua(Context* context)
 {
-    context->RemoveSubsystem<EditorLuaScript>();
+    context->RemoveSubsystem<EditorLuaVMHost>();
 }
 
 } // namespace Urho3D

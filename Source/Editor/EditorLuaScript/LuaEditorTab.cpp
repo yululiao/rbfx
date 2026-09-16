@@ -8,7 +8,7 @@
 
 #ifdef URHO3D_LUA
 
-#include <LuaScript/EditorLuaScript.h>
+#include "EditorLuaVMHost.h"
 
 #include <Urho3D/Core/Context.h>
 
@@ -25,9 +25,9 @@ LuaEditorTab::LuaEditorTab(Context* context, const ea::string& title, unsigned l
 
 void LuaEditorTab::RenderContent()
 {
-    auto* lua = context_->GetSubsystem<EditorLuaScript>();
+    auto* lua = context_->GetSubsystem<EditorLuaVMHost>();
     if (lua)
-        lua->InvokeUICallback(handle_);
+        lua->InvokeCallback(handle_);
 }
 
 } // namespace Urho3D
