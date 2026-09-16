@@ -22,6 +22,8 @@
 --
 
 -- 窗口标题既是显示文本也是 showWindow/hideWindow 的键，必须保持一致
+
+require("LuaPanda").start("127.0.0.1", 8818)
 local WINDOW_TITLE = "Widget Test Window"
 
 -- 跨帧保持的控件状态

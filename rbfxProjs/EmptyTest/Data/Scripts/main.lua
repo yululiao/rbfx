@@ -10,6 +10,7 @@
 ----------------------------------------------------------------------
 -- Scene setup
 ----------------------------------------------------------------------
+require("LuaPanda").start("127.0.0.1", 8818)
 local function CreateScene()
     -- Ground plane
     local planeNode = scene:CreateChild("LuaTest_Plane")
