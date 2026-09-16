@@ -16,6 +16,15 @@ add_library(RbfxLuaScript STATIC ${SOURCE_FILES})
 # LuaBindings.h) expose sol types in their signatures, so every consumer of this library needs
 # both the headers and the Lua symbols. Urho3D links them privately and no longer re-exports them.
 target_link_libraries(RbfxLuaScript PUBLIC Urho3D Lua sol3)
+
+# LuaSocket is an implementation detail of the Lua VMs (the require("socket") channel the
+# LuaPanda debugger speaks), not part of the public headers, so it links privately. The
+# compile definition lets LuaSocketModule.cpp register the modules; without it the same
+# file compiles to a no-op and the VMs never mention socket at all.
+if (URHO3D_LUASOCKET)
+    target_link_libraries(RbfxLuaScript PRIVATE luasocket)
+    target_compile_definitions(RbfxLuaScript PRIVATE URHO3D_LUASOCKET=1)
+endif ()
 target_include_directories(RbfxLuaScript PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )

@@ -11,6 +11,7 @@
 #include "LuaFile.h"
 #include "LuaNodeBindings.h"
 #include "LuaPackageLoader.h"
+#include "LuaSocketModule.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Core/StringUtils.h"
@@ -61,6 +62,11 @@ bool LuaVM::Initialize()
     // directories (the naming every other asset uses), a host's plugin scheme sits in front.
     packageLoader_ = ea::make_unique<LuaPackageLoader>(context_);
     packageLoader_->Attach(luaState_->lua_state(), config_.requirePrefixes_);
+
+    // Preload the LuaSocket modules (when the engine is built with them) into package.loaded,
+    // so require("socket") works for tooling like the LuaPanda debugger without any
+    // filesystem searcher. A no-op on builds without URHO3D_LUASOCKET.
+    RegisterLuaSocketModules(luaState_->lua_state());
 
     RegisterEngineBindings();
 
