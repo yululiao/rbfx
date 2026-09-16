@@ -1147,6 +1147,10 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     // Empty part, still need to account for geometry slot
                     SharedPtr<VertexBuffer> vb(new VertexBuffer(context_));
                     SharedPtr<IndexBuffer> ib(new IndexBuffer(context_));
+                    // Must be shadowed for Model::SetVertexBuffers, even when empty
+                    // (a zero-size buffer skips the "no render device forces shadowing" path).
+                    vb->SetShadowed(true);
+                    ib->SetShadowed(true);
                     ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
                     vb->SetSize(0, elements);
                     ib->SetSize(0, false);
@@ -1159,6 +1163,18 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     outModel->SetNumGeometryLodLevels(destGeomIndex, 1);
                     outModel->SetGeometry(destGeomIndex, 0, geom);
                     outModel->SetGeometryCenter(destGeomIndex, Vector3::ZERO);
+                    // The empty part still owns a bone mapping slot: Model::SetGeometryBoneMappings
+                    // assigns palettes positionally, so a missing entry would shift every later
+                    // geometry's palette (parts after an unused material would skin with wrong bones).
+                    if (isSkinned && model.bones_.size() > maxBones_)
+                    {
+                        ea::vector<ea::vector<unsigned char> > blendIndices;
+                        ea::vector<ea::vector<float> > blendWeights;
+                        ea::vector<unsigned> boneMappings;
+                        FbxGetBlendData(model, mesh, meshNode, boneMappings, blendIndices,
+                            blendWeights, (unsigned)mesh->num_vertices);
+                        allBoneMappings.push_back(boneMappings);
+                    }
                     ++destGeomIndex;
                     continue;
                 }
@@ -1221,6 +1237,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
 
             // Get offset matrix from skin clusters
             newBone.offsetMatrix_ = Matrix3x4::IDENTITY;
+            bool foundInCluster = false;
             for (unsigned mi = 0; mi < model.meshes_.size(); ++mi)
             {
                 ufbx_mesh* mesh = model.meshes_[mi];
@@ -1246,7 +1263,22 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     }
                 }
                 if (found)
+                {
+                    foundInCluster = true;
                     break;
+                }
+            }
+
+            // Bones without a skin cluster (rigid mesh attachment nodes, plain
+            // hierarchy bones) still need a correct offset: the inverse of their
+            // bind transform relative to the model root. Rigid-bound vertices are
+            // baked through the node matrix, so a leftover identity offset would
+            // apply the bone's bind rotation (e.g. the DCC's Z-up -> Y-up
+            // pre-rotation) to those vertices a second time.
+            if (!foundInCluster)
+            {
+                newBone.offsetMatrix_ = ToMatrix3x4(boneNode->node_to_world).Inverse()
+                    * ToMatrix3x4(model.rootNode_->node_to_world);
             }
 
             newBone.radius_ = model.boneRadii_[i];

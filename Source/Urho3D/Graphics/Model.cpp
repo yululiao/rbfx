@@ -148,9 +148,12 @@ bool Model::BeginLoad(Deserializer& source)
             desc.data_.reset(); // Make sure no previous data
             buffer->SetShadowed(true);
             buffer->SetSize(desc.vertexCount_, desc.vertexElements_);
-            void* dest = buffer->Map();
-            source.Read(dest, desc.vertexCount_ * vertexSize);
-            buffer->Unmap();
+            // Empty or unmappable buffer returns null and is not locked, keep Unmap balanced
+            if (void* dest = buffer->Map())
+            {
+                source.Read(dest, desc.vertexCount_ * vertexSize);
+                buffer->Unmap();
+            }
         }
 
         memoryUse += sizeof(VertexBuffer) + desc.vertexCount_ * vertexSize;
@@ -184,9 +187,12 @@ bool Model::BeginLoad(Deserializer& source)
             loadIBData_[i].data_.reset(); // Make sure no previous data
             buffer->SetShadowed(true);
             buffer->SetSize(indexCount, indexSize > sizeof(unsigned short));
-            void* dest = buffer->Map();
-            source.Read(dest, indexCount * indexSize);
-            buffer->Unmap();
+            // Empty or unmappable buffer returns null and is not locked, keep Unmap balanced
+            if (void* dest = buffer->Map())
+            {
+                source.Read(dest, indexCount * indexSize);
+                buffer->Unmap();
+            }
         }
 
         memoryUse += sizeof(IndexBuffer) + indexCount * indexSize;
