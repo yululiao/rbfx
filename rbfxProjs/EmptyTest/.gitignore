@@ -20,7 +20,6 @@
 # Ignore internal files
 *.blend1
 *.user.json
-/Cache.json
 /Data/Scenes/Default.scene.user.json
 /ui.ini
 
