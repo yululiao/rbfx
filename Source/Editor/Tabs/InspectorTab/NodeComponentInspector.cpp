@@ -127,6 +127,10 @@ void NodeComponentInspector::OnProjectRequest(RefCounted* senderTab, ProjectRequ
     if (!inspectNodeComponentRequest || inspectNodeComponentRequest->IsEmpty())
         return;
 
+    // A geometry slot is active in the selection: the dedicated geometry inspector takes over.
+    if (inspectNodeComponentRequest->GetActiveGeometryComponent())
+        return;
+
     Scene* commonScene = inspectNodeComponentRequest->GetCommonScene();
     if (!commonScene)
         return;

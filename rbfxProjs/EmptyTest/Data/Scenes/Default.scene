@@ -132,24 +132,10 @@
 				</component>
 			</components>
 		</node>
-		<node _id="5">
-			<attributes>
-				<attribute name="Name" type="String" value="Sample Cube" />
-				<attribute name="Scale" type="Vector3" value="3 3 3" />
-			</attributes>
-			<components>
-				<component _id="6" _typeName="StaticModel">
-					<attributes>
-						<attribute name="Model" type="ResourceRef" value="Model;Models/TeaPot.mdl" />
-						<attribute name="Material" type="ResourceRefList" value="Material;Materials/default.material;Materials/pot1.material" />
-						<attribute name="Cast Shadows" type="Bool" value="true" />
-					</attributes>
-				</component>
-			</components>
-		</node>
 		<node _id="8">
 			<attributes>
 				<attribute name="Name" type="String" value="plane" />
+				<attribute name="Position" type="Vector3" value="0 -0.4 0" />
 				<attribute name="Scale" type="Vector3" value="0.1 0.1 0.1" />
 			</attributes>
 			<components>

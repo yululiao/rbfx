@@ -1246,7 +1246,10 @@ bool SceneViewTab::UpdateDropToScene()
 void SceneViewTab::InspectSelection(SceneViewPage& page)
 {
     auto project = GetProject();
-    auto request = MakeShared<InspectNodeComponentRequest>(context_, page.selection_.GetNodesAndScenes(), page.selection_.GetComponents());
+    // Pass along the active geometry slot (selected in the hierarchy) so the geometry inspector can take over.
+    Component* activeGeometry = page.selection_.GetActiveGeometryComponent();
+    auto request = MakeShared<InspectNodeComponentRequest>(context_, page.selection_.GetNodesAndScenes(),
+        page.selection_.GetComponents(), activeGeometry, page.selection_.GetActiveGeometryIndex(activeGeometry));
     project->ProcessRequest(request, this);
 }
 

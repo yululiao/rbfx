@@ -82,6 +82,13 @@ void SceneSelection::Update()
     ea::erase_if(nodesAndScenes_, [](Node* node) { return node == nullptr; });
     ea::erase_if(nodes_, [](Node* node) { return node == nullptr; });
 
+    // Drop the active geometry slot if its component expired or is no longer selected.
+    if (activeGeometryComponent_.Get() && !components_.contains(activeGeometryComponent_))
+    {
+        activeGeometryComponent_ = nullptr;
+        activeGeometryIndex_ = M_MAX_UNSIGNED;
+    }
+
     // No need to check nodes_ because it is a subset of nodesAndScenes_
     if (components_.size() != componentsSize || nodesAndScenes_.size() != numNodes)
     {
@@ -178,6 +185,9 @@ void SceneSelection::ClearInternal()
     activeNode_ = nullptr;
     activeObject_ = nullptr;
 
+    activeGeometryComponent_ = nullptr;
+    activeGeometryIndex_ = M_MAX_UNSIGNED;
+
     effectiveNodesAndScenes_.clear();
     effectiveNodes_.clear();
 }
@@ -201,6 +211,10 @@ void SceneSelection::SetSelected(Component* component, bool selected, bool activ
 {
     if (!component)
         return;
+
+    // Regular selection change invalidates the active geometry slot (if any).
+    activeGeometryComponent_ = nullptr;
+    activeGeometryIndex_ = M_MAX_UNSIGNED;
 
     const WeakPtr<Component> weakComponent{component};
 
@@ -226,6 +240,10 @@ void SceneSelection::SetSelected(Node* node, bool selected, bool activated)
 {
     if (!node)
         return;
+
+    // Regular selection change invalidates the active geometry slot (if any).
+    activeGeometryComponent_ = nullptr;
+    activeGeometryIndex_ = M_MAX_UNSIGNED;
 
     const WeakPtr<Node> weakNode{node};
 
@@ -257,6 +275,29 @@ void SceneSelection::SetSelected(Object* object, bool selected, bool activated)
         SetSelected(component, selected, activated);
     else
         URHO3D_ASSERT(0, "SceneSelection::SetSelected received unexpected object");
+}
+
+void SceneSelection::SetGeometrySelected(Component* component, unsigned geometryIndex)
+{
+    if (!component)
+        return;
+
+    // Plain-click semantics: replace the selection with the component and activate the geometry slot.
+    ClearInternal();
+    SetSelected(component, true);
+
+    // SetSelected() clears the active geometry slot and broadcasts OnChanged before it can be
+    // assigned, so re-apply the slot and notify again now that it is visible to the selection.
+    activeGeometryComponent_ = component;
+    activeGeometryIndex_ = geometryIndex;
+    NotifyChanged();
+}
+
+unsigned SceneSelection::GetActiveGeometryIndex(const Component* component) const
+{
+    if (!component || activeGeometryComponent_.Get() != component)
+        return M_MAX_UNSIGNED;
+    return activeGeometryIndex_;
 }
 
 void SceneSelection::NotifyChanged()

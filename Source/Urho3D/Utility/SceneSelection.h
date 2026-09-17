@@ -97,6 +97,13 @@ public:
     void SetSelected(Node* node, bool selected, bool activated = true);
     /// Set whether the node or component is selected.
     void SetSelected(Object* object, bool selected, bool activated = true);
+    /// Select the component and activate its geometry slot (e.g. material slot of StaticModel).
+    /// Note: geometry selection is transient UI state, it is not saved with the selection.
+    void SetGeometrySelected(Component* component, unsigned geometryIndex);
+    /// Return the component with active geometry slot, or null if no geometry slot is active.
+    Component* GetActiveGeometryComponent() const { return activeGeometryComponent_; }
+    /// Return the active geometry index of the component, or M_MAX_UNSIGNED if not active.
+    unsigned GetActiveGeometryIndex(const Component* component) const;
 
 private:
     void ClearInternal();
@@ -112,6 +119,10 @@ private:
     WeakPtr<Node> activeNodeOrScene_;
     WeakPtr<Node> activeNode_;
     WeakPtr<Object> activeObject_;
+
+    /// Active geometry slot of the selected drawable component (transient UI state, not saved).
+    WeakPtr<Component> activeGeometryComponent_;
+    unsigned activeGeometryIndex_{M_MAX_UNSIGNED};
 
     WeakNodeSet effectiveNodesAndScenes_;
     WeakNodeSet effectiveNodes_;

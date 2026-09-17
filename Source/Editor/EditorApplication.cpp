@@ -19,6 +19,7 @@
 #include "Tabs/InspectorTab/AssetPipelineInspector.h"
 #include "Tabs/InspectorTab/EmptyInspector.h"
 #include "Tabs/InspectorTab/FbxAssetInspector.h"
+#include "Tabs/InspectorTab/GeometryInspector.h"
 #include "Tabs/InspectorTab/MaterialInspector.h"
 #include "Tabs/InspectorTab/ModelInspector.h"
 #include "Tabs/InspectorTab/NodeComponentInspector.h"
@@ -137,6 +138,8 @@ EditorApplication::EditorApplication(Context* context)
     editorPluginManager_->AddPlugin("Tabs.Inspector.Prefab", &Tabs_PrefabInspector);
     editorPluginManager_->AddPlugin("Tabs.Inspector.Material", &Tabs_MaterialInspector);
     editorPluginManager_->AddPlugin("Tabs.Inspector.NodeComponent", &Tabs_NodeComponentInspector);
+    // Registered after NodeComponent so that on identical activation requests the geometry inspector wins.
+    editorPluginManager_->AddPlugin("Tabs.Inspector.Geometry", &Tabs_GeometryInspector);
     editorPluginManager_->AddPlugin("Tabs.Inspector.PlaceholderResource", &Tabs_PlaceholderResourceInspector);
     editorPluginManager_->AddPlugin("Tabs.Inspector.RenderPath", &Tabs_RenderPathInspector);
     editorPluginManager_->AddPlugin("Tabs.Inspector.SerializableResource", &Tabs_SerializableResourceInspector);
@@ -394,6 +397,17 @@ ea::string EditorApplication::GetWindowTitle() const
     {
         result += " | ";
         result += project_->GetProjectPath();
+
+        // Show the currently opened scene (its resource path) so the active editing target is
+        // visible at a glance in the OS window title bar.
+        if (auto sceneViewTab = project_->FindTab<SceneViewTab>())
+        {
+            if (auto page = sceneViewTab->GetActivePage(); page && page->resource_)
+            {
+                result += " | ";
+                result += page->resource_->GetName();
+            }
+        }
     }
 
     return result;

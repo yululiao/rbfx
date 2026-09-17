@@ -24,6 +24,9 @@
 
 #include "../SystemUI/SceneHierarchyWidget.h"
 
+#include "../Graphics/Material.h"
+#include "../Graphics/Model.h"
+#include "../Graphics/StaticModel.h"
 #include "../Scene/Component.h"
 #include "../SystemUI/DragDropPayload.h"
 #include "../SystemUI/Widgets.h"
@@ -298,8 +301,14 @@ void SceneHierarchyWidget::RenderComponent(SceneSelection& selection, Component*
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
         | ImGuiTreeNodeFlags_OpenOnDoubleClick
         | ImGuiTreeNodeFlags_SpanAvailWidth
-        | ImGuiTreeNodeFlags_AllowOverlap
-        | ImGuiTreeNodeFlags_Leaf;
+        | ImGuiTreeNodeFlags_AllowOverlap;
+    // Model components list their geometries (material slots) as child items, so every slot can be
+    // selected and edited individually in the inspector - even when the model has only one geometry.
+    const auto staticModel = dynamic_cast<StaticModel*>(component);
+    const unsigned numGeometries = staticModel ? staticModel->GetNumGeometries() : 0;
+    const bool hasGeometryChildren = numGeometries > 0;
+    if (!hasGeometryChildren)
+        flags |= ImGuiTreeNodeFlags_Leaf;
     if (selection.IsSelected(component))
         flags |= ImGuiTreeNodeFlags_Selected;
     HierarchyItemFlags itemFlags = HierarchyItemFlag::Component;
@@ -345,7 +354,60 @@ void SceneHierarchyWidget::RenderComponent(SceneSelection& selection, Component*
         pendingComponentReorder_ = reorder;
 
     if (opened)
+    {
+        if (hasGeometryChildren)
+        {
+            const IdScopeGuard guard("Geometries");
+            for (unsigned geometryIndex = 0; geometryIndex < numGeometries; ++geometryIndex)
+                RenderGeometryItem(selection, staticModel, geometryIndex);
+        }
         ui::TreePop();
+    }
+}
+
+void SceneHierarchyWidget::RenderGeometryItem(SceneSelection& selection, StaticModel* staticModel, unsigned geometryIndex)
+{
+    // Title priority: the source mesh name stored on the model geometry (imported from FBX),
+    // then the slot's material name, then a plain geometry index.
+    Model* model = staticModel->GetModel();
+    const ea::string geometryName = model ? model->GetGeometryName(geometryIndex) : EMPTY_STRING;
+    Material* material = staticModel->GetMaterial(geometryIndex);
+    ea::string title;
+    if (!geometryName.empty())
+        title = Format(ICON_FA_LAYER_GROUP " {}", geometryName);
+    else if (material && !material->GetName().empty())
+        title = Format(ICON_FA_LAYER_GROUP " {}", material->GetName());
+    else
+        title = Format(ICON_FA_LAYER_GROUP " Geometry #{}", geometryIndex);
+
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf
+        | ImGuiTreeNodeFlags_NoTreePushOnOpen
+        | ImGuiTreeNodeFlags_SpanAvailWidth
+        | ImGuiTreeNodeFlags_AllowOverlap;
+    if (selection.IsSelected(staticModel) && selection.GetActiveGeometryIndex(staticModel) == geometryIndex)
+        flags |= ImGuiTreeNodeFlags_Selected;
+
+    HierarchyItemFlags itemFlags = HierarchyItemFlag::Component;
+    if (staticModel->IsTemporary() || staticModel->GetNode()->IsTemporaryEffective())
+        itemFlags |= HierarchyItemFlag::Temporary;
+    if (staticModel->IsEnabledEffective())
+        itemFlags |= HierarchyItemFlag::Enabled;
+
+    const IdScopeGuard guard(staticModel->GetID());
+    const IdScopeGuard geometryGuard(geometryIndex);
+    ui::PushStyleColor(ImGuiCol_Text, GetItemColor(itemFlags));
+    ui::TreeNodeEx(title.c_str(), flags);
+    ui::PopStyleColor();
+
+    if (ui::IsItemHovered() && ui::IsMouseReleased(MOUSEB_LEFT) && !ui::IsMouseDragPastThreshold(MOUSEB_LEFT))
+    {
+        selection.SetGeometrySelected(staticModel, geometryIndex);
+    }
+    else if (ui::IsItemClicked(MOUSEB_RIGHT))
+    {
+        selection.SetGeometrySelected(staticModel, geometryIndex);
+        OpenSelectionContextMenu();
+    }
 }
 
 template <class T>

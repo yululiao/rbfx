@@ -31,6 +31,8 @@
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
 
+#include <EASTL/unordered_set.h>
+
 namespace Urho3D
 {
 
@@ -39,6 +41,7 @@ namespace
 
 ea::unordered_map<AttributeHookKey, AttributeHookFunction> attributeHooks;
 ea::unordered_map<ObjectHookKey, ObjectHookFunction> objectHooks;
+ea::unordered_set<AttributeHookKey> hiddenAttributes;
 
 }
 
@@ -64,6 +67,16 @@ void SerializableInspectorWidget::CopyAttributeHook(const AttributeHookKey& from
     const AttributeHookFunction& hook = GetAttributeHook(from);
     if (hook)
         RegisterAttributeHook(to, hook);
+}
+
+void SerializableInspectorWidget::RegisterAttributeHidden(const AttributeHookKey& key)
+{
+    hiddenAttributes.insert(key);
+}
+
+void SerializableInspectorWidget::UnregisterAttributeHidden(const AttributeHookKey& key)
+{
+    hiddenAttributes.erase(key);
 }
 
 void SerializableInspectorWidget::RegisterObjectHook(const ObjectHookKey& key, const ObjectHookFunction& function)
@@ -227,6 +240,10 @@ void SerializableInspectorWidget::RenderObjects()
 
 void SerializableInspectorWidget::RenderAttribute(const AttributeInfo& info)
 {
+    // Attributes taken over by a dedicated inspector panel are not rendered here at all.
+    if (hiddenAttributes.contains(AttributeHookKey{objects_[0]->GetTypeName(), info.name_}))
+        return;
+
     const AttributeHookFunction& hook = GetAttributeHook(AttributeHookKey{objects_[0]->GetTypeName(), info.name_});
 
     if (!hook && info.GetMetadata(AttributeMetadata::IsAction).GetBool())

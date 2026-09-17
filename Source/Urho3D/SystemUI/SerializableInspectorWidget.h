@@ -65,6 +65,14 @@ public:
     static void CopyAttributeHook(const AttributeHookKey& from, const AttributeHookKey& to);
     /// @}
 
+    /// Hidden attributes are not rendered by any inspector at all. Used when a dedicated
+    /// inspector panel takes over the presentation of an attribute (e.g. the geometry inspector
+    /// shows the material of the selected geometry slot instead of the component attribute).
+    /// @{
+    static void RegisterAttributeHidden(const AttributeHookKey& key);
+    static void UnregisterAttributeHidden(const AttributeHookKey& key);
+    /// @}
+
     /// Hooks used to customize object rendering.
     /// TODO: Object hooks cannot change object's attributes (yet)
     /// @{
@@ -79,6 +87,9 @@ public:
     template <class T> static void RegisterAttributeHook(const ea::string& name, const AttributeHookFunction& function);
     template <class T> static void UnregisterAttributeHook(const ea::string& name);
     template <class T, class U> static void CopyAttributeHook(const ea::string& name);
+
+    template <class T> static void RegisterAttributeHidden(const ea::string& name);
+    template <class T> static void UnregisterAttributeHidden(const ea::string& name);
 
     template <class T> static void RegisterObjectHook(ObjectHookType type, const ObjectHookFunction& function);
     template <class T> static void UnregisterObjectHook();
@@ -114,6 +125,18 @@ template <class T>
 void SerializableInspectorWidget::RegisterAttributeHook(const ea::string& name, const AttributeHookFunction& function)
 {
     SerializableInspectorWidget::RegisterAttributeHook({T::GetTypeNameStatic(), name}, function);
+}
+
+template <class T>
+void SerializableInspectorWidget::RegisterAttributeHidden(const ea::string& name)
+{
+    SerializableInspectorWidget::RegisterAttributeHidden({T::GetTypeNameStatic(), name});
+}
+
+template <class T>
+void SerializableInspectorWidget::UnregisterAttributeHidden(const ea::string& name)
+{
+    SerializableInspectorWidget::UnregisterAttributeHidden({T::GetTypeNameStatic(), name});
 }
 
 template <class T> void SerializableInspectorWidget::UnregisterAttributeHook(const ea::string& name)

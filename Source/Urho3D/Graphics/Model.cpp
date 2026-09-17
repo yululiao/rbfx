@@ -90,6 +90,7 @@ bool Model::BeginLoad(Deserializer& source)
     geometries_.clear();
     geometryBoneMappings_.clear();
     geometryCenters_.clear();
+    geometryNames_.clear();
     morphs_.clear();
     vertexBuffers_.clear();
     indexBuffers_.clear();
@@ -320,6 +321,16 @@ bool Model::BeginLoad(Deserializer& source)
         geometryCenters_.push_back(Vector3::ZERO);
     memoryUse += sizeof(Vector3) * geometries_.size();
 
+    // Read geometry names (material slot names). Only present from geometryNameVersion on;
+    // older files fall through and get padded with empty names below.
+    if (version >= geometryNameVersion)
+    {
+        for (unsigned i = 0; i < geometries_.size() && !source.IsEof(); ++i)
+            geometryNames_.push_back(source.ReadString());
+    }
+    while (geometryNames_.size() < geometries_.size())
+        geometryNames_.push_back(EMPTY_STRING);
+
     // Read metadata
     auto* cache = GetSubsystem<ResourceCache>();
     ea::string xmlName = ReplaceExtension(GetName(), ".xml");
@@ -476,6 +487,10 @@ bool Model::Save(Serializer& dest) const
     for (unsigned i = 0; i < geometryCenters_.size(); ++i)
         dest.WriteVector3(geometryCenters_[i]);
 
+    // Write geometry names (material slot names), one per geometry
+    for (unsigned i = 0; i < geometries_.size(); ++i)
+        dest.WriteString(i < geometryNames_.size() ? geometryNames_[i] : EMPTY_STRING);
+
     // Write metadata
     if (HasMetadata())
     {
@@ -557,6 +572,7 @@ void Model::SetNumGeometries(unsigned num)
     geometries_.resize(num);
     geometryBoneMappings_.resize(num);
     geometryCenters_.resize(num);
+    geometryNames_.resize(num);
 
     // For easier creation of from-scratch geometry, ensure that all geometries start with at least 1 LOD level (0 makes no sense)
     for (unsigned i = 0; i < geometries_.size(); ++i)
@@ -612,6 +628,23 @@ bool Model::SetGeometryCenter(unsigned index, const Vector3& center)
     return true;
 }
 
+bool Model::SetGeometryName(unsigned index, const ea::string& name)
+{
+    // Grow to match the geometry count so callers can set names right after SetGeometry.
+    if (index >= geometryNames_.size())
+    {
+        if (index >= geometries_.size())
+        {
+            URHO3D_LOGERROR("Geometry index out of bounds");
+            return false;
+        }
+        geometryNames_.resize(geometries_.size());
+    }
+
+    geometryNames_[index] = name;
+    return true;
+}
+
 void Model::SetSkeleton(const Skeleton& skeleton)
 {
     skeleton_ = skeleton;
@@ -636,6 +669,7 @@ SharedPtr<Model> Model::Clone(const ea::string& cloneName) const
     ret->skeleton_ = skeleton_;
     ret->geometryBoneMappings_ = geometryBoneMappings_;
     ret->geometryCenters_ = geometryCenters_;
+    ret->geometryNames_ = geometryNames_;
     ret->morphs_ = morphs_;
     ret->morphRangeStarts_ = morphRangeStarts_;
     ret->morphRangeCounts_ = morphRangeCounts_;

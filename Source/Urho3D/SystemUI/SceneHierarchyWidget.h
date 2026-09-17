@@ -28,6 +28,8 @@
 namespace Urho3D
 {
 
+class StaticModel;
+
 struct SceneHierarchySettings
 {
     bool showTemporary_{};
@@ -58,6 +60,7 @@ public:
 private:
     void RenderNode(SceneSelection& selection, Node* node);
     void RenderComponent(SceneSelection& selection, Component* component);
+    void RenderGeometryItem(SceneSelection& selection, StaticModel* staticModel, unsigned geometryIndex);
     void ApplyPendingUpdates(Scene* scene);
 
     void ProcessObjectSelected(SceneSelection& selection, Object* object, bool toggle, bool range);

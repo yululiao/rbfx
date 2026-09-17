@@ -1,0 +1,31 @@
+# Ignore asset cache
+/Cache/
+/Cache.json
+
+# Ignore temporary files
+/Temp/
+
+# Ignore UI settings
+/ui.ini
+
+# Ignore preview screenshot
+/Preview.png
+
+# Ignore artifacts
+/Artifacts/
+
+# Ignore build output
+/Build/
+
+# Ignore internal files
+*.blend1
+*.user.json
+/Cache.json
+/Data/Scenes/Default.scene.user.json
+/ui.ini
+
+
+
+
+
+

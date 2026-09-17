@@ -121,8 +121,11 @@ public:
     using WeakComponentVector = ea::vector<WeakPtr<Component>>;
 
     template <class T, class U>
-    InspectNodeComponentRequest(Context* context, const T& nodes, const U& components)
+    InspectNodeComponentRequest(Context* context, const T& nodes, const U& components,
+        Component* activeGeometry = nullptr, unsigned activeGeometryIndex = M_MAX_UNSIGNED)
         : BaseInspectRequest(context)
+        , activeGeometryComponent_(activeGeometry)
+        , activeGeometryIndex_(activeGeometry ? activeGeometryIndex : M_MAX_UNSIGNED)
     {
         for (Node* node : nodes)
         {
@@ -142,6 +145,11 @@ public:
     const WeakNodeVector& GetNodes() const { return nodes_; }
     const WeakComponentVector& GetComponents() const { return components_; }
 
+    /// Return the component with an active geometry slot (e.g. selected in the scene hierarchy), null if none.
+    Component* GetActiveGeometryComponent() const { return activeGeometryComponent_; }
+    /// Return the active geometry index, or M_MAX_UNSIGNED if no geometry slot is active.
+    unsigned GetActiveGeometryIndex() const { return activeGeometryIndex_; }
+
     /// Return scene if all nodes and components belong to the same scene, null otherwise.
     Scene* GetCommonScene() const;
 
@@ -152,6 +160,8 @@ public:
 private:
     WeakNodeVector nodes_;
     WeakComponentVector components_;
+    WeakPtr<Component> activeGeometryComponent_;
+    unsigned activeGeometryIndex_{M_MAX_UNSIGNED};
 };
 
 /// Request to create resource.

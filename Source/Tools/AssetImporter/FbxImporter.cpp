@@ -1108,6 +1108,11 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
         ufbx_node* meshNode = model.meshNodes_[i];
         unsigned numParts = (unsigned)mesh->material_parts.count;
 
+        // Geometry (material slot) display name: the source mesh name, disambiguated per material
+        // part when the mesh splits into several slots. Persisted into the .mdl and surfaced in
+        // the scene hierarchy under the model component.
+        const ea::string meshName(meshNode->name.data);
+        //std::cout << "meshName!!!:" << std::string(meshName.c_str()) << std::endl;
         if (numParts == 0)
         {
             // Mesh has no material parts - treat as single part covering all faces
@@ -1135,6 +1140,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
 
             vbVector.push_back(vb);
             ibVector.push_back(ib);
+            outModel->SetGeometryName(destGeomIndex, meshName);
             ++destGeomIndex;
         }
         else
@@ -1163,6 +1169,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     outModel->SetNumGeometryLodLevels(destGeomIndex, 1);
                     outModel->SetGeometry(destGeomIndex, 0, geom);
                     outModel->SetGeometryCenter(destGeomIndex, Vector3::ZERO);
+                    outModel->SetGeometryName(destGeomIndex, numParts > 1 ? Format("{} #{}", meshName, p) : meshName);
                     // The empty part still owns a bone mapping slot: Model::SetGeometryBoneMappings
                     // assigns palettes positionally, so a missing entry would shift every later
                     // geometry's palette (parts after an unused material would skin with wrong bones).
@@ -1191,6 +1198,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
 
                 vbVector.push_back(vb);
                 ibVector.push_back(ib);
+                outModel->SetGeometryName(destGeomIndex, numParts > 1 ? Format("{} #{}", meshName, p) : meshName);
                 ++destGeomIndex;
             }
         }

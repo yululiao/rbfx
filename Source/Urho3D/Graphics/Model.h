@@ -145,6 +145,8 @@ public:
     /// Set geometry center.
     /// @property{set_geometryCenters}
     bool SetGeometryCenter(unsigned index, const Vector3& center);
+    /// Set geometry (material slot) name.
+    bool SetGeometryName(unsigned index, const ea::string& name);
     /// Set skeleton.
     void SetSkeleton(const Skeleton& skeleton);
     /// Set bone mappings when model has more bones than the skinning shader can handle.
@@ -195,6 +197,13 @@ public:
         return index < geometryCenters_.size() ? geometryCenters_[index] : Vector3::ZERO;
     }
 
+    /// Return geometry (material slot) name by index.
+    const ea::string& GetGeometryName(unsigned index) const
+    {
+        static const ea::string empty;
+        return index < geometryNames_.size() ? geometryNames_[index] : empty;
+    }
+
     /// Return geometery bone mappings.
     const ea::vector<ea::vector<unsigned> >& GetGeometryBoneMappings() const { return geometryBoneMappings_; }
 
@@ -227,8 +236,9 @@ private:
     /// @{
     static const unsigned legacyVersion = 1; // Fake version for legacy unversioned UMDL/UMD2 file
     static const unsigned morphWeightVersion = 2; // Initial morph weights support added here
+    static const unsigned geometryNameVersion = 3; // Per-geometry (material slot) names added here
 
-    static const unsigned currentVersion = morphWeightVersion;
+    static const unsigned currentVersion = geometryNameVersion;
     /// @}
 
     /// Bounding box.
@@ -245,6 +255,8 @@ private:
     ea::vector<ea::vector<unsigned> > geometryBoneMappings_;
     /// Geometry centers.
     ea::vector<Vector3> geometryCenters_;
+    /// Geometry (material slot) names, parallel to geometries_.
+    ea::vector<ea::string> geometryNames_;
     /// Vertex morphs.
     ea::vector<ModelMorph> morphs_;
     /// Vertex buffer morph range start.
