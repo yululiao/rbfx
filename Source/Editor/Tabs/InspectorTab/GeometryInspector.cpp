@@ -26,8 +26,11 @@
 #include "../../Project/Project.h"
 
 #include <Urho3D/Graphics/AnimatedModel.h>
+#include <Urho3D/Graphics/Geometry.h>
+#include <Urho3D/Graphics/IndexBuffer.h>
 #include <Urho3D/Graphics/Model.h>
 #include <Urho3D/Graphics/StaticModel.h>
+#include <Urho3D/Graphics/VertexBuffer.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/SystemUI/SerializableInspectorWidget.h>
 #include <Urho3D/SystemUI/SystemUI.h>
@@ -117,19 +120,24 @@ Material* GeometryInspector::GetSlotMaterial() const
     return nullptr;
 }
 
-ea::string GeometryInspector::GetSlotGeometryName() const
+Model* GeometryInspector::GetSlotModel() const
 {
     Component* component = geometryComponent_;
     if (!component)
-        return EMPTY_STRING;
+        return nullptr;
 
-    // The mesh name lives on the shared Model, indexed by the same geometry/material slot.
-    Model* model = nullptr;
+    // AnimatedModel inherits StaticModel but is a distinct component type, so it must be checked first.
     if (auto animated = component->GetComponent<AnimatedModel>())
-        model = animated->GetModel();
-    else if (auto staticModel = component->GetComponent<StaticModel>())
-        model = staticModel->GetModel();
+        return animated->GetModel();
+    if (auto staticModel = component->GetComponent<StaticModel>())
+        return staticModel->GetModel();
+    return nullptr;
+}
 
+ea::string GeometryInspector::GetSlotGeometryName() const
+{
+    // The mesh name lives on the shared Model, indexed by the same geometry/material slot.
+    Model* model = GetSlotModel();
     return model ? model->GetGeometryName(geometryIndex_) : EMPTY_STRING;
 }
 
@@ -287,6 +295,125 @@ void GeometryInspector::RenderContent()
             materialWidget_->RenderContent();
         ui::Unindent();
     }
+
+    // Read-only statistics below the editable material slot.
+    RenderGeometryStats();
+}
+
+void GeometryInspector::RenderGeometryStats()
+{
+    Model* model = GetSlotModel();
+    if (!model || geometryIndex_ >= model->GetNumGeometries())
+        return;
+
+    Geometry* geometry = model->GetGeometry(geometryIndex_, 0);
+    if (!geometry)
+    {
+        ui::TextDisabled("(no geometry data)");
+        return;
+    }
+
+    // Read-only snapshot of the selected slot. These numbers describe the shared .mdl asset, so they
+    // are informational only - geometry data edits belong to the ModelInspector asset editor, keeping
+    // with "one feature, one entry point" (this panel only edits the per-instance material override).
+    if (!ui::CollapsingHeader(ICON_FA_CHART_SIMPLE " Geometry Info"))
+        return;
+
+    const unsigned vertices = geometry->GetVertexCount();
+    const unsigned indices = geometry->GetIndexCount();
+    const unsigned primitives = geometry->GetPrimitiveCount();
+
+    static const char* primitiveNames[] = {
+        "Triangle List", "Line List", "Point List", "Triangle Strip", "Line Strip", "Triangle Fan",
+    };
+    const unsigned ptIndex = static_cast<unsigned>(geometry->GetPrimitiveType());
+    const char* primitive = ptIndex < sizeof(primitiveNames) / sizeof(primitiveNames[0])
+        ? primitiveNames[ptIndex] : "Unknown";
+
+    // Aggregate the attribute layout across every vertex buffer the geometry draws from and total the
+    // per-vertex stride. A missing normal/tangent is a common import problem, so it is flagged below.
+    ea::vector<VertexElement> elements;
+    unsigned stride = 0;
+    const unsigned numBuffers = geometry->GetNumVertexBuffers();
+    for (unsigned b = 0; b < numBuffers; ++b)
+    {
+        if (auto* vb = geometry->GetVertexBuffer(b))
+        {
+            const auto& bufferElements = vb->GetElements();
+            elements.insert(elements.end(), bufferElements.begin(), bufferElements.end());
+            stride += vb->GetVertexSize();
+        }
+    }
+
+    bool hasPosition = false, hasNormal = false, hasTangent = false, hasBinormal = false;
+    bool hasColor = false, hasWeights = false, hasBoneIndices = false;
+    unsigned uvSets = 0;
+    for (const auto& element : elements)
+    {
+        switch (element.semantic_)
+        {
+        case SEM_POSITION: hasPosition = true; break;
+        case SEM_NORMAL: hasNormal = true; break;
+        case SEM_TANGENT: hasTangent = true; break;
+        case SEM_BINORMAL: hasBinormal = true; break;
+        case SEM_TEXCOORD: ++uvSets; break;
+        case SEM_COLOR: hasColor = true; break;
+        case SEM_BLENDWEIGHTS: hasWeights = true; break;
+        case SEM_BLENDINDICES: hasBoneIndices = true; break;
+        default: break;
+        }
+    }
+
+    // Per-slot GPU footprint estimate from the first vertex buffer stride and the index buffer stride.
+    // Vertex buffers can be shared between slots, so this is a representative per-slot figure.
+    unsigned long long vboBytes = 0;
+    if (auto* vb = geometry->GetVertexBuffer(0))
+        vboBytes = static_cast<unsigned long long>(vb->GetVertexSize()) * vertices;
+    unsigned long long iboBytes = 0;
+    if (auto* ib = geometry->GetIndexBuffer())
+        iboBytes = static_cast<unsigned long long>(ib->GetIndexSize()) * indices;
+    const double totalKb = static_cast<double>(vboBytes + iboBytes) / 1024.0;
+
+    ui::Text("Vertices: %u", vertices);
+    ui::Text("Indices: %u", indices);
+    ui::Text("Primitives: %u", primitives);
+    ui::Text("Primitive type: %s", primitive);
+    ui::Text("Vertex stride: %u bytes", stride);
+    ui::Text("GPU footprint: ~%.1f KB", totalKb);
+    ui::Text("LOD levels: %u", model->GetNumGeometryLodLevels(geometryIndex_));
+
+    const Vector3 center = model->GetGeometryCenter(geometryIndex_);
+    ui::Text("Center: %.2f, %.2f, %.2f", center.x_, center.y_, center.z_);
+    const Vector3 size = model->GetBoundingBox().Size();
+    ui::Text("Model size: %.2f, %.2f, %.2f", size.x_, size.y_, size.z_);
+
+    ea::string layout;
+    auto add = [&layout](const char* name)
+    {
+        if (!layout.empty())
+            layout += ", ";
+        layout += name;
+    };
+    if (hasPosition) add("Position");
+    if (hasNormal) add("Normal");
+    if (hasTangent) add("Tangent");
+    if (hasBinormal) add("Binormal");
+    if (hasColor) add("Color");
+    if (hasWeights) add("Weights");
+    if (hasBoneIndices) add("BoneIndices");
+    if (uvSets != 0)
+    {
+        if (!layout.empty())
+            layout += ", ";
+        char uvBuf[16];
+        snprintf(uvBuf, sizeof(uvBuf), "UV x%u", uvSets);
+        layout += uvBuf;
+    }
+
+    ui::Separator();
+    ui::TextDisabled("Attributes: %s", layout.empty() ? "(none)" : layout.c_str());
+    if (!hasNormal)
+        ui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), ICON_FA_TRIANGLE_EXCLAMATION " No normals - lighting may look flat");
 }
 
 void GeometryInspector::RenderContextMenuItems()

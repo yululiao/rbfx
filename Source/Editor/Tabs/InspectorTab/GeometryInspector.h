@@ -33,6 +33,8 @@
 namespace Urho3D
 {
 
+class Model;
+
 void Tabs_GeometryInspector(Context* context, InspectorTab* inspectorTab);
 
 /// Dedicated inspector for a geometry/material slot of a model component (StaticModel/AnimatedModel)
@@ -67,10 +69,15 @@ private:
     unsigned GetGeometryCount(const Component* component) const;
     /// Return the material referenced by the active geometry slot, or null.
     Material* GetSlotMaterial() const;
+    /// Return the shared Model asset of the active component, or null.
+    Model* GetSlotModel() const;
     /// Return the source mesh name stored on the model geometry for the active slot (may be empty).
     ea::string GetSlotGeometryName() const;
     /// (Re)create the nested material widget when the slot reference changed; project assets only.
     void RebuildMaterialWidget();
+
+    /// Render the read-only geometry statistics panel (topology, attributes, bounds) for the active slot.
+    void RenderGeometryStats();
 
     void BeginMaterialEdit();
     void EndMaterialEdit();
