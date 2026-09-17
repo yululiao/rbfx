@@ -27,6 +27,7 @@
 #include "../Scene/Component.h"
 #include "../Scene/Node.h"
 
+#include <EASTL/unordered_map.h>
 #include <EASTL/unordered_set.h>
 
 namespace Urho3D
@@ -69,8 +70,13 @@ public:
     bool HasDrawable(Drawable* drawable) const;
     /// Add drawable. Returns true if drawable added.
     bool AddDrawable(Drawable* drawable);
+    /// Add drawable but outline only one geometry (material-slot) batch identified by \p geometryIndex.
+    /// Used to highlight a single geometry of a multi-geometry model instead of the whole drawable.
+    bool AddDrawable(Drawable* drawable, unsigned geometryIndex);
     /// Remove drawable. Returns true if drawable was removed.
     bool RemoveDrawable(Drawable* drawable);
+    /// If \p drawable was added with a single-geometry filter, write the geometry index and return true.
+    bool GetGeometryFilter(Drawable* drawable, unsigned& outGeometryIndex) const;
     /// @}
 
 private:
@@ -92,6 +98,8 @@ private:
 
     /// Selected drawables.
     ea::unordered_set<WeakPtr<Drawable>> drawables_;
+    /// Optional per-drawable single-geometry outline filter (transient editor selection state; not serialized).
+    ea::unordered_map<Drawable*, unsigned> geometryFilters_;
     bool drawablesDirty_{};
     mutable VariantVector drawablesAttr_;
 

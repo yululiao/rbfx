@@ -76,8 +76,10 @@ private:
     PageState& GetOrInitializeState(SceneViewPage& scenePage) const;
     bool PrepareInternalComponents(SceneViewPage& scenePage, PageState& state) const;
     void UpdateInternalComponents(SceneViewPage& scenePage, PageState& state) const;
-    void AddNodeDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup = nullptr) const;
-    void AddNodeChildrenDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup = nullptr) const;
+    void AddNodeDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup = nullptr,
+        Component* activeGeometry = nullptr, unsigned activeGeometryIndex = M_MAX_UNSIGNED) const;
+    void AddNodeChildrenDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup = nullptr,
+        Component* activeGeometry = nullptr, unsigned activeGeometryIndex = M_MAX_UNSIGNED) const;
 
     bool NeedDepthTest(Component* component) const;
     void DrawNodeSelection(Scene* scene, Node* node, bool recursive);

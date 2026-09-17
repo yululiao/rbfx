@@ -148,6 +148,7 @@ const VariantVector& OutlineGroup::GetDrawablesAttr() const
 void OutlineGroup::ClearDrawables()
 {
     drawables_.clear();
+    geometryFilters_.clear();
 }
 
 bool OutlineGroup::HasDrawable(Drawable* drawable) const
@@ -160,8 +161,25 @@ bool OutlineGroup::AddDrawable(Drawable* drawable)
     return drawables_.emplace(drawable).second;
 }
 
+bool OutlineGroup::AddDrawable(Drawable* drawable, unsigned geometryIndex)
+{
+    const bool added = AddDrawable(drawable);
+    geometryFilters_[drawable] = geometryIndex;
+    return added;
+}
+
+bool OutlineGroup::GetGeometryFilter(Drawable* drawable, unsigned& outGeometryIndex) const
+{
+    const auto iter = geometryFilters_.find(drawable);
+    if (iter == geometryFilters_.end())
+        return false;
+    outGeometryIndex = iter->second;
+    return true;
+}
+
 bool OutlineGroup::RemoveDrawable(Drawable* drawable)
 {
+    geometryFilters_.erase(drawable);
     return drawables_.erase(WeakPtr<Drawable>(drawable)) > 0;
 }
 

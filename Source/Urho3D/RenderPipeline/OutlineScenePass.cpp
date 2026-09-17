@@ -89,6 +89,13 @@ DrawableProcessorPass::AddBatchResult OutlineScenePass::AddCustomBatch(
         if (!outlineGroup->ContainsDrawable(drawable))
             continue;
 
+        // When the group filters this drawable to a single geometry (material slot), only outline the
+        // matching batch. For a StaticModel the batches map one-to-one to geometries, so the source
+        // batch index is exactly the geometry index.
+        unsigned geometryFilter = 0;
+        if (outlineGroup->GetGeometryFilter(drawable, geometryFilter) && geometryFilter != sourceBatchIndex)
+            continue;
+
         if (Pass* referencePass = GetFirstPass(technique, outlinedPasses_))
         {
             geometryBatches_.PushBack(threadIndex, GeometryBatch::Deferred(drawable, sourceBatchIndex, referencePass, outlineGroup));

@@ -158,14 +158,20 @@ void SceneSelectionRenderer::UpdateInternalComponents(SceneViewPage& scenePage, 
 
     state.directSelection_->ClearDrawables();
 
+    // When a single geometry (material slot) of a model is the active selection, outline only that
+    // slot instead of the whole drawable. This active-geometry info is transient UI selection state.
+    Component* activeGeometry = scenePage.selection_.GetActiveGeometryComponent();
+    const unsigned activeGeometryIndex =
+        activeGeometry ? scenePage.selection_.GetActiveGeometryIndex(activeGeometry) : M_MAX_UNSIGNED;
+
     for (Component* component : scenePage.selection_.GetComponents())
     {
         if (Node* node = component->GetNode())
-            AddNodeDrawablesToGroup(node, state.directSelection_);
+            AddNodeDrawablesToGroup(node, state.directSelection_, nullptr, activeGeometry, activeGeometryIndex);
     }
 
     for (Node* node : scenePage.selection_.GetNodes())
-        AddNodeDrawablesToGroup(node, state.directSelection_);
+        AddNodeDrawablesToGroup(node, state.directSelection_, nullptr, activeGeometry, activeGeometryIndex);
 
     state.indirectSelection_->ClearDrawables();
 
@@ -182,7 +188,8 @@ void SceneSelectionRenderer::UpdateInternalComponents(SceneViewPage& scenePage, 
     }
 }
 
-void SceneSelectionRenderer::AddNodeDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup) const
+void SceneSelectionRenderer::AddNodeDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup,
+    Component* activeGeometry, unsigned activeGeometryIndex) const
 {
     for (Component* outlinedComponent : node->GetComponents())
     {
@@ -190,17 +197,22 @@ void SceneSelectionRenderer::AddNodeDrawablesToGroup(const Node* node, OutlineGr
         {
             if (excludeGroup && excludeGroup->ContainsDrawable(drawable))
                 continue;
-            group->AddDrawable(drawable);
+            // Outline only the active geometry slot when this drawable is the selected model component.
+            if (activeGeometry && activeGeometryIndex != M_MAX_UNSIGNED && outlinedComponent == activeGeometry)
+                group->AddDrawable(drawable, activeGeometryIndex);
+            else
+                group->AddDrawable(drawable);
         }
     }
 }
 
-void SceneSelectionRenderer::AddNodeChildrenDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup) const
+void SceneSelectionRenderer::AddNodeChildrenDrawablesToGroup(const Node* node, OutlineGroup* group, OutlineGroup* excludeGroup,
+    Component* activeGeometry, unsigned activeGeometryIndex) const
 {
     for (Node* child : node->GetChildren())
     {
-        AddNodeDrawablesToGroup(child, group, excludeGroup);
-        AddNodeChildrenDrawablesToGroup(child, group, excludeGroup);
+        AddNodeDrawablesToGroup(child, group, excludeGroup, activeGeometry, activeGeometryIndex);
+        AddNodeChildrenDrawablesToGroup(child, group, excludeGroup, activeGeometry, activeGeometryIndex);
     }
 }
 
