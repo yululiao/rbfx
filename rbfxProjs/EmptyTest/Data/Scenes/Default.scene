@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <resource _id="1">
 	<attributes>
-		<attribute name="Next Node ID" type="Int" value="9" />
-		<attribute name="Next Component ID" type="Int" value="18" />
+		<attribute name="Next Node ID" type="Int" value="113" />
+		<attribute name="Next Component ID" type="Int" value="22" />
 	</attributes>
 	<components>
 		<component _id="1" _typeName="Octree" />
@@ -147,6 +147,997 @@
 					</attributes>
 				</component>
 			</components>
+		</node>
+		<node _id="9">
+			<attributes>
+				<attribute name="Name" type="String" value="102_mesh" />
+				<attribute name="Position" type="Vector3" value="3.982027 -0.400001 -2.175691" />
+			</attributes>
+			<components>
+				<component _id="21" _typeName="AnimatedModel">
+					<attributes>
+						<attribute name="Model" type="ResourceRef" value="Model;fbx/102/102_mesh.FBX.d/Models/102_mesh.mdl" />
+						<attribute name="Material" type="ResourceRefList" value="Material;Materials/DefaultWhite.xml;Materials/DefaultWhite.xml" />
+						<attribute name="Cast Shadows" type="Bool" value="true" />
+						<attribute name="Bone Animation Enabled" type="VariantVector">
+							<value>
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+								<element type="Bool" value="true" />
+							</value>
+						</attribute>
+					</attributes>
+				</component>
+			</components>
+			<nodes>
+				<node _id="10">
+					<attributes>
+						<attribute name="Name" type="String" value="Root_01" />
+						<attribute name="Rotation" type="Quaternion" value="0.707107 0.707107 0 0" />
+					</attributes>
+					<nodes>
+						<node _id="11">
+							<attributes>
+								<attribute name="Name" type="String" value="Bip01" />
+								<attribute name="Position" type="Vector3" value="1.25313e-06 1.278742 -2.48939" />
+								<attribute name="Rotation" type="Quaternion" value="0.515302 -0.484215 -0.484215 -0.515301" />
+							</attributes>
+							<nodes>
+								<node _id="12">
+									<attributes>
+										<attribute name="Name" type="String" value="Bip01 Pelvis" />
+										<attribute name="Rotation" type="Quaternion" value="0.500001 0.5 0.5 -0.499999" />
+									</attributes>
+									<nodes>
+										<node _id="13">
+											<attributes>
+												<attribute name="Name" type="String" value="Bip01 Spine" />
+												<attribute name="Position" type="Vector3" value="0.359979 0.190532 -4.79267e-08" />
+												<attribute name="Rotation" type="Quaternion" value="0.998462 2.11291e-06 7.68587e-07 0.055433" />
+											</attributes>
+											<nodes>
+												<node _id="14">
+													<attributes>
+														<attribute name="Name" type="String" value="Bip01 Spine1" />
+														<attribute name="Position" type="Vector3" value="0.799969 -0.001052 2.91845e-09" />
+														<attribute name="Rotation" type="Quaternion" value="0.991209 -7.14646e-09 -4.20755e-07 -0.132306" />
+													</attributes>
+													<nodes>
+														<node _id="15">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone01" />
+																<attribute name="Position" type="Vector3" value="1.574148 0.582439 -9.82673e-08" />
+																<attribute name="Rotation" type="Quaternion" value="0.679778 -3.36852e-07 5.77695e-07 0.733418" />
+															</attributes>
+														</node>
+														<node _id="16">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone02" />
+																<attribute name="Position" type="Vector3" value="0.755712 -0.916957 2.30441e-06" />
+																<attribute name="Rotation" type="Quaternion" value="0.77941 -4.6505e-07 7.93414e-08 -0.626514" />
+															</attributes>
+														</node>
+														<node _id="17">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone065" />
+																<attribute name="Position" type="Vector3" value="1.273778 0.451963 0.406275" />
+																<attribute name="Rotation" type="Quaternion" value="0.451611 -0.434304 -0.558013 0.544104" />
+															</attributes>
+														</node>
+														<node _id="18">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone066" />
+																<attribute name="Position" type="Vector3" value="1.273778 0.451962 -0.406" />
+																<attribute name="Rotation" type="Quaternion" value="0.434302 -0.451613 -0.544104 0.558012" />
+															</attributes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="19">
+													<attributes>
+														<attribute name="Name" type="String" value="Bip01 Neck" />
+														<attribute name="Position" type="Vector3" value="1.962841 -0.018559 7.97754e-07" />
+														<attribute name="Rotation" type="Quaternion" value="0.593449 -3.0315e-07 -2.6154e-06 -0.804872" />
+													</attributes>
+													<nodes>
+														<node _id="20">
+															<attributes>
+																<attribute name="Name" type="String" value="Bip01 Neck1" />
+																<attribute name="Position" type="Vector3" value="0.676017 -0.000162 -6.51198e-10" />
+																<attribute name="Rotation" type="Quaternion" value="0.89708 1.60125e-06 2.65534e-06 0.441869" />
+															</attributes>
+															<nodes>
+																<node _id="21">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bip01 Neck2" />
+																		<attribute name="Position" type="Vector3" value="0.334376 -0.000329 9.11768e-10" />
+																		<attribute name="Rotation" type="Quaternion" value="1 2.27374e-13 -1.13687e-13 1.49012e-08" />
+																	</attributes>
+																	<nodes>
+																		<node _id="22">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bip01 Head" />
+																				<attribute name="Position" type="Vector3" value="0.428976 0.034416 1.3938e-05" />
+																				<attribute name="Rotation" type="Quaternion" value="0.999929 -1.75385e-06 -3.26146e-07 -0.011884" />
+																			</attributes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+														<node _id="23">
+															<attributes>
+																<attribute name="Name" type="String" value="Bip01 L Clavicle" />
+																<attribute name="Position" type="Vector3" value="0.498919 -0.469402 -0.253449" />
+																<attribute name="Rotation" type="Quaternion" value="0.1634 -0.163399 -0.687967 0.68797" />
+															</attributes>
+															<nodes>
+																<node _id="24">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bip01 L UpperArm" />
+																		<attribute name="Position" type="Vector3" value="0.747806 0 -0" />
+																		<attribute name="Rotation" type="Quaternion" value="0.587438 0.591009 -0.386883 0.3949" />
+																	</attributes>
+																	<nodes>
+																		<node _id="25">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bip01 L Forearm" />
+																				<attribute name="Position" type="Vector3" value="0.338177 5.96046e-08 -0" />
+																				<attribute name="Rotation" type="Quaternion" value="0.968876 2.77018e-10 -1.03202e-09 -0.247547" />
+																			</attributes>
+																			<nodes>
+																				<node _id="26">
+																					<attributes>
+																						<attribute name="Name" type="String" value="Bip01 L Hand" />
+																						<attribute name="Position" type="Vector3" value="0.687501 5.96046e-08 2.98023e-08" />
+																						<attribute name="Rotation" type="Quaternion" value="0.007712 -0.999954 -0.003946 -0.004131" />
+																					</attributes>
+																					<nodes>
+																						<node _id="27">
+																							<attributes>
+																								<attribute name="Name" type="String" value="Bip01 L Finger0" />
+																								<attribute name="Position" type="Vector3" value="0.628072 0.018292 -0.002763" />
+																								<attribute name="Rotation" type="Quaternion" value="0.979633 0.000164 -0.000718 0.200794" />
+																							</attributes>
+																							<nodes>
+																								<node _id="28">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bip01 L Finger01" />
+																										<attribute name="Position" type="Vector3" value="0.287869 1.19209e-07 -1.49012e-08" />
+																										<attribute name="Rotation" type="Quaternion" value="0.978667 -0.000261 -0.000625 -0.205452" />
+																									</attributes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+														<node _id="29">
+															<attributes>
+																<attribute name="Name" type="String" value="Bip01 R Clavicle" />
+																<attribute name="Position" type="Vector3" value="0.498919 -0.469401 0.25345" />
+																<attribute name="Rotation" type="Quaternion" value="0.163399 0.1634 0.68797 0.687967" />
+															</attributes>
+															<nodes>
+																<node _id="30">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bip01 R UpperArm" />
+																		<attribute name="Position" type="Vector3" value="0.747806 2.98023e-08 -0" />
+																		<attribute name="Rotation" type="Quaternion" value="0.587438 -0.591009 0.386883 0.3949" />
+																	</attributes>
+																	<nodes>
+																		<node _id="31">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bip01 R Forearm" />
+																				<attribute name="Position" type="Vector3" value="0.338177 1.19209e-07 -0" />
+																				<attribute name="Rotation" type="Quaternion" value="0.968876 1.99867e-10 4.29554e-10 -0.247547" />
+																			</attributes>
+																			<nodes>
+																				<node _id="32">
+																					<attributes>
+																						<attribute name="Name" type="String" value="Bip01 R Hand" />
+																						<attribute name="Position" type="Vector3" value="0.6875 5.96046e-08 -2.98023e-08" />
+																						<attribute name="Rotation" type="Quaternion" value="0.007712 0.999954 0.003946 -0.004131" />
+																					</attributes>
+																					<nodes>
+																						<node _id="33">
+																							<attributes>
+																								<attribute name="Name" type="String" value="Bip01 R Finger0" />
+																								<attribute name="Position" type="Vector3" value="0.628072 0.018292 0.002763" />
+																								<attribute name="Rotation" type="Quaternion" value="0.979633 -0.000164 0.000718 0.200794" />
+																							</attributes>
+																							<nodes>
+																								<node _id="34">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bip01 R Finger01" />
+																										<attribute name="Position" type="Vector3" value="0.28787 1.19209e-07 -0" />
+																										<attribute name="Rotation" type="Quaternion" value="0.978667 0.000261 0.000625 -0.205452" />
+																									</attributes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+										<node _id="35">
+											<attributes>
+												<attribute name="Name" type="String" value="Bip01 L Thigh" />
+												<attribute name="Position" type="Vector3" value="-2.38419e-07 4.76837e-07 -0.236007" />
+												<attribute name="Rotation" type="Quaternion" value="-0.005257 -0.610583 -0.791914 0.005744" />
+											</attributes>
+											<nodes>
+												<node _id="36">
+													<attributes>
+														<attribute name="Name" type="String" value="Bip01 L Calf" />
+														<attribute name="Position" type="Vector3" value="0.822039 0 -0" />
+														<attribute name="Rotation" type="Quaternion" value="0.979417 6.44061e-10 8.18161e-10 -0.201847" />
+													</attributes>
+													<nodes>
+														<node _id="37">
+															<attributes>
+																<attribute name="Name" type="String" value="Bip01 L HorseLink" />
+																<attribute name="Position" type="Vector3" value="0.716029 0 -2.98023e-08" />
+																<attribute name="Rotation" type="Quaternion" value="0.979505 -3.82561e-10 -1.02948e-09 0.201419" />
+															</attributes>
+															<nodes>
+																<node _id="38">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bip01 L Foot" />
+																		<attribute name="Position" type="Vector3" value="0.703216 0 -0" />
+																		<attribute name="Rotation" type="Quaternion" value="0.965658 0.000693 0.007756 0.259699" />
+																	</attributes>
+																	<nodes>
+																		<node _id="39">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bip01 L Toe0" />
+																				<attribute name="Position" type="Vector3" value="0.226421 0.025823 -2.98023e-08" />
+																				<attribute name="Rotation" type="Quaternion" value="0.987225 1.52139e-08 -4.37295e-08 -0.159333" />
+																			</attributes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+										<node _id="40">
+											<attributes>
+												<attribute name="Name" type="String" value="Bip01 R Thigh" />
+												<attribute name="Position" type="Vector3" value="4.76837e-07 -2.38419e-07 0.236007" />
+												<attribute name="Rotation" type="Quaternion" value="-0.005259 0.610583 0.791914 0.005744" />
+											</attributes>
+											<nodes>
+												<node _id="41">
+													<attributes>
+														<attribute name="Name" type="String" value="Bip01 R Calf" />
+														<attribute name="Position" type="Vector3" value="0.822039 0 2.98023e-08" />
+														<attribute name="Rotation" type="Quaternion" value="0.979417 -9.12153e-10 1.87985e-10 -0.201847" />
+													</attributes>
+													<nodes>
+														<node _id="42">
+															<attributes>
+																<attribute name="Name" type="String" value="Bip01 R HorseLink" />
+																<attribute name="Position" type="Vector3" value="0.716029 0 -2.98023e-08" />
+																<attribute name="Rotation" type="Quaternion" value="0.979505 1.14029e-09 2.34483e-10 0.201419" />
+															</attributes>
+															<nodes>
+																<node _id="43">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bip01 R Foot" />
+																		<attribute name="Position" type="Vector3" value="0.703216 0 -0" />
+																		<attribute name="Rotation" type="Quaternion" value="0.965658 -0.000693 -0.007756 0.259699" />
+																	</attributes>
+																	<nodes>
+																		<node _id="44">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bip01 R Toe0" />
+																				<attribute name="Position" type="Vector3" value="0.226421 0.025824 -0" />
+																				<attribute name="Rotation" type="Quaternion" value="0.987225 1.20159e-07 2.655e-08 -0.159333" />
+																			</attributes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+										<node _id="45">
+											<attributes>
+												<attribute name="Name" type="String" value="Bone03" />
+												<attribute name="Position" type="Vector3" value="-0.478537 -0.299221 1.19209e-06" />
+												<attribute name="Rotation" type="Quaternion" value="0.371515 9.76546e-07 -1.23261e-06 0.928427" />
+											</attributes>
+											<nodes>
+												<node _id="46">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone04" />
+														<attribute name="Position" type="Vector3" value="0.630615 -4.76837e-07 -5.78267e-08" />
+														<attribute name="Rotation" type="Quaternion" value="0.958866 -3.71616e-08 1.10012e-08 -0.283861" />
+													</attributes>
+													<nodes>
+														<node _id="47">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone05" />
+																<attribute name="Position" type="Vector3" value="0.535848 0 -3.14931e-08" />
+																<attribute name="Rotation" type="Quaternion" value="0.996496 2.37583e-07 1.99404e-08 0.083636" />
+															</attributes>
+															<nodes>
+																<node _id="48">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone06" />
+																		<attribute name="Position" type="Vector3" value="0.563817 -4.76837e-07 -2.5683e-08" />
+																		<attribute name="Rotation" type="Quaternion" value="0.964871 1.25307e-06 -6.4529e-08 0.262726" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+										<node _id="49">
+											<attributes>
+												<attribute name="Name" type="String" value="Bone08" />
+												<attribute name="Position" type="Vector3" value="-0.19416 -0.035424 -0.647999" />
+												<attribute name="Rotation" type="Quaternion" value="0.613661 -0.000842 0.254756 0.747341" />
+											</attributes>
+										</node>
+										<node _id="50">
+											<attributes>
+												<attribute name="Name" type="String" value="Bone09" />
+												<attribute name="Position" type="Vector3" value="-0.194158 -0.035427 0.648051" />
+												<attribute name="Rotation" type="Quaternion" value="-0.000845 0.613662 0.74734 0.254757" />
+											</attributes>
+										</node>
+									</nodes>
+								</node>
+							</nodes>
+						</node>
+						<node _id="51">
+							<attributes>
+								<attribute name="Name" type="String" value="Bone059" />
+								<attribute name="Position" type="Vector3" value="-7.30527e-08 0.144395 -2.837431" />
+								<attribute name="Rotation" type="Quaternion" value="5.59147e-07 0.707107 5.59147e-07 -0.707107" />
+							</attributes>
+							<nodes>
+								<node _id="52">
+									<attributes>
+										<attribute name="Name" type="String" value="biped" />
+										<attribute name="Position" type="Vector3" value="-0.983876 0.183614 1.83773e-07" />
+										<attribute name="Rotation" type="Quaternion" value="0.5 -0.5 -0.5 0.5" />
+									</attributes>
+									<nodes>
+										<node _id="53">
+											<attributes>
+												<attribute name="Name" type="String" value="biped Pelvis" />
+												<attribute name="Rotation" type="Quaternion" value="0.500001 0.5 0.5 -0.499999" />
+											</attributes>
+											<nodes>
+												<node _id="54">
+													<attributes>
+														<attribute name="Name" type="String" value="biped Spine" />
+														<attribute name="Position" type="Vector3" value="0.218865 -0.000319 -3.03964e-07" />
+														<attribute name="Rotation" type="Quaternion" value="1 2.08048e-06 6.93676e-07 0.000398" />
+													</attributes>
+													<nodes>
+														<node _id="55">
+															<attributes>
+																<attribute name="Name" type="String" value="biped Spine1" />
+																<attribute name="Position" type="Vector3" value="0.400267 -0.000385 1.06849e-09" />
+																<attribute name="Rotation" type="Quaternion" value="0.999235 -4.86747e-14 -1.08481e-07 -0.039112" />
+															</attributes>
+															<nodes>
+																<node _id="56">
+																	<attributes>
+																		<attribute name="Name" type="String" value="biped Neck" />
+																		<attribute name="Position" type="Vector3" value="0.564862 -0.064612 2.57226e-08" />
+																		<attribute name="Rotation" type="Quaternion" value="0.98616 1.38982e-14 4.59858e-07 0.165798" />
+																	</attributes>
+																	<nodes>
+																		<node _id="57">
+																			<attributes>
+																				<attribute name="Name" type="String" value="biped Head" />
+																				<attribute name="Position" type="Vector3" value="0.267041 0 -2.27374e-13" />
+																				<attribute name="Rotation" type="Quaternion" value="0.994384 2.09296e-13 -2.93526e-07 -0.105829" />
+																			</attributes>
+																			<nodes>
+																				<node _id="58">
+																					<attributes>
+																						<attribute name="Name" type="String" value="Bone14" />
+																						<attribute name="Position" type="Vector3" value="0.470941 -0.020058 -4.12761e-07" />
+																						<attribute name="Rotation" type="Quaternion" value="0.978387 7.58175e-07 -8.30753e-08 -0.206783" />
+																					</attributes>
+																					<nodes>
+																						<node _id="59">
+																							<attributes>
+																								<attribute name="Name" type="String" value="Bone060" />
+																								<attribute name="Position" type="Vector3" value="0.349012 1.19209e-07 -0" />
+																								<attribute name="Rotation" type="Quaternion" value="0.987687 0.012313 0.110332 -0.110229" />
+																							</attributes>
+																							<nodes>
+																								<node _id="60">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bone061" />
+																										<attribute name="Position" type="Vector3" value="0.410638 -2.38419e-07 -1.19209e-07" />
+																										<attribute name="Rotation" type="Quaternion" value="0.977395 0.015042 0.116607 -0.175717" />
+																									</attributes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+																<node _id="61">
+																	<attributes>
+																		<attribute name="Name" type="String" value="biped L Clavicle" />
+																		<attribute name="Position" type="Vector3" value="0.475986 -0.075393 -0.189745" />
+																		<attribute name="Rotation" type="Quaternion" value="0.000311 -0.621744 0.000249 0.78322" />
+																	</attributes>
+																	<nodes>
+																		<node _id="62">
+																			<attributes>
+																				<attribute name="Name" type="String" value="biped L UpperArm" />
+																				<attribute name="Position" type="Vector3" value="0.240163 -1.49012e-08 -2.38419e-07" />
+																				<attribute name="Rotation" type="Quaternion" value="0.970688 0.061053 -0.232455 -0.001229" />
+																			</attributes>
+																			<nodes>
+																				<node _id="63">
+																					<attributes>
+																						<attribute name="Name" type="String" value="biped L Forearm" />
+																						<attribute name="Position" type="Vector3" value="0.546641 -2.98023e-08 2.38419e-07" />
+																						<attribute name="Rotation" type="Quaternion" value="0.997648 2.12777e-08 -1.63983e-08 -0.068551" />
+																					</attributes>
+																					<nodes>
+																						<node _id="64">
+																							<attributes>
+																								<attribute name="Name" type="String" value="biped L Hand" />
+																								<attribute name="Position" type="Vector3" value="0.540036 0 2.38419e-07" />
+																								<attribute name="Rotation" type="Quaternion" value="0.769137 0.633546 -0.032711 0.077316" />
+																							</attributes>
+																							<nodes>
+																								<node _id="65">
+																									<attributes>
+																										<attribute name="Name" type="String" value="biped L Finger0" />
+																										<attribute name="Position" type="Vector3" value="0.047327 0.041936 0.077491" />
+																										<attribute name="Rotation" type="Quaternion" value="0.648197 -0.712222 -0.269254 0.009114" />
+																									</attributes>
+																									<nodes>
+																										<node _id="66">
+																											<attributes>
+																												<attribute name="Name" type="String" value="biped L Finger01" />
+																												<attribute name="Position" type="Vector3" value="0.123573 -8.9407e-08 -1.19209e-07" />
+																												<attribute name="Rotation" type="Quaternion" value="0.996809 0.001383 -0.017074 0.077962" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																								<node _id="67">
+																									<attributes>
+																										<attribute name="Name" type="String" value="biped L Finger1" />
+																										<attribute name="Position" type="Vector3" value="0.19172 -0.00289 0.004784" />
+																										<attribute name="Rotation" type="Quaternion" value="0.995095 0.091306 0.010219 0.03667" />
+																									</attributes>
+																									<nodes>
+																										<node _id="68">
+																											<attributes>
+																												<attribute name="Name" type="String" value="biped L Finger11" />
+																												<attribute name="Position" type="Vector3" value="0.090206 0 -5.96046e-08" />
+																												<attribute name="Rotation" type="Quaternion" value="0.997442 2.1182e-09 2.25608e-08 0.071474" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																		<node _id="69">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bone19" />
+																				<attribute name="Position" type="Vector3" value="0.072186 0.203473 -0.11498" />
+																				<attribute name="Rotation" type="Quaternion" value="0.792542 -0.179354 -0.576878 0.083191" />
+																			</attributes>
+																			<nodes>
+																				<node _id="70">
+																					<attributes>
+																						<attribute name="Name" type="String" value="Bone20" />
+																						<attribute name="Position" type="Vector3" value="0.687797 5.96046e-07 1.78814e-07" />
+																						<attribute name="Rotation" type="Quaternion" value="1 7.27363e-07 2.36555e-07 -1.40071e-06" />
+																					</attributes>
+																					<nodes>
+																						<node _id="71">
+																							<attributes>
+																								<attribute name="Name" type="String" value="Bone21" />
+																								<attribute name="Position" type="Vector3" value="0.651536 1.19209e-07 5.96046e-08" />
+																								<attribute name="Rotation" type="Quaternion" value="1 9.53681e-07 -9.40629e-07 7.25687e-06" />
+																							</attributes>
+																							<nodes>
+																								<node _id="72">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bone22" />
+																										<attribute name="Position" type="Vector3" value="0.646586 -2.38419e-07 -2.08616e-07" />
+																										<attribute name="Rotation" type="Quaternion" value="1 1.68384e-06 7.2083e-07 -7.86781e-06" />
+																									</attributes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+																<node _id="73">
+																	<attributes>
+																		<attribute name="Name" type="String" value="biped R Clavicle" />
+																		<attribute name="Position" type="Vector3" value="0.475986 -0.075392 0.189745" />
+																		<attribute name="Rotation" type="Quaternion" value="0.000313 0.621744 -0.000246 0.78322" />
+																	</attributes>
+																	<nodes>
+																		<node _id="74">
+																			<attributes>
+																				<attribute name="Name" type="String" value="biped R UpperArm" />
+																				<attribute name="Position" type="Vector3" value="0.240163 -1.49012e-08 -0" />
+																				<attribute name="Rotation" type="Quaternion" value="0.970688 -0.061053 0.232456 -0.001229" />
+																			</attributes>
+																			<nodes>
+																				<node _id="75">
+																					<attributes>
+																						<attribute name="Name" type="String" value="biped R Forearm" />
+																						<attribute name="Position" type="Vector3" value="0.546641 0 -0" />
+																						<attribute name="Rotation" type="Quaternion" value="0.997648 1.02148e-09 1.48661e-08 -0.068551" />
+																					</attributes>
+																					<nodes>
+																						<node _id="76">
+																							<attributes>
+																								<attribute name="Name" type="String" value="biped R Hand" />
+																								<attribute name="Position" type="Vector3" value="0.540036 -1.19209e-07 2.38419e-07" />
+																								<attribute name="Rotation" type="Quaternion" value="0.769137 -0.633546 0.032711 0.077316" />
+																							</attributes>
+																							<nodes>
+																								<node _id="77">
+																									<attributes>
+																										<attribute name="Name" type="String" value="biped R Finger0" />
+																										<attribute name="Position" type="Vector3" value="0.047327 0.041936 -0.077491" />
+																										<attribute name="Rotation" type="Quaternion" value="0.648197 0.712222 0.269254 0.009114" />
+																									</attributes>
+																									<nodes>
+																										<node _id="78">
+																											<attributes>
+																												<attribute name="Name" type="String" value="biped R Finger01" />
+																												<attribute name="Position" type="Vector3" value="0.123573 -2.98023e-08 1.19209e-07" />
+																												<attribute name="Rotation" type="Quaternion" value="0.996809 -0.001383 0.017074 0.077962" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																								<node _id="79">
+																									<attributes>
+																										<attribute name="Name" type="String" value="biped R Finger1" />
+																										<attribute name="Position" type="Vector3" value="0.191721 -0.00289 -0.004784" />
+																										<attribute name="Rotation" type="Quaternion" value="0.995095 -0.091306 -0.010219 0.03667" />
+																									</attributes>
+																									<nodes>
+																										<node _id="80">
+																											<attributes>
+																												<attribute name="Name" type="String" value="biped R Finger11" />
+																												<attribute name="Position" type="Vector3" value="0.090206 0 -0" />
+																												<attribute name="Rotation" type="Quaternion" value="0.997442 -1.11473e-08 -7.98782e-10 0.071474" />
+																											</attributes>
+																										</node>
+																									</nodes>
+																								</node>
+																								<node _id="81">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bone23" />
+																										<attribute name="Position" type="Vector3" value="0.069447 -0.951598 0.143176" />
+																										<attribute name="Rotation" type="Quaternion" value="0.361498 0.068794 -0.048763 -0.928552" />
+																									</attributes>
+																									<nodes>
+																										<node _id="82">
+																											<attributes>
+																												<attribute name="Name" type="String" value="Bone063" />
+																												<attribute name="Position" type="Vector3" value="1.804652 -0.073594 1.90735e-06" />
+																												<attribute name="Rotation" type="Quaternion" value="0.177171 -2.71189e-06 4.52106e-06 -0.98418" />
+																											</attributes>
+																											<nodes>
+																												<node _id="83">
+																													<attributes>
+																														<attribute name="Name" type="String" value="Bone064" />
+																														<attribute name="Position" type="Vector3" value="0.299704 -2.38419e-07 -1.42695e-08" />
+																														<attribute name="Rotation" type="Quaternion" value="0.995358 -8.36271e-08 -1.25292e-08 -0.096245" />
+																													</attributes>
+																												</node>
+																											</nodes>
+																										</node>
+																									</nodes>
+																								</node>
+																								<node _id="84">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bone062" />
+																										<attribute name="Position" type="Vector3" value="0.94254 -0.869537 0.284181" />
+																										<attribute name="Rotation" type="Quaternion" value="0.929186 -0.048641 -0.068883 0.359864" />
+																										<attribute name="Scale" type="Vector3" value="1 1.000001 1" />
+																									</attributes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																		<node _id="85">
+																			<attributes>
+																				<attribute name="Name" type="String" value="Bone29" />
+																				<attribute name="Position" type="Vector3" value="0.072055 0.203474 0.114949" />
+																				<attribute name="Rotation" type="Quaternion" value="0.179353 -0.792542 -0.083193 0.576878" />
+																			</attributes>
+																			<nodes>
+																				<node _id="86">
+																					<attributes>
+																						<attribute name="Name" type="String" value="Bone30" />
+																						<attribute name="Position" type="Vector3" value="0.687797 -7.15256e-07 3.27826e-07" />
+																						<attribute name="Rotation" type="Quaternion" value="1 4.82425e-07 -5.58851e-09 -1.19209e-06" />
+																					</attributes>
+																					<nodes>
+																						<node _id="87">
+																							<attributes>
+																								<attribute name="Name" type="String" value="Bone31" />
+																								<attribute name="Position" type="Vector3" value="0.651536 -3.57628e-07 -2.38419e-07" />
+																								<attribute name="Rotation" type="Quaternion" value="1 5.29922e-07 -1.86147e-09 2.22027e-06" />
+																							</attributes>
+																							<nodes>
+																								<node _id="88">
+																									<attributes>
+																										<attribute name="Name" type="String" value="Bone32" />
+																										<attribute name="Position" type="Vector3" value="0.646586 1.19209e-07 -5.96046e-08" />
+																										<attribute name="Rotation" type="Quaternion" value="1 3.33879e-06 0 0" />
+																									</attributes>
+																								</node>
+																							</nodes>
+																						</node>
+																					</nodes>
+																				</node>
+																			</nodes>
+																		</node>
+																	</nodes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="89">
+													<attributes>
+														<attribute name="Name" type="String" value="biped L Thigh" />
+														<attribute name="Position" type="Vector3" value="-3.57628e-07 4.28408e-07 -0.248623" />
+														<attribute name="Rotation" type="Quaternion" value="0.061521 -0.027388 0.99773 -0.000262" />
+													</attributes>
+													<nodes>
+														<node _id="90">
+															<attributes>
+																<attribute name="Name" type="String" value="biped L Calf" />
+																<attribute name="Position" type="Vector3" value="0.790864 -3.72529e-09 -0" />
+																<attribute name="Rotation" type="Quaternion" value="0.999278 9.30651e-10 -3.53718e-11 -0.03798" />
+															</attributes>
+															<nodes>
+																<node _id="91">
+																	<attributes>
+																		<attribute name="Name" type="String" value="biped L Foot" />
+																		<attribute name="Position" type="Vector3" value="0.877655 0 -0" />
+																		<attribute name="Rotation" type="Quaternion" value="0.994804 0.048247 0.064719 0.06204" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="92">
+													<attributes>
+														<attribute name="Name" type="String" value="biped R Thigh" />
+														<attribute name="Position" type="Vector3" value="3.57628e-07 -2.64496e-07 0.248623" />
+														<attribute name="Rotation" type="Quaternion" value="0.061523 0.027389 -0.99773 -0.000263" />
+													</attributes>
+													<nodes>
+														<node _id="93">
+															<attributes>
+																<attribute name="Name" type="String" value="biped R Calf" />
+																<attribute name="Position" type="Vector3" value="0.790864 3.72529e-09 -2.98023e-08" />
+																<attribute name="Rotation" type="Quaternion" value="0.999278 1.41487e-10 3.7226e-09 -0.03798" />
+															</attributes>
+															<nodes>
+																<node _id="94">
+																	<attributes>
+																		<attribute name="Name" type="String" value="biped R Foot" />
+																		<attribute name="Position" type="Vector3" value="0.877655 1.49012e-08 -0" />
+																		<attribute name="Rotation" type="Quaternion" value="0.994804 -0.048247 -0.064719 0.06204" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="95">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone33" />
+														<attribute name="Position" type="Vector3" value="0.205024 0.188381 0.260776" />
+														<attribute name="Rotation" type="Quaternion" value="0.116714 0.025693 -0.96246 0.243696" />
+													</attributes>
+													<nodes>
+														<node _id="96">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone34" />
+																<attribute name="Position" type="Vector3" value="0.470439 -5.96046e-08 -1.19209e-07" />
+																<attribute name="Rotation" type="Quaternion" value="1 3.14787e-07 3.72529e-08 4.84288e-08" />
+															</attributes>
+															<nodes>
+																<node _id="97">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone35" />
+																		<attribute name="Position" type="Vector3" value="0.465918 1.49012e-07 1.19209e-07" />
+																		<attribute name="Rotation" type="Quaternion" value="1 4.26918e-06 4.47037e-08 4.0978e-08" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="98">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone37" />
+														<attribute name="Position" type="Vector3" value="0.205866 0.312955 -0.004224" />
+														<attribute name="Rotation" type="Quaternion" value="0.022959 -0.022958 -0.706735 0.706733" />
+													</attributes>
+													<nodes>
+														<node _id="99">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone38" />
+																<attribute name="Position" type="Vector3" value="0.47182 1.49012e-08 2.98023e-08" />
+																<attribute name="Rotation" type="Quaternion" value="1 1.87584e-06 1.63991e-13 8.74228e-08" />
+															</attributes>
+															<nodes>
+																<node _id="100">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone39" />
+																		<attribute name="Position" type="Vector3" value="0.47172 -2.4261e-07 5.96046e-08" />
+																		<attribute name="Rotation" type="Quaternion" value="1 2.91884e-05 -2.98188e-08 -5.64259e-07" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="101">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone40" />
+														<attribute name="Position" type="Vector3" value="0.205023 0.188382 -0.260481" />
+														<attribute name="Rotation" type="Quaternion" value="-0.025693 -0.116712 -0.243699 0.96246" />
+													</attributes>
+													<nodes>
+														<node _id="102">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone41" />
+																<attribute name="Position" type="Vector3" value="0.466716 0 -1.19209e-07" />
+																<attribute name="Rotation" type="Quaternion" value="1 2.14112e-06 2.37673e-06 -3.72157e-06" />
+															</attributes>
+															<nodes>
+																<node _id="103">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone42" />
+																		<attribute name="Position" type="Vector3" value="0.46592 -2.23517e-07 -2.38419e-07" />
+																		<attribute name="Rotation" type="Quaternion" value="1 4.19552e-05 -4.90219e-06 7.06336e-06" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="104">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone44" />
+														<attribute name="Position" type="Vector3" value="0.195634 -0.214844 -0.248234" />
+														<attribute name="Rotation" type="Quaternion" value="0.028087 0.135579 -0.392226 -0.909389" />
+													</attributes>
+													<nodes>
+														<node _id="105">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone45" />
+																<attribute name="Position" type="Vector3" value="0.493571 4.47035e-08 1.78814e-07" />
+																<attribute name="Rotation" type="Quaternion" value="1 2.26637e-06 2.60771e-06 1.52178e-06" />
+															</attributes>
+															<nodes>
+																<node _id="106">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone46" />
+																		<attribute name="Position" type="Vector3" value="0.487127 -2.68221e-07 5.96046e-08" />
+																		<attribute name="Rotation" type="Quaternion" value="1 1.0319e-06 -1.69873e-06 -1.27591e-06" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="107">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone48" />
+														<attribute name="Position" type="Vector3" value="0.221829 -0.306528 -0.000558" />
+														<attribute name="Rotation" type="Quaternion" value="0.067301 0.066775 -0.714635 -0.693043" />
+													</attributes>
+													<nodes>
+														<node _id="108">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone49" />
+																<attribute name="Position" type="Vector3" value="0.488864 2.51457e-08 5.96046e-08" />
+																<attribute name="Rotation" type="Quaternion" value="1 1.6701e-06 4.77582e-06 -6.28069e-07" />
+															</attributes>
+															<nodes>
+																<node _id="109">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone50" />
+																		<attribute name="Position" type="Vector3" value="0.484632 -2.5332e-07 -1.19209e-07" />
+																		<attribute name="Rotation" type="Quaternion" value="1 6.5792e-06 -4.72366e-06 8.66394e-07" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+												<node _id="110">
+													<attributes>
+														<attribute name="Name" type="String" value="Bone52" />
+														<attribute name="Position" type="Vector3" value="0.195634 -0.214845 0.248358" />
+														<attribute name="Rotation" type="Quaternion" value="0.135581 0.028087 -0.909387 -0.392229" />
+													</attributes>
+													<nodes>
+														<node _id="111">
+															<attributes>
+																<attribute name="Name" type="String" value="Bone53" />
+																<attribute name="Position" type="Vector3" value="0.493571 1.49012e-08 5.96046e-08" />
+																<attribute name="Rotation" type="Quaternion" value="1 1.78721e-06 9.68575e-07 -2.32832e-07" />
+															</attributes>
+															<nodes>
+																<node _id="112">
+																	<attributes>
+																		<attribute name="Name" type="String" value="Bone54" />
+																		<attribute name="Position" type="Vector3" value="0.487128 1.78814e-07 -5.96046e-08" />
+																		<attribute name="Rotation" type="Quaternion" value="1 7.03335e-06 -1.80303e-06 1.12133e-06" />
+																	</attributes>
+																</node>
+															</nodes>
+														</node>
+													</nodes>
+												</node>
+											</nodes>
+										</node>
+									</nodes>
+								</node>
+							</nodes>
+						</node>
+					</nodes>
+				</node>
+			</nodes>
 		</node>
 	</nodes>
 	<auxiliary />

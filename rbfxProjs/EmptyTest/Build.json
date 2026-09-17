@@ -1,10 +1,9 @@
 {
-	"Profiles": [
+	"Platforms": [
 		{
 			"Android": {},
 			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
-			"EngineBuild": "Incremental",
-			"EngineData": "D:/openSrc/rbfx/bin",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
 			"Name": "Windows",
 			"OutputDir": "Build/Windows",
 			"Platform": "WindowsDesktop",
@@ -20,8 +19,8 @@
 			"Android": {
 				"ApplicationId": "com.example.emptytest"
 			},
-			"EngineBin": "D:/GameEngines/rbfx/msvc/bin/Debug",
-			"EngineData": "D:/GameEngines/rbfx/bin",
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
 			"Name": "Android",
 			"OutputDir": "Build/Android",
 			"Platform": "Android",
@@ -29,15 +28,13 @@
 				"ColorFormatAlpha": "ETC2_RGBA",
 				"ColorFormatNoAlpha": "ETC2_RGB",
 				"Container": "ktx",
-				"Enabled": true,
 				"NormalFormat": "ETC2_RGBA"
 			}
 		},
 		{
 			"Android": {},
-			"EngineBin": "D:/openSrc/rbfx/web/bin/Release",
-			"EngineBuild": "Incremental",
-			"EngineData": "D:/openSrc/rbfx/bin",
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
 			"Name": "Web",
 			"OutputDir": "Build/Web",
 			"Platform": "Web",
@@ -45,10 +42,8 @@
 				"ColorFormatAlpha": "ETC2_RGBA",
 				"ColorFormatNoAlpha": "ETC2_RGB",
 				"Container": "ktx",
-				"Enabled": true,
 				"NormalFormat": "ETC2_RGBA"
-			},
-			"WebEmsdkRoot": "D:/openSrc/emsdk"
+			}
 		}
 	]
 }
