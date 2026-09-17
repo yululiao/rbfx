@@ -230,7 +230,7 @@ Project::Project(
     settingsManager_->LoadFile(settingsJsonPath_);
     assetManager_->LoadFile(cacheJsonPath_);
 
-    // Build profiles live in a file of their own, so that adding one cannot break the schema that
+    // Build platforms live in a file of their own, so that adding one cannot break the schema that
     // already lives in Project.json. The engine data directory is the parent of the CoreData mount
     // the editor was constructed with: that mount is the tree these very binaries read their own
     // resources from, which makes it the only answer that cannot disagree with the running engine.

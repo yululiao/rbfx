@@ -66,7 +66,7 @@ enum class TextureImportColorSpace
 /// levels at runtime, never regenerate them, so mip generation is a cook-time decision by nature.
 enum class TextureImportMipmapMode
 {
-    /// Follow the build profile setting (TextureCompressionSettings::mipmaps_).
+    /// Follow the build platform setting (TextureCompressionSettings::mipmaps_).
     Inherit = 0,
     /// Always bake a full mip chain.
     Enabled,
@@ -92,7 +92,7 @@ struct TextureImporterParams
     TextureImportType textureType_{TextureImportType::Default};
     /// Color space of the content. Normal maps are always Linear; ordinary textures default to SRGB.
     TextureImportColorSpace colorSpace_{TextureImportColorSpace::SRGB};
-    /// Mip chain baking. Inherit keeps the build profile in charge.
+    /// Mip chain baking. Inherit keeps the build platform in charge.
     TextureImportMipmapMode mipmapMode_{TextureImportMipmapMode::Inherit};
 
     /// Sampler overrides. Absent values keep the engine defaults.

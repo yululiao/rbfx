@@ -105,10 +105,10 @@ protected:
     ea::string command_;
     /// Whether to exit the editor after executing the command.
     bool exitAfterCommand_{};
-    /// Profile named by --build. Non empty turns the run into a batch build: the process owns its
+    /// Platform named by --build. Non empty turns the run into a batch build: the process owns its
     /// own lifetime from then on and closes itself with the result of the build as exit code.
-    ea::string buildProfile_;
-    /// Directory named by --build-output-override, replacing the output directory of the profile.
+    ea::string buildPlatform_;
+    /// Directory named by --build-output-override, replacing the output directory of the platform.
     ea::string buildOutputOverride_;
 
     /// UI state

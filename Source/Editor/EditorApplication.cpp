@@ -207,11 +207,11 @@ void EditorApplication::Setup()
     cmd.add_option("--command", command_, "Command to execute on startup.")->type_name("command");
     cmd.add_flag("--exit", exitAfterCommand_, "Forces Editor to exit after command execution.");
     cmd.add_option("project", pendingOpenProject_, "Project to open or create on startup.")->type_name("dir");
-    cmd.add_option("--build", buildProfile_,
-        "Build the named profile of the project and exit with its result as exit code. "
-        "Intended for batch use, combine with --headless.")->type_name("profile");
+    cmd.add_option("--build", buildPlatform_,
+        "Build the named platform of the project and exit with its result as exit code. "
+        "Intended for batch use, combine with --headless.")->type_name("platform");
     cmd.add_option("--build-output-override", buildOutputOverride_,
-        "Directory the build writes into instead of the output directory of the profile.")->type_name("dir");
+        "Directory the build writes into instead of the output directory of the platform.")->type_name("dir");
 
     engineParameters_[EP_WINDOW_TITLE] = GetTypeName();
     engineParameters_[EP_APPLICATION_NAME] = GetWindowTitle();
@@ -321,10 +321,10 @@ void EditorApplication::Start()
     {
         command_.clear(); // Execute commands only if the project is opened too.
 
-        if (!buildProfile_.empty())
+        if (!buildPlatform_.empty())
         {
             URHO3D_LOGERROR("Option --build needs a project to build, and none was given");
-            buildProfile_.clear();
+            buildPlatform_.clear();
             buildOutputOverride_.clear();
             // A failing code here makes Run() return right after Start() instead of entering the main
             // loop, so a batch caller is handed its answer rather than a window to close.
@@ -772,7 +772,7 @@ void EditorApplication::UpdateProjectStatus()
 
         // A batch build owns the rest of the run, because it ends the process when it reports back.
         // Starting a command on top of that would only queue work the exit then cuts short.
-        if (!buildProfile_.empty())
+        if (!buildPlatform_.empty())
         {
             if (!command_.empty())
                 URHO3D_LOGWARNING("Ignoring --command: --build keeps the process until the build finishes");
@@ -790,14 +790,14 @@ void EditorApplication::UpdateProjectStatus()
 
 void EditorApplication::StartCommandLineBuild()
 {
-    const ea::string profile = buildProfile_;
+    const ea::string platform = buildPlatform_;
     const ea::string outputOverride = buildOutputOverride_;
-    buildProfile_.clear();
+    buildPlatform_.clear();
     buildOutputOverride_.clear();
 
     // The handler only decides how the process ends. What a build did is already in the log by the
     // time it runs, because BuildSystem reports every failed stage and its reason itself.
-    if (!project_->GetBuildSystem()->BuildNow(profile, outputOverride,
+    if (!project_->GetBuildSystem()->BuildNow(platform, outputOverride,
         [this](bool success, const ea::string&, const ea::string&)
         {
             if (!success)

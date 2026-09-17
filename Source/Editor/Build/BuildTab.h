@@ -11,17 +11,17 @@
 namespace Urho3D
 {
 
-class BuildProfile;
+class BuildPlatformData;
 class BuildSettings;
 class Project;
 
 void Build_BuildTab(Context* context, Project* project);
 
-/// Tab that edits the build profiles of a project and drives the build pipeline.
+/// Tab that edits the build platforms of a project and drives the build pipeline.
 ///
-/// Nothing here decides what a build does: what a profile means lives in BuildSettings, and how a
-/// profile becomes a package lives in BuildSystem. This file only draws, and the one piece of state
-/// it owns is which profile is being looked at.
+/// Nothing here decides what a build does: what a platform means lives in BuildSettings, and how a
+/// platform becomes a package lives in BuildSystem. This file only draws, and the one piece of state
+/// it owns is which platform is being looked at.
 class BuildTab : public EditorTab
 {
     URHO3D_OBJECT(BuildTab, EditorTab)
@@ -37,27 +37,29 @@ public:
     /// @}
 
 private:
-    /// The profile the persisted name points at, or the first one when it points at nothing.
-    BuildProfile* ResolveProfile(BuildSettings* settings);
+    /// The build platform the persisted platform selection points at, or the first one when it
+    /// points at nothing.
+    BuildPlatformData* ResolvePlatform(BuildSettings* settings);
     /// Switches, names and engine paths that describe the produced package.
-    void RenderPackageOptions(BuildProfile& profile);
+    void RenderPackageOptions(BuildPlatformData& platform);
     /// Per-platform texture compression parameters: PVRTexTool formats, container and quality.
-    void RenderTextureCompressionOptions(BuildProfile& profile);
-    /// The part of a profile only the Android scaffold generator reads.
-    void RenderAndroidOptions(BuildProfile& profile);
-    /// The part of a profile only the web package assembler reads.
-    void RenderWebOptions(BuildProfile& profile);
+    void RenderTextureCompressionOptions(BuildPlatformData& platform);
+    /// The part of a platform only the Android scaffold generator reads.
+    void RenderAndroidOptions(BuildPlatformData& platform);
+    /// The part of a platform only the web package assembler reads.
+    void RenderWebOptions(BuildPlatformData& platform);
     /// Progress of a build in flight, or the reason the last one did not succeed.
-    void RenderStatus(BuildProfile* profile, BuildSettings* settings, Project* project);
-    /// Remember that a widget changed the profile, so Build.json is rewritten once this frame.
+    void RenderStatus(BuildPlatformData* platform, BuildSettings* settings, Project* project);
+    /// Remember that a widget changed the platform, so Build.json is rewritten once this frame.
     void Touch(bool widgetChanged);
 
-    /// Why the selected profile cannot be built, refreshed on a cadence in RenderStatus.
+    /// Why the selected platform cannot be built, refreshed on a cadence in RenderStatus.
     ea::vector<ea::string> validationErrors_;
-    /// Frames left until the selected profile is validated again.
+    /// Frames left until the selected platform is validated again.
     unsigned validationCountdown_{};
-    /// Name, not pointer: the profile vector is edited through this tab and reallocates.
-    ea::string selectedProfile_;
+    /// Name of the selected platform's platform. A name, not a pointer: the platform vector is
+    /// edited through this tab and reallocates.
+    ea::string selectedPlatform_;
     /// Set by any widget that changed a value, cleared once the file has been written.
     bool dirty_{};
 };

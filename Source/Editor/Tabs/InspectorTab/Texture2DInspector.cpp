@@ -236,7 +236,7 @@ void Texture2DInspector::RenderExtraInspectorContent()
         }
         if (ui::IsItemHovered())
             ui::SetTooltip("Mipmaps are baked into the cooked file; the runtime can only drop them,\n"
-                           "never regenerate them. 'Inherit' follows the build profile setting.");
+                           "never regenerate them. 'Inherit' follows the build platform setting.");
     }
 
     // Sampler overrides. 'Default' leaves the engine default in place.

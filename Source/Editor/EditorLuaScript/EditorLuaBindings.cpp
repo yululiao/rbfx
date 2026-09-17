@@ -230,7 +230,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Build pipeline. The editor keeps all of its state, so a plugin never holds a piece of a
     // running build: it asks what can be built, asks for a build, and looks at the status.
-    editor.set_function("buildProfiles", [context](sol::this_state s) -> sol::object
+    editor.set_function("buildPlatforms", [context](sol::this_state s) -> sol::object
     {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
@@ -238,7 +238,7 @@ void RegisterEditorLuaAPI(Context* context)
         auto* settings = project ? project->GetBuildSettings() : nullptr;
         if (settings)
         {
-            const ea::vector<ea::string> names = settings->GetProfileNames();
+            const ea::vector<ea::string> names = settings->GetPlatformNames();
             for (size_t i = 0; i < names.size(); ++i)
                 result[static_cast<int>(i) + 1] = std::string(names[i].c_str());
         }
@@ -248,9 +248,9 @@ void RegisterEditorLuaAPI(Context* context)
     // Starting a build is asynchronous: the call answers whether it was accepted, and the outcome
     // arrives later either through the optional callback (as the same EventData table the
     // "buildFinished" event carries) or through that event alone. A plugin that builds several
-    // profiles in sequence chains them from the callback, which is why the callback is one-shot.
+    // platforms in sequence chains them from the callback, which is why the callback is one-shot.
     editor.set_function("build",
-        [context, editorLua](const std::string& profile,
+        [context, editorLua](const std::string& platform,
             sol::optional<sol::protected_function> callback) -> bool
         {
             if (callback && !callback->valid())
@@ -266,13 +266,13 @@ void RegisterEditorLuaAPI(Context* context)
                 return false;
             }
 
-            const ea::string profileName = ea::string(profile.c_str());
+            const ea::string platformName = ea::string(platform.c_str());
             const unsigned long long handle =
                 callback ? editorLua->RegisterCallback(std::move(*callback)) : 0ull;
             // The reason a refused build is not reported here is that BuildNow already logged it:
-            // a missing profile names the profiles that do exist, and a running build says which.
-            if (!build->BuildNow(profileName, EMPTY_STRING,
-                [context, handle, profileName](bool success, const ea::string& message, const ea::string& outputDir)
+            // a missing platform names the platforms that do exist, and a running build says which.
+            if (!build->BuildNow(platformName, EMPTY_STRING,
+                [context, handle, platformName](bool success, const ea::string& message, const ea::string& outputDir)
                 {
                     auto* lua = context->GetSubsystem<EditorLuaVMHost>();
                     if (!lua || handle == 0ull)
@@ -281,7 +281,7 @@ void RegisterEditorLuaAPI(Context* context)
                     // build runs before the build is torn down and gets the same values.
                     VariantMap eventData;
                     eventData["Success"] = success;
-                    eventData["Profile"] = profileName;
+                    eventData["Platform"] = platformName;
                     eventData["Message"] = success ? EMPTY_STRING : message;
                     eventData["OutputDir"] = outputDir;
                     lua->InvokeOneShotCallback(handle, eventData);
@@ -304,7 +304,7 @@ void RegisterEditorLuaAPI(Context* context)
         result["building"] = build && build->IsBuilding();
         result["progress"] = build ? build->GetProgress() : 0.0f;
         result["stage"] = std::string(build ? build->GetStageName().c_str() : "");
-        result["profile"] = std::string(build ? build->GetProfileName().c_str() : "");
+        result["platform"] = std::string(build ? build->GetPlatformName().c_str() : "");
         result["outputDir"] = std::string(build ? build->GetOutputDir().c_str() : "");
 
         sol::table errors = lua.create_table();

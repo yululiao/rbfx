@@ -25,8 +25,8 @@ namespace Urho3D
 namespace
 {
 
-/// ui.ini key of the profile this tab last showed.
-const char* const SettingsKeyProfile = "SelectedProfile";
+/// ui.ini key of the platform this tab last showed.
+const char* const SettingsKeyPlatform = "SelectedPlatform";
 
 /// The ABIs an Android build can target. A closed list on purpose, matching the one
 /// BuildSettings::Validate accepts: a free text field here can produce an abiFilters entry that
@@ -97,10 +97,10 @@ void BuildTab::RenderContent()
     if (!settings || !build)
         return;
 
-    BuildProfile* profile = ResolveProfile(settings);
-    if (!profile)
+    BuildPlatformData* platform = ResolvePlatform(settings);
+    if (!platform)
     {
-        ui::TextWrapped("This project has no build profiles. Add one to '%s' and reopen this tab.",
+        ui::TextWrapped("This project has no build platforms. Add one to '%s' and reopen this tab.",
             settings->GetFilePath().c_str());
         return;
     }
@@ -108,38 +108,37 @@ void BuildTab::RenderContent()
     ui::Text("Build a self contained, runnable copy of the game. Everything below is stored in '%s'.",
         settings->GetFilePath().c_str());
 
-    if (ui::BeginCombo("Profile", profile->name_.c_str()))
+    if (ui::BeginCombo("Platform", platform->name_.c_str()))
     {
-        for (const BuildProfile& candidate : settings->GetProfiles())
+        for (const BuildPlatformData& candidate : settings->GetPlatforms())
         {
-            if (ui::Selectable(candidate.name_.c_str(), candidate.name_ == profile->name_))
+            if (ui::Selectable(candidate.name_.c_str(), candidate.name_ == platform->name_))
             {
-                selectedProfile_ = candidate.name_;
+                selectedPlatform_ = candidate.name_;
                 validationCountdown_ = 0;
             }
         }
         ui::EndCombo();
     }
 
-    const ea::string outputDir = profile->ResolveOutputDir(project->GetProjectPath());
-    ui::Text("Platform: %s", profile->platform_.empty() ? "(not set)" : profile->platform_.c_str());
+    const ea::string outputDir = platform->ResolveOutputDir(project->GetProjectPath());
     ui::Text("Output: %s", outputDir.c_str());
 
-    // A build in flight reads the profile from memory, and a read only project must not gain files
+    // A build in flight reads the platform from memory, and a read only project must not gain files
     // from being looked at; both lock the same widgets.
     const bool readOnly = project->GetFlags().Test(ProjectFlag::ReadOnly);
     auto* fs = GetSubsystem<FileSystem>();
 
     {
         const bool building = build->IsBuilding();
-        const ea::string executable = outputDir + profile->executableName_ + GetExecutableSuffix();
+        const ea::string executable = outputDir + platform->executableName_ + GetExecutableSuffix();
 
         ui::BeginDisabled(building || readOnly);
         if (ui::Button(ICON_FA_HAMMER " Build"))
         {
-            // False only when no profile of that name exists or a build is already running, neither
+            // False only when no platform of that name exists or a build is already running, neither
             // of which this button can reach; the reason is in the log if it ever happens.
-            build->BuildNow(profile->name_);
+            build->BuildNow(platform->name_);
         }
         ui::EndDisabled();
 
@@ -158,10 +157,10 @@ void BuildTab::RenderContent()
             fs->SystemOpen(outputDir);
         ui::EndDisabled();
 
-        if (!profile->IsAndroid())
+        if (!platform->IsAndroid())
         {
             ui::SameLine();
-            if (profile->IsWeb())
+            if (platform->IsWeb())
             {
                 // A page is not something to launch but to serve: the script starts a local server
                 // and opens the browser as soon as it is listening.
@@ -189,20 +188,20 @@ void BuildTab::RenderContent()
     ui::Separator();
 
     ui::BeginDisabled(build->IsBuilding() || readOnly);
-    RenderPackageOptions(*profile);
-    RenderTextureCompressionOptions(*profile);
-    if (profile->IsAndroid())
-        RenderAndroidOptions(*profile);
-    if (profile->IsWeb())
-        RenderWebOptions(*profile);
+    RenderPackageOptions(*platform);
+    RenderTextureCompressionOptions(*platform);
+    if (platform->IsAndroid())
+        RenderAndroidOptions(*platform);
+    if (platform->IsWeb())
+        RenderWebOptions(*platform);
     ui::EndDisabled();
 
-    RenderStatus(profile, settings, project);
+    RenderStatus(platform, settings, project);
 
     if (dirty_)
     {
         // Written on every change rather than when the tab closes: `Editor --build` reads the same
-        // file, and a profile that only exists in the memory of the editor is a build that quietly
+        // file, and a platform that only exists in the memory of the editor is a build that quietly
         // ignores what was just configured.
         if (!settings->SaveFile(settings->GetFilePath()))
             ui::TextWrapped(ICON_FA_TRIANGLE_EXCLAMATION " Could not write '%s'; the changes above "
@@ -212,77 +211,77 @@ void BuildTab::RenderContent()
     }
 }
 
-BuildProfile* BuildTab::ResolveProfile(BuildSettings* settings)
+BuildPlatformData* BuildTab::ResolvePlatform(BuildSettings* settings)
 {
-    BuildProfile* profile = settings->FindProfileMutable(selectedProfile_);
-    if (profile)
-        return profile;
+    BuildPlatformData* platform = settings->FindPlatformMutable(selectedPlatform_);
+    if (platform)
+        return platform;
 
-    // The persisted name is allowed to be stale, because profiles are renamed or trimmed in the file
-    // between sessions. Falling back to the first profile beats drawing nothing; the choice is kept
+    // The persisted name is allowed to be stale, because platforms are renamed or trimmed in the file
+    // between sessions. Falling back to the first platform beats drawing nothing; the choice is kept
     // for this session only, so a name that came back later is honoured again.
-    auto& profiles = settings->GetMutableProfiles();
-    if (profiles.empty())
+    auto& platforms = settings->GetMutablePlatforms();
+    if (platforms.empty())
         return nullptr;
-    profile = &profiles.front();
-    selectedProfile_ = profile->name_;
-    return profile;
+    platform = &platforms.front();
+    selectedPlatform_ = platform->name_;
+    return platform;
 }
 
-void BuildTab::RenderPackageOptions(BuildProfile& profile)
+void BuildTab::RenderPackageOptions(BuildPlatformData& platform)
 {
-    Touch(ui::InputText("Executable name", &profile.executableName_));
+    Touch(ui::InputText("Executable name", &platform.executableName_));
     if (ui::IsItemHovered())
         ui::SetTooltip("File name of the shipped game, without the platform suffix");
 
-    Touch(PathField("Output directory", profile.outputDir_, PathFieldKind::Directory, nullptr,
+    Touch(PathField("Output directory", platform.outputDir_, PathFieldKind::Directory, nullptr,
         "Absolute, or relative to the project folder. It is emptied at the start of "
             "every build, so point it at a directory the build owns"));
 
-    Touch(ui::Checkbox("Pack resources into .pak files", &profile.packData_));
+    Touch(ui::Checkbox("Pack resources into .pak files", &platform.packData_));
     ui::Indent();
-    ui::BeginDisabled(!profile.packData_);
-    Touch(ui::Checkbox("Compress packages", &profile.compressPackages_));
+    ui::BeginDisabled(!platform.packData_);
+    Touch(ui::Checkbox("Compress packages", &platform.compressPackages_));
     ui::EndDisabled();
     ui::Unindent();
 
-    Touch(ui::Checkbox("Encrypt Lua scripts", &profile.encryptScripts_));
+    Touch(ui::Checkbox("Encrypt Lua scripts", &platform.encryptScripts_));
     ui::Indent();
-    ui::BeginDisabled(!profile.encryptScripts_);
-    Touch(ui::InputText("Script key environment variable", &profile.scriptKeyEnvVar_));
+    ui::BeginDisabled(!platform.encryptScripts_);
+    Touch(ui::InputText("Script key environment variable", &platform.scriptKeyEnvVar_));
     if (ui::IsItemHovered())
         ui::SetTooltip("Named, never stored: the 64 hex character key is read from the environment "
             "at build time, and the runtime reads the same variable");
-    RenderEnvironmentStatus(profile.scriptKeyEnvVar_);
+    RenderEnvironmentStatus(platform.scriptKeyEnvVar_);
     ui::EndDisabled();
     ui::Unindent();
 
-    Touch(ui::Checkbox("Include engine Data/ files", &profile.includeEngineData_));
+    Touch(ui::Checkbox("Include engine Data/ files", &platform.includeEngineData_));
     if (ui::IsItemHovered())
         ui::SetTooltip("Project files win on name clashes, so turning this off only shrinks the "
             "package if the project already carries everything it needs");
 
-    Touch(ui::Checkbox("Run the game when the build finishes", &profile.autoRunAfterBuild_));
+    Touch(ui::Checkbox("Run the game when the build finishes", &platform.autoRunAfterBuild_));
 
     ui::Separator();
-    Touch(PathField("Engine binaries", profile.engineBin_, PathFieldKind::Directory));
-    Touch(PathField("Engine data", profile.engineData_, PathFieldKind::Directory));
+    Touch(PathField("Engine binaries", platform.engineBin_, PathFieldKind::Directory));
+    Touch(PathField("Engine data", platform.engineData_, PathFieldKind::Directory));
     ui::TextWrapped("Both point at an engine you built yourself. A missing host file is reported "
         "together with the command that produces it, or compiled by the build itself when 'Compile "
         "engine host' below is on.");
 
     // Android hides the selector rather than disabling it: its gradle project compiles the engine
     // on its own, so the choice would be dead weight on screen.
-    if (!profile.IsAndroid())
+    if (!platform.IsAndroid())
     {
-        const int current = static_cast<int>(profile.engineBuild_);
+        const int current = static_cast<int>(platform.engineBuild_);
         if (ui::BeginCombo("Compile engine host", EngineBuildLabels[current]))
         {
             for (int i = 0; i < static_cast<int>(NumEngineBuildLabels); ++i)
             {
                 if (ui::Selectable(EngineBuildLabels[i], i == current))
                 {
-                    profile.engineBuild_ = static_cast<EngineBuildMode>(i);
+                    platform.engineBuild_ = static_cast<EngineBuildMode>(i);
                     Touch(true);
                 }
             }
@@ -295,9 +294,9 @@ void BuildTab::RenderPackageOptions(BuildProfile& profile)
     }
 }
 
-void BuildTab::RenderAndroidOptions(BuildProfile& profile)
+void BuildTab::RenderAndroidOptions(BuildPlatformData& platform)
 {
-    AndroidBuildSettings& android = profile.android_;
+    AndroidBuildSettings& android = platform.android_;
 
     if (!ui::CollapsingHeader(ICON_FA_MOBILE_SCREEN_BUTTON " Android", ImGuiTreeNodeFlags_DefaultOpen))
         return;
@@ -341,20 +340,20 @@ void BuildTab::RenderAndroidOptions(BuildProfile& profile)
         "names.");
 }
 
-void BuildTab::RenderWebOptions(BuildProfile& profile)
+void BuildTab::RenderWebOptions(BuildPlatformData& platform)
 {
     if (!ui::CollapsingHeader(ICON_FA_GLOBE " Web", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
-    Touch(PathField("Emsdk root", profile.webEmsdkRoot_, PathFieldKind::Directory, nullptr,
+    Touch(PathField("Emsdk root", platform.webEmsdkRoot_, PathFieldKind::Directory, nullptr,
         "Your emsdk directory, where the build finds file_packager.py. Empty tries "
             "the emsdk environment variables first and then the CMake cache of the web engine "
             "build"));
 }
 
-void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)
+void BuildTab::RenderTextureCompressionOptions(BuildPlatformData& platform)
 {
-    TextureCompressionSettings& tc = profile.textureCompression_;
+    TextureCompressionSettings& tc = platform.textureCompression_;
 
     if (!ui::CollapsingHeader(ICON_FA_IMAGE " Texture compression", ImGuiTreeNodeFlags_DefaultOpen))
         return;
@@ -369,9 +368,9 @@ void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)
 
     // An empty format means "use the platform default", which is not obvious to edit. Resolving it
     // into the fields keeps the widgets honest; the build resolves the same defaults anyway, so a
-    // profile that never touched these fields still compresses with the right format.
+    // platform that never touched these fields still compresses with the right format.
     if (tc.enabled_)
-        tc = profile.GetEffectiveTextureCompression();
+        tc = platform.GetEffectiveTextureCompression();
 
     Touch(ui::InputText("Color format (no alpha)", &tc.colorFormatNoAlpha_));
     if (ui::IsItemHovered())
@@ -400,7 +399,7 @@ void BuildTab::RenderTextureCompressionOptions(BuildProfile& profile)
     ui::Unindent();
 }
 
-void BuildTab::RenderStatus(BuildProfile* profile, BuildSettings* settings, Project* project)
+void BuildTab::RenderStatus(BuildPlatformData* platform, BuildSettings* settings, Project* project)
 {
     auto* build = project->GetBuildSystem();
     ui::Separator();
@@ -410,14 +409,14 @@ void BuildTab::RenderStatus(BuildProfile* profile, BuildSettings* settings, Proj
     if (validationCountdown_ == 0)
     {
         validationCountdown_ = 8;
-        settings->Validate(*profile, validationErrors_);
+        settings->Validate(*platform, validationErrors_);
     }
     else
         --validationCountdown_;
 
     if (build->IsBuilding())
     {
-        const ea::string overlay = Format("{}: {}", build->GetStageName(), build->GetProfileName());
+        const ea::string overlay = Format("{}: {}", build->GetStageName(), build->GetPlatformName());
         ui::ProgressBar(build->GetProgress(), ImVec2{ 200.0f, 0.0f }, overlay.c_str());
         ui::TextWrapped("The build runs between frames, so this window stays usable; every stage is "
             "written to the Console tab under the [Build] prefix.");
@@ -428,19 +427,19 @@ void BuildTab::RenderStatus(BuildProfile* profile, BuildSettings* settings, Proj
     if (!errors.empty())
     {
         ui::Text(ICON_FA_TRIANGLE_EXCLAMATION " The last build of '%s' failed:",
-            build->GetProfileName().c_str());
+            build->GetPlatformName().c_str());
         for (const ea::string& error : errors)
             ui::TextWrapped("- %s", error.c_str());
     }
-    else if (!build->GetProfileName().empty())
+    else if (!build->GetPlatformName().empty())
     {
         ui::Text(ICON_FA_CIRCLE_CHECK " Last build of '%s' finished into %s",
-            build->GetProfileName().c_str(), build->GetOutputDir().c_str());
+            build->GetPlatformName().c_str(), build->GetOutputDir().c_str());
     }
 
     if (!validationErrors_.empty())
     {
-        ui::Text(ICON_FA_TRIANGLE_EXCLAMATION " '%s' cannot be built yet:", profile->name_.c_str());
+        ui::Text(ICON_FA_TRIANGLE_EXCLAMATION " '%s' cannot be built yet:", platform->name_.c_str());
         for (const ea::string& error : validationErrors_)
             ui::TextWrapped("- %s", error.c_str());
     }
@@ -455,14 +454,14 @@ void BuildTab::Touch(bool widgetChanged)
 void BuildTab::WriteIniSettings(ImGuiTextBuffer& output)
 {
     BaseClassName::WriteIniSettings(output);
-    WriteStringToIni(output, SettingsKeyProfile, selectedProfile_);
+    WriteStringToIni(output, SettingsKeyPlatform, selectedPlatform_);
 }
 
 void BuildTab::ReadIniSettings(const char* line)
 {
     BaseClassName::ReadIniSettings(line);
-    if (const auto value = ReadStringFromIni(line, SettingsKeyProfile))
-        selectedProfile_ = *value;
+    if (const auto value = ReadStringFromIni(line, SettingsKeyPlatform))
+        selectedPlatform_ = *value;
 }
 
 } // namespace Urho3D

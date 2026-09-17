@@ -27,10 +27,10 @@ enum class EngineBuildMode
 };
 
 /// Suffix every operating system puts on runnable binaries. The build steps need it to locate the
-/// offline tools (PackageTool, LuaCompiler) next to the engine binaries a profile points at.
+/// offline tools (PackageTool, LuaCompiler) next to the engine binaries a platform points at.
 ea::string GetExecutableSuffix();
 
-/// Android specific part of a build profile. Ignored by desktop platforms, and the only part the
+/// Android specific part of a build platform. Ignored by desktop platforms, and the only part the
 /// Android scaffold generator reads.
 ///
 /// The initializers below and the serialization fallbacks in the .cpp are the same numbers on
@@ -61,8 +61,8 @@ struct AndroidBuildSettings
 /// Per-platform texture compression parameters, applied at build time by the offline PVRTexTool.
 ///
 /// Every string field treats "" as "use the platform default", resolved by
-/// BuildProfile::GetEffectiveTextureCompression. That keeps a hand-trimmed Build.json buildable and
-/// lets a profile written for one platform never accidentally carry the other platform's formats.
+/// BuildPlatformData::GetEffectiveTextureCompression. That keeps a hand-trimmed Build.json buildable and
+/// lets a platform written for one platform never accidentally carry the other platform's formats.
 struct TextureCompressionSettings
 {
     /// Master switch. Off by default: enabling compression is opt-in so existing projects are unaffected.
@@ -88,23 +88,23 @@ struct TextureCompressionSettings
 /// plugin/launch schema that already lives there.
 ///
 /// Every field is serialized with an explicit fallback (see the .cpp), which is what lets a
-/// hand-edited Build.json omit anything it is happy with while every profile still round-trips
-/// to itself instead of inheriting the defaults of whichever profile was written last.
-struct BuildProfile
+/// hand-edited Build.json omit anything it is happy with while every platform still round-trips
+/// to itself instead of inheriting the defaults of whichever platform was written last.
+struct BuildPlatformData
 {
     /// Display name, unique inside the file. Doubles as the argument to `--build`. Deliberately
-    /// without a fallback: a profile nobody can name is an error, not something to guess at.
+    /// without a fallback: a platform nobody can name is an error, not something to guess at.
     ea::string name_;
     /// "WindowsDesktop", "Android" or "Web". Kept as a string on purpose: an unknown value has to be
     /// reported as an error rather than quietly resolved to one of the known platforms, and a
-    /// missing one is reported the same way instead of defaulting an Android profile to desktop.
+    /// missing one is reported the same way instead of defaulting an Android platform to desktop.
     ea::string platform_;
     /// Absolute directory holding the already-built host binary and shared libraries.
     ea::string engineBin_;
     /// Absolute directory holding CoreData/ and Data/ of the engine working tree.
     ea::string engineData_;
     /// Output directory, absolute or relative to the project. Empty resolves to Build/<Name>,
-    /// which is why there is no per-field fallback for it - the default depends on the profile.
+    /// which is why there is no per-field fallback for it - the default depends on the platform.
     ea::string outputDir_;
     /// Host binary name without suffix.
     ea::string executableName_;
@@ -127,7 +127,7 @@ struct BuildProfile
     /// CMakeCache.txt next to the engine binaries. Only the Web platform reads it.
     ea::string webEmsdkRoot_;
     /// Whether the build compiles the C++ engine host itself first. Never by default: a compile
-    /// takes minutes, so a profile opts in when it wants a one click turnaround of engine changes.
+    /// takes minutes, so a platform opts in when it wants a one click turnaround of engine changes.
     /// The stage runs before anything else because it produces the artifacts Validate checks.
     EngineBuildMode engineBuild_{};
     AndroidBuildSettings android_;
@@ -139,16 +139,16 @@ struct BuildProfile
     bool IsWindowsDesktop() const { return platform_ == "WindowsDesktop"; }
     bool IsWeb() const { return platform_ == "Web"; }
 
-    /// Texture compression settings with every empty field resolved to this profile's platform default.
+    /// Texture compression settings with every empty field resolved to this platform's platform default.
     TextureCompressionSettings GetEffectiveTextureCompression() const;
 
     /// Output directory made absolute against the project and normalized to end with a slash.
     ea::string ResolveOutputDir(const ea::string& projectPath) const;
 };
 
-using BuildProfileVector = ea::vector<BuildProfile>;
+using BuildPlatformDataVector = ea::vector<BuildPlatformData>;
 
-/// Holds the build profiles of a project and reads/writes the file they live in.
+/// Holds the build platforms of a project and reads/writes the file they live in.
 class BuildSettings : public Object
 {
     URHO3D_OBJECT(BuildSettings, Object);
@@ -158,41 +158,41 @@ public:
 
     void SerializeInBlock(Archive& archive) override;
 
-    /// Load the profiles from a JSON file. Missing files are not an error, the editor creates the
+    /// Load the platforms from a JSON file. Missing files are not an error, the editor creates the
     /// defaults on first use; a file that exists but does not parse is.
     bool LoadFile(const ea::string& fileName);
     bool SaveFile(const ea::string& fileName);
     const ea::string& GetFilePath() const { return filePath_; }
 
-    /// Open the Build.json of a project. A file that does not exist yet gets the default profiles
-    /// written into it, because a project without a profile has nothing to build. seedDefaults is
+    /// Open the Build.json of a project. A file that does not exist yet gets the default platforms
+    /// written into it, because a project without a platform has nothing to build. seedDefaults is
     /// off for a project opened read only, which must not gain files just by being looked at.
     /// projectPath resolves the relative default output directories, engineData is the directory
     /// that holds CoreData/ and Data/ of the engine working tree - only the caller can know it.
     bool LoadProject(const ea::string& projectPath, const ea::string& engineData, bool seedDefaults);
 
-    const BuildProfileVector& GetProfiles() const { return profiles_; }
-    BuildProfileVector& GetMutableProfiles() { return profiles_; }
-    const BuildProfile* FindProfile(const ea::string& name) const;
-    BuildProfile* FindProfileMutable(const ea::string& name);
-    ea::vector<ea::string> GetProfileNames() const;
+    const BuildPlatformDataVector& GetPlatforms() const { return platforms_; }
+    BuildPlatformDataVector& GetMutablePlatforms() { return platforms_; }
+    const BuildPlatformData* FindPlatform(const ea::string& name) const;
+    BuildPlatformData* FindPlatformMutable(const ea::string& name);
+    ea::vector<ea::string> GetPlatformNames() const;
 
-    /// Seed a profile when no profile of that name exists yet, so a fresh project has something to
+    /// Seed a platform when no platform of that name exists yet, so a fresh project has something to
     /// pick. engineData is the directory that holds CoreData/ and Data/, which only the caller can
     /// know; the engine binary directory is wherever the editor itself was launched from. Returns
-    /// whether a profile was added.
-    bool EnsureProfile(const ea::string& name, const ea::string& projectPath, const ea::string& engineData);
+    /// whether a platform was added.
+    bool EnsurePlatform(const ea::string& name, const ea::string& projectPath, const ea::string& engineData);
 
-    /// Every reason the profile cannot be built right now, one string each. Collects all of them:
+    /// Every reason the platform cannot be built right now, one string each. Collects all of them:
     /// a user who is missing three things should not have to run the check three times.
-    bool Validate(const BuildProfile& profile, ea::vector<ea::string>& errors) const;
+    bool Validate(const BuildPlatformData& platform, ea::vector<ea::string>& errors) const;
 
-    /// Locate an offline build tool by name, looking in the profile's engine binary directory
+    /// Locate an offline build tool by name, looking in the platform's engine binary directory
     /// first and next to the editor second. Returns an empty string when it is nowhere to be found.
-    ea::string FindTool(const BuildProfile& profile, const ea::string& toolName) const;
+    ea::string FindTool(const BuildPlatformData& platform, const ea::string& toolName) const;
 
 private:
-    BuildProfileVector profiles_;
+    BuildPlatformDataVector platforms_;
     ea::string filePath_;
 };
 

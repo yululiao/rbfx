@@ -10,7 +10,7 @@
 namespace Urho3D
 {
 
-class BuildProfile;
+class BuildPlatformData;
 class Context;
 
 /// Write a self contained gradle application project into 'outputDir', the way the engine's own
@@ -27,7 +27,7 @@ class Context;
 /// generated tree is what performs the build and reports precisely which tool is missing.
 ///
 /// Returns false and fills 'errors' with every reason when something cannot be done.
-bool GenerateAndroidScaffold(Context* context, const BuildProfile& profile, const ea::string& projectPath,
+bool GenerateAndroidScaffold(Context* context, const BuildPlatformData& platform, const ea::string& projectPath,
     const ea::string& outputDir, const ea::string& resourceDir, ea::vector<ea::string>& errors);
 
 } // namespace Urho3D
