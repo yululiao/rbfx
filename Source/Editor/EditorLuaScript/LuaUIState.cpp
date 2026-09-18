@@ -6,6 +6,7 @@
 
 #include "LuaUIState.h"
 
+#include "../Core/UndoManager.h"
 #include "../Tabs/SceneViewTab.h"
 #include "../Project/Project.h"
 
@@ -64,6 +65,24 @@ ea::vector<LuaModal>& LuaModals()
     return modals;
 }
 
+ea::vector<LuaToolbarButton>& LuaToolbarButtons()
+{
+    static ea::vector<LuaToolbarButton> buttons;
+    return buttons;
+}
+
+SharedPtr<Object>& LuaHotkeyOwner()
+{
+    static SharedPtr<Object> owner;
+    return owner;
+}
+
+ea::vector<unsigned long long>& LuaHotkeyBindings()
+{
+    static ea::vector<unsigned long long> bindings;
+    return bindings;
+}
+
 unsigned long long& LuaAssetProcessedCallback()
 {
     static unsigned long long handle = 0ull;
@@ -88,6 +107,12 @@ bool& LuaPluginSettingsDirty()
     return dirty;
 }
 
+ea::vector<SharedPtr<EditorAction>>& LuaUndoBatch()
+{
+    static ea::vector<SharedPtr<EditorAction>> stack;
+    return stack;
+}
+
 SceneViewPage* ActiveSceneViewPage(Context* context)
 {
     auto* project = context->GetSubsystem<Project>();
@@ -105,8 +130,15 @@ void ResetLuaUI()
     LuaScheduledTasks().clear();
     LuaToasts().clear();
     LuaModals().clear();
+    LuaToolbarButtons().clear();
+    // Releasing the owner lets its WeakPtr expire so the HotkeyManager prunes every Lua hotkey
+    // binding on its next cleanup; the next Editor.hotkey.bind lazily creates a fresh owner.
+    LuaHotkeyBindings().clear();
+    LuaHotkeyOwner() = nullptr;
     LuaAssetProcessedCallback() = 0ull;
     LuaWasProcessing() = false;
+    // Drop any in-flight batch; its composite belongs to the old VM and must not be pushed.
+    LuaUndoBatch().clear();
     auto& tabs = LuaTabs();
     tabs.erase(ea::remove_if(tabs.begin(), tabs.end(),
                    [](const WeakPtr<LuaEditorTab>& weak) { return !weak.Get(); }),

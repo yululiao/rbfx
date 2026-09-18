@@ -15,6 +15,7 @@
 #include "../Project/Project.h"
 #include "../Project/AssetManager.h"
 #include "../Tabs/SceneViewTab.h"
+#include "../Core/HotkeyManager.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Object.h>
@@ -22,11 +23,14 @@
 #include <Urho3D/Resource/JSONFile.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/SystemUI.h>
+#include <Urho3D/SystemUI/Widgets.h>
 #include <Urho3D/Utility/SceneSelection.h>
 
 #include <EASTL/algorithm.h>
 #include <EASTL/map.h>
 #include <EASTL/optional.h>
+
+#include <string>
 
 namespace Urho3D
 {
@@ -188,6 +192,32 @@ void ReloadEditorLuaPlugins(Context* context)
         }
     });
 
+    // Render registered Lua toolbar buttons right after the built-in Save button (the editor fires
+    // OnRenderProjectToolbar there, before its own separator). Same subsystem-as-receiver lifetime
+    // as the menu subscription, so it is re-added per project and dropped if the Lua host dies.
+    project->OnRenderProjectToolbar.Subscribe(editorLua, [context]()
+    {
+        auto* lua = context->GetSubsystem<EditorLuaVMHost>();
+        if (!lua || Detail::LuaToolbarButtons().empty())
+            return;
+
+        Widgets::ToolbarSeparator();
+        for (const Detail::LuaToolbarButton& button : Detail::LuaToolbarButtons())
+        {
+            // Toolbar buttons are square and icon sized, so show the glyph when there is one and
+            // lean on the tooltip for the words; the label is the fallback caption when icon-less.
+            // The ## suffix is a stable ImGui id seed so two buttons with the same caption differ.
+            ea::string caption = button.glyph.empty() ? button.label : button.glyph;
+            caption += "##EditorLuaTB";
+            caption += ea::string(std::to_string(button.handle).c_str());
+            const ea::string tip = button.tooltip.empty()
+                ? button.label
+                : ea::string(button.label + ea::string(" - ") + button.tooltip);
+            if (Widgets::ToolbarButton(caption.c_str(), tip.c_str()))
+                lua->InvokeCallback(button.handle);
+        }
+    });
+
     // Reload starts from a clean editor-side UI slate, mirroring the Lua-side callback registry
     // clear inside LoadPlugins; the plugins below re-register their tabs, menus and windows.
     Detail::ResetLuaUI();
@@ -291,6 +321,20 @@ void PollLuaAssetProcessing(Context* context, LuaVMHost* lua)
     const unsigned long long handle = Detail::LuaAssetProcessedCallback();
     if (wasProcessing && !processing && handle)
         lua->InvokeCallback(handle);
+}
+
+// Evaluate the Lua-registered hotkeys. They all share the single Detail::LuaHotkeyOwner object, so
+// one InvokeFor against it checks and fires every current binding. It runs from the per-frame plugin
+// pass, after the editor's own HotkeyManager::Update for the frame (which latched the text-input
+// suppression flag and cleared the per-frame invoked-command set). No owner means nothing is bound.
+void PumpLuaHotkeys(Context* context)
+{
+    if (!Detail::LuaHotkeyOwner())
+        return;
+    auto* project = context->GetSubsystem<Project>();
+    auto* hotkeyManager = project ? project->GetHotkeyManager() : nullptr;
+    if (hotkeyManager)
+        hotkeyManager->InvokeFor(Detail::LuaHotkeyOwner().Get());
 }
 
 // Draw queued Editor.ui.notify toasts as a borderless bottom-right stack, expiring by time.
@@ -415,6 +459,7 @@ void RenderLuaWindows(Context* context)
     PumpLuaScheduledTasks(context, lua);
     PollLuaSelectionChange(context, lua);
     PollLuaAssetProcessing(context, lua);
+    PumpLuaHotkeys(context);
 
     for (Detail::LuaWindow& window : Detail::LuaWindows())
     {

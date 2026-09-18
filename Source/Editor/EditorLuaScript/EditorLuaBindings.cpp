@@ -7,12 +7,17 @@
 #include "EditorLuaBindings.h"
 
 #include "EditorLuaVMHost.h"
+#include "EditorLuaSettingsPage.h"
 #include "LuaEditorTab.h"
 #include "LuaUIState.h"
 
 #include <LuaScript/LuaBindings.h>
 
 #include "../Tabs/SceneViewTab.h"
+#include "../Core/CommonEditorActions.h"
+#include "../Core/CommonEditorActionBuilders.h"
+#include "../Core/HotkeyManager.h"
+#include "../Core/SettingsManager.h"
 #include "../Build/BuildSettings.h"
 #include "../Build/BuildSystem.h"
 #include "../Project/Project.h"
@@ -21,6 +26,8 @@
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Timer.h>
+#include <Urho3D/Core/Variant.h>
+#include <Urho3D/Input/Input.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Scene/Component.h>
@@ -28,9 +35,12 @@
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/Utility/SceneSelection.h>
 
+#include <IconFontCppHeaders/IconsFontAwesome6.h>
+
 #include <sol/sol.hpp>
 
 #include <EASTL/algorithm.h>
+#include <EASTL/optional.h>
 
 #include <string>
 #include <string_view>
@@ -167,6 +177,309 @@ bool OpenAssetResource(Context* context, const std::string& name, bool revealOnl
         return false;
     project->ProcessRequest(MakeShared<OpenResourceRequest>(context, resource, revealOnly).Get());
     return true;
+}
+
+// A redoable/undoable step whose "do" and "undo" bodies are Lua callbacks held by the plugin host
+// (registered through EditorLuaVMHost::RegisterCallback). It lives here rather than as an engine
+// action because its body is opaque script. After a plugin reload the stored handle is unknown to
+// the rebuilt callback registry, so InvokeCallback is a safe no-op; CanUndo/CanRedo intentionally
+// stay true so a stale entry never wedges the UndoManager top group (which gates undo all_of on
+// every action in the newest frame).
+class LuaUndoAction : public EditorAction
+{
+public:
+    LuaUndoAction(Context* context, unsigned long long redoHandle, unsigned long long undoHandle,
+        const ea::string& name)
+        : context_(context)
+        , redo_(redoHandle)
+        , undo_(undoHandle)
+        , name_(name)
+    {
+    }
+
+    const ea::string& GetName() const { return name_; }
+    void Redo() const override { Invoke(redo_); }
+    void Undo() const override { Invoke(undo_); }
+
+private:
+    void Invoke(unsigned long long handle) const
+    {
+        if (auto* host = context_->GetSubsystem<EditorLuaVMHost>())
+            host->InvokeCallback(handle);
+    }
+
+    Context* context_;
+    unsigned long long redo_;
+    unsigned long long undo_;
+    ea::string name_;
+};
+
+// Route a finished action onto the editor undo stack: through the scene-view tab when an editable
+// page is up (so the selection is preserved and the save frame is marked), otherwise straight to
+// the UndoManager -- a pure-Lua action needs no scene.
+void PushEditorAction(Context* context, const EditorActionPtr& action)
+{
+    auto* project = context->GetSubsystem<Project>();
+    if (!project)
+        return;
+    auto* view = project->FindTab<SceneViewTab>();
+    if (view && view->GetActivePage())
+        view->PushAction(action);
+    else if (auto* undoManager = project->GetUndoManager())
+        undoManager->PushAction(action);
+}
+
+// Hand a built action to the innermost open Editor.undo.batch() (appended, so one undo reverts the
+// whole group) or, with no batch open, push it live.
+void CommitEditorAction(Context* context, const EditorActionPtr& action)
+{
+    auto& stack = Detail::LuaUndoBatch();
+    if (!stack.empty())
+    {
+        if (auto* composite = static_cast<CompositeEditorAction*>(stack.back().Get()))
+            composite->AddAction(action);
+        return;
+    }
+    PushEditorAction(context, action);
+}
+
+// Shared body of Editor.undo.setComponentAttribute / setNodeAttribute: capture the old value, apply
+// the new one so the world updates immediately, and record a Change*AttributesAction for undo/redo.
+// Both engine actions take the same (scene, attributeName, objects, oldValues, newValues) shape.
+template <class ObjectT, class ActionT>
+bool SetAttributeUndoable(Context* context, ObjectT* object, const std::string& attributeName,
+    const Variant& newValue)
+{
+    SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+    if (!page || !page->scene_ || !object)
+        return false;
+
+    const ea::string attribute(attributeName.c_str());
+    const Variant oldValue = object->GetAttribute(attribute);
+    object->SetAttribute(attribute, newValue);
+    object->ApplyAttributes();
+
+    ea::vector<ObjectT*> objects{ object };
+    VariantVector oldValues{ oldValue };
+    VariantVector newValues{ newValue };
+    const auto action = MakeShared<ActionT>(page->scene_.Get(), ea::string(attributeName.c_str()),
+        objects, oldValues, newValues);
+    CommitEditorAction(context, action);
+    return true;
+}
+
+// Throwaway owner every Lua hotkey is bound against. The HotkeyManager drops a binding once the
+// owner's WeakPtr expires, so holding exactly one of these per plugin generation (in
+// Detail::LuaHotkeyOwner) gives reload-clean unbinding: ResetLuaUI releases it, the manager prunes
+// the orphaned bindings, and the next Editor.hotkey.bind creates a fresh one.
+class LuaHotkeyOwner : public Object
+{
+    URHO3D_OBJECT(LuaHotkeyOwner, Object)
+public:
+    explicit LuaHotkeyOwner(Context* context)
+        : Object(context)
+    {
+    }
+};
+
+// Resolve a plugin-supplied toolbar icon name to its FontAwesome glyph. There is no runtime
+// name->glyph lookup in the engine (the icons are compile-time ICON_FA_* macros), so this curated
+// table covers the common editor-facing glyphs; an unknown name yields an empty string (text-only
+// button). Kept ASCII to match the editor font.
+struct ToolbarIconEntry
+{
+    const char* name;
+    const char* glyph;
+};
+
+// Curated name -> glyph table, shared by the lookup and the discovery helper below.
+const ToolbarIconEntry kLuaToolbarIcons[] = {
+        { "cube", ICON_FA_CUBE },
+        { "cubes", ICON_FA_CUBES },
+        { "grid", ICON_FA_BORDER_ALL },
+        { "lightbulb", ICON_FA_LIGHTBULB },
+        { "camera", ICON_FA_CAMERA },
+        { "video", ICON_FA_VIDEO },
+        { "play", ICON_FA_PLAY },
+        { "pause", ICON_FA_PAUSE },
+        { "stop", ICON_FA_STOP },
+        { "refresh", ICON_FA_ROTATE_RIGHT },
+        { "save", ICON_FA_FLOPPY_DISK },
+        { "folder", ICON_FA_FOLDER },
+        { "folder-open", ICON_FA_FOLDER_OPEN },
+        { "file", ICON_FA_FILE },
+        { "search", ICON_FA_MAGNIFYING_GLASS },
+        { "plus", ICON_FA_PLUS },
+        { "minus", ICON_FA_MINUS },
+        { "trash", ICON_FA_TRASH },
+        { "wrench", ICON_FA_WRENCH },
+        { "cog", ICON_FA_GEAR },
+        { "gear", ICON_FA_GEAR },
+        { "eye", ICON_FA_EYE },
+        { "eye-slash", ICON_FA_EYE_SLASH },
+        { "lock", ICON_FA_LOCK },
+        { "star", ICON_FA_STAR },
+        { "heart", ICON_FA_HEART },
+        { "flag", ICON_FA_FLAG },
+        { "bolt", ICON_FA_BOLT },
+        { "magnet", ICON_FA_MAGNET },
+        { "code", ICON_FA_CODE },
+        { "paint", ICON_FA_PAINTBRUSH },
+        { "brush", ICON_FA_PAINTBRUSH },
+        { "music", ICON_FA_MUSIC },
+        { "globe", ICON_FA_GLOBE },
+        { "map", ICON_FA_MAP },
+        { "chart", ICON_FA_CHART_COLUMN },
+        { "layers", ICON_FA_LAYER_GROUP },
+        { "target", ICON_FA_BULLSEYE },
+        { "arrow-up", ICON_FA_ARROW_UP },
+        { "arrow-down", ICON_FA_ARROW_DOWN },
+        { "arrow-left", ICON_FA_ARROW_LEFT },
+        { "arrow-right", ICON_FA_ARROW_RIGHT },
+        { "check", ICON_FA_CHECK },
+        { "times", ICON_FA_XMARK },
+        { "exclamation", ICON_FA_EXCLAMATION },
+        { "question", ICON_FA_QUESTION },
+        { "info", ICON_FA_INFO },
+        { "warning", ICON_FA_TRIANGLE_EXCLAMATION },
+        { "sun", ICON_FA_SUN },
+        { "moon", ICON_FA_MOON },
+};
+
+// Return the FontAwesome glyph for a plugin-supplied toolbar icon name, or empty when unknown.
+ea::string LookupLuaToolbarIcon(const std::string& name)
+{
+    for (const ToolbarIconEntry& entry : kLuaToolbarIcons)
+        if (name == entry.name)
+            return ea::string(entry.glyph);
+    return ea::string();
+}
+
+// The names accepted by Editor.toolbar.add opts.icon, so a plugin can discover what exists.
+const ea::vector<ea::string>& LuaToolbarIconNames()
+{
+    static const ea::vector<ea::string> names = []
+    {
+        ea::vector<ea::string> result;
+        for (const ToolbarIconEntry& entry : kLuaToolbarIcons)
+            result.push_back(ea::string(entry.name));
+        return result;
+    }();
+    return names;
+}
+
+// Parse a "+"-separated hotkey string ("ctrl+shift+k", "alt+f5", "mouse1") into an EditorHotkey.
+// Modifiers are ctrl/shift/alt (spelled several ways); the final non-modifier segment is the main
+// key: a mouse button (mouse0/1/2), a named special key, or any letter/digit resolved through
+// Input::GetScancodeFromName. Returns nullopt when nothing usable is found. 'command' is stored on
+// the hotkey so the manager can de-duplicate invocations per frame; callers pass a unique string.
+ea::optional<EditorHotkey> ParseLuaHotkey(const std::string& combo, const ea::string& command)
+{
+    // Split on '+', trimming surrounding spaces and lowercasing each token (ASCII input only).
+    ea::vector<std::string> tokens;
+    std::string current;
+    for (char c : combo)
+    {
+        if (c == '+')
+        {
+            tokens.push_back(current);
+            current.clear();
+        }
+        else
+            current.push_back(c);
+    }
+    tokens.push_back(current);
+
+    ea::string main;
+    bool ctrl = false, shift = false, alt = false;
+    for (std::string& raw : tokens)
+    {
+        // Trim and lowercase.
+        size_t begin = raw.find_first_not_of(" \t");
+        if (begin == std::string::npos)
+            continue;
+        size_t end = raw.find_last_not_of(" \t");
+        std::string token = raw.substr(begin, end - begin + 1);
+        for (char& c : token)
+            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+
+        if (token == "ctrl" || token == "control")
+            ctrl = true;
+        else if (token == "shift")
+            shift = true;
+        else if (token == "alt" || token == "option")
+            alt = true;
+        else
+            main = ea::string(token.c_str());
+    }
+
+    if (main.empty())
+        return ea::nullopt;
+
+    EditorHotkey hotkey;
+    hotkey.command_ = command;
+    if (ctrl)
+        hotkey.Ctrl();
+    if (shift)
+        hotkey.Shift();
+    if (alt)
+        hotkey.Alt();
+
+    // Mouse buttons.
+    if (main == "mouse0")
+    {
+        hotkey.Press(MOUSEB_LEFT);
+        return hotkey;
+    }
+    if (main == "mouse1")
+    {
+        hotkey.Press(MOUSEB_RIGHT);
+        return hotkey;
+    }
+    if (main == "mouse2")
+    {
+        hotkey.Press(MOUSEB_MIDDLE);
+        return hotkey;
+    }
+
+    // Named special keys SDL's scancode-name table spells differently or not at all.
+    struct KeyEntry
+    {
+        const char* name;
+        Scancode scancode;
+    };
+    static const KeyEntry specials[] = {
+        { "escape", SCANCODE_ESCAPE }, { "esc", SCANCODE_ESCAPE },
+        { "enter", SCANCODE_RETURN }, { "return", SCANCODE_RETURN },
+        { "space", SCANCODE_SPACE }, { "tab", SCANCODE_TAB },
+        { "backspace", SCANCODE_BACKSPACE }, { "delete", SCANCODE_DELETE },
+        { "insert", SCANCODE_INSERT }, { "home", SCANCODE_HOME },
+        { "end", SCANCODE_END }, { "pageup", SCANCODE_PAGEUP },
+        { "pagedown", SCANCODE_PAGEDOWN }, { "up", SCANCODE_UP },
+        { "down", SCANCODE_DOWN }, { "left", SCANCODE_LEFT },
+        { "right", SCANCODE_RIGHT },
+        { "f1", SCANCODE_F1 }, { "f2", SCANCODE_F2 }, { "f3", SCANCODE_F3 },
+        { "f4", SCANCODE_F4 }, { "f5", SCANCODE_F5 }, { "f6", SCANCODE_F6 },
+        { "f7", SCANCODE_F7 }, { "f8", SCANCODE_F8 }, { "f9", SCANCODE_F9 },
+        { "f10", SCANCODE_F10 }, { "f11", SCANCODE_F11 }, { "f12", SCANCODE_F12 },
+    };
+    for (const KeyEntry& entry : specials)
+    {
+        if (main == entry.name)
+        {
+            hotkey.Press(entry.scancode);
+            return hotkey;
+        }
+    }
+
+    // Letters, digits and simple punctuation resolve through the engine's SDL-backed lookup.
+    const Scancode scancode = Input::GetScancodeFromName(main);
+    if (scancode != SCANCODE_UNKNOWN)
+    {
+        hotkey.Press(scancode);
+        return hotkey;
+    }
+    return ea::nullopt;
 }
 
 } // namespace
@@ -907,11 +1220,279 @@ void RegisterEditorLuaAPI(Context* context)
         return std::string(path.c_str());
     });
 
+    // Register a page in the editor's Settings window whose body the plugin draws itself. The page
+    // nests under Editor > Lua > <title>; drawFn is called each frame the page is open, in the
+    // settings tab's ImGui context, so it can use the imgui table and persist values through
+    // Editor.settings.get/set. The page object is owned by the SettingsManager and outlives reloads,
+    // so the first registration adds it and every later one (after a reload) only re-points the
+    // draw callback -- registering the same title twice never stacks duplicate pages.
+    settingsApi.set_function("registerPage", [context, host = editorLua](const std::string& title,
+                                                sol::protected_function drawFn) -> bool {
+        if (title.empty() || !drawFn.valid())
+            return false;
+        auto* project = context->GetSubsystem<Project>();
+        auto* settingsManager = project ? project->GetSettingsManager() : nullptr;
+        if (!settingsManager)
+            return false;
+
+        const unsigned long long handle = host->RegisterCallback(std::move(drawFn));
+        const ea::string name = ea::string("Editor.Lua:") + ea::string(title.c_str());
+        if (auto* page = dynamic_cast<LuaSettingsPage*>(settingsManager->FindPage(name)))
+        {
+            page->SetHandle(handle);
+            return true;
+        }
+        settingsManager->AddPage(MakeShared<LuaSettingsPage>(context, name, handle));
+        return true;
+    });
+
     // ---------------------------------------------------------------------------
-    // Editor.undo -- reserved. Real undo integration (funneling Lua scene edits onto the editor's
-    // UndoManager) is a deliberate follow-up; direct engine-binding writes are not undoable yet.
+    // Editor.undo -- funnel plugin edits onto the editor's shared undo stack. Two kinds of step:
+    // native scene edits (attributes / create / remove) reuse the engine's own actions so the
+    // inspector refreshes and the selection is preserved; arbitrary Lua-state changes go through
+    // perform(), which stores a do/undo closure pair. batch() groups any of them into one step.
+    // All degrade safely: with no project/scene nothing is recorded, and after a plugin reload a
+    // stale closure resolves to a no-op (the callback handle is gone) instead of crashing.
     // ---------------------------------------------------------------------------
-    editor.create_named("undo");
+    sol::table undoApi = editor.create_named("undo");
+
+    // Run doFn now and record an undoable step that re-runs doFn on redo and undoFn on undo. Works
+    // without a scene (the state is whatever the closures touch). Returns false if either is missing.
+    undoApi.set_function("perform", [context, host = editorLua](const std::string& label,
+                                       sol::protected_function doFn,
+                                       sol::protected_function undoFn) -> bool {
+        if (!doFn.valid() || !undoFn.valid())
+            return false;
+        const unsigned long long redo = host->RegisterCallback(std::move(doFn));
+        const unsigned long long undo = host->RegisterCallback(std::move(undoFn));
+        const auto action = MakeShared<LuaUndoAction>(context, redo, undo, ea::string(label.c_str()));
+        host->InvokeCallback(redo); // execute the "do" immediately, like Godot's commit_action
+        CommitEditorAction(context, action);
+        return true;
+    });
+
+    // Group every undoable operation the body performs into a single undo step. Nested batches fold
+    // into the outermost one. The body runs even if it records nothing (a plain no-op step results).
+    undoApi.set_function("batch", [context](const std::string& /*label*/,
+                             sol::protected_function body) -> bool {
+        if (!body.valid())
+            return false;
+        const auto composite = MakeShared<CompositeEditorAction>();
+        Detail::LuaUndoBatch().push_back(composite);
+        const sol::protected_function_result result = body();
+        Detail::LuaUndoBatch().pop_back();
+        if (!result.valid())
+        {
+            const sol::error error = result;
+            URHO3D_LOGERROR("[EditorLua] Editor.undo.batch body error: {}", error.what());
+        }
+        auto& stack = Detail::LuaUndoBatch();
+        if (!stack.empty())
+        {
+            // Nested: hand the finished group to the enclosing batch as one child.
+            if (auto* parent = static_cast<CompositeEditorAction*>(stack.back().Get()))
+                parent->AddAction(composite);
+        }
+        else
+        {
+            PushEditorAction(context, composite);
+        }
+        return true;
+    });
+
+    undoApi.set_function("setComponentAttribute",
+        [context, host = editorLua](sol::object target, const std::string& attributeName,
+            sol::object value) -> bool {
+            auto* component = dynamic_cast<Component*>(ToEngineObject(target));
+            const Variant variant = LuaToVariant(sol::state_view(host->GetState()), value);
+            if (!component || variant.IsEmpty())
+                return false;
+            return SetAttributeUndoable<Component, ChangeComponentAttributesAction>(
+                context, component, attributeName, variant);
+        });
+
+    undoApi.set_function("setNodeAttribute",
+        [context, host = editorLua](sol::object target, const std::string& attributeName,
+            sol::object value) -> bool {
+            auto* node = dynamic_cast<Node*>(ToEngineObject(target));
+            const Variant variant = LuaToVariant(sol::state_view(host->GetState()), value);
+            if (!node || variant.IsEmpty())
+                return false;
+            return SetAttributeUndoable<Node, ChangeNodeAttributesAction>(
+                context, node, attributeName, variant);
+        });
+
+    // Create a node under 'parent' (defaults to the scene root), optionally named; selects it and
+    // returns the new node, or nil with no scene.
+    undoApi.set_function("createNode",
+        [context, host = editorLua](sol::optional<sol::object> parentObj,
+            sol::optional<std::string> name) -> sol::object {
+            sol::state_view lua(host->GetState());
+            SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+            if (!page || !page->scene_)
+                return sol::make_object(lua, sol::nil);
+            Node* parent = parentObj && parentObj->valid()
+                ? dynamic_cast<Node*>(ToEngineObject(*parentObj))
+                : nullptr;
+            if (!parent)
+                parent = page->scene_.Get();
+
+            const CreateNodeActionBuilder builder{ page->scene_.Get(), AttributeScopeHint::Attribute };
+            Node* node = parent->CreateChild();
+            if (name && !name->empty())
+                node->SetName(ea::string(name->c_str()));
+            page->selection_.Clear();
+            page->selection_.SetSelected(node, true);
+            CommitEditorAction(context, builder.Build(node));
+            return WrapLuaObject(lua, node);
+        });
+
+    undoApi.set_function("removeNode", [context](sol::object target) -> bool {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (!page || !page->scene_)
+            return false;
+        auto* node = dynamic_cast<Node*>(ToEngineObject(target));
+        if (!node || !node->GetParent())
+            return false;
+        const RemoveNodeActionBuilder builder(node);
+        node->Remove();
+        CommitEditorAction(context, builder.Build());
+        return true;
+    });
+
+    // Add a component of the named type to a node; selects it and returns it, or nil on failure.
+    undoApi.set_function("addComponent",
+        [context, host = editorLua](sol::object target, const std::string& componentType) -> sol::object {
+            sol::state_view lua(host->GetState());
+            SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+            auto* node = dynamic_cast<Node*>(ToEngineObject(target));
+            if (!page || !page->scene_ || !node)
+                return sol::make_object(lua, sol::nil);
+            const StringHash type(componentType.c_str());
+            const CreateComponentActionBuilder builder(node, type);
+            Component* component = node->CreateComponent(type);
+            if (!component)
+                return sol::make_object(lua, sol::nil);
+            page->selection_.Clear();
+            page->selection_.SetSelected(component, true);
+            CommitEditorAction(context, builder.Build(component));
+            return WrapLuaObject(lua, component);
+        });
+
+    undoApi.set_function("removeComponent", [context](sol::object target) -> bool {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (!page || !page->scene_)
+            return false;
+        auto* component = dynamic_cast<Component*>(ToEngineObject(target));
+        if (!component)
+            return false;
+        const RemoveComponentActionBuilder builder(component);
+        component->Remove();
+        CommitEditorAction(context, builder.Build());
+        return true;
+    });
+
+    // Stack queries -- forwarded to the editor's own UndoManager, so these drive the very same
+    // history Ctrl+Z / Ctrl+Y use (including native actions pushed by other tabs).
+    undoApi.set_function("canUndo", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        auto* undoManager = project ? project->GetUndoManager() : nullptr;
+        return undoManager && undoManager->CanUndo();
+    });
+    undoApi.set_function("canRedo", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        auto* undoManager = project ? project->GetUndoManager() : nullptr;
+        return undoManager && undoManager->CanRedo();
+    });
+    undoApi.set_function("undo", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        auto* undoManager = project ? project->GetUndoManager() : nullptr;
+        return undoManager && undoManager->Undo();
+    });
+    undoApi.set_function("redo", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        auto* undoManager = project ? project->GetUndoManager() : nullptr;
+        return undoManager && undoManager->Redo();
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.toolbar -- add buttons to the project toolbar (the row next to Save). Each button
+    // shows its resolved icon (or its label when there is no icon) and invokes the callback on
+    // click. Buttons are drawn by the toolbar render subscription in EditorLuaIntegration and
+    // cleared on plugin reload, so re-registering on each load never duplicates them. opts =
+    // { icon?, tooltip? } where 'icon' is a name from Editor.toolbar.iconNames().
+    // ---------------------------------------------------------------------------
+    sol::table toolbarApi = editor.create_named("toolbar");
+    toolbarApi.set_function("add", [host = editorLua](const std::string& label,
+                             sol::protected_function callback, sol::optional<sol::table> opts) -> bool {
+        if (!callback.valid() || label.empty())
+            return false;
+        Detail::LuaToolbarButton button;
+        button.label = ea::string(label.c_str());
+        if (opts)
+        {
+            sol::table o = *opts;
+            if (auto icon = o["icon"].get<sol::optional<std::string>>(); icon && !icon->empty())
+                button.glyph = LookupLuaToolbarIcon(*icon);
+            if (auto tip = o["tooltip"].get<sol::optional<std::string>>(); tip && !tip->empty())
+                button.tooltip = ea::string(tip->c_str());
+        }
+        button.handle = host->RegisterCallback(std::move(callback));
+        Detail::LuaToolbarButtons().push_back(button);
+        return true;
+    });
+    // The icon names Editor.toolbar.add accepts, so a plugin can list what is available.
+    toolbarApi.set_function("iconNames", [](sol::this_state s) -> sol::object {
+        sol::state_view lua(s);
+        sol::table result = lua.create_table();
+        const ea::vector<ea::string>& names = LuaToolbarIconNames();
+        for (size_t i = 0; i < names.size(); ++i)
+            result[static_cast<int>(i) + 1] = std::string(names[i].c_str());
+        return result;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.hotkey -- bind a Lua callback to a key/mouse combination using the editor's own
+    // HotkeyManager, so it coexists with the built-in shortcuts. All Lua hotkeys share one throwaway
+    // owner object; releasing it on reload (ResetLuaUI) lets the manager prune the bindings once the
+    // owner's weak reference expires, and the stored callback handle is invalid anyway after a reload.
+    // combo is a "+"-separated string such as "ctrl+shift+k", "alt+f5" or "mouse1".
+    // ---------------------------------------------------------------------------
+    sol::table hotkeyApi = editor.create_named("hotkey");
+    hotkeyApi.set_function("bind", [context, host = editorLua](const std::string& combo,
+                                     sol::protected_function callback) -> bool {
+        if (!callback.valid())
+            return false;
+        auto* project = context->GetSubsystem<Project>();
+        auto* hotkeyManager = project ? project->GetHotkeyManager() : nullptr;
+        if (!hotkeyManager)
+            return false;
+
+        const unsigned long long handle = host->RegisterCallback(std::move(callback));
+        const ea::string command = ea::string(("Lua." + std::to_string(handle)).c_str());
+        const ea::optional<EditorHotkey> hotkey = ParseLuaHotkey(combo, command);
+        if (!hotkey)
+        {
+            host->DropCallback(handle);
+            URHO3D_LOGWARNING("[EditorLua] Editor.hotkey.bind: could not parse combo '{}'", combo);
+            return false;
+        }
+
+        if (!Detail::LuaHotkeyOwner())
+            Detail::LuaHotkeyOwner() = MakeShared<LuaHotkeyOwner>(context);
+        hotkeyManager->BindHotkey(Detail::LuaHotkeyOwner().Get(), *hotkey,
+            [host, handle]() { host->InvokeCallback(handle); });
+        Detail::LuaHotkeyBindings().push_back(handle);
+        return true;
+    });
+    // Echo a combo back in the editor's canonical display form ("Ctrl+Shift+K"), or "" when it does
+    // not parse -- handy for showing a bound shortcut in a menu or tooltip.
+    hotkeyApi.set_function("comboLabel", [](const std::string& combo) -> std::string {
+        const ea::optional<EditorHotkey> hotkey = ParseLuaHotkey(combo, ea::string("Lua.label"));
+        if (!hotkey)
+            return std::string();
+        return std::string(hotkey->ToString().c_str());
+    });
 }
 
 } // namespace Urho3D

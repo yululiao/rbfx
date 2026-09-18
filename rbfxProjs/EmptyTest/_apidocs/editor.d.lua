@@ -2,11 +2,14 @@
 
 ---@class Editor
 ---@field assets EditorAssets
+---@field hotkey EditorHotkey
 ---@field project EditorProject
 ---@field selection EditorSelection
 ---@field settings EditorSettings
 ---@field tick EditorTick
+---@field toolbar EditorToolbar
 ---@field ui EditorUi
+---@field undo EditorUndo
 Editor = {}
 ---@return boolean
 function Editor.addMenuItem(...) end
@@ -182,6 +185,13 @@ function EditorAssets.reimport(...) end
 function EditorAssets.reveal(...) end
 function EditorAssets.status(...) end
 
+---@class EditorHotkey
+EditorHotkey = {}
+---@return boolean
+function EditorHotkey.bind(...) end
+---@return string
+function EditorHotkey.comboLabel(...) end
+
 ---@class EditorProject
 EditorProject = {}
 ---@return string
@@ -223,6 +233,8 @@ function EditorSettings.keys(...) end
 ---@return string
 function EditorSettings.path(...) end
 ---@return boolean
+function EditorSettings.registerPage(...) end
+---@return boolean
 function EditorSettings.set(...) end
 
 ---@class EditorTick
@@ -236,6 +248,12 @@ function EditorTick.defer(...) end
 ---@return integer
 function EditorTick.every(...) end
 
+---@class EditorToolbar
+EditorToolbar = {}
+---@return boolean
+function EditorToolbar.add(...) end
+function EditorToolbar.iconNames(...) end
+
 ---@class EditorUi
 EditorUi = {}
 ---@return boolean
@@ -244,3 +262,28 @@ function EditorUi.confirm(...) end
 function EditorUi.input(...) end
 ---@return boolean
 function EditorUi.notify(...) end
+
+---@class EditorUndo
+EditorUndo = {}
+function EditorUndo.addComponent(...) end
+---@return boolean
+function EditorUndo.batch(...) end
+---@return boolean
+function EditorUndo.canRedo(...) end
+---@return boolean
+function EditorUndo.canUndo(...) end
+function EditorUndo.createNode(...) end
+---@return boolean
+function EditorUndo.perform(...) end
+---@return boolean
+function EditorUndo.redo(...) end
+---@return boolean
+function EditorUndo.removeComponent(...) end
+---@return boolean
+function EditorUndo.removeNode(...) end
+---@return boolean
+function EditorUndo.setComponentAttribute(...) end
+---@return boolean
+function EditorUndo.setNodeAttribute(...) end
+---@return boolean
+function EditorUndo.undo(...) end

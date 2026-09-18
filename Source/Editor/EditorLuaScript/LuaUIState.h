@@ -15,7 +15,9 @@ namespace Urho3D
 {
 
 class Context;
+class EditorAction;
 class LuaEditorTab;
+class Object;
 class SceneViewPage;
 
 // Editor-side bookkeeping for the Lua plugin UI, shared between the two parties that touch it:
@@ -100,11 +102,41 @@ ea::vector<LuaScheduledTask>& LuaScheduledTasks();
 ea::vector<LuaToast>& LuaToasts();
 ea::vector<LuaModal>& LuaModals();
 
+/// A toolbar button registered by Editor.toolbar.add. The editor draws it in the project toolbar
+/// (Widgets::ToolbarButton) every frame and invokes the callback by handle on click. 'glyph' is the
+/// pre-resolved FontAwesome icon (empty when the plugin asked for an unknown icon name); 'tooltip'
+/// may be empty. Cleared on plugin reload like the other transient registries.
+struct LuaToolbarButton
+{
+    ea::string label;
+    ea::string glyph;
+    ea::string tooltip;
+    unsigned long long handle;
+};
+
+ea::vector<LuaToolbarButton>& LuaToolbarButtons();
+
+/// Owner object every Lua hotkey is bound against. The HotkeyManager dispatches to a bound owner
+/// via InvokeFor(owner) and drops bindings once the owner WeakPtr expires, so a single throwaway
+/// owner per plugin generation gives reload-clean semantics: ResetLuaUI releases it (old bindings
+/// expire and are pruned), the next Editor.hotkey.bind creates a fresh one. Held as a SharedPtr so
+/// its lifetime is exactly one plugin generation.
+SharedPtr<Object>& LuaHotkeyOwner();
+/// Handles of the callbacks bound through Editor.hotkey, kept only so the bookkeeping mirrors the
+/// other registries (the owner reset is what actually unbinds them).
+ea::vector<unsigned long long>& LuaHotkeyBindings();
+
 /// Handle of the single Editor.assets.onProcessed callback (0 = none). It fires on the falling
 /// edge of AssetManager::IsProcessing, so 'wasProcessing' keeps the previously observed state.
 /// Like the selection callbacks, the handle lives in the host registry and ResetLuaUI drops it.
 unsigned long long& LuaAssetProcessedCallback();
 bool& LuaWasProcessing();
+
+/// Nested Editor.undo.batch() stack. Each level holds the CompositeEditorAction currently
+/// accumulating child actions; the last entry is where a committed action is appended instead of
+/// pushed live. Empty means no batch is open (actions push straight to the editor undo stack). It is
+/// transient -- ResetLuaUI drops it, because an in-flight batch cannot survive a plugin reload.
+ea::vector<SharedPtr<EditorAction>>& LuaUndoBatch();
 
 /// Plugin-owned persistent key->variant store backing Editor.settings. It is loaded from disk when
 /// a project's plugins (re)load and flushed by the per-frame pump whenever 'dirty' is set, so a
