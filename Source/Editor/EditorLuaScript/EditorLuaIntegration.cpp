@@ -19,6 +19,7 @@
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Object.h>
 #include <Urho3D/Core/Timer.h>
+#include <Urho3D/Resource/JSONFile.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/SystemUI.h>
 #include <Urho3D/Utility/SceneSelection.h>
@@ -94,6 +95,51 @@ ea::vector<LuaMenuSlice> CollectLuaMenuChildren(const ea::string& topName)
 
 } // namespace
 
+namespace
+{
+
+// Absolute path of the plugin settings JSON, kept in the same EditorScripts folder as the plugins
+// themselves (so it never ships in a game build). Empty with no project.
+ea::string LuaPluginSettingsPath(Context* context)
+{
+    auto* project = context->GetSubsystem<Project>();
+    if (!project)
+        return EMPTY_STRING;
+    // GetProjectPath() already ends with a '/'.
+    return project->GetProjectPath() + "EditorScripts/plugin-settings.json";
+}
+
+// Replace the in-memory store with whatever is on disk (empty when there is no project or file),
+// clearing the dirty flag so a just-loaded store is not immediately rewritten.
+void LoadPluginSettings(Context* context)
+{
+    auto& store = Detail::LuaPluginSettings();
+    store.clear();
+    const ea::string path = LuaPluginSettingsPath(context);
+    if (!path.empty())
+    {
+        auto json = MakeShared<JSONFile>(context);
+        if (json->LoadFile(path))
+            store = json->GetRoot().GetStringVariantMap();
+    }
+    Detail::LuaPluginSettingsDirty() = false;
+}
+
+// Write the in-memory store back to disk. Mirrors SettingsManager::SaveFile (build a JSONFile,
+// set the root object, save). No-op when there is no project (nothing persisted is lost, the
+// store stays in memory until a project is open).
+void SavePluginSettings(Context* context)
+{
+    const ea::string path = LuaPluginSettingsPath(context);
+    if (path.empty())
+        return;
+    auto json = MakeShared<JSONFile>(context);
+    json->GetRoot().SetStringVariantMap(Detail::LuaPluginSettings(), context);
+    json->SaveFile(path);
+}
+
+} // namespace
+
 void SetupEditorLua(Context* context)
 {
     // Bring up the dedicated Lua VM for editor plugins. EditorLuaVMHost is the editor's flavor
@@ -145,6 +191,10 @@ void ReloadEditorLuaPlugins(Context* context)
     // Reload starts from a clean editor-side UI slate, mirroring the Lua-side callback registry
     // clear inside LoadPlugins; the plugins below re-register their tabs, menus and windows.
     Detail::ResetLuaUI();
+
+    // Read the plugin settings store fresh from disk so every plugin's top-level Editor.settings
+    // reads see the persisted values; ResetLuaUI deliberately left the store untouched above.
+    LoadPluginSettings(context);
 
     // Convention: per-project editor plugins live in an "EditorScripts" folder at the project root
     // (kept separate from the game's Data/Scripts so editor-only tooling never ships with a build).
@@ -381,6 +431,14 @@ void RenderLuaWindows(Context* context)
 
     RenderLuaToasts(context);
     RenderLuaModals(context, lua);
+
+    // Write-behind flush: at most one disk write per frame no matter how many Editor.settings.set
+    // calls a plugin made, so a plugin looping over set() never thrashes the file.
+    if (Detail::LuaPluginSettingsDirty())
+    {
+        SavePluginSettings(context);
+        Detail::LuaPluginSettingsDirty() = false;
+    }
 }
 
 void RenderLuaMenuEntries(Context* context, const char* topName)

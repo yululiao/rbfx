@@ -9,6 +9,7 @@
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
 #include <Urho3D/Container/Ptr.h>
+#include <Urho3D/Core/Variant.h>
 
 namespace Urho3D
 {
@@ -104,6 +105,13 @@ ea::vector<LuaModal>& LuaModals();
 /// Like the selection callbacks, the handle lives in the host registry and ResetLuaUI drops it.
 unsigned long long& LuaAssetProcessedCallback();
 bool& LuaWasProcessing();
+
+/// Plugin-owned persistent key->variant store backing Editor.settings. It is loaded from disk when
+/// a project's plugins (re)load and flushed by the per-frame pump whenever 'dirty' is set, so a
+/// plugin looping over set() only writes the file once per frame. Unlike the transient UI state
+/// above, ResetLuaUI deliberately leaves these untouched -- the (re)load path owns them.
+StringVariantMap& LuaPluginSettings();
+bool& LuaPluginSettingsDirty();
 
 /// Return the scene-view page currently being edited (its scene + selection), or null.
 SceneViewPage* ActiveSceneViewPage(Context* context);

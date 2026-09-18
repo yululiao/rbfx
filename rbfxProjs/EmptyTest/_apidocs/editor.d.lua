@@ -4,6 +4,7 @@
 ---@field assets EditorAssets
 ---@field project EditorProject
 ---@field selection EditorSelection
+---@field settings EditorSettings
 ---@field tick EditorTick
 ---@field ui EditorUi
 Editor = {}
@@ -210,6 +211,19 @@ function EditorSelection.onChanged(...) end
 function EditorSelection.scene(...) end
 ---@return boolean
 function EditorSelection.set(...) end
+
+---@class EditorSettings
+EditorSettings = {}
+---@return boolean
+function EditorSettings.erase(...) end
+function EditorSettings.get(...) end
+---@return boolean
+function EditorSettings.has(...) end
+function EditorSettings.keys(...) end
+---@return string
+function EditorSettings.path(...) end
+---@return boolean
+function EditorSettings.set(...) end
 
 ---@class EditorTick
 EditorTick = {}

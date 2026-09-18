@@ -76,6 +76,18 @@ bool& LuaWasProcessing()
     return processing;
 }
 
+StringVariantMap& LuaPluginSettings()
+{
+    static StringVariantMap settings;
+    return settings;
+}
+
+bool& LuaPluginSettingsDirty()
+{
+    static bool dirty = false;
+    return dirty;
+}
+
 SceneViewPage* ActiveSceneViewPage(Context* context)
 {
     auto* project = context->GetSubsystem<Project>();

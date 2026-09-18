@@ -30,6 +30,8 @@
 
 #include <sol/sol.hpp>
 
+#include <EASTL/algorithm.h>
+
 #include <string>
 #include <string_view>
 
@@ -832,6 +834,77 @@ void RegisterEditorLuaAPI(Context* context)
     });
     assetsApi.set_function("reveal", [context](const std::string& name) -> bool {
         return OpenAssetResource(context, name, true);
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.settings -- a namespaced, persistent key->variant store a plugin owns, backed by a
+    // single JSON file under <Project>/EditorScripts/plugin-settings.json (loaded before plugins
+    // run, flushed at most once per frame). Keys are dotted ASCII strings; values round-trip the
+    // scalars LuaToVariant understands (bool / int / float / string, and homogeneous scalar arrays).
+    // Everything degrades safely with no project: get->default, set->false, keys->empty, path->"".
+    // ---------------------------------------------------------------------------
+    sol::table settingsApi = editor.create_named("settings");
+
+    // Read a key, or 'default' (nil when omitted) when it is absent.
+    settingsApi.set_function("get", [](sol::this_state s, const std::string& key,
+                                sol::optional<sol::object> fallback) -> sol::object {
+        sol::state_view lua(s);
+        auto it = Detail::LuaPluginSettings().find(ea::string(key.c_str()));
+        if (it != Detail::LuaPluginSettings().end())
+            return VariantToLua(lua, it->second);
+        if (fallback && fallback->valid() && *fallback != sol::lua_nil)
+            return *fallback;
+        return sol::make_object(lua, sol::nil);
+    });
+
+    // Store a key. Returns false (and leaves the store untouched) when the value is not
+    // convertible -- e.g. nil, a function or arbitrary userdata.
+    settingsApi.set_function("set", [](sol::this_state s, const std::string& key, sol::object value) -> bool {
+        const Variant variant = LuaToVariant(sol::state_view(s), value);
+        if (variant.IsEmpty())
+            return false;
+        Detail::LuaPluginSettings()[ea::string(key.c_str())] = variant;
+        Detail::LuaPluginSettingsDirty() = true;
+        return true;
+    });
+
+    settingsApi.set_function("has", [](const std::string& key) -> bool {
+        return Detail::LuaPluginSettings().find(ea::string(key.c_str())) != Detail::LuaPluginSettings().end();
+    });
+
+    // Remove a key; true when one was actually erased (which marks the store dirty).
+    settingsApi.set_function("erase", [](const std::string& key) -> bool {
+        auto& store = Detail::LuaPluginSettings();
+        if (store.erase(ea::string(key.c_str())) == 0)
+            return false;
+        Detail::LuaPluginSettingsDirty() = true;
+        return true;
+    });
+
+    // All keys, optionally limited to a prefix, sorted lexicographically for stable output.
+    settingsApi.set_function("keys",
+        [](sol::this_state s, sol::optional<std::string> prefix) -> sol::object {
+            sol::state_view lua(s);
+            sol::table result = lua.create_table();
+            const ea::string filter = prefix ? ea::string(prefix->c_str()) : ea::string();
+            ea::vector<ea::string> names;
+            for (const auto& pair : Detail::LuaPluginSettings())
+                if (filter.empty() || pair.first.starts_with(filter))
+                    names.push_back(pair.first);
+            ea::sort(names.begin(), names.end());
+            int index = 0;
+            for (const ea::string& name : names)
+                result[++index] = std::string(name.c_str());
+            return result;
+        });
+
+    // Absolute path of the backing JSON file, or "" with no project (for transparency / debugging).
+    settingsApi.set_function("path", [context]() -> std::string {
+        auto* project = context->GetSubsystem<Project>();
+        if (!project)
+            return std::string();
+        const ea::string path = project->GetProjectPath() + "EditorScripts/plugin-settings.json";
+        return std::string(path.c_str());
     });
 
     // ---------------------------------------------------------------------------
