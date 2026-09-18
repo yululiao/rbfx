@@ -10,7 +10,17 @@
 ----------------------------------------------------------------------
 -- Scene setup
 ----------------------------------------------------------------------
+---lua 调试
 require("LuaPanda").start("127.0.0.1", 8818)
+-- 基建 lua 冒烟：require 以脚本根为基准解析（依赖 EngineLuaVM 的 "Scripts/" require 前缀）。
+-- local Object = require("core.Object")
+local Counter = require("core.Counter")
+local counter = Counter:New()  -- Counter:New() 来自 Object，---@return self 把它推成 Counter
+-- counter:Init(10)               -- 子类方法
+counter:Increment()              -- 子类方法
+counter:Log("counter = " .. counter:GetValue())  -- Log/Test 继承自 Object
+counter:Test()
+
 local function CreateScene()
     -- Ground plane
     local planeNode = scene:CreateChild("LuaTest_Plane")

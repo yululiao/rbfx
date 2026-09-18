@@ -28,10 +28,14 @@ namespace
 
 // Game script output shows up as "Lua: ..." in the log, matching what the game has always
 // printed. require() resolves from the mounted resource directories, like every other asset.
+// The "Scripts/" prefix lets game code name modules relative to the script root
+// (require("core.Object") -> Scripts/core/Object.lua); the empty prefix is kept behind it so
+// fully-qualified names and root-level modules (require("LuaPanda")) keep resolving too.
 LuaVMConfig EngineVMConfig()
 {
     LuaVMConfig config;
     config.logPrefix_ = "Lua";
+    config.requirePrefixes_ = { "Scripts/", EMPTY_STRING };
     return config;
 }
 
