@@ -54,6 +54,8 @@
 #include "Assets/StandardFileTypes.h"
 #include "Tabs/Texture2DViewTab.h"
 #include "Tabs/TextureCubeViewTab.h"
+#include "Tabs/UIViewTab.h"
+#include "Tabs/Glue/UIViewGlue.h"
 
 #include "Project/ProjectRequest.h"
 
@@ -111,6 +113,7 @@ EditorApplication::EditorApplication(Context* context)
     editorPluginManager_->AddPlugin("Tabs.HierarchyBrowser", &Tabs_HierarchyBrowserTab);
     editorPluginManager_->AddPlugin("Tabs.Settings", &Tabs_SettingsTab);
     editorPluginManager_->AddPlugin("Tabs.Inspector", &Tabs_InspectorTab);
+    editorPluginManager_->AddPlugin("Tabs.UIView", &Tabs_UIViewTab);
 
     editorPluginManager_->AddPlugin("Tabs.Settings.KeyBindings", &Tabs_KeyBindingsPage);
     editorPluginManager_->AddPlugin("Tabs.Settings.Launch", &Tabs_LaunchPage);
@@ -152,6 +155,7 @@ EditorApplication::EditorApplication(Context* context)
     editorPluginManager_->AddPlugin("Tabs.Glue.Project", &Tabs_ProjectGlue);
     editorPluginManager_->AddPlugin("Tabs.Glue.ResourceBrowser", &Tabs_ResourceBrowserGlue);
     editorPluginManager_->AddPlugin("Tabs.Glue.SceneView", &Tabs_SceneViewGlue);
+    editorPluginManager_->AddPlugin("Tabs.Glue.UIView", &Tabs_UIViewGlue);
 }
 
 void EditorApplication::SerializeInBlock(Archive& archive)
