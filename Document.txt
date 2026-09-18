@@ -1,0 +1,63 @@
+
+1.游戏内lua代码补全和提示
+c++导出的类型,靠rbfx\rbfxProjs\EmptyTest\_apidocs下的*.d.lua(rbfx/gen_editor_lua_api.bat &gen_engine_lua_api.bat 生成)
+bat会调用Source/Tools/ApiDocGen/generate_api_docs.py去解析c++ lua_binding代码，导出c++ bind 到lua的类型输出到rbfx\rbfxProjs\EmptyTest\_apidocs
+你自己写的游戏逻辑Lua,LuaLS 会直接分析工作区里的 .lua 源码。自动实现代码提示。但只需满足三件事:
+两个文件在同一工作区目录树内(你现在开 EmptyTest,Data/Scripts/** 全在里面)——这点已满足。
+require 能解析到那个文件(见下命名规则)。
+模块要"导出类型"——这是最关键、也最容易被忽略的一步。
+
+游戏逻辑lua范式：按范式写，会自动有语法提示(VsCode Lua插件(sumneko)支持)
+-- Data/Scripts/ui/kit.lua
+---@class UiKit
+local M = {}
+
+---@param node Node          -- 直接引用引擎类型,因为 engine.d.lua 在 workspace.library 里
+---@param w integer
+---@param h integer
+function M.centerOn(node, w, h) ... end
+
+---@return Timer             -- 返回值类型也会传播
+function M.makeTimer(...) ... end
+
+return M
+
+
+2.
+
+
+剩余工作项：周更新一次
+
+第一层:三支柱愿景内的剩余任务
+A. Lua 做游戏(dev loop)—— 基本成型,收尾为主
+✅ VM 三层架构、全量引擎绑定、48 样本移植(46 OK)
+✅ 外部工具链:LuaLS 补全 + A2 存根生成器(engine.d.lua/editor.d.lua)、LuaPanda 断点调试
+✅ 基建 lua:require 前缀、@class 继承补全、模板/约定、模块级热重载
+🟡 待办:
+协程/时序原语:游戏侧 coroutine+自定义 scheduler、计时器/缓动库(Tween)、await 风格异步(Godot 有 await/Timer,rbfx 得自己在 Lua 层搭)
+输入映射:Lua 侧 action-map / 重绑定 / 手柄抽象(Godot 的 Input Map 很完整)
+单场景糖的历史坑:SetGlobalScene 悬垂裸指针 / 多场景表达(之前你暂缓)——需要定拥有型场景注册表
+绑定覆盖面:样本冒烟时发现的零星缺口(GetUIRoot/一些 setter)按需求补
+B. Lua 写 Editor 插件 —— P0 刚落,继续往上爬
+✅ P0:Editor.{project,selection,tick,ui} + undo 占位 + 每帧泵(本次提交)
+❌ 待办(有清晰分层):
+P1:资源库 API —— Editor.assets.*(AssetManager 枚举/导入/重导入/MarkCacheDirty/依赖查询)
+P1:设置读写 —— Editor.settings.*(engine/project 配置)
+P2:自定义 Inspector 注册 —— 插件给某 Component 挂 Lua 绘制的属性面板(最大杠杆,让工具用 Lua 写)
+真 undo/redo —— 把 Lua 的场景改动灌进 UndoManager(P0 明确没做,直写不进撤销栈)
+C. Editor 一键发布 —— Web 通了,补平台
+✅ Web 端到端链路、Windows、BuildSystem/BuildPlatform/BuildTab
+❌ 待办:
+iOS 打包(第一梯队,未做)
+构建时按平台纹理压缩(PVRTexTool 方案已定,但只有解码器活著,crunch/ETCPACK 编码器休眠)
+发布模板缓存(避免每次全量重打包)
+第一梯队优先级(维持既有判断):插件 API 覆盖面 > iOS 打包 > 发布模板缓存。
+第二层:引擎本体 vs Godot 的结构性长尾(多季度工程)
+这是"真追平"的大头,和 Lua 愿景正交。Godot 明显更强的地方:
+🟡 渲染特性:GI/SDFGI、SSAO/SSR、体积雾、贴花管线、后处理栈(Godot 4 成套;rbfx 后端覆盖广但这些效果缺)
+🟡 编辑器工具完备度:动画曲线/状态机编辑器、粒子编辑器、可视化 shader、NavMesh 编辑、Project Settings UI —— rbfx 偏"引擎在跑,工具靠手写"
+❌ 2D:Godot 2D 是一等公民;rbfx Urho2D 工具链薄弱
+🟡 UI 系统:rbfx 用 RmlUi(游戏)+ ImGui(工具);Godot 是 Control 节点树 + 场景化 UI 编辑。缺一套 Lua 友好的声明式 UI 层
+🟡 音频:bus/effect 混音编辑器、实时参数
+🟡 高层多人:Godot 有 high-level multiplayer API;rbfx 偏底层 socket
+❌ 本地化工作流、资源导入 UX(可视化重导入/元数据)

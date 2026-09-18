@@ -134,7 +134,7 @@
 		</node>
 		<node _id="8">
 			<attributes>
-				<attribute name="Name" type="String" value="plane" />
+				<attribute name="Name" type="String" value="planeNew" />
 				<attribute name="Position" type="Vector3" value="0 -0.4 0" />
 				<attribute name="Scale" type="Vector3" value="0.1 0.1 0.1" />
 			</attributes>
