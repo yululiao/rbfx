@@ -201,6 +201,10 @@ void Light::ProcessRayQuery(const RayOctreeQuery& query, ea::vector<RayQueryResu
     case RAY_TRIANGLE_UV:
         URHO3D_LOGWARNING("RAY_TRIANGLE_UV query level is not supported for Light component");
         return;
+
+    case RAY_BONE:
+        // Bone-collision picking is only meaningful for AnimatedModel.
+        return;
     }
 
     // If the code reaches here then we have a hit

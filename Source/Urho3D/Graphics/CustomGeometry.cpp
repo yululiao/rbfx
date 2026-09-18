@@ -133,6 +133,10 @@ void CustomGeometry::ProcessRayQuery(const RayOctreeQuery& query, ea::vector<Ray
     case RAY_TRIANGLE_UV:
         URHO3D_LOGWARNING("RAY_TRIANGLE_UV query level is not supported for CustomGeometry component");
         break;
+
+    case RAY_BONE:
+        // Bone-collision picking is only meaningful for AnimatedModel.
+        break;
     }
 }
 

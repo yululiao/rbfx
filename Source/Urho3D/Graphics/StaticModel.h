@@ -52,9 +52,11 @@ public:
     /// @nobind
     static void RegisterObject(Context* context);
 
-    /// Process raycast with custom transform.
+    /// Process raycast with custom transform. Geometry levels resolve to a material slot; the
+    /// optional boneWorldTransforms provides a per-bone pose override used by skinned sub-classes.
     void ProcessCustomRayQuery(const RayOctreeQuery& query, const BoundingBox& worldBoundingBox,
-        const Matrix3x4& worldTransform, ea::vector<RayQueryResult>& results);
+        const Matrix3x4& worldTransform, ea::vector<RayQueryResult>& results,
+        const Matrix3x4* boneWorldTransforms = nullptr);
     /// Process octree raycast. May be called from a worker thread.
     void ProcessRayQuery(const RayOctreeQuery& query, ea::vector<RayQueryResult>& results) override;
     /// Calculate distance and prepare batches for rendering. May be called from worker thread(s), possibly re-entrantly.
@@ -147,6 +149,14 @@ protected:
     void CalculateLodLevels();
     /// Update lightmaps in batches.
     void UpdateBatchesLightmaps();
+
+    /// Triangle-level hit test of one geometry (material slot) against the query ray. Returns the hit
+    /// distance along the world ray (M_INFINITY on a miss) and a world-space normal, and the texture
+    /// UV when query.level_ is RAY_TRIANGLE_UV. The default implementation tests the bind geometry in
+    /// local space; AnimatedModel overrides it to test the current skin pose.
+    virtual float HitTestGeometry(unsigned index, Geometry* geometry, const Matrix3x4& worldTransform,
+        const RayOctreeQuery& query, Vector3& worldNormal, Vector2& textureUV,
+        const Matrix3x4* boneWorldTransforms) const;
 
     /// Extra per-geometry data.
     ea::vector<StaticModelGeometryData> geometryData_;

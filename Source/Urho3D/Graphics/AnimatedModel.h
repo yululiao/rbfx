@@ -159,6 +159,14 @@ protected:
     /// Recalculate the world-space bounding box.
     void OnWorldBoundingBoxUpdate() override;
 
+    /// Triangle-level geometry hit test that deforms the bind geometry to the current skin pose with
+    /// CPU linear-blend skinning, so RAY_TRIANGLE picks the material slot actually under the cursor
+    /// while the model is animating. boneWorldTransforms may provide an explicit pose (replica/replay);
+    /// when null the live bone node transforms are used.
+    float HitTestGeometry(unsigned index, Geometry* geometry, const Matrix3x4& worldTransform,
+        const RayOctreeQuery& query, Vector3& worldNormal, Vector2& textureUV,
+        const Matrix3x4* boneWorldTransforms) const override;
+
 private:
     /// Assign skeleton and animation bone node references as a postprocess. Called by ApplyAttributes.
     void AssignBoneNodes();

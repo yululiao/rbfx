@@ -24,6 +24,7 @@
 
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/Octree.h>
+#include <Urho3D/Graphics/StaticModel.h>
 #include <Urho3D/SystemUI/SystemUI.h>
 
 namespace Urho3D
@@ -50,11 +51,23 @@ void SceneSelector::ProcessInput(SceneViewPage& scenePage, bool& mouseConsumed)
             && !ui::IsKeyDown(KEY_LALT) && !ui::IsKeyDown(KEY_RALT))
         {
             mouseConsumed = true;
-            Node* selectedNode = QuerySelectedNode(scene, scenePage.cameraRay_);
-
             const bool toggle = ui::IsKeyDown(KEY_LCTRL) || ui::IsKeyDown(KEY_RCTRL);
             const bool append = ui::IsKeyDown(KEY_LSHIFT) || ui::IsKeyDown(KEY_RSHIFT);
-            SelectNode(scenePage.selection_, selectedNode, toggle, append);
+
+            // A model is split into per-geometry (material slot) sub-items in the hierarchy; mirror
+            // that here so clicking a slot selects just that geometry instead of the whole model.
+            // The engine reports the hit material slot in subObject_ for any model, including a posed
+            // AnimatedModel. Only a real triangle hit carries a slot index; anything else selects a node.
+            const auto [model, geometryIndex] = QuerySelectedGeometry(scene, scenePage.cameraRay_);
+            if (model)
+            {
+                scenePage.selection_.SetGeometrySelected(model, geometryIndex);
+            }
+            else
+            {
+                Node* selectedNode = QuerySelectedNode(scene, scenePage.cameraRay_);
+                SelectNode(scenePage.selection_, selectedNode, toggle, append);
+            }
         }
     }
 }
@@ -84,6 +97,28 @@ Node* SceneSelector::QuerySelectedNode(Scene* scene, const Ray& cameraRay) const
         selectedNode = selectedNode->GetParent();
 
     return selectedNode;
+}
+
+ea::pair<StaticModel*, unsigned> SceneSelector::QuerySelectedGeometry(Scene* scene, const Ray& cameraRay) const
+{
+    // Results are front-to-back. The engine guarantees that a RAY_TRIANGLE hit on a model reports the
+    // material-slot (geometry) index in subObject_, consistently for StaticModel and a posed
+    // AnimatedModel; a hit that is not a model surface reports M_MAX_UNSIGNED.
+    const auto results = QueryGeometriesFromScene(scene, cameraRay, RAY_TRIANGLE);
+    for (const RayQueryResult& result : results)
+    {
+        Drawable* drawable = result.drawable_;
+        if (!drawable || drawable->GetScene() == nullptr)
+            continue;
+
+        auto* model = dynamic_cast<StaticModel*>(drawable);
+        if (model && !model->GetNode()->IsTemporary() && result.subObject_ < model->GetNumGeometries())
+            return { model, result.subObject_ };
+
+        // The front-most hit resolved to no geometry slot: select it as a node instead.
+        return { nullptr, M_MAX_UNSIGNED };
+    }
+    return { nullptr, M_MAX_UNSIGNED };
 }
 
 void SceneSelector::SelectNode(SceneSelection& selection, Node* node, bool toggle, bool append) const

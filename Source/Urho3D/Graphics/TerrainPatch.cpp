@@ -113,6 +113,10 @@ void TerrainPatch::ProcessRayQuery(const RayOctreeQuery& query, ea::vector<RayQu
     case RAY_TRIANGLE_UV:
         URHO3D_LOGWARNING("RAY_TRIANGLE_UV query level is not supported for TerrainPatch component");
         break;
+
+    case RAY_BONE:
+        // Bone-collision picking is only meaningful for AnimatedModel.
+        break;
     }
 }
 

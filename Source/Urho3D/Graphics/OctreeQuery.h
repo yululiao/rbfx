@@ -173,12 +173,20 @@ struct URHO3D_API OctreeQueryResult
 };
 
 /// Graphics raycast detail level.
+/// The meaning of RayQueryResult::subObject_ is fixed per mode, independent of the drawable type:
+///  - RAY_AABB / RAY_OBB: bounds only, subObject_ is unused (M_MAX_UNSIGNED).
+///  - RAY_TRIANGLE / RAY_TRIANGLE_UV: surface hit; for a model subObject_ is the geometry (material
+///    slot) index, tested against the current skin pose for an AnimatedModel. Other drawables report
+///    M_MAX_UNSIGNED (no sub-object addressing).
+///  - RAY_BONE: opt-in AnimatedModel mode; subObject_ is the colliding bone index. Non-animated
+///    drawables produce no result for this mode.
 enum RayQueryLevel
 {
     RAY_AABB = 0,
     RAY_OBB,
     RAY_TRIANGLE,
-    RAY_TRIANGLE_UV
+    RAY_TRIANGLE_UV,
+    RAY_BONE,
 };
 
 /// Raycast result.

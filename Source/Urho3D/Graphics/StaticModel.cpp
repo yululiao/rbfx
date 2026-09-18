@@ -80,7 +80,7 @@ void StaticModel::ProcessRayQuery(const RayOctreeQuery& query, ea::vector<RayQue
 }
 
 void StaticModel::ProcessCustomRayQuery(const RayOctreeQuery& query, const BoundingBox& worldBoundingBox,
-    const Matrix3x4& worldTransform, ea::vector<RayQueryResult>& results)
+    const Matrix3x4& worldTransform, ea::vector<RayQueryResult>& results, const Matrix3x4* boneWorldTransforms)
 {
     RayQueryLevel level = query.level_;
 
@@ -90,53 +90,85 @@ void StaticModel::ProcessCustomRayQuery(const RayOctreeQuery& query, const Bound
         Drawable::ProcessCustomRayQuery(query, worldBoundingBox, results);
         break;
 
+    case RAY_BONE:
+        // Bone-collision picking is only meaningful for skinned models; a static model has none.
+        break;
+
     case RAY_OBB:
     case RAY_TRIANGLE:
     case RAY_TRIANGLE_UV:
-        Matrix3x4 inverse(worldTransform.Inverse());
-        Ray localRay = query.ray_.Transformed(inverse);
-        const auto distanceAndNormal = localRay.HitDistanceAndNormal(boundingBox_);
-        float distance = distanceAndNormal.distance_;
-        Vector3 normal = (worldTransform * Vector4(distanceAndNormal.normal_,0.0f)).Normalized();
-        Vector2 geometryUV;
-        unsigned hitBatch = M_MAX_UNSIGNED;
-
-        if (level >= RAY_TRIANGLE && distance < query.maxDistance_)
+        // Coarse accept against the world-space bounds (pose-extended for AnimatedModel), so a limb
+        // moved outside the bind box is still testable at triangle level.
+        if (query.ray_.HitDistance(worldBoundingBox) >= query.maxDistance_)
+            break;
         {
-            distance = M_INFINITY;
+            float distance;
+            Vector3 normal;
+            Vector2 geometryUV;
+            unsigned hitBatch = M_MAX_UNSIGNED;
 
-            for (unsigned i = 0; i < batches_.size(); ++i)
+            if (level == RAY_OBB)
             {
-                Geometry* geometry = batches_[i].geometry_;
-                if (geometry)
+                // Oriented-box estimate from the bind box mapped by the node transform.
+                const Ray localRay = query.ray_.Transformed(Matrix3x4(worldTransform.Inverse()));
+                const auto distanceAndNormal = localRay.HitDistanceAndNormal(boundingBox_);
+                distance = distanceAndNormal.distance_;
+                normal = (worldTransform * Vector4(distanceAndNormal.normal_, 0.0f)).Normalized();
+            }
+            else
+            {
+                distance = M_INFINITY;
+                for (unsigned i = 0; i < batches_.size(); ++i)
                 {
+                    Geometry* geometry = batches_[i].geometry_;
+                    if (!geometry)
+                        continue;
                     Vector3 geometryNormal;
-                    float geometryDistance = level == RAY_TRIANGLE ? geometry->GetHitDistance(localRay, &geometryNormal) :
-                        geometry->GetHitDistance(localRay, &geometryNormal, &geometryUV);
+                    Vector2 uv;
+                    const float geometryDistance =
+                        HitTestGeometry(i, geometry, worldTransform, query, geometryNormal, uv, boneWorldTransforms);
                     if (geometryDistance < query.maxDistance_ && geometryDistance < distance)
                     {
                         distance = geometryDistance;
-                        normal = (worldTransform * geometryNormal.ToVector4()).Normalized();
+                        normal = geometryNormal;
+                        geometryUV = uv;
                         hitBatch = i;
                     }
                 }
             }
-        }
 
-        if (distance < query.maxDistance_)
-        {
-            RayQueryResult result;
-            result.position_ = query.ray_.origin_ + distance * query.ray_.direction_;
-            result.normal_ = normal;
-            result.textureUV_ = geometryUV;
-            result.distance_ = distance;
-            result.drawable_ = this;
-            result.node_ = node_;
-            result.subObject_ = hitBatch;
-            results.push_back(result);
+            if (distance < query.maxDistance_)
+            {
+                RayQueryResult result;
+                result.position_ = query.ray_.origin_ + distance * query.ray_.direction_;
+                result.normal_ = normal;
+                result.textureUV_ = geometryUV;
+                result.distance_ = distance;
+                result.drawable_ = this;
+                result.node_ = node_;
+                result.subObject_ = hitBatch;
+                results.push_back(result);
+            }
         }
         break;
     }
+}
+
+float StaticModel::HitTestGeometry(unsigned index, Geometry* geometry, const Matrix3x4& worldTransform,
+    const RayOctreeQuery& query, Vector3& worldNormal, Vector2& textureUV, const Matrix3x4* boneWorldTransforms) const
+{
+    (void)index;
+    (void)boneWorldTransforms;
+
+    // Bind geometry equals posed geometry for a static model: test it directly in local space.
+    const Ray localRay = query.ray_.Transformed(Matrix3x4(worldTransform.Inverse()));
+    Vector3 localNormal;
+    const float distance = query.level_ == RAY_TRIANGLE_UV
+        ? geometry->GetHitDistance(localRay, &localNormal, &textureUV)
+        : geometry->GetHitDistance(localRay, &localNormal);
+    if (distance < M_INFINITY)
+        worldNormal = (worldTransform * localNormal.ToVector4()).Normalized();
+    return distance;
 }
 
 void StaticModel::UpdateBatches(const FrameInfo& frame)

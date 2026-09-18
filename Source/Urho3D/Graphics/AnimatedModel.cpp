@@ -114,11 +114,14 @@ void AnimatedModel::ProcessCustomRayQuery(const RayOctreeQuery& query, const Bou
     const Matrix3x4& worldTransform, ea::span<const Matrix3x4> boneWorldTransforms,
     ea::vector<RayQueryResult>& results)
 {
-    // If no bones or no bone-level testing, use the StaticModel test
-    RayQueryLevel level = query.level_;
-    if (level < RAY_TRIANGLE || !skeleton_.GetNumBones())
+    // Bone-collision hit detection is an explicit opt-in mode (RAY_BONE) and the only one whose
+    // subObject_ is a bone index. Every other level resolves to a material slot like StaticModel,
+    // but tested against the current skin pose (see HitTestGeometry). Previously triangle-level picks
+    // on a skinned model leaked bone indices and were un-pickable when no bone masks were set.
+    const RayQueryLevel level = query.level_;
+    if (level != RAY_BONE || !skeleton_.GetNumBones())
     {
-        StaticModel::ProcessCustomRayQuery(query, worldBoundingBox, worldTransform, results);
+        StaticModel::ProcessCustomRayQuery(query, worldBoundingBox, worldTransform, results, boneWorldTransforms.data());
         return;
     }
 
@@ -181,6 +184,115 @@ void AnimatedModel::ProcessCustomRayQuery(const RayOctreeQuery& query, const Bou
         result.subObject_ = i;
         results.push_back(result);
     }
+}
+
+// Read one index from raw index data of either 2- or 4-byte width.
+static unsigned AnimReadIndex(const unsigned char* indexData, unsigned indexSize, unsigned at)
+{
+    return indexSize == 2
+        ? static_cast<unsigned>(reinterpret_cast<const uint16_t*>(indexData)[at])
+        : static_cast<unsigned>(reinterpret_cast<const uint32_t*>(indexData)[at]);
+}
+
+float AnimatedModel::HitTestGeometry(unsigned index, Geometry* geometry, const Matrix3x4& worldTransform,
+    const RayOctreeQuery& query, Vector3& worldNormal, Vector2& textureUV, const Matrix3x4* boneWorldTransforms) const
+{
+    const ea::vector<Bone>& bones = skeleton_.GetBones();
+    const unsigned numBones = bones.size();
+
+    const unsigned char* vertexData = nullptr;
+    const unsigned char* indexData = nullptr;
+    unsigned vertexSize = 0;
+    unsigned indexSize = 0;
+    const ea::vector<VertexElement>* elements = nullptr;
+    geometry->GetRawData(vertexData, vertexSize, indexData, indexSize, elements);
+
+    const unsigned posOffset = elements ? VertexBuffer::GetElementOffset(*elements, TYPE_VECTOR3, SEM_POSITION) : M_MAX_UNSIGNED;
+    const unsigned biOffset = elements ? VertexBuffer::GetElementOffset(*elements, TYPE_UBYTE4, SEM_BLENDINDICES) : M_MAX_UNSIGNED;
+    unsigned bwOffset = elements ? VertexBuffer::GetElementOffset(*elements, TYPE_VECTOR4, SEM_BLENDWEIGHTS) : M_MAX_UNSIGNED;
+    bool weightsNormalized = false;
+    if (elements && bwOffset == M_MAX_UNSIGNED)
+    {
+        bwOffset = VertexBuffer::GetElementOffset(*elements, TYPE_UBYTE4_NORM, SEM_BLENDWEIGHTS);
+        weightsNormalized = true;
+    }
+
+    // No skeleton, or no readable blend data on this geometry: bind pose equals a static test.
+    if (!numBones || !vertexData || posOffset == M_MAX_UNSIGNED || biOffset == M_MAX_UNSIGNED || bwOffset == M_MAX_UNSIGNED)
+        return StaticModel::HitTestGeometry(index, geometry, worldTransform, query, worldNormal, textureUV, boneWorldTransforms);
+
+    const bool perGeometry = !geometrySkinMatrices_.empty();
+    const ea::vector<unsigned>* mapping =
+        (perGeometry && index < geometryBoneMappings_.size()) ? &geometryBoneMappings_[index] : nullptr;
+
+    // World-space linear-blend-skinned position of a bind vertex, matching UpdateSkinning
+    // (skin = boneWorld * offsetMatrix, already world space). boneWorldTransforms overrides the live
+    // node pose for replica/replay queries; a missing bone falls back to the node transform.
+    const Ray& worldRay = query.ray_;
+    auto skinPos = [&](unsigned v) -> Vector3 {
+        const unsigned char* vp = vertexData + static_cast<size_t>(v) * vertexSize;
+        const Vector3 bindPos{*reinterpret_cast<const Vector3*>(vp + posOffset)};
+        const unsigned char* bi = vp + biOffset;
+        const unsigned char* bw = vp + bwOffset;
+        Vector3 acc = Vector3::ZERO;
+        for (int k = 0; k < 4; ++k)
+        {
+            const float w = weightsNormalized ? bw[k] / 255.0f : reinterpret_cast<const float*>(bw)[k];
+            if (w <= 0.0f)
+                continue;
+            unsigned boneIdx = bi[k];
+            if (mapping)
+            {
+                if (boneIdx >= mapping->size())
+                    continue;
+                boneIdx = (*mapping)[boneIdx];
+            }
+            if (boneIdx >= numBones)
+                continue;
+            const Bone& bone = bones[boneIdx];
+            const Matrix3x4 boneWorld = boneWorldTransforms ? boneWorldTransforms[boneIdx]
+                : (bone.node_ ? bone.node_->GetWorldTransform() : worldTransform);
+            acc += ((boneWorld * bone.offsetMatrix_) * bindPos) * w;
+        }
+        return acc;
+    };
+
+    float best = M_INFINITY;
+    auto testTriangle = [&](unsigned a, unsigned b, unsigned c) {
+        const Vector3 p0 = skinPos(a);
+        const Vector3 p1 = skinPos(b);
+        const Vector3 p2 = skinPos(c);
+        Vector3 faceNormal;
+        const float d = worldRay.HitDistance(p0, p1, p2, &faceNormal);
+        if (d < best)
+        {
+            best = d;
+            worldNormal = faceNormal;
+        }
+    };
+
+    if (indexData)
+    {
+        const unsigned start = geometry->GetIndexStart();
+        const unsigned n = geometry->GetIndexCount();
+        for (unsigned i = 0; i + 2 < n; i += 3)
+        {
+            testTriangle(AnimReadIndex(indexData, indexSize, start + i),
+                AnimReadIndex(indexData, indexSize, start + i + 1),
+                AnimReadIndex(indexData, indexSize, start + i + 2));
+        }
+    }
+    else
+    {
+        const unsigned start = geometry->GetVertexStart();
+        const unsigned n = geometry->GetVertexCount();
+        for (unsigned i = 0; i + 2 < n; i += 3)
+            testTriangle(start + i, start + i + 1, start + i + 2);
+    }
+
+    // Texture UV is not resolved on skinned geometry; picking relies on distance, slot and normal.
+    (void)textureUV;
+    return best;
 }
 
 void AnimatedModel::ProcessRayQuery(const RayOctreeQuery& query, ea::vector<RayQueryResult>& results)

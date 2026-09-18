@@ -31,6 +31,8 @@
 namespace Urho3D
 {
 
+class StaticModel;
+
 void Tabs_SceneSelector(Context* context, SceneViewTab* sceneViewTab);
 
 /// Addon to manage scene selection with mouse and render debug geometry.
@@ -51,6 +53,11 @@ public:
 private:
     Drawable* QuerySelectedDrawable(Scene* scene, const Ray& cameraRay, RayQueryLevel level) const;
     Node* QuerySelectedNode(Scene* scene, const Ray& cameraRay) const;
+    /// If the topmost triangle hit is a geometry slot of a model, return that component and the slot
+    /// index; otherwise {nullptr, M_MAX_UNSIGNED} so the caller selects the whole node. Relies on the
+    /// engine guarantee that RAY_TRIANGLE reports a material-slot index in subObject_ for every
+    /// StaticModel subclass (including a posed AnimatedModel), and M_MAX_UNSIGNED otherwise.
+    ea::pair<StaticModel*, unsigned> QuerySelectedGeometry(Scene* scene, const Ray& cameraRay) const;
     void SelectNode(SceneSelection& selection, Node* node, bool toggle, bool append) const;
 };
 
