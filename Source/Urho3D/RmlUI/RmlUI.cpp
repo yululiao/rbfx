@@ -49,6 +49,7 @@
 #include "../RmlUI/RmlFile.h"
 #include "../RmlUI/RmlEventListeners.h"
 #include "../RmlUI/RmlCanvasComponent.h"
+#include "../RmlUI/RmlWorldCanvas.h"
 #include "../RmlUI/RmlSerializableInspector.h"
 #include "../RmlUI/RmlUIComponent.h"
 #include "Urho3D/RenderAPI/RenderContext.h"
@@ -1029,6 +1030,7 @@ void RegisterRmlUILibrary(Context* context)
     context->AddFactoryReflection<RmlUI>();
     RmlUIComponent::RegisterObject(context);
     RmlCanvasComponent::RegisterObject(context);
+    RmlWorldCanvas::RegisterObject(context);
     RmlSerializableInspector::RegisterObject(context);
 }
 
