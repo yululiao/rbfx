@@ -43,15 +43,68 @@ struct LuaWindow
     unsigned int flags;
 };
 
+/// Callback registered by Editor.selection.onChanged; invoked when the active scene selection
+/// changes. Persist across frames, one-shot-free: they fire on every change until a plugin reload.
+/// (Handles live in the host callback registry; ResetLuaUI drops the list, the reload drops the
+/// registry, so a stale handle can never be invoked.)
+
+/// A scheduled task registered through Editor.tick.{defer,after,every}. 'nextFrame' tasks run on
+/// the very next pump regardless of 'fireTime'; 'interval' > 0 marks a repeating task (every),
+/// 0 a one-shot (defer/after) that is dropped after firing. 'fireTime' is an absolute stamp from
+/// the Time subsystem's elapsed clock.
+struct LuaScheduledTask
+{
+    unsigned long long handle;
+    float fireTime;
+    float interval;
+    bool nextFrame;
+};
+
+/// A transient notification queued by Editor.ui.notify, drawn as a floating toast and expired by
+/// 'expireTime' (absolute Time elapsed stamp).
+struct LuaToast
+{
+    ea::string text;
+    float expireTime;
+};
+
+/// A modal dialog requested by Editor.ui.{confirm,input}. Only the first entry is presented each
+/// frame; resolving it (button / enter / escape) pops it and invokes the stored one-shot callback
+/// handles. 'id' is the ImGui popup name; 'opened' guards the one-time OpenPopup call; 'input'
+/// is the mutable text buffer for the Input kind.
+struct LuaModal
+{
+    enum Kind
+    {
+        Confirm,
+        Input,
+    };
+
+    Kind kind;
+    ea::string id;
+    ea::string title;
+    ea::string text;
+    ea::string label;
+    ea::string input;
+    unsigned long long onConfirm; // Confirm: yes / Input: done(text)
+    unsigned long long onCancel;  // Confirm: no (may be 0)
+    bool opened;
+};
+
 ea::vector<LuaMenuItem>& LuaMenuItems();
 ea::vector<WeakPtr<LuaEditorTab>>& LuaTabs();
 ea::vector<LuaWindow>& LuaWindows();
+ea::vector<unsigned long long>& LuaSelectionCallbacks();
+ea::vector<LuaScheduledTask>& LuaScheduledTasks();
+ea::vector<LuaToast>& LuaToasts();
+ea::vector<LuaModal>& LuaModals();
 
 /// Return the scene-view page currently being edited (its scene + selection), or null.
 SceneViewPage* ActiveSceneViewPage(Context* context);
 
-/// Drop accumulated bookkeeping (menu items, windows, pruned tab references) at the start of a
-/// plugin (re)load, mirroring the Lua side clearing its own UI-callback registry.
+/// Drop accumulated bookkeeping (menu items, windows, pruned tab references, and the P0 UI state:
+/// selection callbacks, scheduled tasks, toasts and modals) at the start of a plugin (re)load,
+/// mirroring the Lua side clearing its own UI-callback registry.
 void ResetLuaUI();
 
 }

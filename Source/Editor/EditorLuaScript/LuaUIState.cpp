@@ -40,6 +40,30 @@ ea::vector<LuaWindow>& LuaWindows()
     return windows;
 }
 
+ea::vector<unsigned long long>& LuaSelectionCallbacks()
+{
+    static ea::vector<unsigned long long> callbacks;
+    return callbacks;
+}
+
+ea::vector<LuaScheduledTask>& LuaScheduledTasks()
+{
+    static ea::vector<LuaScheduledTask> tasks;
+    return tasks;
+}
+
+ea::vector<LuaToast>& LuaToasts()
+{
+    static ea::vector<LuaToast> toasts;
+    return toasts;
+}
+
+ea::vector<LuaModal>& LuaModals()
+{
+    static ea::vector<LuaModal> modals;
+    return modals;
+}
+
 SceneViewPage* ActiveSceneViewPage(Context* context)
 {
     auto* project = context->GetSubsystem<Project>();
@@ -53,6 +77,10 @@ void ResetLuaUI()
 {
     LuaMenuItems().clear();
     LuaWindows().clear();
+    LuaSelectionCallbacks().clear();
+    LuaScheduledTasks().clear();
+    LuaToasts().clear();
+    LuaModals().clear();
     auto& tabs = LuaTabs();
     tabs.erase(ea::remove_if(tabs.begin(), tabs.end(),
                    [](const WeakPtr<LuaEditorTab>& weak) { return !weak.Get(); }),

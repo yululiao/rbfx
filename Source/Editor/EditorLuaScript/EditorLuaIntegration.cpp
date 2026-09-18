@@ -13,12 +13,18 @@
 #include "LuaUIState.h"
 
 #include "../Project/Project.h"
+#include "../Tabs/SceneViewTab.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Object.h>
+#include <Urho3D/Core/Timer.h>
+#include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/SystemUI.h>
+#include <Urho3D/Utility/SceneSelection.h>
 
+#include <EASTL/algorithm.h>
 #include <EASTL/map.h>
+#include <EASTL/optional.h>
 
 namespace Urho3D
 {
@@ -145,15 +151,202 @@ void ReloadEditorLuaPlugins(Context* context)
     editorLua->LoadPlugins(project->GetProjectPath() + "EditorScripts");
 }
 
+namespace
+{
+
+float LuaNow(Context* context)
+{
+    auto* time = context->GetSubsystem<Time>();
+    return time ? time->GetElapsedTime() : 0.0f;
+}
+
+// Run due scheduled tasks (Editor.tick). Fired work is snapshotted out of the live list before it
+// is invoked, so a callback that registers more tasks (a defer inside a defer) or cancels a
+// sibling mutates the shared list, never the copy being called.
+void PumpLuaScheduledTasks(Context* context, LuaVMHost* lua)
+{
+    auto& tasks = Detail::LuaScheduledTasks();
+    if (tasks.empty())
+        return;
+
+    const float now = LuaNow(context);
+    ea::vector<Detail::LuaScheduledTask> fire;
+    ea::vector<Detail::LuaScheduledTask> reschedule;
+
+    for (auto it = tasks.begin(); it != tasks.end();)
+    {
+        Detail::LuaScheduledTask task = *it;
+        if (task.nextFrame || now >= task.fireTime)
+        {
+            it = tasks.erase(it);
+            task.nextFrame = false;
+            if (task.interval > 0.0f)
+            {
+                task.fireTime = now + task.interval;
+                reschedule.push_back(task);
+            }
+            fire.push_back(task);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    for (const Detail::LuaScheduledTask& task : reschedule)
+        tasks.push_back(task);
+    for (const Detail::LuaScheduledTask& task : fire)
+        lua->InvokeCallback(task.handle);
+}
+
+// Fire Editor.selection.onChanged callbacks when the active selection changes. The packed selection
+// is compared every frame so edits from the user, other tabs, or Lua all funnel through one path.
+// A scene switch only re-baselines (no callback) so opening a project never looks like an edit.
+void PollLuaSelectionChange(Context* context, LuaVMHost* lua)
+{
+    static Scene* lastScene = nullptr;
+    static ea::optional<PackedSceneSelection> lastPack;
+
+    SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+    Scene* scene = page ? page->scene_.Get() : nullptr;
+    const ea::optional<PackedSceneSelection> current = page
+        ? ea::optional<PackedSceneSelection>(page->selection_.Pack())
+        : ea::optional<PackedSceneSelection>();
+
+    const bool rebaselined = scene != lastScene;
+    const bool changed = current && lastPack && !(current == lastPack);
+    lastScene = scene;
+    lastPack = current;
+
+    if (rebaselined || !changed)
+        return;
+
+    auto callbacks = Detail::LuaSelectionCallbacks();
+    for (unsigned long long handle : callbacks)
+        lua->InvokeCallback(handle);
+}
+
+// Draw queued Editor.ui.notify toasts as a borderless bottom-right stack, expiring by time.
+void RenderLuaToasts(Context* context)
+{
+    auto& toasts = Detail::LuaToasts();
+    if (toasts.empty())
+        return;
+
+    const float now = LuaNow(context);
+    toasts.erase(ea::remove_if(toasts.begin(), toasts.end(),
+                     [now](const Detail::LuaToast& t) { return now >= t.expireTime; }),
+        toasts.end());
+    if (toasts.empty())
+        return;
+
+    const ImVec2 display = ui::GetIO().DisplaySize;
+    ui::SetNextWindowPos(ImVec2(display.x - 16.0f, display.y - 16.0f), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+    ui::SetNextWindowBgAlpha(0.95f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    if (ui::Begin("EditorLuaNotify", nullptr, flags))
+    {
+        for (const Detail::LuaToast& toast : toasts)
+            ui::TextUnformatted(toast.text.c_str());
+    }
+    ui::End();
+}
+
+// Present the front-most Editor.ui modal; resolving it pops the queue and fires the stored one-shot
+// callback. An input dialog hands its text back as an EventData with a Text field; cancelling an
+// input, or pressing No on a confirm, runs the cancel path (no callback for input).
+void RenderLuaModals(Context* context, LuaVMHost* lua)
+{
+    auto& modals = Detail::LuaModals();
+    if (modals.empty())
+        return;
+
+    Detail::LuaModal& modal = modals.front();
+    if (!modal.opened)
+    {
+        ui::OpenPopup(modal.id.c_str());
+        modal.opened = true;
+    }
+
+    bool resolved = false;
+    bool confirmed = false;
+    if (ui::BeginPopupModal(modal.id.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (!modal.title.empty())
+            ui::TextUnformatted(modal.title.c_str());
+        if (modal.kind == Detail::LuaModal::Confirm)
+        {
+            if (!modal.text.empty())
+                ui::TextWrapped("%s", modal.text.c_str());
+            ui::Separator();
+            if (ui::Button("OK"))
+                confirmed = resolved = true;
+            if (modal.onCancel)
+            {
+                ui::SameLine();
+                if (ui::Button("Cancel"))
+                    resolved = true;
+            }
+            if (ui::IsKeyPressed(KEY_ESCAPE))
+                resolved = true;
+        }
+        else // Input
+        {
+            ui::InputText(modal.label.c_str(), &modal.input);
+            ui::Separator();
+            if (ui::Button("OK"))
+                confirmed = resolved = true;
+            if (ui::IsKeyPressed(KEY_ESCAPE))
+                resolved = true;
+        }
+        ui::EndPopup();
+    }
+
+    if (!resolved)
+        return;
+
+    const bool wasInput = modal.kind == Detail::LuaModal::Input;
+    const ea::string text = modal.input;
+    const unsigned long long okHandle = modal.onConfirm;
+    const unsigned long long cancelHandle = modal.onCancel;
+    modals.erase(modals.begin());
+    ui::CloseCurrentPopup();
+
+    VariantMap data;
+    if (confirmed)
+    {
+        if (wasInput)
+            data["Text"] = text;
+        if (okHandle)
+            lua->InvokeOneShotCallback(okHandle, data);
+        if (cancelHandle)
+            lua->DropCallback(cancelHandle);
+    }
+    else
+    {
+        if (cancelHandle)
+            lua->InvokeOneShotCallback(cancelHandle, data);
+        if (okHandle)
+            lua->DropCallback(okHandle);
+    }
+}
+
+} // namespace
+
 void RenderLuaWindows(Context* context)
 {
-    // Draw every Lua window whose flag is set. This runs at the top level of the editor frame
-    // (like the About dialog), so the windows persist regardless of which dock tab is focused.
-    if (Detail::LuaWindows().empty())
-        return;
+    // Single per-frame entry point for the whole Lua plugin UI, run at the top level of the editor
+    // frame (like the About dialog): drive scheduling, detect selection changes, then draw the
+    // registered windows, toasts and modals. Scheduling runs first so a deferred callback acts
+    // before anything it queued is rendered this frame.
     auto* lua = context->GetSubsystem<EditorLuaVMHost>();
     if (!lua)
         return;
+
+    PumpLuaScheduledTasks(context, lua);
+    PollLuaSelectionChange(context, lua);
 
     for (Detail::LuaWindow& window : Detail::LuaWindows())
     {
@@ -167,6 +360,9 @@ void RenderLuaWindows(Context* context)
         if (!open)
             window.visible = false; // User closed it from the title bar.
     }
+
+    RenderLuaToasts(context);
+    RenderLuaModals(context, lua);
 }
 
 void RenderLuaMenuEntries(Context* context, const char* topName)

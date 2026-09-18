@@ -18,10 +18,12 @@
 #include "../Project/Project.h"
 
 #include <Urho3D/Core/Context.h>
+#include <Urho3D/Core/Timer.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Scene/Component.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Scene.h>
+#include <Urho3D/Utility/SceneSelection.h>
 
 #include <sol/sol.hpp>
 
@@ -35,6 +37,59 @@ namespace Urho3D
 // sees: VM plumbing (log, subscribe, exec) plus the capabilities that need editor types
 // (project access, UI registration, live scene context, build pipeline). Each lambda resolves
 // the live subsystems on call, so the functions stay correct as projects open and close.
+namespace
+{
+
+// Absolute stamp from the Time subsystem's elapsed clock; 0 before the subsystem exists.
+float NowElapsed(Context* context)
+{
+    auto* time = context->GetSubsystem<Time>();
+    return time ? time->GetElapsedTime() : 0.0f;
+}
+
+// Resolve a Lua value that came from WrapLuaObject back to a live engine object pointer. The
+// wrappers are either a concrete bound usertype (Node/Component/...) or the generic LuaObjectRef
+// fallback; both funnel down to Object*. Returns null for anything that is not a live object.
+Object* ToEngineObject(const sol::object& value)
+{
+    if (!value.valid() || value.get_type() != sol::type::userdata)
+        return nullptr;
+    if (value.is<LuaObjectRef>())
+        return value.as<LuaObjectRef>().Get();
+    if (value.is<Node*>())
+        return value.as<Node*>();
+    if (value.is<Component*>())
+        return value.as<Component*>();
+    if (value.is<Object*>())
+        return value.as<Object*>();
+    return nullptr;
+}
+
+// Select a single object or every object in an array (1-based Lua table), leaving the rest of the
+// selection as it is. Non-object entries are ignored.
+void ApplySelection(SceneSelection& selection, const sol::object& target, bool activate)
+{
+    if (target.is<sol::table>())
+    {
+        sol::table array = target.as<sol::table>();
+        for (auto& pair : array)
+            if (Object* object = ToEngineObject(pair.second))
+                selection.SetSelected(object, true, activate);
+        return;
+    }
+    if (Object* object = ToEngineObject(target))
+        selection.SetSelected(object, true, activate);
+}
+
+// Unique ImGui popup id for a modal; the ## suffix hides the counter from the visible title.
+ea::string MakeModalId(const std::string& title)
+{
+    static unsigned counter = 0;
+    return ea::string(("LuaModal##" + std::to_string(++counter) + "_" + title).c_str());
+}
+
+} // namespace
+
 void RegisterEditorLuaAPI(Context* context)
 {
     auto* editorLua = context->GetSubsystem<EditorLuaVMHost>();
@@ -317,6 +372,228 @@ void RegisterEditorLuaAPI(Context* context)
         result["errors"] = errors;
         return result;
     });
+
+    // ---------------------------------------------------------------------------
+    // Editor.project -- dirty marking and save (P0).
+    // ---------------------------------------------------------------------------
+    sol::table projectApi = editor.create_named("project");
+    projectApi.set_function("hasProject", [context]() -> bool {
+        return context->GetSubsystem<Project>() != nullptr;
+    });
+    projectApi.set_function("path", [context]() -> std::string {
+        auto* project = context->GetSubsystem<Project>();
+        return project ? std::string(project->GetProjectPath().c_str()) : std::string();
+    });
+    projectApi.set_function("dataPath", [context]() -> std::string {
+        auto* project = context->GetSubsystem<Project>();
+        return project ? std::string(project->GetDataPath().c_str()) : std::string();
+    });
+    // Mark the project as having unsaved changes so the title bar shows the dirty indicator and a
+    // close prompts. Use it after mutating the scene from a plugin (the engine bindings do not mark
+    // it on their own).
+    projectApi.set_function("markDirty", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        if (!project)
+            return false;
+        project->MarkUnsaved();
+        return true;
+    });
+    projectApi.set_function("isDirty", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        return project && project->HasUnsavedChanges();
+    });
+    // Save the active scene through the very routine Ctrl+S uses (the scene view tab's current
+    // resource). Returns false when no project or scene view is open.
+    projectApi.set_function("save", [context]() -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        if (!project)
+            return false;
+        auto* view = project->FindTab<SceneViewTab>();
+        if (!view)
+            return false;
+        view->SaveCurrentResource();
+        return true;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.selection -- read and write the live scene selection, plus a change callback.
+    // Objects flow in and out through the same wrappers the engine bindings use.
+    // ---------------------------------------------------------------------------
+    sol::table selectionApi = editor.create_named("selection");
+    selectionApi.set_function("scene", [context, editorLua]() -> sol::object {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        return WrapLuaObject(editorLua->GetState(), page ? page->scene_.Get() : nullptr);
+    });
+    selectionApi.set_function("activeNode", [context, editorLua]() -> sol::object {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        return WrapLuaObject(editorLua->GetState(), page ? page->selection_.GetActiveNode() : nullptr);
+    });
+    selectionApi.set_function("nodes", [context](sol::this_state s) -> sol::object {
+        sol::state_view lua(s);
+        sol::table result = lua.create_table();
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (page)
+        {
+            int index = 0;
+            for (const WeakPtr<Node>& node : page->selection_.GetNodes())
+                if (Node* raw = node.Get())
+                    result[++index] = WrapLuaObject(lua, raw);
+        }
+        return result;
+    });
+    selectionApi.set_function("components", [context](sol::this_state s) -> sol::object {
+        sol::state_view lua(s);
+        sol::table result = lua.create_table();
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (page)
+        {
+            int index = 0;
+            for (const WeakPtr<Component>& component : page->selection_.GetComponents())
+                if (Component* raw = component.Get())
+                    result[++index] = WrapLuaObject(lua, raw);
+        }
+        return result;
+    });
+    // set replaces the selection, add extends it; each takes one object or an array of objects.
+    selectionApi.set_function("set", [context](sol::object target, sol::optional<bool> activate) -> bool {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (!page)
+            return false;
+        page->selection_.Clear();
+        ApplySelection(page->selection_, target, activate.value_or(true));
+        return true;
+    });
+    selectionApi.set_function("add", [context](sol::object target, sol::optional<bool> activate) -> bool {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (!page)
+            return false;
+        ApplySelection(page->selection_, target, activate.value_or(true));
+        return true;
+    });
+    selectionApi.set_function("clear", [context]() -> bool {
+        SceneViewPage* page = Detail::ActiveSceneViewPage(context);
+        if (!page)
+            return false;
+        page->selection_.Clear();
+        return true;
+    });
+    // Register a callback fired whenever the active selection changes (the editor polls the packed
+    // selection each frame, so it also catches changes made by the user or other tabs). Callbacks
+    // read the new selection via the getters; they are cleared on plugin reload.
+    selectionApi.set_function("onChanged",
+        [host = editorLua](sol::protected_function callback) -> bool {
+            if (!callback.valid())
+                return false;
+            Detail::LuaSelectionCallbacks().push_back(host->RegisterCallback(std::move(callback)));
+            return true;
+        });
+
+    // ---------------------------------------------------------------------------
+    // Editor.tick -- run a callback later on the editor loop. Pumped every frame from the plugin
+    // window pass; handles are the host's callback handles so a reload can never invoke a stale one.
+    // ---------------------------------------------------------------------------
+    sol::table tickApi = editor.create_named("tick");
+    tickApi.set_function("defer", [host = editorLua](sol::protected_function callback) -> bool {
+        if (!callback.valid())
+            return false;
+        Detail::LuaScheduledTask task;
+        task.handle = host->RegisterCallback(std::move(callback));
+        task.fireTime = 0.0f;
+        task.interval = 0.0f;
+        task.nextFrame = true;
+        Detail::LuaScheduledTasks().push_back(task);
+        return true;
+    });
+    tickApi.set_function("after", [context, host = editorLua](double seconds,
+                             sol::protected_function callback) -> bool {
+        if (!callback.valid())
+            return false;
+        Detail::LuaScheduledTask task;
+        task.handle = host->RegisterCallback(std::move(callback));
+        task.fireTime = NowElapsed(context) + static_cast<float>(seconds);
+        task.interval = 0.0f;
+        task.nextFrame = false;
+        Detail::LuaScheduledTasks().push_back(task);
+        return true;
+    });
+    tickApi.set_function("every", [context, host = editorLua](double seconds,
+                             sol::protected_function callback) -> unsigned long long {
+        if (!callback.valid())
+            return 0ull;
+        Detail::LuaScheduledTask task;
+        task.handle = host->RegisterCallback(std::move(callback));
+        task.fireTime = NowElapsed(context) + static_cast<float>(seconds);
+        task.interval = static_cast<float>(seconds);
+        task.nextFrame = false;
+        Detail::LuaScheduledTasks().push_back(task);
+        return task.handle;
+    });
+    tickApi.set_function("cancel", [host = editorLua](unsigned long long handle) -> bool {
+        auto& tasks = Detail::LuaScheduledTasks();
+        for (size_t i = 0; i < tasks.size(); ++i)
+        {
+            if (tasks[i].handle == handle)
+            {
+                tasks.erase(tasks.begin() + i);
+                host->DropCallback(handle);
+                return true;
+            }
+        }
+        return false;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.ui -- transient toast notifications and simple modal dialogs (ImGui based). Toasts and
+    // modals are drawn by the per-frame plugin pass.
+    // ---------------------------------------------------------------------------
+    sol::table uiApi = editor.create_named("ui");
+    uiApi.set_function("notify", [context](const std::string& text,
+                           sol::optional<double> seconds) -> bool {
+        Detail::LuaToast toast;
+        toast.text = ea::string(text.c_str());
+        toast.expireTime = NowElapsed(context) + static_cast<float>(seconds.value_or(3.0));
+        Detail::LuaToasts().push_back(toast);
+        return true;
+    });
+    uiApi.set_function("confirm", [context, host = editorLua](const std::string& title,
+                                   const std::string& text, sol::protected_function onYes,
+                                   sol::optional<sol::protected_function> onNo) -> bool {
+        if (!onYes.valid())
+            return false;
+        Detail::LuaModal modal;
+        modal.kind = Detail::LuaModal::Confirm;
+        modal.id = MakeModalId(title);
+        modal.title = ea::string(title.c_str());
+        modal.text = ea::string(text.c_str());
+        modal.onConfirm = host->RegisterCallback(std::move(onYes));
+        modal.onCancel = (onNo && onNo->valid()) ? host->RegisterCallback(std::move(*onNo)) : 0ull;
+        modal.opened = false;
+        Detail::LuaModals().push_back(modal);
+        return true;
+    });
+    uiApi.set_function("input", [context, host = editorLua](const std::string& title,
+                                 const std::string& label, const std::string& defaultText,
+                                 sol::protected_function onDone) -> bool {
+        if (!onDone.valid())
+            return false;
+        Detail::LuaModal modal;
+        modal.kind = Detail::LuaModal::Input;
+        modal.id = MakeModalId(title);
+        modal.title = ea::string(title.c_str());
+        modal.label = ea::string(label.c_str());
+        modal.input = ea::string(defaultText.c_str());
+        modal.onConfirm = host->RegisterCallback(std::move(onDone));
+        modal.onCancel = 0ull;
+        modal.opened = false;
+        Detail::LuaModals().push_back(modal);
+        return true;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.undo -- reserved. Real undo integration (funneling Lua scene edits onto the editor's
+    // UndoManager) is a deliberate follow-up; direct engine-binding writes are not undoable yet.
+    // ---------------------------------------------------------------------------
+    editor.create_named("undo");
 }
 
 } // namespace Urho3D

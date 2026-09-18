@@ -475,21 +475,29 @@ def parse_file(path, api):
     def join(prefix, name):
         return (prefix + '.' + name) if prefix else name
 
-    # Pass 1: sol::table VAR = <ctx>.create_named_table("Name")
+    # Pass 1: sol::table VAR = <ctx>.create_named_table("Name") and its nested cousin
+    # <ctx>.create_named("Name") (a table method). The latter nests under <ctx>'s qualified name,
+    # so `Editor.project` (a create_named of the `Editor` named table) resolves one level down.
     i = 0
     while i < n:
         if toks[i][0] == 'id' and toks[i][1] == 'sol':
             j = match_seq(toks, i, [('id', 'sol'), ('punct', '::'), ('id', 'table')])
             if j > 0 and j + 1 < n and toks[j][0] == 'id' and toks[j + 1] == ('punct', '='):
                 var = toks[j][1]
+                ctx = toks[j + 2][1] if j + 2 < n and toks[j + 2][0] == 'id' else None
                 m = match_seq(toks, j + 2, [('id', None), ('punct', '.'),
                                             ('id', 'create_named_table'), ('punct', '('),
                                             ('str', None), ('punct', ')')])
-                if m > 0:
-                    ctx = toks[j + 2][1]
-                    name = toks[j + 6][1]
-                    prefix = resolve(ctx) or ''
-                    namespace_var[var] = join(prefix, name)
+                if m > 0 and ctx is not None:
+                    namespace_var[var] = join(resolve(ctx) or '', toks[j + 6][1])
+                else:
+                    m = match_seq(toks, j + 2, [('id', None), ('punct', '.'),
+                                                ('id', 'create_named'), ('punct', '('),
+                                                ('str', None), ('punct', ')')])
+                    if m > 0 and ctx is not None:
+                        prefix = resolve(ctx)
+                        if prefix is not None:
+                            namespace_var[var] = join(prefix, toks[j + 6][1])
         i += 1
 
     # Pass 2: API-defining constructs.
@@ -615,6 +623,18 @@ def emit(api, header):
     def ann(kind, ret):
         return cpp_to_lua_type(ret, exported)
 
+    # A qualified table name like `Editor.project` becomes the alias class `EditorProject`; a plain
+    # name is its own alias. Nested tables are declared as alias classes and referenced from the
+    # parent via a field, so `Editor.project.markDirty` resolves while `Editor` itself stays flat.
+    def alias_name(qname):
+        parts = qname.split('.')
+        return parts[0] + ''.join(p[:1].upper() + p[1:] for p in parts[1:])
+
+    children = {}
+    for name in exported:
+        if '.' in name:
+            children.setdefault(name.rsplit('.', 1)[0], []).append(name)
+
     gfuncs = sorted(n for n, g in api.globals.items() if g['kind'] == 'function' and is_identifier(n))
     gconsts = sorted(n for n, g in api.globals.items() if g['kind'] == 'const' and is_identifier(n))
 
@@ -634,26 +654,34 @@ def emit(api, header):
     if gfuncs or gconsts:
         out.append('')
 
-    for name in sorted(exported):
-        if not is_identifier(name):
-            continue
-        sym = api.symbols[name]
-        out.append('---@class %s%s' % (name, bases_of(sym)))
-        out.append('%s = {}' % name)
+    def emit_class(qname):
+        sym = api.symbols[qname]
+        cls = alias_name(qname)
+        out.append('---@class %s%s' % (cls, bases_of(sym)))
+        for child in sorted(children.get(qname, [])):
+            out.append('---@field %s %s' % (child.rsplit('.', 1)[1], alias_name(child)))
+        out.append('%s = {}' % cls)
         for m in sorted(k for k, mm in sym.members.items() if mm['kind'] == 'method'):
             if m in FACTORY_SPECS:
-                emit_name_keyed(name, m, FACTORY_SPECS[m], is_method=True)
+                emit_name_keyed(cls, m, FACTORY_SPECS[m], is_method=True)
                 continue
             t = ann('method', sym.members[m]['ret'])
             if t:
                 out.append('---@return %s' % t)
-            out.append('function %s.%s(...) end' % (name, m))
+            out.append('function %s.%s(...) end' % (cls, m))
         for f in sorted(k for k, mm in sym.members.items() if mm['kind'] == 'field'):
             t = ann('field', sym.members[f]['ret'])
             if t:
                 out.append('---@type %s' % t)
-            out.append('%s.%s = %s' % (name, f, 'nil' if sym.is_class else '0'))
+            out.append('%s.%s = %s' % (cls, f, 'nil' if sym.is_class else '0'))
         out.append('')
+
+    for name in sorted(exported):
+        if is_identifier(name):
+            emit_class(name)
+    for name in sorted(exported):
+        if '.' in name:
+            emit_class(name)
 
     return '\n'.join(out).rstrip() + '\n'
 
