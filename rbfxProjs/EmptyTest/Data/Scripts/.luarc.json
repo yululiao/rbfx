@@ -1,0 +1,15 @@
+{
+    "runtime": {
+        "version": "Lua5.4"
+    },
+    "workspace": {
+        "library": [
+            "../../_apidocs"
+        ]
+    },
+    "diagnostics": {
+        "globals": [
+            "self"
+        ]
+    }
+}

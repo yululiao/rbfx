@@ -1,0 +1,1 @@
+python Source/Tools/ApiDocGen/generate_api_docs.py --src Source/LuaScript --out rbfxProjs/EmptyTest/_apidocs/engine.d.lua
