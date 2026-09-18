@@ -13,6 +13,7 @@
 #include "LuaUIState.h"
 
 #include "../Project/Project.h"
+#include "../Project/AssetManager.h"
 #include "../Tabs/SceneViewTab.h"
 
 #include <Urho3D/Core/Context.h>
@@ -226,6 +227,22 @@ void PollLuaSelectionChange(Context* context, LuaVMHost* lua)
         lua->InvokeCallback(handle);
 }
 
+// Fire Editor.assets.onProcessed when an import run finishes. The AssetManager only exposes a
+// busy flag (no engine event exists for it), so the falling edge of IsProcessing is polled like
+// the selection change above; a project with no asset manager simply reads as not processing.
+void PollLuaAssetProcessing(Context* context, LuaVMHost* lua)
+{
+    auto* project = context->GetSubsystem<Project>();
+    auto* assets = project ? project->GetAssetManager() : nullptr;
+    const bool processing = assets && assets->IsProcessing();
+    const bool wasProcessing = Detail::LuaWasProcessing();
+    Detail::LuaWasProcessing() = processing;
+
+    const unsigned long long handle = Detail::LuaAssetProcessedCallback();
+    if (wasProcessing && !processing && handle)
+        lua->InvokeCallback(handle);
+}
+
 // Draw queued Editor.ui.notify toasts as a borderless bottom-right stack, expiring by time.
 void RenderLuaToasts(Context* context)
 {
@@ -347,6 +364,7 @@ void RenderLuaWindows(Context* context)
 
     PumpLuaScheduledTasks(context, lua);
     PollLuaSelectionChange(context, lua);
+    PollLuaAssetProcessing(context, lua);
 
     for (Detail::LuaWindow& window : Detail::LuaWindows())
     {

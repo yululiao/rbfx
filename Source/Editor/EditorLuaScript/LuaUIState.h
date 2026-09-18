@@ -99,6 +99,12 @@ ea::vector<LuaScheduledTask>& LuaScheduledTasks();
 ea::vector<LuaToast>& LuaToasts();
 ea::vector<LuaModal>& LuaModals();
 
+/// Handle of the single Editor.assets.onProcessed callback (0 = none). It fires on the falling
+/// edge of AssetManager::IsProcessing, so 'wasProcessing' keeps the previously observed state.
+/// Like the selection callbacks, the handle lives in the host registry and ResetLuaUI drops it.
+unsigned long long& LuaAssetProcessedCallback();
+bool& LuaWasProcessing();
+
 /// Return the scene-view page currently being edited (its scene + selection), or null.
 SceneViewPage* ActiveSceneViewPage(Context* context);
 

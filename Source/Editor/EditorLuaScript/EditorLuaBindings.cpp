@@ -16,9 +16,12 @@
 #include "../Build/BuildSettings.h"
 #include "../Build/BuildSystem.h"
 #include "../Project/Project.h"
+#include "../Project/AssetManager.h"
+#include "../Project/ProjectRequest.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/Timer.h>
+#include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Scene/Component.h>
 #include <Urho3D/Scene/Node.h>
@@ -28,6 +31,7 @@
 #include <sol/sol.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace Urho3D
 {
@@ -86,6 +90,81 @@ ea::string MakeModalId(const std::string& title)
 {
     static unsigned counter = 0;
     return ea::string(("LuaModal##" + std::to_string(++counter) + "_" + title).c_str());
+}
+
+// Project data root as an absolute path ending in exactly one '/' (or empty with no project).
+ea::string DataRoot(const Project* project)
+{
+    ea::string path = project->GetDataPath();
+    if (!path.empty() && path.back() != '/')
+        path.push_back('/');
+    return path;
+}
+
+// Normalize a project-relative sub-path to forward slashes, dropping leading slashes and any
+// trailing slash unless one is requested (used to turn a 'dir' scope into a scan prefix).
+ea::string NormalizeResourcePath(std::string_view in, bool trailingSlash)
+{
+    size_t start = 0;
+    while (start < in.size() && (in[start] == '/' || in[start] == '\\'))
+        ++start;
+    ea::string result;
+    result.reserve(static_cast<unsigned>(in.size() - start));
+    for (size_t i = start; i < in.size(); ++i)
+        result.push_back(in[i] == '\\' ? '/' : in[i]);
+    while (!result.empty() && result.back() == '/')
+        result.pop_back();
+    if (trailingSlash && !result.empty())
+        result.push_back('/');
+    return result;
+}
+
+// Lowercased ".ext" tail of a resource name (empty when it has none).
+ea::string GetResourceExtension(const ea::string& name)
+{
+    const auto dot = name.rfind('.');
+    if (dot == ea::string::npos)
+        return ea::string();
+    ea::string ext = name.substr(dot);
+    ext.to_lower();
+    return ext;
+}
+
+// Turn a user-supplied extension ("png" or ".png") into a lowercase ".png" filter tail.
+ea::string NormalizeExtension(std::string_view in)
+{
+    ea::string ext = NormalizeResourcePath(std::string(in.data(), in.size()), false);
+    if (ext.empty())
+        return ext;
+    if (ext.front() != '.')
+        ext = ea::string(".") + ext;
+    ext.to_lower();
+    return ext;
+}
+
+// Whether a resource name is an editor-managed byproduct that should never surface as an asset:
+// import metadata, pipeline definitions, and per-source ".d" output folders ("foo.fbx.d/...").
+bool IsSatelliteResource(const ea::string& name)
+{
+    static const char* const suffixes[] = { ".meta", ".assetpipeline", ".AssetPipeline.json", ".texmeta" };
+    for (const char* suffix : suffixes)
+        if (name.ends_with(suffix))
+            return true;
+    return name.find(".d/") != ea::string::npos;
+}
+
+// Ask the editor to open (or just locate, when revealOnly) a resource in its editor tab by posting
+// the same request the Resource Browser uses. Returns false with no project or an empty name.
+bool OpenAssetResource(Context* context, const std::string& name, bool revealOnly)
+{
+    auto* project = context->GetSubsystem<Project>();
+    if (!project)
+        return false;
+    const ea::string resource = NormalizeResourcePath(name, false);
+    if (resource.empty())
+        return false;
+    project->ProcessRequest(MakeShared<OpenResourceRequest>(context, resource, revealOnly).Get());
+    return true;
 }
 
 } // namespace
@@ -587,6 +666,172 @@ void RegisterEditorLuaAPI(Context* context)
         modal.opened = false;
         Detail::LuaModals().push_back(modal);
         return true;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Editor.assets -- the project asset database. Paths are project-relative resource
+    // names ("Textures/foo.png"). Every call degrades to a safe empty result with no
+    // project open. Raw file reads/writes are out of scope: plugins already have the
+    // engine's fileSystem/file bindings for that.
+    // ---------------------------------------------------------------------------
+    sol::table assetsApi = editor.create_named("assets");
+
+    // Re-run the import pipeline for one asset or, when given a directory (trailing slash),
+    // everything under it. Reprocessing happens on the AssetManager's next update, so watch
+    // status()/onProcessed for completion.
+    assetsApi.set_function("reimport", [context](const std::string& path) -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        auto* assets = project ? project->GetAssetManager() : nullptr;
+        if (!assets)
+            return false;
+        assets->MarkCacheDirty(ea::string(path.c_str()));
+        return true;
+    });
+
+    // Import activity snapshot: { processing:boolean, processed:integer, total:integer }.
+    assetsApi.set_function("status", [context](sol::this_state s) -> sol::object {
+        sol::state_view lua(s);
+        sol::table result = lua.create_table();
+        auto* project = context->GetSubsystem<Project>();
+        auto* assets = project ? project->GetAssetManager() : nullptr;
+        const AssetManager::ProgressInfo progress =
+            assets ? assets->GetProgress() : AssetManager::ProgressInfo{ 0u, 0u };
+        result["processing"] = assets && assets->IsProcessing();
+        result["processed"] = static_cast<int>(progress.first);
+        result["total"] = static_cast<int>(progress.second);
+        return result;
+    });
+
+    // One persistent callback fired whenever an import run finishes (processing -> idle). Pass
+    // nil to clear; replaced on re-registration and dropped on plugin reload. It takes no
+    // argument -- call status()/list() from the handler to inspect what changed.
+    assetsApi.set_function("onProcessed",
+        [host = editorLua](sol::optional<sol::protected_function> callback) -> bool {
+            auto& stored = Detail::LuaAssetProcessedCallback();
+            if (stored)
+            {
+                host->DropCallback(stored);
+                stored = 0ull;
+            }
+            if (callback && callback->valid())
+                stored = host->RegisterCallback(std::move(*callback));
+            return true;
+        });
+
+    // List project assets. opts = { dir?, type?, extension? }.
+    //  * default is cheap: names/paths/extension only, no per-file type sniffing.
+    //  * giving 'type' resolves each candidate through Project::GetResourceDescriptor and
+    //    filters to that resource type (base types match too) -- slower on big projects, so
+    //    pair it with 'dir'/'extension' to narrow the scan.
+    // Each entry: { name, path, extension, isDirectory } plus, when types were resolved,
+    // { type = most-derived, types = { all matched type names } }.
+    assetsApi.set_function("list",
+        [context](sol::this_state s, sol::optional<sol::table> opts) -> sol::object {
+            sol::state_view lua(s);
+            sol::table result = lua.create_table();
+            auto* project = context->GetSubsystem<Project>();
+            auto* fs = context->GetSubsystem<FileSystem>();
+            if (!project || !fs)
+                return result;
+
+            ea::string dirPrefix;
+            ea::string typeFilter;
+            ea::string extFilter;
+            if (opts)
+            {
+                sol::table o = *opts;
+                if (auto dir = o["dir"].get<sol::optional<std::string>>(); dir && !dir->empty())
+                    dirPrefix = NormalizeResourcePath(*dir, true);
+                if (auto type = o["type"].get<sol::optional<std::string>>(); type && !type->empty())
+                    typeFilter = ea::string(type->c_str());
+                if (auto ext = o["extension"].get<sol::optional<std::string>>(); ext && !ext->empty())
+                    extFilter = NormalizeExtension(*ext);
+            }
+
+            const ea::string root = DataRoot(project);
+            const ea::string pattern = extFilter.empty() ? ea::string("*") : ("*" + extFilter);
+            ea::vector<ea::string> files;
+            fs->ScanDir(files, root + dirPrefix, pattern, SCAN_FILES | SCAN_RECURSIVE);
+
+            const bool resolveTypes = !typeFilter.empty();
+            int index = 0;
+            for (const ea::string& relative : files)
+            {
+                const ea::string resourceName = dirPrefix + relative;
+                if (IsSatelliteResource(resourceName) || project->IsFileNameIgnored(resourceName))
+                    continue;
+
+                ResourceFileDescriptor desc;
+                if (resolveTypes)
+                {
+                    desc = project->GetResourceDescriptor(resourceName);
+                    if (desc.isAutomatic_ || !desc.HasObjectType(typeFilter))
+                        continue;
+                }
+
+                sol::table entry = lua.create_table();
+                entry["name"] = std::string(resourceName.c_str());
+                entry["path"] = std::string((root + resourceName).c_str());
+                entry["extension"] = std::string(GetResourceExtension(resourceName).c_str());
+                entry["isDirectory"] = false;
+                if (resolveTypes)
+                {
+                    entry["type"] = std::string(desc.mostDerivedType_.c_str());
+                    sol::table types = lua.create_table();
+                    int typeIndex = 0;
+                    for (const ea::string& typeName : desc.typeNames_)
+                        types[++typeIndex] = std::string(typeName.c_str());
+                    entry["types"] = types;
+                }
+                result[++index] = entry;
+            }
+            return result;
+        });
+
+    // Metadata for one resource (types always resolved), or nil when it does not exist.
+    assetsApi.set_function("info", [context](sol::this_state s, const std::string& name) -> sol::object {
+        sol::state_view lua(s);
+        auto* project = context->GetSubsystem<Project>();
+        auto* fs = context->GetSubsystem<FileSystem>();
+        if (!project || !fs)
+            return sol::make_object(lua, sol::nil);
+        const ea::string root = DataRoot(project);
+        const ea::string resource = NormalizeResourcePath(name, false);
+        if (resource.empty() || !fs->Exists(root + resource))
+            return sol::make_object(lua, sol::nil);
+
+        const ResourceFileDescriptor desc = project->GetResourceDescriptor(resource);
+        sol::table entry = lua.create_table();
+        entry["name"] = std::string(resource.c_str());
+        entry["path"] = std::string((root + resource).c_str());
+        entry["extension"] = std::string(GetResourceExtension(resource).c_str());
+        entry["isDirectory"] = desc.isDirectory_;
+        entry["type"] = std::string(desc.mostDerivedType_.c_str());
+        sol::table types = lua.create_table();
+        int typeIndex = 0;
+        for (const ea::string& typeName : desc.typeNames_)
+            types[++typeIndex] = std::string(typeName.c_str());
+        entry["types"] = types;
+        return entry;
+    });
+
+    // Cheap existence check (a file or directory under Data), no type resolution.
+    assetsApi.set_function("exists", [context](const std::string& name) -> bool {
+        auto* project = context->GetSubsystem<Project>();
+        auto* fs = context->GetSubsystem<FileSystem>();
+        if (!project || !fs)
+            return false;
+        const ea::string resource = NormalizeResourcePath(name, false);
+        return !resource.empty() && fs->Exists(DataRoot(project) + resource);
+    });
+
+    // Open the resource in its editor tab / just highlight it in the browser without stealing the
+    // Inspector. Both return false with no project or an empty name.
+    assetsApi.set_function("open", [context](const std::string& name) -> bool {
+        return OpenAssetResource(context, name, false);
+    });
+    assetsApi.set_function("reveal", [context](const std::string& name) -> bool {
+        return OpenAssetResource(context, name, true);
     });
 
     // ---------------------------------------------------------------------------

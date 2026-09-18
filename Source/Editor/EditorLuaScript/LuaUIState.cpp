@@ -64,6 +64,18 @@ ea::vector<LuaModal>& LuaModals()
     return modals;
 }
 
+unsigned long long& LuaAssetProcessedCallback()
+{
+    static unsigned long long handle = 0ull;
+    return handle;
+}
+
+bool& LuaWasProcessing()
+{
+    static bool processing = false;
+    return processing;
+}
+
 SceneViewPage* ActiveSceneViewPage(Context* context)
 {
     auto* project = context->GetSubsystem<Project>();
@@ -81,6 +93,8 @@ void ResetLuaUI()
     LuaScheduledTasks().clear();
     LuaToasts().clear();
     LuaModals().clear();
+    LuaAssetProcessedCallback() = 0ull;
+    LuaWasProcessing() = false;
     auto& tabs = LuaTabs();
     tabs.erase(ea::remove_if(tabs.begin(), tabs.end(),
                    [](const WeakPtr<LuaEditorTab>& weak) { return !weak.Get(); }),
