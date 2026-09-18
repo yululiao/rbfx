@@ -138,3 +138,6 @@ packaging/nuget/local-repository/
 packaging/nuget/out/
 packaging/nuget/in/
 packaging/nuget/rbfx-*.zip
+
+# Local build logs
+/build_log.txt
