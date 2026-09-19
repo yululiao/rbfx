@@ -43,6 +43,13 @@ target_include_directories(EditorLibrary PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/Tools>
 )
 target_link_libraries (EditorLibrary PUBLIC Urho3D)
+if (MSVC)
+    # Some tabs contain UTF-8 (non-ASCII) string literals; without an explicit
+    # source/execution charset MSVC falls back to the system ANSI codepage and
+    # mis-parses multi-byte sequences. /utf-8 keeps both source and narrow
+    # literals UTF-8, which is what the immediate-mode UI expects at runtime.
+    target_compile_options (EditorLibrary PRIVATE /utf-8)
+endif ()
 if (URHO3D_LUA)
     # The editor registers the imgui table and the editor-capability half of the "Editor" Lua
     # table straight into the subsystem's state (EditorLuaBindings / ImGuiLuaBindings), which
