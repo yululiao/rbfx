@@ -83,8 +83,10 @@ UIViewTab::UIViewTab(Context* context)
     // leaving the whole bound subtree unrendered.
     if (Rml::Context* ctx = previewUI_->GetRmlContext())
     {
-        ea::string modelName = "{{__data_model_id}}";
-        Detail::InsertVariablePlaceholders(modelName, this);
+        // Detail::InsertVariablePlaceholders() substitutes the token with
+        // Format("{}", ptr); build the identical name locally so we do not
+        // depend on that engine symbol (it is not URHO3D_API-exported).
+        const ea::string modelName = Format("{}", static_cast<void*>(this));
         Rml::DataModelConstructor ctor = ctx->CreateDataModel(modelName, nullptr);
         (void)ctor.GetModelHandle();
     }
@@ -250,6 +252,16 @@ void UIViewTab::RenderPreview()
         ui::TextUnformatted("No UI document loaded.\nType a resource path (e.g. \"Interface/Main.rml\") and press Load.");
         return;
     }
+
+    // The editor never runs the gameplay Renderer::Render() pass that fires
+    // E_ENDALLVIEWSRENDER (scene previews draw through surface-attached
+    // viewports instead), so the private preview RmlUI would never receive a
+    // render trigger. Drive it explicitly: update layout then render into the
+    // offscreen surface. RmlUI::Render() is designed to be callable manually;
+    // SystemUI rebinds the swapchain when it submits the editor UI frame, and
+    // sampling the just-rendered texture here mirrors SceneRendererToTexture.
+    previewUI_->Update(0.0f);
+    previewUI_->Render();
 
     const ImVec2 avail = ui::GetContentRegionAvail();
     const float scale = ea::min(avail.x / static_cast<float>(previewSize_.x_),
