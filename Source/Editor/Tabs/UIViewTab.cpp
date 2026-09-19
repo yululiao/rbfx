@@ -10,25 +10,15 @@
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/IO/FileSystem.h>
-#include <Urho3D/Graphics/GraphicsEvents.h>
-#include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/Log.h>
-#include <Urho3D/Input/InputEvents.h>
 #include <Urho3D/Resource/ResourceCache.h>
-#include <Urho3D/Resource/ResourceEvents.h>
-#include <Urho3D/RmlUI/RmlUI.h>
 #include <Urho3D/SystemUI/Widgets.h>
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
 
-#include <RmlUi/Core/Context.h>
-#include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
-#include <RmlUi/Core/Property.h>
-#include <RmlUi/Core/Types.h>
-#include <RmlUi/Core/Variant.h>
 
 #include <math.h>
 #include <algorithm>
@@ -41,11 +31,6 @@ namespace Urho3D
 
 namespace
 {
-// Static preview resolution. The document lays out against this virtual
-// viewport; the widget then scales it down to fit the tab.
-constexpr int kPreviewWidth = 1024;
-constexpr int kPreviewHeight = 768;
-
 // On-screen radius (in pixels) for grabbing a gizmo handle.
 constexpr float kHandleGrabPx = 7.0f;
 // Half on-screen size of a drawn gizmo handle square.
@@ -67,31 +52,6 @@ Vector2 V2(const Rml::Vector2f& v) { return Vector2{v.x, v.y}; }
 Vector2 V2(const ImVec2& v) { return Vector2{v.x, v.y}; }
 ImVec2 IV2(const Vector2& v) { return ImVec2{v.x_, v.y_}; }
 
-// The border box (document space) of a live DOM element, plus the node's own
-// emitted transform. This is the thin view adapter that turns projection
-// numbers into the UiBox the pure logic consumes.
-bool TryGetDomBox(Rml::Element* element, const UiNode* node, UiBox& out)
-{
-    if (!element)
-        return false;
-    out.pos_ = V2(element->GetAbsoluteOffset(Rml::BoxArea::Border));
-    out.size_ = V2(element->GetBox().GetSize(Rml::BoxArea::Border));
-    out.xform_ = node ? ParseUiTransform(node->GetStyle("transform")) : UiTransform{};
-    return out.size_.x_ > 0.0f && out.size_.y_ > 0.0f;
-}
-
-// Origin of the coordinate frame an element's inline left/top resolve against,
-// derived from the element's own placement (absOrigin = frameOrigin + left).
-// Empirical, so it stays exact no matter which box area RmlUi uses as the
-// containing block for absolute positioning.
-Vector2 InlineStyleBase(Rml::Element* el, const UiNode* node)
-{
-    float l = 0.0f, t = 0.0f;
-    if (el && node && TryParsePx(node->GetStyle("left"), l) && TryParsePx(node->GetStyle("top"), t))
-        return V2(el->GetAbsoluteOffset(Rml::BoxArea::Border)) - Vector2{l, t};
-    return Vector2::ZERO;
-}
-
 // The widget palette is a data table so the toolbar renders and dispatches
 // without a chain of per-control branches.
 struct PaletteEntry
@@ -105,46 +65,6 @@ const PaletteEntry kPalette[] = {
     {ICON_FA_TOGGLE_ON "  button", "button"},
     {ICON_FA_FONT "  Text", "text"},
 };
-
-SharedPtr<UiNode> DeepClone(const UiNode& src)
-{
-    auto copy = MakeShared<UiNode>();
-    copy->tag_ = src.tag_;
-    copy->text_ = src.text_;
-    copy->id_ = src.id_;
-    copy->classes_ = src.classes_;
-    copy->attributes_ = src.attributes_;
-    copy->style_ = src.style_;
-    for (const SharedPtr<UiNode>& child : src.children_)
-        copy->children_.push_back(DeepClone(*child));
-    return copy;
-}
-
-UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, const Vector2& point)
-{
-    // Children first, tested in reverse (later siblings paint on top).
-    const int n = element->GetNumChildren(false);
-    for (int i = n - 1; i >= 0; i--)
-    {
-        Rml::Element* child = element->GetChild(i);
-        if (child->GetTagName() == "#text")
-            continue; // raw text isn't independently selectable
-        if (UiNode* hit = HitTestRecurse(child, model, point))
-            return hit;
-    }
-
-    UiNode* node = model->FindByDom(element);
-    UiBox box;
-    if (!TryGetDomBox(element, node, box))
-        return nullptr;
-    const Vector2 local = InverseMapPoint(point, box);
-    if (local.x_ >= box.pos_.x_ && local.x_ <= box.pos_.x_ + box.size_.x_ &&
-        local.y_ >= box.pos_.y_ && local.y_ <= box.pos_.y_ + box.size_.y_)
-    {
-        return node;
-    }
-    return nullptr;
-}
 } // namespace
 
 void Tabs_UIViewTab(Context* context, Project* project)
@@ -153,67 +73,22 @@ void Tabs_UIViewTab(Context* context, Project* project)
 }
 
 // ---------------------------------------------------------------------------
-// UIViewTab: construction / offscreen preview plumbing
+// UIViewTab: view + controller over one UIViewDocument
 // ---------------------------------------------------------------------------
 
 UIViewTab::UIViewTab(Context* context)
     : EditorTab(context, ICON_FA_BEZIER_CURVE " UI", "8f2b1c9e-7d34-4a5b-9c10-ui0preview",
         EditorTabFlags{}, EditorTabPlacement::DockCenter)
 {
-    // Private RmlUi context that renders the document under edit into a dynamic
-    // texture. Deliberately not the master RmlUI subsystem so editing does not
-    // leak into the running game view.
-    previewUI_ = new RmlUI(context_, "UIViewPreview");
-    // Input isolation: drop RmlUI's global input subscriptions so the preview
-    // cannot steal editor focus. SetBlockEvents() must NOT be used - it blocks
-    // E_POSTUPDATE too, stalling Context::Update so the document never renders.
-    previewUI_->UnsubscribeFromEvent(E_MOUSEBUTTONDOWN);
-    previewUI_->UnsubscribeFromEvent(E_MOUSEBUTTONUP);
-    previewUI_->UnsubscribeFromEvent(E_MOUSEMOVE);
-    previewUI_->UnsubscribeFromEvent(E_MOUSEWHEEL);
-    previewUI_->UnsubscribeFromEvent(E_TOUCHBEGIN);
-    previewUI_->UnsubscribeFromEvent(E_TOUCHEND);
-    previewUI_->UnsubscribeFromEvent(E_TOUCHMOVE);
-    previewUI_->UnsubscribeFromEvent(E_KEYDOWN);
-    previewUI_->UnsubscribeFromEvent(E_KEYUP);
-    previewUI_->UnsubscribeFromEvent(E_TEXTINPUT);
-    previewUI_->UnsubscribeFromEvent(E_DROPFILE);
-    // Reload immunity: keep the isolated preview from reacting to the file
-    // watcher. We drive every rebuild ourselves through ReloadPreview(), so a
-    // disk change (e.g. our own Save) must not hand the engine back ownership
-    // of document_ and dangle model_'s dom_ pointers. This is what lets us load
-    // with a real source URL (required for <link>/template resolution below).
-    previewUI_->UnsubscribeFromEvent(E_FILECHANGED);
-
-    texture_ = MakeShared<Texture2D>(context_);
+    document_ = MakeShared<UIViewDocument>(context_);
+    document_->OnModelEdited.Subscribe(this, &UIViewTab::OnModelEdited);
 
     hierarchySource_ = MakeShared<UIViewHierarchy>(this);
     inspectorSource_ = MakeShared<UIViewInspector>(this);
-
-    Rebuild();
-
-    // Design-time documents frequently bind content via data-model=
-    // "{{__data_model_id}}". Register an empty placeholder model named
-    // identically to the token SubstituteDataModelToken produces, so the binding
-    // resolves instead of erroring and leaving the bound subtree unrendered.
-    if (Rml::Context* ctx = previewUI_->GetRmlContext())
-    {
-        const ea::string modelName = SubstituteDataModelToken("{{__data_model_id}}");
-        Rml::DataModelConstructor ctor = ctx->CreateDataModel(modelName, nullptr);
-        (void)ctor.GetModelHandle();
-    }
-
-    // Redirect offscreen draws to E_BEGINRENDERING (a fresh frame); RmlUI's
-    // default E_ENDALLVIEWSRENDER auto-render is too late to retarget.
-    previewUI_->SetRendering(false);
-    SubscribeToEvent(E_BEGINRENDERING, URHO3D_HANDLER(UIViewTab, HandleBeginRendering));
 }
 
 UIViewTab::~UIViewTab()
 {
-    if (previewUI_ && previewUI_->GetRmlContext())
-        previewUI_->GetRmlContext()->UnloadAllDocuments();
-    document_ = nullptr;
     selected_ = nullptr;
 }
 
@@ -222,57 +97,40 @@ UIViewTab* UIViewTab::GetActive(Project* project)
     return project ? project->FindTab<UIViewTab>() : nullptr;
 }
 
-void UIViewTab::HandleBeginRendering(StringHash, VariantMap&)
+ea::vector<unsigned> UIViewTab::NodePath(const UiNode* node) const
 {
-    // Layout was already updated on E_POSTUPDATE (CPU-side); here, at the start
-    // of the graphics frame, it is safe to issue GPU draws into the offscreen
-    // surface. RenderPreview() samples the resulting texture later this frame.
-    if (previewUI_)
-        previewUI_->Render();
+    ea::vector<unsigned> path;
+    if (document_)
+        document_->GetModel().BuildPath(node, path);
+    return path;
 }
 
-void UIViewTab::Rebuild()
+void UIViewTab::OnModelEdited()
 {
-    if (!texture_)
+    // A command or undo/redo may have invalidated the selection pointer.
+    // Restore it from the stable child-index path when possible.
+    if (!document_)
         return;
-
-    // Single mip, set before SetSize (SetNumLevels only feeds the NEXT texture
-    // creation). The ImGui backend binds the SRV directly and does not refresh a
-    // render-target's mip chain, so a full chain shows never-written lower mips.
-    texture_->SetNumLevels(1);
-    texture_->SetSize(previewSize_.x_, previewSize_.y_, TextureFormat::TEX_FORMAT_RGBA8_UNORM,
-                      TextureFlag::BindRenderTarget);
-    texture_->SetFilterMode(FILTER_BILINEAR);
-    texture_->SetAddressMode(TextureCoordinate::U, ADDRESS_CLAMP);
-    texture_->SetAddressMode(TextureCoordinate::V, ADDRESS_CLAMP);
-
-    RenderSurface* surface = texture_->GetRenderSurface();
-    if (surface)
-    {
-        surface->SetUpdateMode(SURFACE_MANUALUPDATE);
-        // Opaque editor-neutral background: RmlUI skips the clear for fully
-        // transparent colors, which would leave stale pixels behind.
-        previewUI_->SetRenderTarget(surface, Color(0.16f, 0.18f, 0.22f, 1.0f));
-    }
-    else
-    {
-        previewUI_->SetRenderTarget(nullptr);
-        URHO3D_LOGERROR("UIViewTab: failed to acquire RenderSurface for preview texture.");
-    }
+    const UiDocumentModel& model = document_->GetModel();
+    if (selected_ && model.FindParent(selected_) != nullptr) // still attached
+        return;
+    selected_ = model.ResolvePath(selPath_);
+    if (!selected_)
+        selected_ = model.root_.Get();
+    model.BuildPath(selected_, selPath_);
 }
 
-ea::string UIViewTab::SubstituteDataModelToken(const ea::string& text) const
+void UIViewTab::SetSelectedNode(UiNode* node)
 {
-    // Mirrors the engine's Detail::InsertVariablePlaceholders token/Format pair
-    // without depending on that (non-exported) symbol.
-    const ea::string id = Format("{}", static_cast<const void*>(this));
-    ea::string result = text;
-    result.replace("{{__data_model_id}}", id);
-    return result;
+    selected_ = node;
+    if (document_)
+        document_->GetModel().BuildPath(node, selPath_);
+    if (hierarchySource_)
+        hierarchySource_->ExpandAncestors(selPath_);
 }
 
 // ---------------------------------------------------------------------------
-// Preview lifecycle: model (data) <-> DOM (runtime projection)
+// Document loading / persistence
 // ---------------------------------------------------------------------------
 
 void UIViewTab::OpenResource(const ea::string& path)
@@ -284,7 +142,7 @@ void UIViewTab::OpenResource(const ea::string& path)
 
 void UIViewTab::LoadDocument(const ea::string& path)
 {
-    if (path.empty())
+    if (path.empty() || !document_)
         return;
 
     auto* cache = GetSubsystem<ResourceCache>();
@@ -300,11 +158,12 @@ void UIViewTab::LoadDocument(const ea::string& path)
     }
     const ea::string contents = file.ReadText();
 
-    if (LoadDocumentFromText(contents, path))
+    if (document_->LoadFromText(contents, path))
     {
         // Fresh open: start with the root selected.
         selPath_.clear();
-        selected_ = model_.root_;
+        selected_ = document_->GetModel().root_.Get();
+        resourcePath_ = path;
         snprintf(pathInputBuf_, sizeof(pathInputBuf_), "%s", path.c_str());
     }
     else
@@ -312,371 +171,6 @@ void UIViewTab::LoadDocument(const ea::string& path)
         URHO3D_LOGERROR("UIViewTab: failed to load UI document '{}'", path.c_str());
     }
 }
-
-bool UIViewTab::LoadDocumentFromText(const ea::string& text, const ea::string& path)
-{
-    Rml::Context* ctx = previewUI_->GetRmlContext();
-    if (!ctx)
-        return false;
-
-    // Preserve the <head>...</head> block verbatim (styles / templates the
-    // editor neither parses nor reorders).
-    ea::string head;
-    const size_t headBegin = text.find("<head");
-    if (headBegin != ea::string::npos)
-    {
-        const size_t headEnd = text.find("</head>", headBegin);
-        if (headEnd != ea::string::npos)
-            head = text.substr(headBegin, headEnd + 7 /*len("</head>")*/ - headBegin);
-    }
-
-    ctx->UnloadAllDocuments();
-    document_ = nullptr;
-
-    // Load under the document's real resource path so RmlUi resolves relative
-    // <link>/<template> hrefs and theme imports the same way the runtime does
-    // (RmlFile::Open joins the href onto the source-URL directory). An empty
-    // URL would silently drop e.g. <link href="HelloRmlUI_Window.rml"> and leave
-    // a template="..." body rendering as a bare, content-less box.
-    // E_FILECHANGED is unsubscribed on previewUI_ (see ctor), so using the real
-    // URL here stays immune to the engine's hot-reload path.
-    document_ = ctx->LoadDocumentFromMemory(
-        Rml::String(SubstituteDataModelToken(text).c_str()),
-        Rml::String(path.c_str(), path.length()));
-    if (!document_)
-        return false;
-
-    document_->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
-    // Synchronous layout so the freshly built model sees valid boxes.
-    document_->UpdateDocument();
-
-    model_.BuildFromDom(document_);
-    model_.headRaw_ = head;
-
-    resourcePath_ = path;
-    dirty_ = false;
-    hoveredPath_.clear();
-    return true;
-}
-
-void UIViewTab::ReloadPreview()
-{
-    // Re-emit the model and re-project; restore the selection by its stable
-    // child-index path (model identity survives; only dom_ pointers change).
-    const ea::vector<unsigned> keepPath = selPath_;
-    const ea::string emitted = model_.EmitRml();
-    if (LoadDocumentFromText(emitted, resourcePath_))
-    {
-        selPath_ = keepPath;
-        selected_ = model_.ResolvePath(selPath_);
-        if (!selected_)
-            selected_ = model_.root_;
-    }
-}
-
-ea::vector<unsigned> UIViewTab::NodePath(const UiNode* node) const
-{
-    ea::vector<unsigned> path;
-    model_.BuildPath(node, path);
-    return path;
-}
-
-void UIViewTab::SetSelectedNode(UiNode* node)
-{
-    selected_ = node;
-    model_.BuildPath(node, selPath_);
-    if (hierarchySource_)
-        hierarchySource_->ExpandAncestors(selPath_);
-}
-
-// ---------------------------------------------------------------------------
-// Editing operations (mutate model, then re-project)
-// ---------------------------------------------------------------------------
-
-void UIViewTab::MaterializeNode(UiNode* node)
-{
-    if (!node || !node->dom_ || node->IsMaterialized())
-        return;
-
-    // Bake the computed border box. The guess for the left/top frame origin is
-    // then verified against the re-laid-out element and corrected once, so the
-    // element never shifts (regardless of containing-block padding/border).
-    Rml::Element* el = node->dom_;
-    const Vector2 absBefore = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-    const Vector2 size = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
-    Rml::Element* parent = el->GetOffsetParent();
-    const Vector2 base = parent ? V2(parent->GetAbsoluteOffset(Rml::BoxArea::Border)) : Vector2::ZERO;
-
-    UiBox box;
-    box.pos_ = absBefore - base;
-    box.size_ = size;
-    box.xform_ = ParseUiTransform(node->GetStyle("transform"));
-    WriteBoxToStyle(*node, box);
-
-    // Push straight onto the live element - never re-emit/reload, which would
-    // re-instantiate templates and data-bound subtrees.
-    ApplyNodeToDom(node);
-    if (document_)
-        document_->UpdateDocument();
-
-    const Vector2 absAfter = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-    if (absAfter != absBefore)
-    {
-        box.pos_ += absBefore - absAfter;
-        WriteBoxToStyle(*node, box);
-        ApplyNodeToDom(node);
-        if (document_)
-            document_->UpdateDocument();
-    }
-    dirty_ = true;
-}
-
-void UIViewTab::AddWidget(const char* tag)
-{
-    if (!model_.root_ || !document_)
-        return;
-    UiNode* parent = (selected_ && selected_->dom_) ? selected_ : model_.root_;
-    Rml::Element* parentEl = parent ? parent->dom_ : nullptr;
-    if (!parentEl)
-        return;
-
-    auto node = MakeShared<UiNode>();
-    const ea::string kind = tag;
-    if (kind == "text")
-    {
-        // RmlUi has no standalone text element: text lives inside a block.
-        // Emit a plain <div> carrying a text node, styled as visible text
-        // (no fill box) so it reads as a label rather than an empty panel.
-        node->tag_ = "div";
-        auto text = MakeShared<UiNode>();
-        text->tag_ = "#text";
-        text->text_ = "Text";
-        node->children_.push_back(text);
-        node->SetStyle("color", "#e8eef5");
-    }
-    else
-    {
-        node->tag_ = kind;
-        if (kind == "button")
-        {
-            auto text = MakeShared<UiNode>();
-            text->tag_ = "#text";
-            text->text_ = "Button";
-            node->children_.push_back(text);
-        }
-        else if (kind == "img")
-        {
-            node->attributes_.emplace_back("src", "");
-        }
-        node->SetStyle("background-color", "#3a4656");
-        node->SetStyle("border", "1px solid #6f86a6");
-    }
-
-    // Born materialized: 160x48 centered inside the parent's rendered box so it
-    // lands in view (not off a narrow/auto-sized body) and is draggable at once.
-    UiBox box;
-    box.size_ = Vector2{160.0f, 48.0f};
-    float cw = static_cast<float>(kPreviewWidth);
-    float ch = static_cast<float>(kPreviewHeight);
-    const Vector2 psz = V2(parentEl->GetBox().GetSize(Rml::BoxArea::Border));
-    if (psz.x_ > box.size_.x_)
-        cw = psz.x_;
-    if (psz.y_ > box.size_.y_)
-        ch = psz.y_;
-    box.pos_ = Vector2{Max(cw - box.size_.x_, 0.0f) * 0.5f, Max(ch - box.size_.y_, 0.0f) * 0.5f};
-    WriteBoxToStyle(*node, box);
-
-    CreateDomForNode(*node, parentEl);
-    document_->UpdateDocument();
-
-    // Center precisely: measure where the widget actually landed and correct
-    // its left/top once, so the centering is exact regardless of which
-    // containing block the new absolute element resolves against.
-    if (Rml::Element* el = node->dom_)
-    {
-        const Vector2 pAbs = V2(parentEl->GetAbsoluteOffset(Rml::BoxArea::Border));
-        const Vector2 desired = pAbs + Vector2{Max(psz.x_ - box.size_.x_, 0.0f) * 0.5f,
-                                               Max(psz.y_ - box.size_.y_, 0.0f) * 0.5f};
-        const Vector2 landed = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-        if (landed != desired)
-        {
-            box.pos_ += desired - landed;
-            WriteBoxToStyle(*node, box);
-            SyncStyleToDom(node);
-            document_->UpdateDocument();
-        }
-    }
-
-    parent->children_.push_back(node);
-    dirty_ = true;
-    SetSelectedNode(node);
-}
-
-void UIViewTab::DeleteSelected()
-{
-    if (!selected_ || selected_ == model_.root_)
-        return;
-    UiNode* victim = selected_;
-    UiNode* parent = model_.FindParent(victim);
-    if (!parent)
-        return;
-
-    // Remove from the live DOM first, then mirror in the model. No reload.
-    if (victim->dom_)
-    {
-        if (Rml::Element* pdom = victim->dom_->GetParentNode())
-            pdom->RemoveChild(victim->dom_);
-        victim->dom_ = nullptr;
-    }
-    for (size_t i = 0; i < parent->children_.size(); i++)
-    {
-        if (parent->children_[i] == victim)
-        {
-            parent->children_.erase(parent->children_.begin() + i);
-            break;
-        }
-    }
-
-    if (document_)
-        document_->UpdateDocument();
-    dirty_ = true;
-    SetSelectedNode(parent);
-}
-
-void UIViewTab::DuplicateSelected()
-{
-    if (!selected_ || selected_ == model_.root_)
-        return;
-    UiNode* parent = model_.FindParent(selected_);
-    if (!parent || !parent->dom_)
-        return;
-
-    SharedPtr<UiNode> copy = DeepClone(*selected_);
-    if (!copy->id_.empty())
-        copy->id_ += "-2";
-    // Nudge a materialized copy so it does not sit exactly on the original.
-    UiBox b;
-    if (TryGetMaterializedBox(*copy, b))
-    {
-        b.pos_ += Vector2{16.0f, 16.0f};
-        WriteBoxToStyle(*copy, b);
-    }
-
-    CreateDomForNode(*copy, parent->dom_);
-    if (document_)
-        document_->UpdateDocument();
-    parent->children_.push_back(copy);
-    dirty_ = true;
-    SetSelectedNode(copy);
-}
-
-void UIViewTab::SyncStyleToDom(UiNode* node)
-{
-    Rml::Element* el = node ? node->dom_ : nullptr;
-    if (!el)
-        return;
-    // The model's inline style vector is the source of truth. Drop any
-    // editor-managed property no longer present, then apply the current set via
-    // SetProperty on the *attached* element (RmlUi marks it dirty and re-flows),
-    // which is the same path the live drag uses and visibly updates the render.
-    static const char* const managed[] = {
-        "position", "box-sizing", "left", "top", "right", "bottom",
-        "width", "height", "transform", "background-color", "border", "color",
-    };
-    for (const char* key : managed)
-    {
-        if (node->GetStyle(key).empty())
-            el->RemoveProperty(key);
-    }
-    for (const UiStyleDecl& decl : node->style_)
-        el->SetProperty(decl.name_.c_str(), decl.value_.c_str());
-}
-
-Rml::Element* UIViewTab::CreateDomForNode(UiNode& node, Rml::Element* parentEl)
-{
-    Rml::ElementDocument* doc = parentEl->GetOwnerDocument();
-    if (!doc)
-        return nullptr;
-
-    if (node.IsText())
-    {
-        Rml::ElementPtr text = doc->CreateTextNode(node.text_.c_str());
-        node.dom_ = parentEl->AppendChild(std::move(text));
-        return node.dom_;
-    }
-
-    Rml::ElementPtr el = doc->CreateElement(node.tag_.c_str());
-    Rml::Element* raw = el.get();
-    if (!node.id_.empty())
-        raw->SetAttribute("id", node.id_.c_str());
-    if (!node.classes_.empty())
-        raw->SetAttribute("class", node.classes_.c_str());
-    for (const auto& attr : node.attributes_)
-        raw->SetAttribute(attr.first.c_str(), attr.second.c_str());
-    node.dom_ = parentEl->AppendChild(std::move(el));
-    // Apply inline style only after insertion: setting the 'style' attribute on a
-    // detached element does not reliably parse into applied properties, so the
-    // new node would render at its default/auto size (a 0x0 dot).
-    SyncStyleToDom(&node);
-    for (const SharedPtr<UiNode>& child : node.children_)
-        CreateDomForNode(*child, node.dom_);
-    return node.dom_;
-}
-
-void UIViewTab::ApplyNodeToDom(UiNode* node)
-{
-    Rml::Element* el = node ? node->dom_ : nullptr;
-    if (!el)
-        return;
-
-    if (node->id_.empty())
-        el->RemoveAttribute("id");
-    else
-        el->SetAttribute("id", node->id_.c_str());
-    if (node->classes_.empty())
-        el->RemoveAttribute("class");
-    else
-        el->SetAttribute("class", node->classes_.c_str());
-    // Inline style is pushed as properties on the attached element, not via the
-    // 'style' attribute (which does not reliably re-parse into applied props).
-    SyncStyleToDom(node);
-
-    // Drop attributes that no longer exist in the model, then rewrite the rest
-    // (SetAttribute on a live element re-parses; style/class refresh in place).
-    ea::vector<Rml::String> stale;
-    for (const auto& pair : el->GetAttributes())
-    {
-        const ea::string name(pair.first.c_str(), pair.first.length());
-        if (name == "id" || name == "class" || name == "style")
-            continue;
-        bool found = false;
-        for (const auto& attr : node->attributes_)
-        {
-            if (attr.first == name)
-            {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            stale.push_back(pair.first);
-    }
-    for (const Rml::String& name : stale)
-        el->RemoveAttribute(name);
-    for (const auto& attr : node->attributes_)
-        el->SetAttribute(attr.first.c_str(), attr.second.c_str());
-}
-
-void UIViewTab::CommitNodeEdit(UiNode* node)
-{
-    ApplyNodeToDom(node);
-    if (document_)
-        document_->UpdateDocument();
-}
-
-// ---------------------------------------------------------------------------
-// Persistence
-// ---------------------------------------------------------------------------
 
 bool UIViewTab::SaveDocument()
 {
@@ -693,7 +187,9 @@ bool UIViewTab::SaveDocument()
 
 bool UIViewTab::SaveDocumentTo(const ea::string& path)
 {
-    const ea::string emitted = model_.EmitRml();
+    if (!document_)
+        return false;
+    const ea::string emitted = document_->EmitRml();
 
     auto* cache = GetSubsystem<ResourceCache>();
     auto* fs = GetSubsystem<FileSystem>();
@@ -721,8 +217,8 @@ bool UIViewTab::SaveDocumentTo(const ea::string& path)
     // Drop any cached File so a later Load sees the new bytes.
     cache->ReleaseResource(path, true);
 
+    document_->MarkSaved();
     resourcePath_ = path;
-    dirty_ = false;
     snprintf(pathInputBuf_, sizeof(pathInputBuf_), "%s", path.c_str());
     return true;
 }
@@ -739,12 +235,13 @@ void UIViewTab::NewDocument()
         "  </body>\n"
         "</rml>\n";
 
-    if (LoadDocumentFromText(kTemplate, ea::string()))
+    if (document_ && document_->LoadFromText(kTemplate, ea::string()))
     {
         selPath_.clear();
-        selected_ = model_.root_;
+        selected_ = document_->GetModel().root_.Get();
+        resourcePath_.clear();
         pathInputBuf_[0] = '\0';
-        dirty_ = true; // untitled document does not exist on disk yet
+        document_->MarkDirty(); // untitled document does not exist on disk yet
     }
 }
 
@@ -765,7 +262,7 @@ void UIViewTab::RenderToolbar()
     if (ui::InputText("##uiPath", pathInputBuf_, sizeof(pathInputBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
     {
         const ea::string path = Trim(pathInputBuf_);
-        if (!path.empty() && document_)
+        if (!path.empty() && document_ && document_->GetRmlDocument())
             SaveDocumentTo(path);
     }
     ui::PopItemWidth();
@@ -781,7 +278,7 @@ void UIViewTab::RenderToolbar()
             LoadDocument(path);
     }
 
-    const bool hasDoc = document_ != nullptr;
+    const bool hasDoc = document_ && document_->GetRmlDocument() != nullptr;
     ui::SameLine();
     ui::BeginDisabled(!hasDoc);
     if (ui::Button(ICON_FA_FLOPPY_DISK " Save"))
@@ -791,12 +288,10 @@ void UIViewTab::RenderToolbar()
     {
         if (!resourcePath_.empty())
             LoadDocument(resourcePath_);
-        else
-            ReloadPreview();
     }
     ui::EndDisabled();
 
-    if (dirty_)
+    if (document_ && document_->IsDirty())
     {
         ui::SameLine();
         ui::TextDisabled("(unsaved)");
@@ -809,18 +304,24 @@ void UIViewTab::RenderToolbar()
         for (const PaletteEntry& entry : kPalette)
         {
             if (ui::Selectable(entry.label_))
-                AddWidget(entry.tag_);
+            {
+                if (UiNode* added = document_->AddWidget(selected_, entry.tag_))
+                    SetSelectedNode(added);
+            }
         }
         ui::EndCombo();
     }
     ui::SameLine();
-    const bool canEdit = selected_ && selected_ != model_.root_;
+    const bool canEdit = selected_ && document_ && selected_ != document_->GetModel().root_.Get();
     ui::BeginDisabled(!canEdit);
     if (ui::Button(ICON_FA_COPY " Copy"))
-        DuplicateSelected();
+    {
+        if (UiNode* copy = document_->DuplicateNode(selected_))
+            SetSelectedNode(copy);
+    }
     ui::SameLine();
     if (ui::Button(ICON_FA_TRASH " Delete"))
-        DeleteSelected();
+        document_->DeleteNode(selected_); // OnModelEdited revalidates the selection
     ui::EndDisabled();
     ui::EndDisabled();
 
@@ -831,14 +332,17 @@ void UIViewTab::RenderToolbar()
         if (node && !node->IsText() && !node->IsMaterialized())
         {
             if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
-                MaterializeNode(node);
+                document_->MaterializeNode(node);
         }
-        if (node && node != model_.root_)
+        if (node && document_ && node != document_->GetModel().root_.Get())
         {
             if (ui::MenuItem(ICON_FA_COPY " Copy"))
-                DuplicateSelected();
+            {
+                if (UiNode* copy = document_->DuplicateNode(node))
+                    SetSelectedNode(copy);
+            }
             if (ui::MenuItem(ICON_FA_TRASH " Delete"))
-                DeleteSelected();
+                document_->DeleteNode(node); // OnModelEdited revalidates the selection
         }
         ui::EndPopup();
     }
@@ -846,22 +350,23 @@ void UIViewTab::RenderToolbar()
 
 void UIViewTab::RenderPreview()
 {
-    if (!document_)
+    if (!document_ || !document_->GetRmlDocument())
     {
         ui::TextUnformatted("No UI document loaded.\nType a resource path (e.g. \"UI/HelloRmlUI.rml\") and press Load, or click New.");
         return;
     }
 
-    // RmlUI renders the document into the texture from E_BEGINRENDERING; here we
+    // The document renders into the texture from E_BEGINRENDERING; here we
     // only sample the produced texture (never issue draws during widget build).
+    const IntVector2 previewSize = document_->GetPreviewSize();
     const ImVec2 avail = ui::GetContentRegionAvail();
-    float scale = ea::min(avail.x / static_cast<float>(previewSize_.x_),
-                          avail.y / static_cast<float>(previewSize_.y_));
+    float scale = ea::min(avail.x / static_cast<float>(previewSize.x_),
+                          avail.y / static_cast<float>(previewSize.y_));
     if (scale <= 0.0f)
         scale = 0.1f;
-    const ImVec2 displaySize(previewSize_.x_ * scale, previewSize_.y_ * scale);
+    const ImVec2 displaySize(previewSize.x_ * scale, previewSize.y_ * scale);
 
-    Widgets::Image(texture_, displaySize);
+    Widgets::Image(document_->GetPreviewTexture(), displaySize);
 
     DocViewport vp;
     vp.origin_ = V2(ui::GetItemRectMin());
@@ -872,15 +377,8 @@ void UIViewTab::RenderPreview()
 }
 
 // ---------------------------------------------------------------------------
-// Hit testing / pointer
+// Pointer / drag routing
 // ---------------------------------------------------------------------------
-
-UiNode* UIViewTab::HitTestPreview(const Vector2& docPos) const
-{
-    if (!document_)
-        return nullptr;
-    return HitTestRecurse(document_, &model_, docPos);
-}
 
 void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
 {
@@ -889,9 +387,10 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
     // ImGui::IsItemHovered(): Widgets::Image submits a zero-ID plain Image, and
     // item-hover on such an item is unreliable across ImGui versions (it silently
     // returned false here, disabling preview picking and the hover outline).
+    const IntVector2 previewSize = document_->GetPreviewSize();
     const ImVec2 imageMin = IV2(vp.origin_);
-    const ImVec2 imageMax(imageMin.x + previewSize_.x_ * vp.scale_,
-                          imageMin.y + previewSize_.y_ * vp.scale_);
+    const ImVec2 imageMax(imageMin.x + previewSize.x_ * vp.scale_,
+                          imageMin.y + previewSize.y_ * vp.scale_);
     const bool overImage = ui::IsMouseHoveringRect(imageMin, imageMax);
     const Vector2 doc = vp.ToDoc(V2(io.MousePos));
 
@@ -911,7 +410,7 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
     // so we still defer to the context menu and neighbouring panels.
     const bool active = overImage && ui::IsWindowHovered(ImGuiHoveredFlags_None);
 
-    UiNode* hover = active ? HitTestPreview(doc) : nullptr;
+    UiNode* hover = active ? document_->HitTest(doc) : nullptr;
     hoveredPath_ = hover ? NodePath(hover) : ea::vector<unsigned>{};
 
     if (!active)
@@ -934,7 +433,7 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
         if (selected_ && selected_->dom_ && TryGetMaterializedBox(*selected_, box))
         {
             const float grab = kHandleGrabPx / vp.scale_;
-            const Vector2 base = InlineStyleBase(selected_->dom_, selected_);
+            const Vector2 base = document_->GetInlineStyleBase(selected_);
             const GizmoHandle handle = PickGizmoHandle(box, doc - base, grab);
             if (handle.op_ != GizmoOp::None)
             {
@@ -954,7 +453,7 @@ void UIViewTab::BeginDrag(const GizmoHandle& handle, UiNode* node, const DocView
     TryGetMaterializedBox(*node, gizmoStartBox_);
     // Capture the left/top frame origin once: the live box and the element
     // itself both move through this base during the drag.
-    gizmoBase_ = InlineStyleBase(node->dom_, node);
+    gizmoBase_ = document_->GetInlineStyleBase(node);
     gizmoPressDoc_ = gizmoCurDoc_ = vp.ToDoc(V2(ui::GetIO().MousePos));
     gizmoLiveBox_ = gizmoStartBox_;
     dragging_ = true;
@@ -968,30 +467,13 @@ void UIViewTab::UpdateDrag(const DocViewport& vp)
 
     // Live preview into the DOM projection; the model is only touched on
     // release. Layout re-flows next E_POSTUPDATE (Context::Update).
-    if (Rml::Element* el = gizmoNode_ ? gizmoNode_->dom_ : nullptr)
-    {
-        el->SetProperty("position", "absolute");
-        el->SetProperty("box-sizing", "border-box");
-        el->SetProperty("left", FormatPx(solved.pos_.x_).c_str());
-        el->SetProperty("top", FormatPx(solved.pos_.y_).c_str());
-        el->SetProperty("width", FormatPx(solved.size_.x_).c_str());
-        el->SetProperty("height", FormatPx(solved.size_.y_).c_str());
-        const ea::string transform = FormatUiTransform(solved.xform_);
-        if (transform.empty())
-            el->RemoveProperty("transform");
-        else
-            el->SetProperty("transform", transform.c_str());
-    }
+    document_->SetLiveBox(gizmoNode_, solved);
 }
 
 void UIViewTab::CommitDrag()
 {
     if (gizmoNode_)
-    {
-        const UiBox solved = SolveDrag(gizmoStartBox_, gizmoDrag_, gizmoPressDoc_, gizmoCurDoc_);
-        WriteBoxToStyle(*gizmoNode_, solved);
-        dirty_ = true;
-    }
+        document_->CommitBoxEdit(gizmoNode_, SolveDrag(gizmoStartBox_, gizmoDrag_, gizmoPressDoc_, gizmoCurDoc_));
     dragging_ = false;
     gizmoNode_ = nullptr;
 }
@@ -1027,12 +509,12 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
 {
     ImDrawList* dl = ui::GetWindowDrawList();
     UiNode* sel = selected_;
-    UiNode* hover = model_.ResolvePath(hoveredPath_);
+    UiNode* hover = document_->GetModel().ResolvePath(hoveredPath_);
 
     if (hover && hover != sel && hover->dom_ && !hover->IsText())
     {
         UiBox box;
-        if (TryGetDomBox(hover->dom_, hover, box))
+        if (document_->TryGetDomBox(hover, box))
         {
             ImVec2 c[4];
             TransformedCorners(vp, box, c);
@@ -1052,7 +534,7 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
             box.pos_ += gizmoBase_;
         }
         else
-            TryGetDomBox(sel->dom_, sel, box);
+            document_->TryGetDomBox(sel, box);
 
         if (box.size_.x_ > 0.0f && box.size_.y_ > 0.0f)
         {
@@ -1165,7 +647,7 @@ bool UIViewHierarchy::IsOpen(UiNode* node, const ea::vector<unsigned>& path) con
     if (focusPathOnly_)
     {
         // Open only if this node is a proper ancestor of the selection.
-        const ea::vector<unsigned>& sel = tab->selPath_;
+        const ea::vector<unsigned>& sel = tab->GetSelectedPath();
         if (sel.size() <= path.size())
             return false;
         for (size_t i = 0; i < path.size(); i++)
@@ -1185,14 +667,14 @@ bool UIViewHierarchy::IsOpen(UiNode* node, const ea::vector<unsigned>& path) con
 void UIViewHierarchy::RenderContent()
 {
     UIViewTab* tab = owner_;
-    if (!tab || !tab->model_.root_)
+    if (!tab || !tab->GetDocument() || !tab->GetDocument()->GetModel().root_)
     {
         ui::TextDisabled("(no document)");
         return;
     }
 
     ui::Checkbox("Focus Path Only", &focusPathOnly_);
-    RenderNode(tab->model_.root_, ea::vector<unsigned>{});
+    RenderNode(tab->GetDocument()->GetModel().root_.Get(), ea::vector<unsigned>{});
 }
 
 void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
@@ -1223,7 +705,7 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
         }
     }
 
-    const bool selected = tab->selected_ == node;
+    const bool selected = tab->GetSelectedNode() == node;
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
     if (hasElementChild)
     {
@@ -1262,7 +744,7 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
                 continue;
             childPath.resize(path.size());
             childPath.push_back(i);
-            RenderNode(child, childPath);
+            RenderNode(child.Get(), childPath);
         }
         ui::TreePop();
     }
@@ -1271,23 +753,24 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
 void UIViewHierarchy::RenderContextMenuItems()
 {
     UIViewTab* tab = owner_;
-    if (!tab)
+    if (!tab || !tab->GetDocument())
         return;
-    UiNode* target = contextMenuTarget_ ? contextMenuTarget_ : tab->selected_;
+    UIViewDocument* doc = tab->GetDocument();
+    UiNode* target = contextMenuTarget_ ? contextMenuTarget_ : tab->GetSelectedNode();
     if (!target)
         return;
 
     if (!target->IsText() && !target->IsMaterialized())
     {
         if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
-            tab->MaterializeNode(target);
+            doc->MaterializeNode(target);
     }
-    if (target != tab->model_.root_)
+    if (target != doc->GetModel().root_.Get())
     {
         if (ui::MenuItem(ICON_FA_TRASH " Delete"))
         {
             tab->SetSelectedNode(target);
-            tab->DeleteSelected();
+            doc->DeleteNode(target);
         }
     }
     contextMenuTarget_ = nullptr;
@@ -1306,7 +789,7 @@ UIViewInspector::UIViewInspector(UIViewTab* owner)
 void UIViewInspector::RenderContent()
 {
     UIViewTab* tab = owner_;
-    UiNode* node = tab ? tab->selected_ : nullptr;
+    UiNode* node = tab ? tab->GetSelectedNode() : nullptr;
     if (!node)
     {
         ui::TextDisabled("Select an element to edit its attributes.");
@@ -1332,14 +815,18 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     if (!ui::CollapsingHeader(ICON_FA_LIST " Attributes", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
-    // id / class are dedicated fields; editing them is structural (emitted).
+    // Edits accumulate into a payload COPY; the model node is only touched by
+    // the undoable command, which snapshots the pristine "old" state itself.
+    UiNodePayload payload = SnapshotUiNodePayload(*node);
     bool structural = false;
+
+    // id / class are dedicated fields; editing them is structural (emitted).
     char idBuf[256];
     snprintf(idBuf, sizeof(idBuf), "%s", node->id_.c_str());
     ui::InputText("id", idBuf, sizeof(idBuf), ImGuiInputTextFlags_EnterReturnsTrue);
     if (ui::IsItemDeactivatedAfterEdit())
     {
-        node->id_ = Trim(idBuf);
+        payload.id_ = Trim(idBuf);
         structural = true;
     }
     char classBuf[256];
@@ -1347,7 +834,7 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     ui::InputText("class", classBuf, sizeof(classBuf), ImGuiInputTextFlags_EnterReturnsTrue);
     if (ui::IsItemDeactivatedAfterEdit())
     {
-        node->classes_ = Trim(classBuf);
+        payload.classes_ = Trim(classBuf);
         structural = true;
     }
 
@@ -1363,14 +850,14 @@ void UIViewInspector::RenderAttributes(UiNode* node)
         ui::PushItemWidth(-40.0f);
         if (ui::InputText("##value", valBuf, sizeof(valBuf), ImGuiInputTextFlags_EnterReturnsTrue))
         {
-            node->attributes_[i].second = valBuf;
+            payload.attributes_[i].second = valBuf;
             structural = true;
         }
         ui::PopItemWidth();
         ui::SameLine();
         if (ui::SmallButton(ICON_FA_TRASH))
         {
-            node->attributes_.erase(node->attributes_.begin() + i);
+            payload.attributes_.erase(payload.attributes_.begin() + i);
             structural = true;
             ui::PopID();
             break; // re-snapshot next frame
@@ -1388,8 +875,8 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     ui::SameLine();
     if (ui::SmallButton(ICON_FA_PLUS) && !Trim(attributeKeyBuf_).empty())
     {
-        node->attributes_.emplace_back(Trim(attributeKeyBuf_), attributeValueBuf_);
-        ea::sort(node->attributes_.begin(), node->attributes_.end(),
+        payload.attributes_.emplace_back(Trim(attributeKeyBuf_), attributeValueBuf_);
+        ea::sort(payload.attributes_.begin(), payload.attributes_.end(),
             [](const ea::pair<ea::string, ea::string>& a, const ea::pair<ea::string, ea::string>& b)
             { return a.first < b.first; });
         structural = true;
@@ -1398,11 +885,8 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     }
     ui::PopID();
 
-    if (structural && tab)
-    {
-        tab->dirty_ = true;
-        tab->CommitNodeEdit(node);
-    }
+    if (structural && tab && tab->GetDocument())
+        tab->GetDocument()->EditNodePayload(node, payload);
 }
 
 void UIViewInspector::RenderInlineStyle(UiNode* node)
@@ -1411,7 +895,7 @@ void UIViewInspector::RenderInlineStyle(UiNode* node)
     if (!ui::CollapsingHeader(ICON_FA_PAINTBRUSH " Inline Style", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
-    const ea::vector<unsigned> curPath = tab ? tab->selPath_ : ea::vector<unsigned>{};
+    const ea::vector<unsigned> curPath = tab ? tab->GetSelectedPath() : ea::vector<unsigned>{};
     if (!styleSeedValid_ || curPath != lastStylePath_)
     {
         // Seed from the model's ordered declarations (source of truth).
@@ -1431,12 +915,12 @@ void UIViewInspector::RenderInlineStyle(UiNode* node)
     {
         ea::vector<UiStyleDecl> parsed;
         ParseStyleDeclarations(ea::string(styleBuf_), parsed);
-        node->style_ = parsed;
         styleSeedValid_ = false;
-        if (tab)
+        if (tab && tab->GetDocument())
         {
-            tab->dirty_ = true;
-            tab->CommitNodeEdit(node);
+            UiNodePayload payload = SnapshotUiNodePayload(*node);
+            payload.style_ = ea::move(parsed);
+            tab->GetDocument()->EditNodePayload(node, payload);
         }
     }
 }
@@ -1459,10 +943,10 @@ void UIViewInspector::RenderComputed(UiNode* node)
     {
         ui::TextDisabled("(explicit / editable)");
     }
-    else if (!node->IsText() && tab)
+    else if (!node->IsText() && tab && tab->GetDocument())
     {
         if (ui::Button(ICON_FA_LOCATION_PIN " Add Explicit Position"))
-            tab->MaterializeNode(node);
+            tab->GetDocument()->MaterializeNode(node);
     }
 }
 

@@ -56,6 +56,27 @@ struct UiNode : public RefCounted
     bool IsMaterialized() const;
 };
 
+/// Undo payload: everything editable on a single node except its children
+/// (tag stays immutable once created). Old/new payloads are diffed by the
+/// undo actions and applied whole, so any subset of fields can change in one
+/// recorded step.
+struct UiNodePayload
+{
+    ea::string text_;
+    ea::string id_;
+    ea::string classes_;
+    ea::vector<ea::pair<ea::string, ea::string>> attributes_;
+    ea::vector<UiStyleDecl> style_;
+};
+
+/// Capture the editable payload of a node (children excluded).
+UiNodePayload SnapshotUiNodePayload(const UiNode& node);
+/// Overwrite a node's editable payload (children untouched).
+void ApplyUiNodePayload(UiNode& node, const UiNodePayload& payload);
+
+/// Deep copy of a node subtree (dom_ projection links are dropped).
+SharedPtr<UiNode> DeepCloneUiNode(const UiNode& src);
+
 /// Full editor model of one .rml document. Built by walking the loaded DOM and
 /// serialized back via EmitRml().
 struct UiDocumentModel

@@ -183,6 +183,18 @@ UiNode* FindByDomRecursive(const UiNode* node, const Rml::Element* element)
     }
     return nullptr;
 }
+UiNode* FindParentRecursive(const UiNode* node, const UiNode* child)
+{
+    for (const SharedPtr<UiNode>& candidate : node->children_)
+    {
+        if (candidate == child)
+            return const_cast<UiNode*>(node);
+        if (UiNode* found = FindParentRecursive(candidate, child))
+            return found;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 int UiNode::FindStyle(const ea::string& name) const
@@ -224,6 +236,40 @@ bool UiNode::IsMaterialized() const
     float tmp = 0.0f;
     return TryParsePx(GetStyle("left"), tmp) && TryParsePx(GetStyle("top"), tmp)
         && TryParsePx(GetStyle("width"), tmp) && TryParsePx(GetStyle("height"), tmp);
+}
+
+UiNodePayload SnapshotUiNodePayload(const UiNode& node)
+{
+    UiNodePayload payload;
+    payload.text_ = node.text_;
+    payload.id_ = node.id_;
+    payload.classes_ = node.classes_;
+    payload.attributes_ = node.attributes_;
+    payload.style_ = node.style_;
+    return payload;
+}
+
+void ApplyUiNodePayload(UiNode& node, const UiNodePayload& payload)
+{
+    node.text_ = payload.text_;
+    node.id_ = payload.id_;
+    node.classes_ = payload.classes_;
+    node.attributes_ = payload.attributes_;
+    node.style_ = payload.style_;
+}
+
+SharedPtr<UiNode> DeepCloneUiNode(const UiNode& src)
+{
+    auto copy = MakeShared<UiNode>();
+    copy->tag_ = src.tag_;
+    copy->text_ = src.text_;
+    copy->id_ = src.id_;
+    copy->classes_ = src.classes_;
+    copy->attributes_ = src.attributes_;
+    copy->style_ = src.style_;
+    for (const SharedPtr<UiNode>& child : src.children_)
+        copy->children_.push_back(DeepCloneUiNode(*child));
+    return copy;
 }
 
 ea::string Trim(const ea::string& s)
@@ -319,14 +365,7 @@ UiNode* UiDocumentModel::FindParent(const UiNode* node) const
 {
     if (!root_ || !node || node == root_)
         return nullptr;
-    for (const SharedPtr<UiNode>& child : root_->children_)
-    {
-        if (child == node)
-            return root_;
-        if (UiNode* found = FindParent(child))
-            return found;
-    }
-    return nullptr;
+    return FindParentRecursive(root_, node);
 }
 
 bool UiDocumentModel::BuildPath(const UiNode* node, ea::vector<unsigned>& path) const

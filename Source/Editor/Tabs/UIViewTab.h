@@ -9,9 +9,7 @@
 #include "EditorTab.h"
 #include "Shared/HierarchyBrowserSource.h"
 #include "Shared/InspectorSource.h"
-#include "UIViewLayoutMath.h"
-
-#include <Urho3D/Graphics/Texture2D.h>
+#include "UIViewDocument.h"
 
 namespace Rml
 {
@@ -22,7 +20,6 @@ class ElementDocument;
 namespace Urho3D
 {
 
-class RmlUI;
 class UIViewTab;
 class UIViewHierarchy;
 class UIViewInspector;
@@ -32,15 +29,16 @@ void Tabs_UIViewTab(Context* context, Project* project);
 
 /// Editor tab that lets the user author an RmlUi document (.rml file).
 ///
-/// Layering (data / view / logic separation):
+/// Layering (data / logic / view separation):
 /// - DATA: UiDocumentModel / UiNode (UIViewDocumentModel) is the source of
 ///   truth - pure data + (de)serialization.
 /// - LOGIC: UIViewLayoutMath holds the RmlUi/ImGui-free interaction math
 ///   (viewport mapping, transformed hit-testing, gizmo drag solving).
-/// - VIEW: the RmlUi DOM is a runtime projection rendered offscreen into a
-///   dynamic Texture2D; the ImGui overlay draws hover/selection/gizmo on top.
-/// - CONTROLLER: this tab owns editing state and routes events, feeding DOM
-///   numbers into the pure logic and writing results back to model / DOM.
+/// - DOCUMENT: UIViewDocument owns the model, its live RmlUi DOM projection,
+///   the offscreen preview surface and the undoable editing commands.
+/// - VIEW/CONTROLLER: this tab renders ImGui (toolbar, preview, overlay,
+///   gizmo), routes pointer input into selection and drags, and forwards
+///   editing commands to UIViewDocument. It owns no editing logic itself.
 ///
 /// Deliberately does not use the RmlWorldCanvas Drawable: the editor only needs
 /// a 2D preview and using RmlUI + Texture2D directly keeps this tab independent
@@ -65,22 +63,20 @@ public:
     /// Create an untitled in-memory document from the built-in template.
     void NewDocument();
 
+    /// The editable document hosted by this tab.
+    UIViewDocument* GetDocument() const { return document_.Get(); }
+
     /// Selected model node, may be null. Node identity is stable across DOM
-    /// reloads (only its dom_ projection is refreshed), so this never dangles.
+    /// reloads (only its dom_ projection is refreshed), so this never dangles
+    /// between commands within the same document generation.
     UiNode* GetSelectedNode() const { return selected_; }
+    /// Child-index path of the selection (stable across DOM reloads).
+    const ea::vector<unsigned>& GetSelectedPath() const { return selPath_; }
     /// Select from the preview or the hierarchy; keeps selPath_ and the
     /// hierarchy expand state in sync. Passing null clears the selection.
     void SetSelectedNode(UiNode* node);
 
-    /// The document projected from the model, or null.
-    Rml::ElementDocument* GetDocument() const { return document_; }
-    /// The resource path of the loaded document (may be empty for untitled).
     const ea::string& GetResourcePath() const { return resourcePath_; }
-    /// The offscreen RmlUI instance owning the document. Never null.
-    RmlUI* GetPreviewUI() const { return previewUI_; }
-    /// Preview texture; ImGui renders this in the tab's viewport.
-    Texture2D* GetPreviewTexture() const { return texture_; }
-    const UiDocumentModel& GetModel() const { return model_; }
 
     /// Hierarchy/Inspector data sources hosted by this tab. The Glue binds
     /// the shared HierarchyBrowserTab / InspectorTab to these on focus.
@@ -93,46 +89,18 @@ public:
 
     /// Implement EditorTab.
     void RenderContent() override;
+    bool IsUndoSupported() override { return true; }
 
 private:
-    friend class UIViewHierarchy;
-    friend class UIViewInspector;
-
-    void Rebuild();
     void RenderToolbar();
     void RenderPreview();
-    // Renders the offscreen preview into the texture at a valid render-phase
-    // event (start of the graphics frame); RenderPreview() samples it later.
-    void HandleBeginRendering(StringHash eventType, VariantMap& eventData);
 
-    // --- preview lifecycle (data -> DOM projection) -------------------------
-    ea::string SubstituteDataModelToken(const ea::string& text) const;
-    /// Rebuild the DOM from the emitted model text (structural changes).
-    void ReloadPreview();
-    /// Seed the model + projection from raw source text.
-    bool LoadDocumentFromText(const ea::string& text, const ea::string& path);
-
-    // --- editing operations (mutate model, then reload or sync DOM) ---------
-    void MaterializeNode(UiNode* node);
-    void AddWidget(const char* tag);
-    void DeleteSelected();
-    void DuplicateSelected();
-    /// Push a node's current inline style (from the model) into the live DOM.
-    void SyncStyleToDom(UiNode* node);
-    /// (Re)create the live DOM subtree for a (new) model node under parentEl,
-    /// linking every UiNode::dom_ as it goes. Used instead of a full re-emit +
-    /// reload so template/data-bound documents are never re-instantiated.
-    Rml::Element* CreateDomForNode(UiNode& node, Rml::Element* parentEl);
-    /// Push a node's id/class/attributes/inline-style back onto its live element.
-    void ApplyNodeToDom(UiNode* node);
-    /// Apply a single node's model edits to the DOM and refresh layout (used by
-    /// the Inspector after an in-place property/style change).
-    void CommitNodeEdit(UiNode* node);
+    // --- selection helpers ---------------------------------------------------
+    ea::vector<unsigned> NodePath(const UiNode* node) const;
+    /// Revalidate the selection after a model mutation (OnModelEdited).
+    void OnModelEdited();
 
     // --- pointer / overlay (view + controller) ------------------------------
-    /// Deepest model node whose DOM border box (inverse-transformed) contains
-    /// the document-space point; null when outside.
-    UiNode* HitTestPreview(const Vector2& docPos) const;
     void HandlePreviewPointer(const DocViewport& vp);
     void DrawOverlay(const DocViewport& vp);
     void DrawGizmo(const DocViewport& vp, const UiBox& box);
@@ -140,16 +108,12 @@ private:
     void UpdateDrag(const DocViewport& vp);
     void CommitDrag();
 
-    SharedPtr<RmlUI> previewUI_;
-    SharedPtr<Texture2D> texture_;
-    Rml::ElementDocument* document_ = nullptr;
-
-    UiDocumentModel model_;
+    /// The editable document (model + live DOM projection + undo commands).
+    SharedPtr<UIViewDocument> document_;
 
     UiNode* selected_ = nullptr;
     ea::vector<unsigned> selPath_;
     ea::vector<unsigned> hoveredPath_;
-    ea::vector<unsigned> NodePath(const UiNode* node) const;
 
     // --- gizmo drag state (data-driven; solved via UIViewLayoutMath) --------
     UiNode* gizmoNode_ = nullptr;
@@ -161,8 +125,6 @@ private:
     Vector2 gizmoCurDoc_; ///< document-space mouse of the latest frame
     bool dragging_ = false;
 
-    IntVector2 previewSize_{1024, 768};
-    bool dirty_ = false;
     ea::string resourcePath_;
     char pathInputBuf_[512]{};
 
@@ -170,7 +132,7 @@ private:
     SharedPtr<UIViewInspector> inspectorSource_;
 };
 
-/// HierarchyBrowserSource: walks the editor model of UIViewTab's document.
+/// HierarchyBrowserSource: walks the editor model of the tab's document.
 class UIViewHierarchy : public Object, public HierarchyBrowserSource
 {
     URHO3D_OBJECT(UIViewHierarchy, Object)
