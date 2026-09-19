@@ -32,6 +32,8 @@ captures/
 # Compiled shaders
 *.vs?
 *.ps?
+# ...but *.ps? also collides with PowerShell scripts; keep the Lua-binding CI harness.
+!/Source/Tools/LuaBindingCI/*.ps1
 
 # Compiled AngelScript
 *.asc
