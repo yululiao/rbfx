@@ -89,6 +89,9 @@ private:
     void Rebuild();
     void RenderToolbar();
     void RenderPreview();
+    // Renders the offscreen preview into the texture at a valid render-phase
+    // event (start of the graphics frame), then RenderPreview() samples it.
+    void HandleBeginRendering(StringHash eventType, VariantMap& eventData);
 
     SharedPtr<RmlUI> previewUI_;
     SharedPtr<Texture2D> texture_;

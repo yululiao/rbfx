@@ -11,10 +11,12 @@
 #include "../Tabs/InspectorTab.h"
 
 #include <Urho3D/Core/Context.h>
+#include <Urho3D/Graphics/GraphicsEvents.h>
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
+#include <Urho3D/Input/InputEvents.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/RmlUI/RmlUI.h>
 #include <Urho3D/SystemUI/Widgets.h>
@@ -63,9 +65,22 @@ UIViewTab::UIViewTab(Context* context)
     // dynamic texture. It is deliberately not the master RmlUI subsystem so
     // that editing does not leak into the running game view.
     previewUI_ = new RmlUI(context_, "UIViewPreview");
-    // The preview must not steal mouse/keyboard focus from the editor; the
-    // hierarchy panel drives selection instead.
-    previewUI_->SetBlockEvents(true);
+    // Input isolation for the offscreen context: drop the subscriptions RmlUI
+    // made to global input events so the preview cannot steal focus from the
+    // editor. SetBlockEvents() must NOT be used here: it blocks every event,
+    // including E_POSTUPDATE, which stalls Context::Update - the root element
+    // never becomes a stacking context and the document is never rendered.
+    previewUI_->UnsubscribeFromEvent(E_MOUSEBUTTONDOWN);
+    previewUI_->UnsubscribeFromEvent(E_MOUSEBUTTONUP);
+    previewUI_->UnsubscribeFromEvent(E_MOUSEMOVE);
+    previewUI_->UnsubscribeFromEvent(E_MOUSEWHEEL);
+    previewUI_->UnsubscribeFromEvent(E_TOUCHBEGIN);
+    previewUI_->UnsubscribeFromEvent(E_TOUCHEND);
+    previewUI_->UnsubscribeFromEvent(E_TOUCHMOVE);
+    previewUI_->UnsubscribeFromEvent(E_KEYDOWN);
+    previewUI_->UnsubscribeFromEvent(E_KEYUP);
+    previewUI_->UnsubscribeFromEvent(E_TEXTINPUT);
+    previewUI_->UnsubscribeFromEvent(E_DROPFILE);
 
     texture_ = MakeShared<Texture2D>(context_);
 
@@ -90,6 +105,25 @@ UIViewTab::UIViewTab(Context* context)
         Rml::DataModelConstructor ctor = ctx->CreateDataModel(modelName, nullptr);
         (void)ctor.GetModelHandle();
     }
+
+    // RmlUI auto-renders on E_ENDALLVIEWSRENDER, but by then the frame's render
+    // state is already committed to the backbuffer, so redirecting draws into an
+    // offscreen texture there is unreliable. Disable that auto-render and instead
+    // drive the preview render from E_BEGINRENDERING (a fresh frame, the same
+    // event TextureCubeInspectorWidget uses for offscreen render-to-texture).
+    previewUI_->SetRendering(false);
+    SubscribeToEvent(E_BEGINRENDERING, URHO3D_HANDLER(UIViewTab, HandleBeginRendering));
+}
+
+void UIViewTab::HandleBeginRendering(StringHash, VariantMap&)
+{
+    if (!previewUI_)
+        return;
+
+    // Layout was already updated on E_POSTUPDATE (CPU-side); here, at the start
+    // of the graphics frame, it is safe to issue GPU draws into the offscreen
+    // surface. RenderPreview() samples the resulting texture later this frame.
+    previewUI_->Render();
 }
 
 UIViewTab::~UIViewTab()
@@ -186,20 +220,27 @@ void UIViewTab::Rebuild()
     if (!texture_)
         return;
 
+    // A single mip level: the offscreen render only ever writes mip 0, and the
+    // preview is sampled through the ImGui backend, which - unlike engine draw
+    // commands (DrawCommandQueue) - does not auto-refresh the mip chain of
+    // render-target textures. With the default auto-generated chain the sampler
+    // would pick the never-written lower mips at typical preview scale and the
+    // image would stay blank. Note: SetNumLevels only feeds the NEXT texture
+    // creation, so it must be called before SetSize.
+    texture_->SetNumLevels(1);
     texture_->SetSize(previewSize_.x_, previewSize_.y_, TextureFormat::TEX_FORMAT_RGBA8_UNORM,
                       TextureFlag::BindRenderTarget);
     texture_->SetFilterMode(FILTER_BILINEAR);
     texture_->SetAddressMode(TextureCoordinate::U, ADDRESS_CLAMP);
     texture_->SetAddressMode(TextureCoordinate::V, ADDRESS_CLAMP);
-    texture_->SetNumLevels(1);
 
     RenderSurface* surface = texture_->GetRenderSurface();
     if (surface)
     {
         surface->SetUpdateMode(SURFACE_MANUALUPDATE);
-        // DIAGNOSTIC: opaque clear. If the preview shows this color, the offscreen
-        // render reaches the texture (issue is document content/layout). If it is
-        // still fully transparent/empty, the render never lands in the texture.
+        // Opaque editor-neutral background. Must stay opaque: RmlUI skips the
+        // clear entirely for fully transparent colors, which would leave stale
+        // pixels behind when the document shrinks or unloads.
         previewUI_->SetRenderTarget(surface, Color(0.16f, 0.18f, 0.22f, 1.0f));
     }
     else
@@ -256,9 +297,8 @@ void UIViewTab::RenderPreview()
         return;
     }
 
-    // RmlUI renders the document into the texture via its E_ENDALLVIEWSRENDER
-    // handler, which runs inside the graphics frame (Engine::Render ->
-    // Renderer::Render). We must NOT call Render() here: widget building runs
+    // RmlUI renders the document into the texture from E_BEGINRENDERING (see
+    // HandleBeginRendering). We must NOT call Render() here: widget building runs
     // during E_UPDATE, before the graphics frame begins, so any draw issued now
     // has no active frame and is dropped. Just sample the texture that the
     // event-driven render produced.
