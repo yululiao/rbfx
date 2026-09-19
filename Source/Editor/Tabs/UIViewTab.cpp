@@ -83,8 +83,10 @@ UIViewTab::UIViewTab(Context* context)
     // leaving the whole bound subtree unrendered.
     if (Rml::Context* ctx = previewUI_->GetRmlContext())
     {
-        ea::string modelName = "{{__data_model_id}}";
-        Detail::InsertVariablePlaceholders(modelName, this);
+        // Detail::InsertVariablePlaceholders() substitutes the token with
+        // Format("{}", ptr); build the identical name locally so we do not
+        // depend on that engine symbol (it is not URHO3D_API-exported).
+        const ea::string modelName = Format("{}", static_cast<void*>(this));
         Rml::DataModelConstructor ctor = ctx->CreateDataModel(modelName, nullptr);
         (void)ctor.GetModelHandle();
     }
@@ -195,7 +197,10 @@ void UIViewTab::Rebuild()
     if (surface)
     {
         surface->SetUpdateMode(SURFACE_MANUALUPDATE);
-        previewUI_->SetRenderTarget(surface, Color::TRANSPARENT_BLACK);
+        // DIAGNOSTIC: opaque clear. If the preview shows this color, the offscreen
+        // render reaches the texture (issue is document content/layout). If it is
+        // still fully transparent/empty, the render never lands in the texture.
+        previewUI_->SetRenderTarget(surface, Color(0.16f, 0.18f, 0.22f, 1.0f));
     }
     else
     {
@@ -251,13 +256,20 @@ void UIViewTab::RenderPreview()
         return;
     }
 
+    // RmlUI renders the document into the texture via its E_ENDALLVIEWSRENDER
+    // handler, which runs inside the graphics frame (Engine::Render ->
+    // Renderer::Render). We must NOT call Render() here: widget building runs
+    // during E_UPDATE, before the graphics frame begins, so any draw issued now
+    // has no active frame and is dropped. Just sample the texture that the
+    // event-driven render produced.
     const ImVec2 avail = ui::GetContentRegionAvail();
     const float scale = ea::min(avail.x / static_cast<float>(previewSize_.x_),
                                 avail.y / static_cast<float>(previewSize_.y_));
     const ImVec2 displaySize(previewSize_.x_ * scale, previewSize_.y_ * scale);
 
-    // RmlUi renders with a top-left origin; flip V so the preview is upright.
-    Widgets::Image(texture_, displaySize, ImVec2(0, 1), ImVec2(1, 0));
+    // Scene previews sample a render-to-texture with default UVs and appear
+    // upright, so no V flip is needed here either.
+    Widgets::Image(texture_, displaySize);
 }
 
 // ---------------------------------------------------------------------------
