@@ -17,6 +17,7 @@
 
 #include <sol/sol.hpp>
 
+#include <cstdint>
 #include <string>
 
 namespace sol
@@ -40,6 +41,49 @@ ea::unordered_map<StringHash, LuaObjectCaster>& GetCasterRegistry()
     return registry;
 }
 
+// Registry key holding the per-state object identity cache (a weak-valued table).
+constexpr const char* const sObjectCacheKey = "rbfx.luaObjectCache";
+
+/// Get (or lazily build) the per-state object identity cache. It is a table keyed
+/// by an engine Object's address, mapping to the Lua wrapper already handed out for
+/// that object, so re-wrapping the same live object returns the SAME Lua value
+/// (stable `==`/rawequal and table-key identity, and no repeated userdata alloc).
+/// The table is weak-VALUED (__mode="v"): an entry disappears as soon as Lua drops
+/// the last reference to the wrapper, so the cache never keeps an object alive and
+/// cannot leak. Living in the registry scopes it to one lua_State (no shared mutable
+/// state across VMs/threads).
+sol::table GetObjectCache(sol::state_view lua)
+{
+    lua_State* L = lua.lua_state();
+
+    lua_pushstring(L, sObjectCacheKey);
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    if (lua_istable(L, -1))
+    {
+        sol::table cache(sol::stack_reference(L, -1));
+        lua_pop(L, 1);
+        return cache;
+    }
+    lua_pop(L, 1); // drop the nil lookup
+
+    // local cache = setmetatable({}, { __mode = "v" })
+    lua_newtable(L);                       // cache
+    lua_newtable(L);                       // mt
+    lua_pushliteral(L, "__mode");
+    lua_pushliteral(L, "v");
+    lua_settable(L, -3);                   // mt.__mode = "v"
+    lua_setmetatable(L, -2);               // setmetatable(cache, mt); pops mt
+
+    // registry[sObjectCacheKey] = cache
+    lua_pushstring(L, sObjectCacheKey);
+    lua_pushvalue(L, -2);                  // push a copy of cache
+    lua_settable(L, LUA_REGISTRYINDEX);    // pops key + value
+
+    sol::table cache(sol::stack_reference(L, -1));
+    lua_pop(L, 1);                         // pop cache
+    return cache;
+}
+
 /// Lowercase a name and drop spaces so Lua keys map to engine attribute names
 /// ("FarClip" and "Far Clip" both resolve to the "Far Clip" attribute).
 ea::string NormalizeAttributeName(const ea::string& name)
@@ -61,6 +105,18 @@ const AttributeInfo* FindAttribute(const Serializable* serializable, const char*
     if (!attributes)
         return nullptr;
 
+    // Fast path: exact name-hash match. One hash computation for the key, then
+    // cheap integer compares -- no per-attribute allocation. This covers the
+    // common case (the Lua key already equals the attribute name).
+    const StringHash hash(key);
+    for (const AttributeInfo& attr : *attributes)
+    {
+        if (attr.nameHash_ == hash)
+            return &attr;
+    }
+
+    // Slow path: case/space-insensitive normalization, only reached on a hash
+    // miss (e.g. key "FarClip" vs attribute name "Far Clip").
     const ea::string normalized = NormalizeAttributeName(key);
     for (const AttributeInfo& attr : *attributes)
     {
@@ -68,6 +124,20 @@ const AttributeInfo* FindAttribute(const Serializable* serializable, const char*
             return &attr;
     }
     return nullptr;
+}
+
+/// Report an attribute operation attempted through a generic ObjectRef whose
+/// engine object has already been destroyed. The reflection channel otherwise
+/// collapses to a silent nil read / dropped write, which hides "operate on a
+/// removed object" bugs -- so surface it explicitly. Non-fatal by design (this
+/// project does not force SOL_ALL_SAFETIES, so a thrown C++ exception could
+/// escape into the engine and crash). Liveness probes (Get/CastTo/GetTypeName/
+/// to_string) stay silent on purpose: nil/"" is their documented "is it gone?"
+/// answer, not an error.
+void ReportDeadObjectRef(const char* op)
+{
+    URHO3D_LOGERROR("Lua ObjectRef: '{}' used on a destroyed engine object; the operation is a no-op -- "
+                    "re-fetch the object or guard with ref:Get() ~= nil", op);
 }
 
 } // namespace
@@ -82,12 +152,29 @@ sol::object WrapLuaObject(sol::state_view lua, Object* object)
     if (!object)
         return sol::lua_nil;
 
+    sol::table cache = GetObjectCache(lua);
+    const lua_Integer key = static_cast<lua_Integer>(reinterpret_cast<std::uintptr_t>(object));
+
+    sol::object cached = cache.get<sol::object>(key);
+    if (cached.get_type() == sol::type::userdata)
+    {
+        // Registered-type wrappers hold a strong SharedPtr, so while the wrapper is
+        // alive its object cannot be destroyed and the address cannot be recycled --
+        // a hit is guaranteed to be this same live object. The generic LuaObjectRef
+        // holds only a WeakPtr, so re-validate it still points at this object before
+        // reusing it (a stale weak ref over a recycled address must not be returned).
+        if (!cached.is<LuaObjectRef>() || cached.as<LuaObjectRef>().Get() == object)
+            return cached;
+    }
+
     auto& registry = GetCasterRegistry();
     const auto iter = registry.find(object->GetType());
-    if (iter != registry.end())
-        return iter->second(lua, object);
+    sol::object wrapper = (iter != registry.end())
+        ? iter->second(lua, object)
+        : sol::make_object(lua, LuaObjectRef{object});
 
-    return sol::make_object(lua, LuaObjectRef{object});
+    cache[key] = wrapper;
+    return wrapper;
 }
 
 Variant LuaToVariant(sol::state_view lua, const sol::object& value)
@@ -307,15 +394,33 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
             return WrapLuaObject(lua, object);
         },
         "GetAttribute", [&lua](LuaObjectRef& self, const char* name) -> sol::object {
-            auto* serializable = dynamic_cast<Serializable*>(self.Get());
+            Object* object = self.Get();
+            if (!object)
+            {
+                ReportDeadObjectRef("GetAttribute");
+                return sol::lua_nil;
+            }
+            auto* serializable = dynamic_cast<Serializable*>(object);
             return serializable ? VariantToLua(lua, serializable->GetAttribute(name)) : sol::lua_nil;
         },
         "SetAttribute", [&lua](LuaObjectRef& self, const char* name, sol::object value) {
-            if (auto* serializable = dynamic_cast<Serializable*>(self.Get()))
+            Object* object = self.Get();
+            if (!object)
+            {
+                ReportDeadObjectRef("SetAttribute");
+                return;
+            }
+            if (auto* serializable = dynamic_cast<Serializable*>(object))
                 serializable->SetAttribute(name, LuaToVariant(lua, value));
         },
         "GetAttributes", [&lua](LuaObjectRef& self) -> sol::object {
-            auto* serializable = dynamic_cast<Serializable*>(self.Get());
+            Object* object = self.Get();
+            if (!object)
+            {
+                ReportDeadObjectRef("GetAttributes");
+                return sol::lua_nil;
+            }
+            auto* serializable = dynamic_cast<Serializable*>(object);
             if (!serializable)
                 return sol::lua_nil;
             const auto* attributes = serializable->GetAttributes();
@@ -336,14 +441,26 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
                               : "ObjectRef: <destroyed>";
         },
         sol::meta_function::index, [&lua](LuaObjectRef& self, const char* key) -> sol::object {
-            auto* serializable = dynamic_cast<Serializable*>(self.Get());
+            Object* object = self.Get();
+            if (!object)
+            {
+                ReportDeadObjectRef("index");
+                return sol::lua_nil;
+            }
+            auto* serializable = dynamic_cast<Serializable*>(object);
             if (!serializable)
                 return sol::lua_nil;
             const AttributeInfo* attr = FindAttribute(serializable, key);
             return attr ? VariantToLua(lua, serializable->GetAttribute(attr->name_)) : sol::lua_nil;
         },
         sol::meta_function::new_index, [&lua](LuaObjectRef& self, const char* key, sol::object value) {
-            auto* serializable = dynamic_cast<Serializable*>(self.Get());
+            Object* object = self.Get();
+            if (!object)
+            {
+                ReportDeadObjectRef("new_index");
+                return;
+            }
+            auto* serializable = dynamic_cast<Serializable*>(object);
             if (!serializable)
                 return;
             if (const AttributeInfo* attr = FindAttribute(serializable, key))

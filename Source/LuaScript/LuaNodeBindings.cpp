@@ -179,6 +179,65 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
                 return sol::lua_nil;
             return WrapObjectVector<Node>(sol::state_view(s), node->GetChildren(recursive.value_or(false)));
         },
+        // Callback-style enumeration: visits children without allocating an
+        // intermediate Lua table (the per-frame churn GetChildren incurs).
+        // callback(child); return false from the callback to stop early.
+        // Non-recursive iterates the engine's internal vector by reference (zero copy).
+        "ForEachChild", [](Node* node, sol::protected_function callback, sol::optional<bool> recursive, sol::this_state s) {
+            if (!node || !callback.valid())
+                return;
+            sol::state_view lua(s);
+            if (!recursive.value_or(false))
+            {
+                for (const SharedPtr<Node>& child : node->GetChildren())
+                {
+                    sol::protected_function_result r = callback(WrapLuaObject(lua, child.Get()));
+                    if (!r.valid())
+                    {
+                        sol::error err = r;
+                        URHO3D_LOGERROR("Node:ForEachChild callback failed: {}", err.what());
+                        return;
+                    }
+                    if (r.get_type() == sol::type::boolean && !r.get<bool>())
+                        return; // early break
+                }
+            }
+            else
+            {
+                ea::vector<Node*> children;
+                node->GetChildren(children, true);
+                for (Node* child : children)
+                {
+                    sol::protected_function_result r = callback(WrapLuaObject(lua, child));
+                    if (!r.valid())
+                    {
+                        sol::error err = r;
+                        URHO3D_LOGERROR("Node:ForEachChild callback failed: {}", err.what());
+                        return;
+                    }
+                    if (r.get_type() == sol::type::boolean && !r.get<bool>())
+                        return;
+                }
+            }
+        },
+        // Same idea for components: callback(component); return false to stop.
+        "ForEachComponent", [](Node* node, sol::protected_function callback, sol::this_state s) {
+            if (!node || !callback.valid())
+                return;
+            sol::state_view lua(s);
+            for (const SharedPtr<Component>& component : node->GetComponents())
+            {
+                sol::protected_function_result r = callback(WrapLuaObject(lua, component.Get()));
+                if (!r.valid())
+                {
+                    sol::error err = r;
+                    URHO3D_LOGERROR("Node:ForEachComponent callback failed: {}", err.what());
+                    return;
+                }
+                if (r.get_type() == sol::type::boolean && !r.get<bool>())
+                    return;
+            }
+        },
 
         // Components: string-typed factory channel. Any component type
         // registered in the Context is creatable from Lua.

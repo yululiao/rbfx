@@ -134,15 +134,24 @@ runtime breakage; rules 4-6 prevent capability regressions.
     C++ object alive even after scene removal)**; a type without one falls back to `LuaObjectRef`
     (**`WeakPtr` — safely goes nil but is a different Lua representation of the same object**).
     Add pointer-based `sol::meta_function::equal_to` to every object usertype so `==` compares the
-    underlying pointer, not the userdata. **`rawequal` is NOT a valid object comparison** (each
-    wrap makes a fresh userdata) — never rely on it. **This vendored sol3 has no
-    `meta_function::hash`**, and a raw `"__hash"` string key lands under `__index` (invisible to
-    the VM's key-hashing), so **a userdata is still an unreliable table key** — two wrappers of one
-    object hash differently. The ONLY robust fix (single cached userdata per object, which also
-    heals `rawequal` + table-key) is a global identity cache in `WrapLuaObject`: cross-cutting, it
-    touches every sample, so do NOT slip it into a per-sample batch — it must go through the FULL
-    suite (human `run_all_samples.bat`). Meanwhile scripts must key objects by `obj.id`/a stable
-    field, not by the userdata itself.
+    underlying pointer, not the userdata. **This vendored sol3 has no `meta_function::hash`**, and a
+    raw `"__hash"` string key lands under `__index` (invisible to the VM's key-hashing), so a
+    userdata's *hash* cannot be customised.
+    **A global identity cache now lives in `WrapLuaObject`** (`LuaCoreBindings.cpp`): a per-state
+    **weak-valued** registry table keyed by the `Object*` address maps each object to the ONE wrapper
+    Lua value handed out for it, so repeated wraps of the same live object return the *same* userdata
+    — `rawequal` holds and the wrapper is a stable table key. It never leaks: weak values mean an
+    entry vanishes once Lua drops the wrapper; the strong `SharedPtr` of registered wrappers guarantees
+    a cache hit is the same live object, and the `LuaObjectRef` fallback re-validates `Get()==object`
+    on a hit to survive address recycling.
+    **Scope limit — this cache only covers the `WrapLuaObject` path** (GetChildren/ForEach*/GetComponent/
+    event senders/subsystems/Variant PTR/unbound types). Accessors that return a registered `T*`/
+    `SharedPtr<T>` *directly* (e.g. `.parent`, `.scene`, `GetChild`, `CreateChild`) are pushed by sol3
+    as fresh userdata and BYPASS the cache, so across those two paths `rawequal`/table-key do NOT unify
+    (only `==` does, via `equal_to`). Do not assume `rawequal` works between a `.parent` value and a
+    `GetChildren()` value of the same node. Prefer `==`, and when a single canonical identity matters,
+    key by `obj.id`/a stable field. Routing the direct-push path through the cache is a deeper,
+    cross-cutting change and must go through the FULL suite.
 11. **Register the FULL `sol::base_classes` chain, and mind TU order.** sol3 upcasts only match the
     bases you declare, so an object usertype must list its whole ancestor chain up to `Object`
     (e.g. `sol::bases<Component, Serializable, Object>`); dropping a link silently breaks
@@ -151,6 +160,20 @@ runtime breakage; rules 4-6 prevent capability regressions.
     **Resource must precede Graphics** (Model/Material derive from Resource); a new subsystem that
     binds a type deriving from another TU's type must be registered AFTER that TU. There is no
     auto-derivation from reflection; both invariants are hand-maintained.
+12. **A destroyed object reached through `ObjectRef` must report, not silently no-op.** `LuaObjectRef`
+    (the generic wrapper for unregistered types) holds a `WeakPtr`, so its userdata outlives the C++
+    object; after death `Get()==nullptr` and every attribute read/write used to collapse to a silent
+    `nil`/dropped write, hiding "operate on a removed object" bugs. `WrapLuaObject`'s `GetAttribute`/
+    `SetAttribute`/`GetAttributes`/`__index`/`__newindex` now call `ReportDeadObjectRef(op)` (a
+    non-fatal `URHO3D_LOGERROR`, NOT a thrown exception — the project does not force
+    `SOL_ALL_SAFETIES`, so a C++ throw could escape into the engine). Keep liveness probes
+    (`Get`/`CastTo`/`GetTypeName`/`to_string`) silent: returning nil/`""`/`<destroyed>` is their
+    contract. Two boundaries are deliberate: (a) for **registered** types and direct `T*`/`SharedPtr`
+    returns, a null already becomes Lua `nil`, so `nil:Foo()` is *already loud* — the `if (self)`
+    guards in those lambdas are unreachable defensive code, do not add error paths there; (b) null
+    **arguments** (`node:AddChild(nil)`) are intentionally NOT error-globally — many engine params
+    legitimately accept null (`SetStyle(nil)`, `LoadLayout(file, nil)`), so blanket-guarding them
+    regresses real usage. Only the dead-self reflection path is guarded.
 
 ## Hard cases: unbound subsystems & C++-virtual subclassing
 
@@ -198,6 +221,37 @@ overrides a virtual). The rule is the same: **enhance the Lua-side binding add-o
   no `__urho_log_info` global.
 - Layout: a sample dir has `main.lua` (plus its assets). It is staged at build time into
   `msvc/bin/<Config>/LuaSamples/` by the CMake "Copying Lua sample scripts" step.
+
+## Performance notes (measured on the Release build)
+
+Real per-operation costs from a microbenchmark (vanilla Lua 5.4, sol3, hand-written
+bindings). Pure Lua local call = ~35 ns; everything below is the engine-boundary tax.
+
+- **~330 ns** rides on each bound method call (arg check + convert) — a `GetNumChildren()`
+  call is ~370–410 ns. Fine for orchestration; matters only inside per-entity per-frame loops.
+- **~200–600 ns** is the *allocation* tax, not the call: `Vector3(...)` ctor ~580 ns,
+  reading a `.position` (returns a Vector3 userdata) ~600–670 ns, a string getter like
+  `GetName()` ~420 ns, writing `.position` ~270 ns. So a Lua statement like
+  `node.position = node.position + Vector3(0,dt,0)` costs ~1.5 µs and churns 2–3 short-lived
+  userdata. In hot loops cache scalars, avoid re-reading vector properties, and don't build
+  throwaway vectors per frame.
+- **Enumeration cost is dominated by per-child wrapping (~580 ns each), not the table.**
+  `parent:GetChildren()` over 20 children ≈ 17–19 µs. `ForEachChild` was added and is NOT
+  faster for a full pass (callback overhead makes it ~30 µs); its value is the **early break**
+  (`return false` from the callback) — stopping at the first match is ~2.7 µs, ~7× cheaper
+  than `GetChildren`. Use `ForEachChild(... return false)` for "find first", keep `GetChildren`
+  when you must visit all, and cache the table when the structure is stable.
+- **A global object identity cache now lives in `WrapLuaObject`** (contract rule 10): a per-state
+  weak-valued registry table reuses ONE userdata per live object. Measured effect on the Release
+  build (GC paused, `parent:GetChildren()` over 20 children): cache-cold re-wrap ≈ 19.6 µs, cache-hot
+  (wrappers held) ≈ 15.5 µs — ~20 % cheaper because the ~580 ns re-wrap allocation is skipped on a
+  hit; the throwaway path is unchanged within noise (the cache lookup bookkeeping ≈ the saved alloc).
+  Its larger win is correctness: `rawequal` and userdata-as-table-key now work for values that come
+  through `WrapLuaObject` (GetChildren/GetComponent/event senders/subsystems/unbound types). It does
+  NOT cover direct-push accessors (`.parent`, `GetChild`, …) — see rule 10's scope limit.
+- FindAttribute (the O(n) dynamic-attribute path) is only reached for **unregistered** types
+  (`LuaObjectRef`); registered usertypes use direct property methods and never hit it. It now has
+  a StringHash fast path, so an exact-name key costs one hash + integer compares (no alloc).
 
 ## Verification commands (exact)
 

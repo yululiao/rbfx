@@ -1059,6 +1059,8 @@ function Node.CreateChild(...) end
 ---@param typeName string
 ---@return Component
 function Node:CreateComponent(typeName) end
+function Node.ForEachChild(...) end
+function Node.ForEachComponent(...) end
 ---@return Node
 function Node.GetChild(...) end
 function Node.GetChildren(...) end
