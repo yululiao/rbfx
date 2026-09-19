@@ -12,6 +12,7 @@
 
 #include "Export.h"
 
+#include <EASTL/shared_ptr.h>
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
@@ -38,15 +39,37 @@ struct RBFXLUA_API LuaVMConfig
 
 /// Lightweight read-only wrapper over event data that allows Lua callbacks
 /// to read event parameters by name: data.TimeStep, data.Name, etc.
+///
+/// The raw eventData_ pointer is only valid during the synchronous dispatch.
+/// To stop a script that stashes the wrapper (for example
+/// ``SubscribeToEvent("Update", function(d) saved = d end)``) from reading a
+/// dead VariantMap later, a shared validity token is flipped false by the
+/// bridge right after the callback returns. sol copies this struct into the
+/// userdata, and every copy shares the same token, so a stale view reads nil
+/// instead of dereferencing freed memory.
 class LuaEventData
 {
 public:
     explicit LuaEventData(const VariantMap* eventData)
-        : eventData_(eventData)
+        : eventData_(eventData), valid_(ea::make_shared<bool>(true))
     {
     }
 
+    /// Invalidate this view and every copy a script kept. Safe to call twice.
+    void Invalidate()
+    {
+        if (valid_)
+            *valid_ = false;
+        eventData_ = nullptr;
+    }
+
+    /// The live event map during dispatch, or null once invalidated / self null.
+    const VariantMap* Get() const { return (valid_ && *valid_) ? eventData_ : nullptr; }
+
     const VariantMap* eventData_;
+
+private:
+    ea::shared_ptr<bool> valid_;
 };
 
 /// Base class of every engine-bound Lua virtual machine. It owns a DEDICATED sol state (a
@@ -114,6 +137,24 @@ protected:
 private:
     /// Register the engine usertypes/bindings onto the state and the event bridge.
     void RegisterEngineBindings();
+
+    /// Append a callback to the fan-out list for (sender, eventType) and (re)attach the
+    /// dispatcher. Shared by the global and sender subscribe entry points.
+    ///
+    /// Why a fan-out list: rbfx Object::SubscribeToEvent(eventType, handler) *replaces*
+    /// (rather than appends) the handler for a given (object, eventType) pair, so a naive
+    /// per-callback subscribe would let only the last Lua callback for the same event
+    /// survive. Every callback for an (sender, eventType) pair is kept in an opaque
+    /// registry (defined in the .cpp, where the sol types are complete) and a single
+    /// stateless dispatcher is (re)attached that looks the pair up at fire time and invokes
+    /// all of them. `sender == nullptr` denotes a global (context) event.
+    void AddSubscriber(Object* sender, StringHash eventType, sol::protected_function callback);
+
+    /// Opaque event fan-out registry (pimpl: keeps sol::protected_function containers out of
+    /// this header, which only forward-declares the sol types). Destroyed before luaState_
+    /// (declaration order) so the stored callbacks are released while the state is alive.
+    struct Subscribers;
+    ea::unique_ptr<Subscribers> subscribers_;
 };
 
 } // namespace Urho3D

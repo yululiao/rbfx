@@ -143,6 +143,7 @@ RBFXLUA_API void RegisterPhysics2DBindings(sol::state& lua, Context* context);
 RBFXLUA_API void RegisterAudioBindings(sol::state& lua, Context* context);
 RBFXLUA_API void RegisterNavigationBindings(sol::state& lua, Context* context);
 RBFXLUA_API void RegisterNetworkBindings(sol::state& lua, Context* context);
+RBFXLUA_API void RegisterRmlUIBindings(sol::state& lua, Context* context);
 
 /// Helper for binding modules: register the caster of a concrete type.
 /// Casters return a SharedPtr so the Lua reference keeps the object alive

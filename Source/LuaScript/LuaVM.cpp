@@ -17,14 +17,43 @@
 #include "../Urho3D/Core/StringUtils.h"
 #include "../Urho3D/IO/Log.h"
 
+#include <EASTL/unordered_map.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 #include <sol/sol.hpp>
 
 namespace Urho3D
 {
 
+// Event fan-out registry (opaque in LuaVM.h; sol types are complete here).
+struct LuaVM::Subscribers
+{
+    struct Key
+    {
+        Object* sender_;
+        unsigned eventType_;
+        bool operator==(const Key& rhs) const { return sender_ == rhs.sender_ && eventType_ == rhs.eventType_; }
+    };
+    struct KeyHash
+    {
+        size_t operator()(const Key& key) const
+        {
+            return static_cast<size_t>(key.eventType_) ^ (reinterpret_cast<size_t>(key.sender_) >> 4);
+        }
+    };
+    struct Entry
+    {
+        ea::vector<sol::protected_function> callbacks_;
+        WeakPtr<Object> owner_;
+    };
+    ea::unordered_map<Key, Entry, KeyHash> map_;
+};
+
 LuaVM::LuaVM(Context* context, const LuaVMConfig& config)
     : Object(context)
     , config_(config)
+    , subscribers_(ea::make_unique<Subscribers>())
 {
 }
 
@@ -33,6 +62,8 @@ LuaVM::~LuaVM()
     // Drop event handlers while the Lua state is still alive: their lambdas capture sol
     // references which must be released before luaState_ (and its lua_State) is gone.
     UnsubscribeFromAllEvents();
+    if (subscribers_)
+        subscribers_->map_.clear();
 }
 
 bool LuaVM::Initialize()
@@ -144,13 +175,7 @@ void LuaVM::SubscribeGlobalEvent(const char* eventName, sol::protected_function 
         return;
     }
 
-    // The lambda copies the sol reference; handlers are removed in the destructor before
-    // the Lua state is torn down, so callbacks can never fire on a destroyed state.
-    SubscribeToEvent(StringHash(eventName),
-        [this, callback](Object*, StringHash, VariantMap& eventData) mutable
-        {
-            InvokeEventCallback(callback, eventData);
-        });
+    AddSubscriber(nullptr, StringHash(eventName), std::move(callback));
 }
 
 void LuaVM::SubscribeSenderEvent(Object* sender, const char* eventName, sol::protected_function callback)
@@ -171,23 +196,58 @@ void LuaVM::SubscribeSenderEvent(Object* sender, const char* eventName, sol::pro
         return;
     }
 
-    // Handler is attached to the sender, so it is automatically removed when
-    // the sender is destroyed and Lua callbacks cannot fire on dead objects.
-    sender->SubscribeToEvent(StringHash(eventName),
-        [this, callback](Object*, StringHash, VariantMap& eventData) mutable
-        {
-            InvokeEventCallback(callback, eventData);
-        });
+    AddSubscriber(sender, StringHash(eventName), std::move(callback));
+}
+
+void LuaVM::AddSubscriber(Object* sender, StringHash eventType, sol::protected_function callback)
+{
+    // Handlers are removed in the destructor (global) or with the sender (sender events), so
+    // callbacks can never fire on a destroyed state or dead object. See the LuaVM.h note for
+    // why a single dispatcher plus a Lua-side callback list is required over per-callback
+    // subscribes (rbfx replaces same-event handlers rather than appending them).
+    Subscribers::Key key{ sender, eventType.Value() };
+    Subscribers::Entry& entry = subscribers_->map_[key];
+    if (sender && entry.owner_.Get() != sender)
+    {
+        // A live object at a pointer that previously belonged to a now-destroyed sender: do
+        // not inherit the dead owner's callbacks. (Same-sender repeat subscribes keep them.)
+        entry.callbacks_.clear();
+        entry.owner_ = sender;
+    }
+    entry.callbacks_.push_back(std::move(callback));
+
+    // Stateless dispatcher: resolves the current callback list by key at fire time. Re-
+    // attaching replaces the previous dispatcher for this pair, so exactly one runs and it
+    // always sees every callback registered so far.
+    auto dispatch = [this, key](Object*, StringHash, VariantMap& eventData)
+    {
+        const auto it = subscribers_->map_.find(key);
+        if (it == subscribers_->map_.end())
+            return;
+        // Snapshot so a callback that subscribes/unsubscribes during dispatch is safe.
+        ea::vector<sol::protected_function> callbacks = it->second.callbacks_;
+        for (sol::protected_function& cb : callbacks)
+            InvokeEventCallback(cb, eventData);
+    };
+
+    if (sender)
+        sender->SubscribeToEvent(eventType, dispatch);
+    else
+        SubscribeToEvent(eventType, dispatch);
 }
 
 void LuaVM::UnsubscribeEvent(const char* eventName)
 {
-    UnsubscribeFromEvent(StringHash(eventName));
+    const StringHash hash(eventName);
+    subscribers_->map_.erase(Subscribers::Key{ nullptr, hash.Value() });
+    UnsubscribeFromEvent(hash);
 }
 
 void LuaVM::UnsubscribeSenderEvent(Object* sender, const char* eventName)
 {
-    UnsubscribeFromEvent(sender, StringHash(eventName));
+    const StringHash hash(eventName);
+    subscribers_->map_.erase(Subscribers::Key{ sender, hash.Value() });
+    UnsubscribeFromEvent(sender, hash);
 }
 
 void LuaVM::InvokeEventCallback(sol::protected_function& callback, VariantMap& eventData)
@@ -195,7 +255,12 @@ void LuaVM::InvokeEventCallback(sol::protected_function& callback, VariantMap& e
     if (!luaState_)
         return;
 
-    sol::protected_function_result result = callback(LuaEventData{&eventData});
+    LuaEventData view{ &eventData };
+    sol::protected_function_result result = callback(view);
+    // Invalidate after the callback returns: any EventData wrapper the script
+    // stashed away shares this view's token and will now read nil rather than
+    // dereference the (soon to be dead) event map.
+    view.Invalidate();
     if (!result.valid())
     {
         sol::error err = result;
@@ -221,6 +286,7 @@ void LuaVM::RegisterEngineBindings()
     RegisterAudioBindings(*luaState_, context_);
     RegisterNavigationBindings(*luaState_, context_);
     RegisterNetworkBindings(*luaState_, context_);
+    RegisterRmlUIBindings(*luaState_, context_);
 
     // Event data wrapper: parameters are looked up by name via dynamic indexing,
     // e.g. data.TimeStep, data.Node.
@@ -229,15 +295,17 @@ void LuaVM::RegisterEngineBindings()
         sol::meta_function::index,
         [](LuaEventData& self, const char* name, sol::this_state s) -> sol::object
         {
-            if (!self.eventData_)
+            const VariantMap* data = self.Get();
+            if (!data)
                 return sol::lua_nil;
-            const auto iter = self.eventData_->find(StringHash(name));
-            if (iter == self.eventData_->end())
+            const auto iter = data->find(StringHash(name));
+            if (iter == data->end())
                 return sol::lua_nil;
             return VariantToLua(sol::state_view(s), iter->second);
         },
         "Contains", [](LuaEventData& self, const char* name) {
-            return self.eventData_ && self.eventData_->find(StringHash(name)) != self.eventData_->end();
+            const VariantMap* data = self.Get();
+            return data && data->find(StringHash(name)) != data->end();
         });
 
     // Expose the subscription API to Lua. Callbacks receive the EventData wrapper. The

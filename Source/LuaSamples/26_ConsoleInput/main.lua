@@ -27,9 +27,10 @@ app.numTurns = 0
 app.hunger = 2
 app.urhoThreat = 0
 
--- Logging appears both in the engine console and stdout
+-- Logging appears both in the engine console and stdout (print() is redirected
+-- into the engine log by the VM, matching every other sample's logging path).
 local function Print(output)
-    __urho_log_info(output)
+    print(output)
 end
 
 function app:OnStart()

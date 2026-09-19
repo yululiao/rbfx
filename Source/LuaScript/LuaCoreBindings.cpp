@@ -104,11 +104,18 @@ Variant LuaToVariant(sol::state_view lua, const sol::object& value)
         return Variant(value.as<const char*>());
     case sol::type::number:
     {
-        // Prefer integral representation when the number is whole.
+        // Prefer integral representation when the number is whole. Keep the
+        // 32-bit range in VAR_INT, but land larger whole numbers on VAR_INT64
+        // rather than silently degrading them to VAR_DOUBLE (which loses
+        // precision past 2^53 and mis-types integer-only attributes).
         const double number = value.as<double>();
-        if (number == std::floor(number) && std::abs(number) < 2147483648.0)
-            return Variant(static_cast<int>(number));
-        return Variant(static_cast<double>(number));
+        if (number == std::floor(number))
+        {
+            if (number >= -2147483648.0 && number < 2147483648.0)
+                return Variant(static_cast<int>(number));
+            return Variant(static_cast<long long>(number));
+        }
+        return Variant(number);
     }
     case sol::type::table:
     {
@@ -121,6 +128,11 @@ Variant LuaToVariant(sol::state_view lua, const sol::object& value)
         if (typeName.valid() && typeName.is<const char*>() && resourceName.valid()
             && resourceName.is<const char*>())
             return Variant(ResourceRef(typeName.as<const char*>(), resourceName.as<const char*>()));
+        // A table that is not the { type, name } ResourceRef shorthand cannot be
+        // mapped to a Variant. Report it instead of silently yielding EMPTY --
+        // callers such as SetAttribute/SetVar would otherwise clear the value
+        // with no clue why the write "did nothing".
+        URHO3D_LOGERROR("LuaToVariant: cannot convert Lua table to Variant (expected a { type, name } ResourceRef shorthand); value dropped");
         return Variant::EMPTY;
     }
     case sol::type::userdata:
@@ -136,10 +148,15 @@ Variant LuaToVariant(sol::state_view lua, const sol::object& value)
             return Variant(value.as<Color>());
         if (value.is<IntVector2>())
             return Variant(value.as<IntVector2>());
+        if (value.is<IntVector3>())
+            return Variant(value.as<IntVector3>());
+        if (value.is<Rect>())
+            return Variant(value.as<Rect>());
         if (value.is<LuaObjectRef>())
             return Variant(value.as<LuaObjectRef>().Get());
         if (value.is<Object*>())
             return Variant(value.as<Object*>());
+        URHO3D_LOGERROR("LuaToVariant: unsupported userdata passed where a Variant was expected; value dropped");
         return Variant::EMPTY;
     default:
         return Variant::EMPTY;
@@ -170,6 +187,8 @@ sol::object VariantToLua(sol::state_view lua, const Variant& value)
     case VAR_QUATERNION: return sol::make_object(lua, value.GetQuaternion());
     case VAR_COLOR: return sol::make_object(lua, value.GetColor());
     case VAR_INTVECTOR2: return sol::make_object(lua, value.GetIntVector2());
+    case VAR_INTVECTOR3: return sol::make_object(lua, value.GetIntVector3());
+    case VAR_RECT: return sol::make_object(lua, value.GetRect());
     case VAR_VARIANTMAP:
     {
         // Nested variant maps (e.g. the NetworkHostDiscovered Beacon in
@@ -271,6 +290,12 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     //   ref.FarClip = 100.0  or  ref["Far Clip"] = 100.0
     lua.new_usertype<LuaObjectRef>("ObjectRef",
         sol::no_constructor,
+        // Identity by underlying pointer so == agrees with every other Object wrapper.
+        // (This vendored sol3 has no meta_function::hash, so userdata-as-table-key
+        // identity is still unreliable -- see the gen-lua-binding skill contract.)
+        // The wrapped handle is a WeakPtr, so a dead object collapses to null (two dead
+        // refs compare equal) rather than dangling.
+        sol::meta_function::equal_to, [](LuaObjectRef& a, LuaObjectRef& b) { return a.Get() == b.Get(); },
         "Get", &LuaObjectRef::Get,
         "GetTypeName", [](LuaObjectRef& self) -> std::string {
             return self.Get() ? self.Get()->GetTypeName().c_str() : "";

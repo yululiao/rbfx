@@ -9,6 +9,7 @@
 #include "LuaNodeBindings.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/Log.h"
@@ -87,17 +88,17 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
         "scale", sol::property(
             [](Node* node) -> Vector3 { return node ? node->GetScale() : Vector3::ONE; },
             [](Node* node, const Vector3& value) { if (node) node->SetScale(value); }),
-        "SetPosition", [](Node* node, const Vector3& v) { if (node) node->SetPosition(v); },
+        "SetPosition", NullChecked(&Node::SetPosition),
         "GetPosition", [](Node* node) -> Vector3 { return node ? node->GetPosition() : Vector3::ZERO; },
         "GetPosition2D", [](Node* node) -> Vector2 { return node ? node->GetPosition2D() : Vector2::ZERO; },
         "GetWorldPosition2D", [](Node* node) -> Vector2 { return node ? node->GetWorldPosition2D() : Vector2::ZERO; },
-        "SetRotation", [](Node* node, const Quaternion& q) { if (node) node->SetRotation(q); },
+        "SetRotation", NullChecked(&Node::SetRotation),
         "GetRotation", [](Node* node) -> Quaternion { return node ? node->GetRotation() : Quaternion::IDENTITY; },
         "GetScale", [](Node* node) -> Vector3 { return node ? node->GetScale() : Vector3::ONE; },
         "SetScale", sol::overload(
             [](Node* node, const Vector3& v) { if (node) node->SetScale(v); },
             [](Node* node, float v) { if (node) node->SetScale(v); }),
-        "SetDirection", [](Node* node, const Vector3& d) { if (node) node->SetDirection(d); },
+        "SetDirection", NullChecked(&Node::SetDirection),
         "SetTransform", sol::overload(
             [](Node* node, const Vector3& position, const Quaternion& rotation) { if (node) node->SetTransform(position, rotation); },
             [](Node* node, const Vector3& position, const Quaternion& rotation, const Vector3& scale) { if (node) node->SetTransform(position, rotation, scale); }),
@@ -127,8 +128,8 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
         "direction", sol::readonly_property([](Node* node) -> Vector3 {
             return node ? node->GetDirection() : Vector3::FORWARD;
         }),
-        "SetWorldPosition", [](Node* node, const Vector3& v) { if (node) node->SetWorldPosition(v); },
-        "SetWorldRotation", [](Node* node, const Quaternion& q) { if (node) node->SetWorldRotation(q); },
+        "SetWorldPosition", NullChecked(&Node::SetWorldPosition),
+        "SetWorldRotation", NullChecked(&Node::SetWorldRotation),
         "LocalToWorld", [](Node* node, const Vector3& position) -> Vector3 {
             return node ? node->LocalToWorld(position) : Vector3::ZERO;
         },
@@ -153,10 +154,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
 
         // Hierarchy
         "parent", sol::readonly_property([](Node* node) -> Node* { return node ? node->GetParent() : nullptr; }),
-        "SetParent", [](Node* node, Node* parent) {
-            if (node)
-                node->SetParent(parent);
-        },
+        "SetParent", NullChecked(&Node::SetParent),
         "scene", sol::readonly_property([](Node* node) -> Scene* { return node ? node->GetScene() : nullptr; }),
         "numChildren", sol::readonly_property([](Node* node) -> unsigned { return node ? node->GetNumChildren() : 0; }),
         "numComponents", sol::readonly_property([](Node* node) -> unsigned { return node ? node->GetNumComponents() : 0; }),
@@ -165,7 +163,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             [](Node* node) -> SharedPtr<Node> { return node ? SharedPtr<Node>(node->CreateChild()) : nullptr; }),
         "AddChild", [](Node* node, Node* child) { if (node && child) node->AddChild(child); },
         "RemoveChild", [](Node* node, Node* child) { if (node) node->RemoveChild(child); },
-        "RemoveAllChildren", [](Node* node) { if (node) node->RemoveAllChildren(); },
+        "RemoveAllChildren", NullChecked(&Node::RemoveAllChildren),
         "Remove", [](Node* node) { if (node) node->Remove(); },
         "Clone", [](Node* node) -> SharedPtr<Node> { return node ? SharedPtr<Node>(node->Clone()) : nullptr; },
         // Instantiate a PrefabResource under this node (17_SceneReplication).

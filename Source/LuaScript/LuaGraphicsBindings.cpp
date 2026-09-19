@@ -1024,6 +1024,16 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     filter["ANISOTROPIC"] = FILTER_ANISOTROPIC;
     filter["DEFAULT"] = FILTER_DEFAULT;
 
+    // Cull modes for Material:SetCullMode / GetCullMode. Material binding took
+    // raw ints before this table existed; scripts can now name them. Additive
+    // (no prior Lua name for CULL_*), and kept as plain ints to match the
+    // existing int-passing idiom every other enum table uses (sol2 marshals the
+    // unregistered CullMode parameter from an integer, so this is behavior-neutral).
+    sol::table cull = lua.create_named_table("CULL");
+    cull["NONE"] = CULL_NONE;
+    cull["CCW"] = CULL_CCW;
+    cull["CW"] = CULL_CW;
+
     // Common texture formats for Texture2D:SetSize.
     sol::table texf = lua.create_named_table("TEXF");
     texf["RGBA8_UNORM"] = static_cast<int>(TextureFormat::TEX_FORMAT_RGBA8_UNORM);

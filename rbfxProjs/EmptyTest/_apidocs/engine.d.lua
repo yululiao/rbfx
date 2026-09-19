@@ -191,6 +191,12 @@ CT.HINGE = 0
 CT.POINT = 0
 CT.SLIDER = 0
 
+---@class CULL
+CULL = {}
+CULL.CCW = 0
+CULL.CW = 0
+CULL.NONE = 0
+
 ---@class Camera : Component, Serializable, Object
 Camera = {}
 function Camera.GetFarClip(...) end
@@ -818,6 +824,20 @@ function Localization.LoadJSONFile(...) end
 function Localization.Reset(...) end
 function Localization.SetLanguage(...) end
 
+---@class LuaRmlUIComponent : RmlUIComponent, Component, Serializable, Object
+LuaRmlUIComponent = {}
+function LuaRmlUIComponent.BindEvent(...) end
+function LuaRmlUIComponent.BindProperty(...) end
+function LuaRmlUIComponent.BindReadonlyProperty(...) end
+function LuaRmlUIComponent.BindVariant(...) end
+function LuaRmlUIComponent.BindVariantMap(...) end
+function LuaRmlUIComponent.BindVariantVector(...) end
+function LuaRmlUIComponent.MarkDirty(...) end
+function LuaRmlUIComponent.SetHandlers(...) end
+function LuaRmlUIComponent.SetVariant(...) end
+function LuaRmlUIComponent.SetVariantMap(...) end
+function LuaRmlUIComponent.SetVariantVector(...) end
+
 ---@class MM
 MM = {}
 MM.ABSOLUTE = 0
@@ -1000,6 +1020,7 @@ function Node.CreateChild(...) end
 ---@overload fun(self: Node, typeName: "Drawable2D"): Drawable2D
 ---@overload fun(self: Node, typeName: "DynamicNavigationMesh"): DynamicNavigationMesh
 ---@overload fun(self: Node, typeName: "Light"): Light
+---@overload fun(self: Node, typeName: "LuaRmlUIComponent"): LuaRmlUIComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitComponent"): MoveAndOrbitComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitController"): MoveAndOrbitController
 ---@overload fun(self: Node, typeName: "Navigable"): Navigable
@@ -1019,6 +1040,8 @@ function Node.CreateChild(...) end
 ---@overload fun(self: Node, typeName: "RibbonTrail"): RibbonTrail
 ---@overload fun(self: Node, typeName: "RigidBody"): RigidBody
 ---@overload fun(self: Node, typeName: "RigidBody2D"): RigidBody2D
+---@overload fun(self: Node, typeName: "RmlCanvasComponent"): RmlCanvasComponent
+---@overload fun(self: Node, typeName: "RmlUIComponent"): RmlUIComponent
 ---@overload fun(self: Node, typeName: "Skybox"): Skybox
 ---@overload fun(self: Node, typeName: "SoundListener"): SoundListener
 ---@overload fun(self: Node, typeName: "SoundSource"): SoundSource
@@ -1077,6 +1100,7 @@ function Node.GetChildrenWithTag(...) end
 ---@overload fun(self: Node, typeName: "Drawable2D"): Drawable2D
 ---@overload fun(self: Node, typeName: "DynamicNavigationMesh"): DynamicNavigationMesh
 ---@overload fun(self: Node, typeName: "Light"): Light
+---@overload fun(self: Node, typeName: "LuaRmlUIComponent"): LuaRmlUIComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitComponent"): MoveAndOrbitComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitController"): MoveAndOrbitController
 ---@overload fun(self: Node, typeName: "Navigable"): Navigable
@@ -1096,6 +1120,8 @@ function Node.GetChildrenWithTag(...) end
 ---@overload fun(self: Node, typeName: "RibbonTrail"): RibbonTrail
 ---@overload fun(self: Node, typeName: "RigidBody"): RigidBody
 ---@overload fun(self: Node, typeName: "RigidBody2D"): RigidBody2D
+---@overload fun(self: Node, typeName: "RmlCanvasComponent"): RmlCanvasComponent
+---@overload fun(self: Node, typeName: "RmlUIComponent"): RmlUIComponent
 ---@overload fun(self: Node, typeName: "Skybox"): Skybox
 ---@overload fun(self: Node, typeName: "SoundListener"): SoundListener
 ---@overload fun(self: Node, typeName: "SoundSource"): SoundSource
@@ -1152,6 +1178,7 @@ function Node.GetNumChildren(...) end
 ---@overload fun(self: Node, typeName: "Drawable2D"): Drawable2D
 ---@overload fun(self: Node, typeName: "DynamicNavigationMesh"): DynamicNavigationMesh
 ---@overload fun(self: Node, typeName: "Light"): Light
+---@overload fun(self: Node, typeName: "LuaRmlUIComponent"): LuaRmlUIComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitComponent"): MoveAndOrbitComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitController"): MoveAndOrbitController
 ---@overload fun(self: Node, typeName: "Navigable"): Navigable
@@ -1171,6 +1198,8 @@ function Node.GetNumChildren(...) end
 ---@overload fun(self: Node, typeName: "RibbonTrail"): RibbonTrail
 ---@overload fun(self: Node, typeName: "RigidBody"): RigidBody
 ---@overload fun(self: Node, typeName: "RigidBody2D"): RigidBody2D
+---@overload fun(self: Node, typeName: "RmlCanvasComponent"): RmlCanvasComponent
+---@overload fun(self: Node, typeName: "RmlUIComponent"): RmlUIComponent
 ---@overload fun(self: Node, typeName: "Skybox"): Skybox
 ---@overload fun(self: Node, typeName: "SoundListener"): SoundListener
 ---@overload fun(self: Node, typeName: "SoundSource"): SoundSource
@@ -1641,6 +1670,46 @@ function RigidBody2D.SetLinearVelocity(...) end
 function RigidBody2D.SetMass(...) end
 function RigidBody2D.SetMassCenter(...) end
 function RigidBody2D.SetUseFixtureMass(...) end
+
+---@class RmlCanvasComponent : Component, Serializable, Object
+RmlCanvasComponent = {}
+function RmlCanvasComponent.GetRemapMousePos(...) end
+function RmlCanvasComponent.GetTexture(...) end
+function RmlCanvasComponent.GetUI(...) end
+function RmlCanvasComponent.SetClearColor(...) end
+function RmlCanvasComponent.SetRemapMousePos(...) end
+function RmlCanvasComponent.SetTexture(...) end
+function RmlCanvasComponent.SetUISize(...) end
+
+---@class RmlUI : Object
+RmlUI = {}
+function RmlUI.GetScale(...) end
+function RmlUI.IsDebuggerVisible(...) end
+function RmlUI.IsHovered(...) end
+function RmlUI.IsInputCaptured(...) end
+---@return boolean
+function RmlUI.LoadFont(...) end
+function RmlUI.ReloadFonts(...) end
+function RmlUI.SetDebuggerVisible(...) end
+function RmlUI.SetScale(...) end
+
+---@class RmlUIComponent : Component, Serializable, Object
+RmlUIComponent = {}
+function RmlUIComponent.Focus(...) end
+function RmlUIComponent.GetAutoSize(...) end
+function RmlUIComponent.GetEmSize(...) end
+function RmlUIComponent.GetPosition(...) end
+function RmlUIComponent.GetSize(...) end
+function RmlUIComponent.GetUI(...) end
+function RmlUIComponent.GetUseNormalizedCoordinates(...) end
+function RmlUIComponent.IsModal(...) end
+function RmlUIComponent.SetAutoSize(...) end
+function RmlUIComponent.SetEmSize(...) end
+function RmlUIComponent.SetModal(...) end
+function RmlUIComponent.SetPosition(...) end
+function RmlUIComponent.SetResource(...) end
+function RmlUIComponent.SetSize(...) end
+function RmlUIComponent.SetUseNormalizedCoordinates(...) end
 
 ---@class SOUND
 SOUND = {}
