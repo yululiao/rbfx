@@ -21,6 +21,8 @@
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
 
+#include <RmlUi/Core/Context.h>
+#include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Property.h>
@@ -71,6 +73,21 @@ UIViewTab::UIViewTab(Context* context)
     inspectorSource_ = MakeShared<UIViewInspector>(this);
 
     Rebuild();
+
+    // Design-time documents frequently bind their content to the runtime data
+    // model via `data-model="{{__data_model_id}}"`. At runtime RmlUIComponent
+    // substitutes that token with a registered model name; the editor has no
+    // such component. Register an empty placeholder model named identically to
+    // the token LoadDocument() will substitute (derived from `this`), so the
+    // binding resolves instead of erroring "Could not locate data model" and
+    // leaving the whole bound subtree unrendered.
+    if (Rml::Context* ctx = previewUI_->GetRmlContext())
+    {
+        ea::string modelName = "{{__data_model_id}}";
+        Detail::InsertVariablePlaceholders(modelName, this);
+        Rml::DataModelConstructor ctor = ctx->CreateDataModel(modelName, nullptr);
+        (void)ctor.GetModelHandle();
+    }
 }
 
 UIViewTab::~UIViewTab()
@@ -103,7 +120,9 @@ void UIViewTab::LoadDocument(const ea::string& path)
     document_ = nullptr;
     selected_ = nullptr;
 
-    document_ = previewUI_->LoadDocument(path, nullptr);
+    // Pass `this` so the {{__data_model_id}} token is substituted with the
+    // placeholder model registered in the constructor above.
+    document_ = previewUI_->LoadDocument(path, this);
     if (document_)
     {
         document_->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
