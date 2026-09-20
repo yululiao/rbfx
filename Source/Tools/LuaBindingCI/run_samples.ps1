@@ -17,7 +17,11 @@
   cannot convert", dead-object access as "Lua ObjectRef: ... destroyed" -- none
   of which used to count as FAIL), AND the Lua-heap probe that Framework.lua
   runs once per second (forced full GC, then a resident-KB reading) never
-  exceeds its baseline by more than -MemBudgetKB.
+  exceeds its baseline by more than -MemBudgetKB. With the default -Seconds 1
+  the probe completes only its FIRST reading (the baseline, at t~=1s); the
+  leak verdict needs that plus 5 consecutive over-budget readings, so it can
+  never fire and the memory gate SLEEPS (memPeak shows the baseline, no
+  budget lines); the load gate and the [error] gate stay fully armed either way.
   The [error] criterion is not whitelisted: healthy samples log ZERO [error]
   lines (verified across audio/network/RmlUI/console samples), so any single
   [error] line is a real defect by definition.
@@ -37,9 +41,11 @@
   a faithful pass/fail; --headless is only for a fast non-GPU subset.
 
 .PARAMETER Seconds
-  Seconds the sample runs before the ENGINE exits itself via --timeout (default 8;
-  the probe's leak detection needs ~5+ consecutive readings, so raise this for a
-  more sensitive memory gate). A forced kill only happens as a safety net.
+  Seconds the sample runs before the RUNNER exits itself via --timeout (default
+  1 = fast smoke: load gate + [error] gate fully armed; the memory probe only
+  gets its baseline reading, so the leak verdict stays asleep). Leak hunting
+  needs baseline + 5 consecutive over-budget readings, so run -Seconds 10 to
+  arm the memory gate. A forced kill only happens as a safety net.
 
 .PARAMETER MemBudgetKB
   Allowed Lua-heap growth over the probe's first reading (default 256). Passed
@@ -52,7 +58,7 @@
 param(
     [string]$Config = 'Release',
     [string]$Only,
-    [int]$Seconds = 8,
+    [int]$Seconds = 1,
     [int]$MemBudgetKB = 256,
     [switch]$Headless,
     [string]$RepoRoot
@@ -89,10 +95,20 @@ $failLogDir = Join-Path $RepoRoot 'msvc/sample_fail_logs'
 $results = @()
 foreach ($s in $samples) {
     $log = Join-Path $workLogDir "$s.log"
-    # --timeout makes the ENGINE exit by itself at $Seconds, which flushes the
+    # --prefs-dir makes the runner redirect the engine's user-preferences
+    # directory (EngineParameters.json, psocache.bin, shader cache -- everything
+    # under conf://) into this suite's temp dir: the clean-exit shutdown saves
+    # must not depend on the real user profile being writable (a CI agent or
+    # sandboxed shell would refuse and fabricate [error] lines). The path needs
+    # forward slashes and a trailing separator -- the engine concatenates it
+    # with file names verbatim.
+    $prefsDir = (($workLogDir -replace '\\', '/') + '/')
+    # --timeout makes the RUNNER exit by itself at $Seconds (it implements the
+    # option itself -- the engine's own --timeout is silently dropped by its
+    # parameter merge unless the app pre-defines the key), which flushes the
     # whole log; a forced kill loses the buffered tail (and with it the probe's
     # budget-exceeded lines). The kill below is only the safety net.
-    $argList = @($s, '--nosound', '--log-file', $log, '--timeout', "$Seconds")
+    $argList = @($s, '--nosound', '--log-file', $log, '--prefs-dir', $prefsDir, '--timeout', "$Seconds")
     if ($Headless) { $argList += '--headless' } else { $argList += '--windowed' }
     $proc = Start-Process -FilePath $runner -ArgumentList $argList -PassThru
     $waited = 0

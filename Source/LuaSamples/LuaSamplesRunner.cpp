@@ -9,7 +9,9 @@
 // the same engine bindings the editor plugin uses.
 
 #include <Urho3D/Core/Context.h>
+#include <Urho3D/Core/CoreEvents.h>
 #include <Urho3D/Core/ProcessUtils.h>
+#include <Urho3D/Core/StringUtils.h>
 #include <Urho3D/Engine/Application.h>
 #include <Urho3D/Engine/Engine.h>
 #include <Urho3D/Engine/EngineDefs.h>
@@ -55,7 +57,10 @@ public:
         // The positional argument selects the sample to run. The engine's CLI
         // parser rejects unknown positional arguments, so grab the sample
         // name here (Setup runs before the parser) and re-parse the command
-        // line without it. Engine options like --timeout still pass through.
+        // line without it. Other engine options (--log-file, --windowed, ...)
+        // still pass through; --timeout and --prefs-dir are consumed by the
+        // runner itself because the engine's parameter merge silently drops
+        // keys the application did not pre-define (see Start).
         sampleName_ = GetSampleNameFromArguments();
         const ea::vector<ea::string>& arguments = GetArguments();
         ea::string cmdLine;
@@ -66,6 +71,29 @@ public:
             if (!sampleNameSkipped && !argument.empty() && argument.front() != '-')
             {
                 sampleNameSkipped = true; // Drop the sample selector only
+                continue;
+            }
+            if (argument == "--timeout" && i + 1 < arguments.size())
+            {
+                // Run-time bound used by the CI smoke gate. Consumed here and
+                // dropped from the re-parsed line; Start() turns it into a
+                // clean self-exit so the whole log is flushed (a kill from
+                // outside loses the buffered tail).
+                timeoutSecs_ = ToFloat(arguments[i + 1]);
+                ++i; // Skip the value
+                continue;
+            }
+            if (argument == "--prefs-dir" && i + 1 < arguments.size())
+            {
+                // Hermetic smoke runs: redirect the engine's user-preferences
+                // directory (EngineParameters.json, psocache.bin, shader cache,
+                // default logs -- everything under conf://) into a disposable
+                // directory. Without this, the clean-exit shutdown saves into
+                // the real user profile, which a CI agent or sandboxed shell
+                // may refuse to write, fabricating [error] lines that have
+                // nothing to do with the samples.
+                engineParameters_[EP_APPLICATION_PREFERENCES_DIR] = arguments[i + 1].c_str();
+                ++i; // Skip the value
                 continue;
             }
             cmdLine.append_sprintf("\"%s\" ", argument.c_str());
@@ -128,11 +156,31 @@ public:
         }
 
         URHO3D_LOGINFO("Lua sample '{}' started", sampleName_);
+
+        // Self-exit after --timeout seconds of actual run time. Subscribed
+        // LAST so the Framework.lua memory probe (which ticks once a second)
+        // still gets its reading on the exit frame, and so the countdown
+        // covers only the time the sample runs -- engine init and script
+        // loading do not count.
+        if (timeoutSecs_ > 0.0f)
+        {
+            SubscribeToEvent(E_UPDATE, [this](StringHash /*eventType*/, VariantMap& eventData) {
+                runSecs_ += eventData[Update::P_TIMESTEP].GetFloat();
+                if (runSecs_ >= timeoutSecs_)
+                    GetSubsystem<Engine>()->Exit();
+            });
+        }
     }
 
 private:
     /// Sample directory name taken from the first positional argument.
     ea::string sampleName_;
+    /// Run-time limit in seconds from --timeout (0 = unlimited). Consumed in
+    /// Setup and implemented as a self-exit in Start; never forwarded to the
+    /// engine, whose parameter merge drops keys the app did not pre-define.
+    float timeoutSecs_ = 0.0f;
+    /// Run time accumulated by the --timeout handler.
+    float runSecs_ = 0.0f;
 };
 
 URHO3D_DEFINE_APPLICATION_MAIN(LuaSamplesRunner);
