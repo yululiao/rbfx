@@ -22,6 +22,7 @@
 
 #include "LuaBindings.h"
 #include "LuaBindHelpers.h"
+#include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Graphics/Texture2D.h"
@@ -260,78 +261,86 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
     LuaRmlUIComponent::RegisterObject(context);
 
     // RmlUI subsystem (master instance reachable through GetSubsystem("RmlUI")).
-    lua.new_usertype<RmlUI>("RmlUI",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<RmlUI, Object>::bases(lua),
-        "SetDebuggerVisible", &RmlUI::SetDebuggerVisible,
-        "IsDebuggerVisible", &RmlUI::IsDebuggerVisible,
-        "LoadFont", [](RmlUI* ui, const char* font, sol::optional<bool> fallback) -> bool {
-            return ui ? ui->LoadFont(font, fallback.value_or(false)) : false;
-        },
-        "ReloadFonts", &RmlUI::ReloadFonts,
-        "SetScale", &RmlUI::SetScale,
-        "GetScale", &RmlUI::GetScale,
-        "IsInputCaptured", &RmlUI::IsInputCaptured,
-        "IsHovered", &RmlUI::IsHovered
-    );
+    {
+        using RBFX_THIS = RmlUI;
+        RBFX_USERTYPE(RmlUI, sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_M(SetDebuggerVisible)
+            RBFX_M(IsDebuggerVisible)
+            RBFX_RAW(LoadFont, [](RmlUI* ui, const char* font, sol::optional<bool> fallback) -> bool {
+                return ui ? ui->LoadFont(font, fallback.value_or(false)) : false;
+            })
+            RBFX_M(ReloadFonts)
+            RBFX_M(SetScale)
+            RBFX_M(GetScale)
+            RBFX_M(IsInputCaptured)
+            RBFX_M(IsHovered)
+        );
+    }
     RegisterLuaObjectWrapper<RmlUI>();
 
     // RmlCanvasComponent: renders an off-screen RmlUI into a texture (windows on 3D objects).
-    lua.new_usertype<RmlCanvasComponent>("RmlCanvasComponent",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<RmlCanvasComponent, Component, Serializable, Object>::bases(lua),
-        "SetUISize", &RmlCanvasComponent::SetUISize,
-        "SetTexture", &RmlCanvasComponent::SetTexture,
-        "GetTexture", &RmlCanvasComponent::GetTexture,
-        "SetRemapMousePos", &RmlCanvasComponent::SetRemapMousePos,
-        "GetRemapMousePos", &RmlCanvasComponent::GetRemapMousePos,
-        "SetClearColor", &RmlCanvasComponent::SetClearColor,
-        "GetUI", &RmlCanvasComponent::GetUI
-    );
+    {
+        using RBFX_THIS = RmlCanvasComponent;
+        RBFX_USERTYPE(RmlCanvasComponent, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetUISize)
+            RBFX_M(SetTexture)
+            RBFX_M(GetTexture)
+            RBFX_M(SetRemapMousePos)
+            RBFX_M(GetRemapMousePos)
+            RBFX_M(SetClearColor)
+            RBFX_M(GetUI)
+        );
+    }
     RegisterLuaObjectWrapper<RmlCanvasComponent>();
 
     // RmlUIComponent base: window placement / font size / document access. Registered
     // before the derived trampoline because sol3 requires base usertypes to exist first.
-    lua.new_usertype<RmlUIComponent>("RmlUIComponent",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<RmlUIComponent, Component, Serializable, Object>::bases(lua),
-        "SetResource", [](RmlUIComponent* component, const char* path) {
-            if (component)
-                component->SetResource(ea::string(path));
-        },
-        "SetUseNormalizedCoordinates", &RmlUIComponent::SetUseNormalizedCoordinates,
-        "GetUseNormalizedCoordinates", &RmlUIComponent::GetUseNormalizedCoordinates,
-        "SetPosition", &RmlUIComponent::SetPosition,
-        "GetPosition", &RmlUIComponent::GetPosition,
-        "SetSize", &RmlUIComponent::SetSize,
-        "GetSize", &RmlUIComponent::GetSize,
-        "SetAutoSize", &RmlUIComponent::SetAutoSize,
-        "GetAutoSize", &RmlUIComponent::GetAutoSize,
-        "SetEmSize", &RmlUIComponent::SetEmSize,
-        "GetEmSize", &RmlUIComponent::GetEmSize,
-        "IsModal", &RmlUIComponent::IsModal,
-        "SetModal", &RmlUIComponent::SetModal,
-        "Focus", &RmlUIComponent::Focus,
-        "GetUI", &RmlUIComponent::GetUI
-    );
+    {
+        using RBFX_THIS = RmlUIComponent;
+        RBFX_USERTYPE(RmlUIComponent, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_RAW(SetResource, [](RmlUIComponent* component, const char* path) {
+                if (component)
+                    component->SetResource(ea::string(path));
+            })
+            RBFX_M(SetUseNormalizedCoordinates)
+            RBFX_M(GetUseNormalizedCoordinates)
+            RBFX_M(SetPosition)
+            RBFX_M(GetPosition)
+            RBFX_M(SetSize)
+            RBFX_M(GetSize)
+            RBFX_M(SetAutoSize)
+            RBFX_M(GetAutoSize)
+            RBFX_M(SetEmSize)
+            RBFX_M(GetEmSize)
+            RBFX_M(IsModal)
+            RBFX_M(SetModal)
+            RBFX_M(Focus)
+            RBFX_M(GetUI)
+        );
+    }
     RegisterLuaObjectWrapper<RmlUIComponent>();
 
     // The Lua-facing trampoline. Adds the handler/data-model surface on top of the base.
-    lua.new_usertype<LuaRmlUIComponent>("LuaRmlUIComponent",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<LuaRmlUIComponent, RmlUIComponent, Component, Serializable, Object>::bases(lua),
-        "SetHandlers", &LuaRmlUIComponent::SetHandlers,
-        "BindProperty", &LuaRmlUIComponent::BindProperty,
-        "BindReadonlyProperty", &LuaRmlUIComponent::BindReadonlyProperty,
-        "BindEvent", &LuaRmlUIComponent::BindEvent,
-        "BindVariant", &LuaRmlUIComponent::BindVariant,
-        "BindVariantVector", &LuaRmlUIComponent::BindVariantVector,
-        "BindVariantMap", &LuaRmlUIComponent::BindVariantMap,
-        "SetVariant", &LuaRmlUIComponent::SetVariant,
-        "SetVariantVector", &LuaRmlUIComponent::SetVariantVector,
-        "SetVariantMap", &LuaRmlUIComponent::SetVariantMap,
-        "MarkDirty", &LuaRmlUIComponent::MarkDirty
-    );
+    {
+        using RBFX_THIS = LuaRmlUIComponent;
+        RBFX_USERTYPE(LuaRmlUIComponent, sol::no_constructor
+            RBFX_BASES(RmlUIComponent, Component, Serializable, Object)
+            RBFX_M(SetHandlers)
+            RBFX_M(BindProperty)
+            RBFX_M(BindReadonlyProperty)
+            RBFX_M(BindEvent)
+            RBFX_M(BindVariant)
+            RBFX_M(BindVariantVector)
+            RBFX_M(BindVariantMap)
+            RBFX_M(SetVariant)
+            RBFX_M(SetVariantVector)
+            RBFX_M(SetVariantMap)
+            RBFX_M(MarkDirty)
+        );
+    }
     RegisterLuaObjectWrapper<LuaRmlUIComponent>();
 }
 

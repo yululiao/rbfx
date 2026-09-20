@@ -80,16 +80,38 @@ decision -- do it by double-clicking `run_all_samples.bat` at the repo root.
 Violation of rule 1 or 2 silently corrupts the code hints; rule 3 is the top source of
 runtime breakage; rules 4-6 prevent capability regressions.
 
-1. **Registration keys must be literal at the call site.** The parser only recognizes these
-   shapes; a helper/builder that swallows the string key drops the member from the docs:
-   - `lua.new_usertype<T>("Name", "Key", <value>, "Key2", <value>, ...)`
-   - `lua.set_function("name", <value>)` / `luaState_->set_function(...)`
-   - `lua.create_named_table("X")` (then `X["MEMBER"] = <value>`)
-   - `lua["Name"] = <value>`
+1. **Registration keys must be literal at the call site.** The parser only recognizes
+   these shapes; a helper/builder that swallows the string key drops the member from the
+   docs. Two equivalent forms:
+   - Hand-written comma form: `lua.new_usertype<T>("Name", "Key", <value>, ...)` /
+     `lua.set_function("name", <value>)` / `lua.create_named_table("X")` /
+     `lua["Name"] = <value>`. Still required for constructor registrations whose
+     `sol::constructors<A(), B(float, float)>` template-argument commas would split a
+     macro argument list (the preprocessor ignores angle brackets).
+   - RBFX macro form (preferred, `Source/LuaScript/LuaBindMacros.h`): every key is an
+     IDENTIFIER stringized by the macro — `RBFX_M(SetParent)`, `RBFX_RAW(DrawDebugGeometry,
+     ...)`, `RBFX_OVERLOAD(SetScale, RBFX_CAST(...))`, `RBFX_META(equal_to, ...)` — inside a
+     `{ using RBFX_THIS = T; RBFX_USERTYPE(T, sol::no_constructor ...); }` block (one block
+     per usertype: a using-alias cannot be redeclared; `RegisterLuaObjectWrapper<T>()`
+     stays outside the block). The generator expands these back to the hand-written
+     tokens; parity locks the mirror, and an unknown macro or wrong arity fails loudly.
+   - Do NOT mix forms: the leading-comma RBFX list macros cannot be dropped into a
+     hand-written comma-form registration (double comma). `RBFX_CAST`/`RBFX_CAST_C` are
+     expression macros (no leading comma) and may appear anywhere, including nested
+     inside `RBFX_OVERLOAD`.
 2. **Getters / annotated returns keep an explicit lambda with a trailing `-> Type`.**
    `extract_return_base` derives `---@return` / `---@type` from the first `->` in the bound
    value token stream. `return [](Node* n) -> Vector3 { ... }` keeps the annotation;
    a bare member pointer or a helper wrapper has no `->` and the return hint silently vanishes.
+   In the macro form the TYPE/RET argument is the annotation carrier instead:
+   `RBFX_M_RET(GetPosition2D, Vector2)`, `RBFX_PROP(name, std::string, GetName, SetName)`,
+   `RBFX_PROP_R(id, unsigned, GetID)` — the generator re-synthesizes the `-> Type` from it.
+   KEEP the literal lambda when it carries real adaptation — the lambda IS the adaptation:
+   default-argument hiding (`Pitch(angle)` hides `TransformSpace`), `sol::optional`
+   unwrapping, overload disambiguation (`&T::M` is ambiguous when the engine member
+   overloads), or a property whose type differs from the member's (`rotation2D`'s
+   Quaternion↔float). Members taking/returning `ea::string` bind directly (LuaBindings.h
+   marshals it to a Lua string) — no `const char*` shim lambda needed.
    Cache-routed object getters return `sol::object`, which has no namable `-> Type`: there
    the annotation comes from the **body** — call `WrapLuaObjectAs<T>(sol::state_view(s), ptr)`
    and the generator's `_wrap_lua_object_as` rescan recovers `---@return T`. A bare
@@ -322,9 +344,18 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
   log `Lua mem budget exceeded` → FAIL — transient working-set swings (18_CharacterDemo
   legitimately peaks ~1.8 MB above its baseline mid-run) must not fail, while a real leak
   never settles. That is how per-frame binding leaks (a getter that keeps allocating) get
-  caught — tune with `-MemBudgetKB` / `-Seconds` (leak detection needs ~5+ readings), never
-  disable. The runner exits via engine `--timeout`, NOT a forced kill (a kill loses the
-  buffered log tail, budget lines included). Cross-cutting changes (the identity cache,
+  caught — tune with `-MemBudgetKB` / `-Seconds`, never disable. Note the default
+  `-Seconds 1` is a fast smoke: the probe completes only its baseline reading
+  (t≈1s), so the leak verdict stays asleep (no budget lines, memPeak = baseline);
+  arm it explicitly with `-Seconds 10` when hunting leaks. The runner implements
+  `--timeout` itself and exits cleanly (the engine's own `--timeout` option is
+  silently dropped by its parameter merge unless the app pre-defines the key),
+  NOT a forced kill (a kill loses the
+  buffered log tail, budget lines included). The gate also passes `--prefs-dir`
+  (a per-suite temp dir) so those clean-exit shutdown saves (psocache.bin,
+  EngineParameters.json under conf://) never touch the real user profile — an
+  unwritable profile (CI agent, sandboxed shell) would otherwise fabricate
+  [error] lines and fail every sample. Cross-cutting changes (the identity cache,
   `LuaBases`, the probe) additionally require the FULL suite via `run_all_samples.bat`;
   otherwise the full suite remains a human decision, not a step in this skill.
 

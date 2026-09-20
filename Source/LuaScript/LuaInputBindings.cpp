@@ -8,6 +8,7 @@
 
 #include "LuaBindings.h"
 #include "LuaBindHelpers.h"
+#include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Input/Input.h"
@@ -45,112 +46,122 @@ struct InputConstants
 
 void RegisterInputBindings(sol::state& lua, Context* context)
 {
-    lua.new_usertype<Input>("Input",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Input, Object>::bases(lua),
+    {
+        using RBFX_THIS = Input;
+        RBFX_USERTYPE(Input, sol::no_constructor
+            RBFX_BASES(Object)
 
-        // Key & mouse queries
-        "GetKeyDown", &Input::GetKeyDown,
-        "GetKeyPress", &Input::GetKeyPress,
-        // MouseButton args arrive as Lua numbers; FlagSet<MouseButton> is
-        // not directly convertible so the cast happens here.
-        "GetMouseButtonDown", [](Input* input, int button) {
-            return input && input->GetMouseButtonDown(static_cast<MouseButton>(button));
-        },
-        "GetMouseButtonPress", [](Input* input, int button) {
-            return input && input->GetMouseButtonPress(static_cast<MouseButton>(button));
-        },
-        "GetMousePosition", &Input::GetMousePosition,
-        "GetMouseMove", &Input::GetMouseMove,
-        "GetMouseMoveX", &Input::GetMouseMoveX,
-        "GetMouseMoveY", &Input::GetMouseMoveY,
-        // Wheel scrolling (49/50 zoom-to-cursor) and mouse re-centering
-        // (16_Chat style mouse lock helpers).
-        "GetMouseMoveWheel", &Input::GetMouseMoveWheel,
-        "CenterMousePosition", &Input::CenterMousePosition,
-        "GetKeyFromName", &Input::GetKeyFromName,
-        "GetQualifierDown", [](Input* input, int qualifier) {
-            return input && input->GetQualifierDown(static_cast<Qualifier>(qualifier));
-        },
+            // Key & mouse queries
+            RBFX_M(GetKeyDown)
+            RBFX_M(GetKeyPress)
+            // MouseButton args arrive as Lua numbers; FlagSet<MouseButton> is
+            // not directly convertible so the cast happens here.
+            RBFX_RAW(GetMouseButtonDown, [](Input* input, int button) {
+                return input && input->GetMouseButtonDown(static_cast<MouseButton>(button));
+            })
+            RBFX_RAW(GetMouseButtonPress, [](Input* input, int button) {
+                return input && input->GetMouseButtonPress(static_cast<MouseButton>(button));
+            })
+            RBFX_M(GetMousePosition)
+            RBFX_M(GetMouseMove)
+            RBFX_M(GetMouseMoveX)
+            RBFX_M(GetMouseMoveY)
+            // Wheel scrolling (49/50 zoom-to-cursor) and mouse re-centering
+            // (16_Chat style mouse lock helpers).
+            RBFX_M(GetMouseMoveWheel)
+            RBFX_M(CenterMousePosition)
+            RBFX_M(GetKeyFromName)
+            RBFX_RAW(GetQualifierDown, [](Input* input, int qualifier) {
+                return input && input->GetQualifierDown(static_cast<Qualifier>(qualifier));
+            })
 
-        // Mouse state management. The suppressEvent parameters are optional
-        // in C++ and must be mirrored with sol::optional for Lua calls.
-        "SetMouseVisible", [](Input* input, bool enable, sol::optional<bool> suppressEvent) {
-            if (input)
-                input->SetMouseVisible(enable, suppressEvent.value_or(false));
-        },
-        "IsMouseVisible", &Input::IsMouseVisible,
-        "SetMouseMode", [](Input* input, int mode, sol::optional<bool> suppressEvent) {
-            if (input)
-                input->SetMouseMode(static_cast<MouseMode>(mode), suppressEvent.value_or(false));
-        },
-        "GetMouseMode", &Input::GetMouseMode,
-        "SetMouseGrabbed", [](Input* input, bool grab, sol::optional<bool> suppressEvent) {
-            if (input)
-                input->SetMouseGrabbed(grab, suppressEvent.value_or(false));
-        },
-        "IsMouseLocked", &Input::IsMouseLocked,
-        "IsMouseGrabbed", &Input::IsMouseGrabbed,
+            // Mouse state management. The suppressEvent parameters are optional
+            // in C++ and must be mirrored with sol::optional for Lua calls.
+            RBFX_RAW(SetMouseVisible, [](Input* input, bool enable, sol::optional<bool> suppressEvent) {
+                if (input)
+                    input->SetMouseVisible(enable, suppressEvent.value_or(false));
+            })
+            RBFX_M(IsMouseVisible)
+            RBFX_RAW(SetMouseMode, [](Input* input, int mode, sol::optional<bool> suppressEvent) {
+                if (input)
+                    input->SetMouseMode(static_cast<MouseMode>(mode), suppressEvent.value_or(false));
+            })
+            RBFX_M(GetMouseMode)
+            RBFX_RAW(SetMouseGrabbed, [](Input* input, bool grab, sol::optional<bool> suppressEvent) {
+                if (input)
+                    input->SetMouseGrabbed(grab, suppressEvent.value_or(false));
+            })
+            RBFX_M(IsMouseLocked)
+            RBFX_M(IsMouseGrabbed)
 
-        // Misc
-        "GetNumTouches", &Input::GetNumTouches,
-        "GetTouch", &Input::GetTouch,
-        "GetNumJoysticks", &Input::GetNumJoysticks,
-        "IsMinimized", &Input::IsMinimized,
-        "SetToggleFullscreen", &Input::SetToggleFullscreen
-    );
+            // Misc
+            RBFX_M(GetNumTouches)
+            RBFX_M(GetTouch)
+            RBFX_M(GetNumJoysticks)
+            RBFX_M(IsMinimized)
+            RBFX_M(SetToggleFullscreen)
+        );
+    }
     RegisterLuaObjectWrapper<Input>();
 
     // TouchState: plain struct describing one finger. Fetched through
     // Input:GetTouch(index), never constructed from Lua (37_UIDrag).
-    lua.new_usertype<TouchState>("TouchState",
-        sol::no_constructor,
-        "touchID", &TouchState::touchID_,
-        "position", &TouchState::position_,
-        "lastPosition", &TouchState::lastPosition_,
-        "delta", &TouchState::delta_,
-        "pressure", &TouchState::pressure_
-    );
+    {
+        using RBFX_THIS = TouchState;
+        RBFX_USERTYPE(TouchState, sol::no_constructor
+            RBFX_RAW(touchID, &TouchState::touchID_)
+            RBFX_RAW(position, &TouchState::position_)
+            RBFX_RAW(lastPosition, &TouchState::lastPosition_)
+            RBFX_RAW(delta, &TouchState::delta_)
+            RBFX_RAW(pressure, &TouchState::pressure_)
+        );
+    }
 
     // MoveAndOrbitController: optional WASD+orbit camera helper component
     // (46_RaycastVehicle). Created through Node:CreateComponent, configured
     // by loading an input map resource.
-    lua.new_usertype<MoveAndOrbitController>("MoveAndOrbitController",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<MoveAndOrbitController, Component, Serializable, Object>::bases(lua),
-        "LoadInputMap", [](MoveAndOrbitController* controller, const char* name) {
-            if (controller)
-                controller->LoadInputMap(name);
-        },
-        "GetInputMap", &MoveAndOrbitController::GetInputMap
-    );
+    {
+        using RBFX_THIS = MoveAndOrbitController;
+        RBFX_USERTYPE(MoveAndOrbitController, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_RAW(LoadInputMap, [](MoveAndOrbitController* controller, const char* name) {
+                if (controller)
+                    controller->LoadInputMap(name);
+            })
+            RBFX_M(GetInputMap)
+        );
+    }
     RegisterLuaObjectWrapper<MoveAndOrbitController>();
 
     // MoveAndOrbitComponent: movement/orbit state updated by the controller.
     // The Lua vehicle logic (46_RaycastVehicle) reads velocity/yaw/pitch from
     // it every frame.
-    lua.new_usertype<MoveAndOrbitComponent>("MoveAndOrbitComponent",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<MoveAndOrbitComponent, Component, Serializable, Object>::bases(lua),
-        "SetVelocity", &MoveAndOrbitComponent::SetVelocity,
-        "SetYaw", &MoveAndOrbitComponent::SetYaw,
-        "SetPitch", &MoveAndOrbitComponent::SetPitch,
-        "GetVelocity", &MoveAndOrbitComponent::GetVelocity,
-        "GetYaw", &MoveAndOrbitComponent::GetYaw,
-        "GetPitch", &MoveAndOrbitComponent::GetPitch,
-        "GetYawPitchRotation", &MoveAndOrbitComponent::GetYawPitchRotation
-    );
+    {
+        using RBFX_THIS = MoveAndOrbitComponent;
+        RBFX_USERTYPE(MoveAndOrbitComponent, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetVelocity)
+            RBFX_M(SetYaw)
+            RBFX_M(SetPitch)
+            RBFX_M(GetVelocity)
+            RBFX_M(GetYaw)
+            RBFX_M(GetPitch)
+            RBFX_M(GetYawPitchRotation)
+        );
+    }
     RegisterLuaObjectWrapper<MoveAndOrbitComponent>();
 
     // InputMap: named action evaluation from a loaded input map resource
     // (46_RaycastVehicle braking).
-    lua.new_usertype<InputMap>("InputMap",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<InputMap, Resource, Object>::bases(lua),
-        "Evaluate", [](InputMap* inputMap, const char* name) -> float {
-            return inputMap ? inputMap->Evaluate(name) : 0.0f;
-        }
-    );
+    {
+        using RBFX_THIS = InputMap;
+        RBFX_USERTYPE(InputMap, sol::no_constructor
+            RBFX_BASES(Resource, Object)
+            RBFX_RAW(Evaluate, [](InputMap* inputMap, const char* name) -> float {
+                return inputMap ? inputMap->Evaluate(name) : 0.0f;
+            })
+        );
+    }
     RegisterLuaObjectWrapper<InputMap>();
 
     // Keyboard constants (subset used by samples; SDL keycodes are lowercase
@@ -198,28 +209,16 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     }
 
     // Mouse buttons.
-    sol::table mouseb = lua.create_named_table("MOUSEB");
-    mouseb["LEFT"] = MOUSEB_LEFT;
-    mouseb["RIGHT"] = MOUSEB_RIGHT;
-    mouseb["MIDDLE"] = MOUSEB_MIDDLE;
-    mouseb["X1"] = MOUSEB_X1;
-    mouseb["X2"] = MOUSEB_X2;
+    RBFX_ENUM_TABLE(MOUSEB, "LEFT", MOUSEB_LEFT, "RIGHT", MOUSEB_RIGHT, "MIDDLE", MOUSEB_MIDDLE,
+        "X1", MOUSEB_X1, "X2", MOUSEB_X2);
 
     // Mouse modes.
-    sol::table mm = lua.create_named_table("MM");
-    mm["ABSOLUTE"] = MM_ABSOLUTE;
-    mm["RELATIVE"] = MM_RELATIVE;
-    mm["WRAP"] = MM_WRAP;
-    mm["FREE"] = MM_FREE;
-    mm["INVALID"] = MM_INVALID;
+    RBFX_ENUM_TABLE(MM, "ABSOLUTE", MM_ABSOLUTE, "RELATIVE", MM_RELATIVE, "WRAP", MM_WRAP,
+        "FREE", MM_FREE, "INVALID", MM_INVALID);
 
     // Keyboard qualifiers (InputConstants.h).
-    sol::table qual = lua.create_named_table("QUAL");
-    qual["NONE"] = QUAL_NONE;
-    qual["SHIFT"] = QUAL_SHIFT;
-    qual["CTRL"] = QUAL_CTRL;
-    qual["ALT"] = QUAL_ALT;
-    qual["ANY"] = QUAL_ANY;
+    RBFX_ENUM_TABLE(QUAL, "NONE", QUAL_NONE, "SHIFT", QUAL_SHIFT, "CTRL", QUAL_CTRL, "ALT", QUAL_ALT,
+        "ANY", QUAL_ANY);
 }
 
 } // namespace Urho3D

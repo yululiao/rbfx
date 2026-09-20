@@ -186,6 +186,32 @@ def split_args(toks):
     return groups
 
 
+def split_macro_args(toks):
+    """Split MACRO arguments the way the C++ preprocessor does: on commas
+    that are not inside PARENTHESES. Braces and angle brackets do not protect
+    a comma from the preprocessor's textual splitter, so this deliberately
+    drops the bracket/brace/angle tracking of split_args -- keeping the RBFX
+    expander in lockstep with what MSVC/GCC/Clang actually see (a call the
+    compiler would reject as C4002 must fail parity here too, not pass)."""
+    groups = []
+    start = 0
+    dp = 0
+    for k in range(len(toks)):
+        kk, vv = toks[k]
+        if kk != 'punct':
+            continue
+        if vv == '(':
+            dp += 1
+        elif vv == ')':
+            dp = max(0, dp - 1)
+        elif vv == ',' and dp == 0:
+            groups.append(toks[start:k])
+            start = k + 1
+    if toks[start:]:
+        groups.append(toks[start:])
+    return groups
+
+
 def qualified_head(toks):
     """Leading id/::/. chain joined as text, e.g. sol::property."""
     parts = []
@@ -200,6 +226,23 @@ def qualified_head(toks):
             i += 1
         else:
             break
+    return ''.join(parts)
+
+
+def qualified_id(toks):
+    """Whole-run id/:: chain as text (std::string), or None if anything else
+    appears -- macro TYPE arguments must be a qualified type name and nothing
+    more (no cv/ref/brackets), so malformed uses fail loudly in parity."""
+    if not toks:
+        return None
+    parts = []
+    for k, v in toks:
+        if k == 'id':
+            parts.append(v)
+        elif k == 'punct' and v == '::':
+            parts.append(v)
+        else:
+            return None
     return ''.join(parts)
 
 
@@ -473,13 +516,253 @@ def member_access(toks, i):
 
 
 # ---------------------------------------------------------------------------
+# LuaBindMacros.h one-line family: token-level expansion
+# ---------------------------------------------------------------------------
+# Source/LuaScript/LuaBindMacros.h collapses the recurring sol3 registration
+# patterns into RBFX_* macros (one line per member, leading-comma convention).
+# The parser itself understands the hand-written form, so before any pass runs
+# every RBFX_* call is expanded back to the equivalent hand-written tokens.
+# The templates below mirror the #define bodies in LuaBindMacros.h; the parity
+# guard locks the two together. A macro the expander does not know, or a call
+# with the wrong arity, is kept verbatim -- the parser then ignores it, the
+# stub comes out missing that member, and check_api_docs.ps1 fails loudly
+# instead of dropping it silently.
+
+def _expand_rbfx(name, args, cls):
+    """Expand one RBFX_* macro call to the equivalent hand-written token run.
+    cls is the usertype bound by the enclosing `using RBFX_THIS = X;` block
+    (None outside any block). Returns None for an unknown macro, a call that
+    breaks its contract, or a class-bearing macro used outside a block --
+    parity then fails loudly instead of dropping the member silently."""
+    def id_args():
+        out = []
+        for a in args:
+            if len(a) != 1 or a[0][0] != 'id':
+                return None
+            out.append(a[0][1])
+        return out
+
+    if name == 'RBFX_USERTYPE':
+        if len(args) < 1 or len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        # Registration opener: NAME stringizes into the Lua type name, so
+        # the hand-written form sees `lua.new_usertype<NAME>("NAME", ...`.
+        # The remaining arguments re-join comma-separated; nested list macros
+        # (RBFX_BASES and friends) expand on the rescan pass.
+        n = args[0][0][1]
+        out = tokenize('lua.new_usertype<%s>("%s"' % (n, n))
+        for a in args[1:]:
+            out += [('punct', ',')] + a
+        out.append(('punct', ')'))
+        return out
+    if name == 'RBFX_BASES':
+        if not cls:
+            return None
+        ids = id_args()
+        if not ids or len(ids) < 1:
+            return None
+        return tokenize(', sol::base_classes, LuaBases<%s, %s>::bases(lua)'
+                        % (cls, ', '.join(ids)))
+    if name == 'RBFX_M':
+        if not cls:
+            return None
+        ids = id_args()
+        if not ids or len(ids) != 1:
+            return None
+        member = ids[0]
+        return tokenize(', "%s", &%s::%s' % (member, cls, member))
+    if name == 'RBFX_M_RET':
+        if not cls:
+            return None
+        if len(args) != 2:
+            return None
+        member = args[0][0][1] if len(args[0]) == 1 and args[0][0][0] == 'id' else None
+        ret = qualified_id(args[1])
+        if not (member and ret):
+            return None
+        # Same bare member pointer as RBFX_M C++-side; RET only re-synthesizes
+        # the `-> RET` trailing return the stub scanner reads (---@return).
+        return tokenize(', "%s", [](%s* self) -> %s { return self->%s(); }'
+                        % (member, cls, ret, member))
+    if name == 'RBFX_M_ENUM':
+        if not cls:
+            return None
+        ids = id_args()
+        if not ids or len(ids) != 2:
+            return None
+        member, enum = ids
+        return tokenize(', "%s", [](%s* self, int value) '
+                        '{ if (self) self->%s(static_cast<%s>(value)); }'
+                        % (member, cls, member, enum))
+    if name == 'RBFX_OBJ_R':
+        if not cls:
+            return None
+        ids = id_args()
+        if not ids or len(ids) != 3:
+            return None
+        key, ret, getter = ids
+        return tokenize(', "%s", sol::readonly_property([](%s* self, sol::this_state s) '
+                        '-> sol::object { return self ? WrapLuaObjectAs<%s>'
+                        '(sol::state_view(s), self->%s()) : sol::lua_nil; })'
+                        % (key, cls, ret, getter))
+    if name == 'RBFX_OBJ_M':
+        if not cls:
+            return None
+        ids = id_args()
+        if not ids or len(ids) != 3:
+            return None
+        key, ret, getter = ids
+        return tokenize(', "%s", [](%s* self, sol::this_state s) '
+                        '-> sol::object { return self ? WrapLuaObjectAs<%s>'
+                        '(sol::state_view(s), self->%s()) : sol::lua_nil; }'
+                        % (key, cls, ret, getter))
+    if name == 'RBFX_ENUM_TABLE':
+        if len(args) < 3 or len(args) % 2 == 0:
+            return None
+        if len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        table = args[0][0][1]
+        out = tokenize('sol::table %s = lua.create_named_table("%s");'
+                       % (table, table))
+        for j in range(1, len(args), 2):
+            key, val = args[j], args[j + 1]
+            if not key or key[0][0] != 'str':
+                return None
+            # Rebuild the value tokens as text so the loop stays in token land;
+            # values here are enum constants / numbers, never nested lambdas.
+            text = ''.join(v if k != 'str' else '"%s"' % v for k, v in val)
+            out += tokenize('%s["%s"] = %s;' % (table, key[0][1], text))
+        return out
+    if name == 'RBFX_RAW':
+        if len(args) != 2 or not args[1]:
+            return None
+        if len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        # KEY is an identifier stringized by the C++ macro (#); emit the
+        # string literal so downstream passes see the hand-written shape.
+        # Selector keys go through RBFX_META instead.
+        return [('punct', ','), ('str', args[0][0][1]), ('punct', ',')] + args[1]
+    if name == 'RBFX_META':
+        if len(args) != 2 or not args[1]:
+            return None
+        if len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        # sol::meta_function::SELECTOR passthrough -- not a stub member, the
+        # parser skips the non-string key exactly as with the literal form.
+        return tokenize(', sol::meta_function::%s' % args[0][0][1]) \
+            + [('punct', ',')] + args[1]
+    if name == 'RBFX_PROP':
+        if not cls or len(args) != 4:
+            return None
+        def single(a):
+            return a[0][1] if len(a) == 1 and a[0][0] == 'id' else None
+        key, getter, setter = (single(args[i]) for i in (0, 2, 3))
+        # TYPE may be a qualified chain (std::string, ea::string) -- accept
+        # id/:: runs there, not just a single identifier.
+        type_ = qualified_id(args[1])
+        if not (key and type_ and getter and setter):
+            return None
+        # The C++ macro binds bare member pointers (no `-> Type` for the stub
+        # scanner to read), so re-synthesize the arrow-lambda form the
+        # hand-written clusters used: the property's getter half drives the
+        # field's ---@type, the getter method's lambda drives ---@return, and
+        # the setter stays a bare member pointer (setters carry no annotation).
+        return tokenize(', "%s", sol::property([](%s* self) -> %s { return '
+                        'self->%s(); }, &%s::%s), '
+                        '"%s", [](%s* self) -> %s { return self->%s(); }, '
+                        '"%s", &%s::%s'
+                        % (key, cls, type_, getter, cls, setter,
+                           getter, cls, type_, getter,
+                           setter, cls, setter))
+    if name == 'RBFX_PROP_R':
+        if not cls or len(args) != 3:
+            return None
+        def single(a):
+            return a[0][1] if len(a) == 1 and a[0][0] == 'id' else None
+        key, getter = (single(args[i]) for i in (0, 2))
+        type_ = qualified_id(args[1])
+        if not (key and type_ and getter):
+            return None
+        # Readonly twin of RBFX_PROP: the field's ---@type comes from the
+        # synthesized arrow; no method entries are emitted.
+        return tokenize(', "%s", sol::readonly_property([](%s* self) -> %s '
+                        '{ return self->%s(); })'
+                        % (key, cls, type_, getter))
+    if name == 'RBFX_OVERLOAD':
+        if len(args) < 2 or len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        # MEMBER is an identifier stringized by the C++ macro (#); emit the
+        # string-literal key so downstream passes see the hand-written shape.
+        # sol::meta_function selectors are not identifiers -- those stay in
+        # literal RBFX_RAW(sol::meta_function::..., sol::overload(...)) form.
+        out = tokenize(', "%s", sol::overload(' % args[0][0][1])
+        for j, a in enumerate(args[1:]):
+            if j:
+                out.append(('punct', ','))
+            out.extend(a)
+        out.append(('punct', ')'))
+        return out
+    if name in ('RBFX_CAST', 'RBFX_CAST_C'):
+        if not cls or len(args) < 2:
+            return None
+        if len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        member = args[0][0][1]
+        def run_text(toks):
+            return ' '.join(v for k, v in toks)
+        ret = run_text(args[1])
+        params = ', '.join(run_text(a) for a in args[2:])
+        suffix = ' const' if name == 'RBFX_CAST_C' else ''
+        return tokenize('static_cast<%s (%s::*)(%s)%s>(&%s::%s)'
+                        % (ret, cls, params, suffix, cls, member))
+    return None
+
+
+def expand_rbfx_macros(toks, cls=None):
+    """Expand every RBFX_* macro call in a token stream to its hand-written
+    equivalent (see _expand_rbfx); unknown or malformed calls pass through.
+    Tracks the enclosing `using RBFX_THIS = X;` so class-bearing macros know
+    which usertype they bind. cls carries the context into nested rescans
+    (RBFX_CAST inside RBFX_OVERLOAD)."""
+    out = []
+    i = 0
+    n = len(toks)
+    while i < n:
+        k, v = toks[i]
+        # using RBFX_THIS = <qualified-id> ;  -- scoped class context
+        if k == 'id' and v == 'using' and i + 3 < n \
+                and toks[i + 1] == ('id', 'RBFX_THIS') \
+                and toks[i + 2] == ('punct', '='):
+            end = i + 3
+            while end < n and toks[end] != ('punct', ';'):
+                end += 1
+            if end < n:
+                cls = qualified_id(toks[i + 3:end])
+        if k == 'id' and v.startswith('RBFX_') and i + 1 < n \
+                and toks[i + 1] == ('punct', '('):
+            close = skip_balanced(toks, i + 1, '(', ')')
+            args = split_macro_args(toks[i + 2:close - 1])
+            expanded = _expand_rbfx(v, args, cls)
+            if expanded is not None:
+                # Expansion output can contain nested macro calls (e.g.
+                # RBFX_CAST inside RBFX_OVERLOAD); rescan it so they expand
+                # too, carrying the class context along.
+                out.extend(expand_rbfx_macros(expanded, cls))
+                i = close
+                continue
+        out.append(toks[i])
+        i += 1
+    return out
+
+
+# ---------------------------------------------------------------------------
 # File parser
 # ---------------------------------------------------------------------------
 
 def parse_file(path, api):
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
         text = f.read()
-    toks = tokenize(text)
+    toks = expand_rbfx_macros(tokenize(text))
     n = len(toks)
 
     # Local variable bound to a named table: var -> qualified table name.

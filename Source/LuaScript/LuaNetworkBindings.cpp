@@ -8,6 +8,7 @@
 
 #include "LuaBindings.h"
 #include "LuaBindHelpers.h"
+#include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/MemoryBuffer.h"
@@ -86,286 +87,312 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
 {
     // Network subsystem. rbfx addresses endpoints through the URL type; the
     // bindings accept a "host:port" string or a bare port number.
-    lua.new_usertype<Network>("Network",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Network, Object>::bases(lua),
-        "Connect", [](Network* network, const char* url, Scene* scene) -> bool {
-            return network && network->Connect(URL(url), scene);
-        },
-        "StartServer", [](Network* network, unsigned short port) -> bool {
-            return network && network->StartServer(URL(port));
-        },
-        "Disconnect", [](Network* network) {
-            if (network)
-                network->Disconnect();
-        },
-        "GetServerConnection", &Network::GetServerConnection,
-        "GetClientConnections", [](Network* network, sol::this_state s) -> sol::table {
-            sol::state_view lua(s);
-            sol::table result = lua.create_table();
-            if (network)
-            {
-                unsigned index = 1;
-                for (Connection* connection : network->GetClientConnections())
-                    result[index++] = connection;
-            }
-            return result;
-        },
-        "SetUpdateFps", &Network::SetUpdateFps,
-        "RegisterRemoteEvent", [](Network* network, const char* eventName) {
-            if (network)
-                network->RegisterRemoteEvent(StringHash(eventName));
-        },
-        "IsServerRunning", &Network::IsServerRunning,
-        "StopServer", [](Network* network) {
-            if (network)
-                network->StopServer();
-        },
-        // Broadcast a VectorBuffer message to all clients (16_Chat).
-        "BroadcastMessage", [](Network* network, int messageId, VectorBuffer* msg) {
-            if (network && msg)
-                network->BroadcastMessage(static_cast<NetworkMessageId>(messageId), *msg);
-        }
-    );
+    {
+        using RBFX_THIS = Network;
+        RBFX_USERTYPE(Network, sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_RAW(Connect, [](Network* network, const char* url, Scene* scene) -> bool {
+                return network && network->Connect(URL(url), scene);
+            })
+            RBFX_RAW(StartServer, [](Network* network, unsigned short port) -> bool {
+                return network && network->StartServer(URL(port));
+            })
+            RBFX_RAW(Disconnect, [](Network* network) {
+                if (network)
+                    network->Disconnect();
+            })
+            RBFX_M(GetServerConnection)
+            RBFX_RAW(GetClientConnections, [](Network* network, sol::this_state s) -> sol::table {
+                sol::state_view lua(s);
+                sol::table result = lua.create_table();
+                if (network)
+                {
+                    unsigned index = 1;
+                    for (Connection* connection : network->GetClientConnections())
+                        result[index++] = connection;
+                }
+                return result;
+            })
+            RBFX_M(SetUpdateFps)
+            RBFX_RAW(RegisterRemoteEvent, [](Network* network, const char* eventName) {
+                if (network)
+                    network->RegisterRemoteEvent(StringHash(eventName));
+            })
+            RBFX_M(IsServerRunning)
+            RBFX_RAW(StopServer, [](Network* network) {
+                if (network)
+                    network->StopServer();
+            })
+            // Broadcast a VectorBuffer message to all clients (16_Chat).
+            RBFX_RAW(BroadcastMessage, [](Network* network, int messageId, VectorBuffer* msg) {
+                if (network && msg)
+                    network->BroadcastMessage(static_cast<NetworkMessageId>(messageId), *msg);
+            })
+        );
+    }
     RegisterLuaObjectWrapper<Network>();
 
     // Connection: a remote peer. Scene replication and messages are managed
     // by the engine; the bindings expose the peer state queries.
-    lua.new_usertype<Connection>("Connection",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Connection, Object>::bases(lua),
-        "Disconnect", static_cast<void (Connection::*)()>(&Connection::Disconnect),
-        "GetScene", &Connection::GetScene,
-        "SetScene", &Connection::SetScene,
-        "IsConnected", &Connection::IsConnected,
-        "GetAddress", &Connection::GetAddress,
-        // Traffic statistics for the overlay UI (17_SceneReplication).
-        "GetPacketsInPerSec", &Connection::GetPacketsInPerSec,
-        "GetPacketsOutPerSec", &Connection::GetPacketsOutPerSec,
-        "GetBytesInPerSec", &Connection::GetBytesInPerSec,
-        "GetBytesOutPerSec", &Connection::GetBytesOutPerSec,
-        // Send a VectorBuffer message as reliable + ordered (16_Chat).
-        "SendMessage", [](Connection* connection, int messageId, VectorBuffer* msg) {
-            if (connection && msg)
-                connection->SendMessage(static_cast<NetworkMessageId>(messageId), *msg);
-        },
-        "ToString", &Connection::ToString
-    );
+    {
+        using RBFX_THIS = Connection;
+        RBFX_USERTYPE(Connection, sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_RAW(Disconnect, static_cast<void (Connection::*)()>(&Connection::Disconnect))
+            RBFX_M(GetScene)
+            RBFX_M(SetScene)
+            RBFX_M(IsConnected)
+            RBFX_M(GetAddress)
+            // Traffic statistics for the overlay UI (17_SceneReplication).
+            RBFX_M(GetPacketsInPerSec)
+            RBFX_M(GetPacketsOutPerSec)
+            RBFX_M(GetBytesInPerSec)
+            RBFX_M(GetBytesOutPerSec)
+            // Send a VectorBuffer message as reliable + ordered (16_Chat).
+            RBFX_RAW(SendMessage, [](Connection* connection, int messageId, VectorBuffer* msg) {
+                if (connection && msg)
+                    connection->SendMessage(static_cast<NetworkMessageId>(messageId), *msg);
+            })
+            RBFX_M(ToString)
+        );
+    }
     RegisterLuaObjectWrapper<Connection>();
 
     // VectorBuffer: construct outgoing network messages (16_Chat). The
     // buffer is not reference-counted (AbstractFile has no RefCounted base),
     // so Lua owns it by value inside the userdata.
-    lua.new_usertype<VectorBuffer>("VectorBuffer",
-        sol::call_constructor, sol::factories([]() {
-            return VectorBuffer();
-        }),
-        "WriteString", [](VectorBuffer* buffer, const char* text) {
-            if (buffer)
-                buffer->WriteString(text);
-        },
-        "ReadString", [](VectorBuffer* buffer) {
-            return buffer ? buffer->ReadString() : ea::string();
-        },
-        "WriteFloat", [](VectorBuffer* buffer, float value) {
-            if (buffer)
-                buffer->WriteFloat(value);
-        },
-        "ReadFloat", [](VectorBuffer* buffer) {
-            return buffer ? buffer->ReadFloat() : 0.0f;
-        },
-        "WriteVLE", [](VectorBuffer* buffer, unsigned value) {
-            if (buffer)
-                buffer->WriteVLE(value);
-        },
-        "ReadVLE", [](VectorBuffer* buffer) {
-            return buffer ? buffer->ReadVLE() : 0u;
-        },
-        // Rewind before re-reading an in-memory scene snapshot
-        // (49_Urho2DIsometricDemo reload).
-        "Seek", [](VectorBuffer* buffer, unsigned position) {
-            return buffer ? buffer->Seek(position) : 0u;
-        },
-        "GetSize", [](VectorBuffer* buffer) {
-            return buffer ? buffer->GetSize() : 0u;
-        },
-        "Clear", [](VectorBuffer* buffer) {
-            if (buffer)
-                buffer->Clear();
-        }
-    );
+    {
+        using RBFX_THIS = VectorBuffer;
+        lua.new_usertype<VectorBuffer>("VectorBuffer",
+            sol::call_constructor, sol::factories([]() {
+                return VectorBuffer();
+            })
+            RBFX_RAW(WriteString, [](VectorBuffer* buffer, const char* text) {
+                if (buffer)
+                    buffer->WriteString(text);
+            })
+            RBFX_RAW(ReadString, [](VectorBuffer* buffer) {
+                return buffer ? buffer->ReadString() : ea::string();
+            })
+            RBFX_RAW(WriteFloat, [](VectorBuffer* buffer, float value) {
+                if (buffer)
+                    buffer->WriteFloat(value);
+            })
+            RBFX_RAW(ReadFloat, [](VectorBuffer* buffer) {
+                return buffer ? buffer->ReadFloat() : 0.0f;
+            })
+            RBFX_RAW(WriteVLE, [](VectorBuffer* buffer, unsigned value) {
+                if (buffer)
+                    buffer->WriteVLE(value);
+            })
+            RBFX_RAW(ReadVLE, [](VectorBuffer* buffer) {
+                return buffer ? buffer->ReadVLE() : 0u;
+            })
+            // Rewind before re-reading an in-memory scene snapshot
+            // (49_Urho2DIsometricDemo reload).
+            RBFX_RAW(Seek, [](VectorBuffer* buffer, unsigned position) {
+                return buffer ? buffer->Seek(position) : 0u;
+            })
+            RBFX_RAW(GetSize, [](VectorBuffer* buffer) {
+                return buffer ? buffer->GetSize() : 0u;
+            })
+            RBFX_RAW(Clear, [](VectorBuffer* buffer) {
+                if (buffer)
+                    buffer->Clear();
+            })
+        );
+    }
 
     // MemoryBuffer: stream-read incoming network message data. Constructed
     // from a (possibly binary) Lua string delivered in NetworkMessage event
     // data. Registered under the engine type name; the userdata actually
     // holds LuaMemoryBuffer, which owns the bytes the reader points to.
-    lua.new_usertype<LuaMemoryBuffer>("MemoryBuffer",
-        sol::call_constructor, sol::factories([](std::string data) {
-            return LuaMemoryBuffer(data);
-        }),
-        "ReadString", [](LuaMemoryBuffer* buffer) {
-            return buffer ? buffer->buffer_.ReadString() : ea::string();
-        },
-        "ReadFloat", [](LuaMemoryBuffer* buffer) {
-            return buffer ? buffer->buffer_.ReadFloat() : 0.0f;
-        },
-        "ReadVLE", [](LuaMemoryBuffer* buffer) {
-            return buffer ? buffer->buffer_.ReadVLE() : 0u;
-        },
-        // Read a packed Vector3, used to walk physics contact data
-        // (18_CharacterDemo).
-        "ReadVector3", [](LuaMemoryBuffer* buffer) {
-            return buffer ? buffer->buffer_.ReadVector3() : Vector3::ZERO;
-        },
-        "IsEof", [](LuaMemoryBuffer* buffer) {
-            return buffer ? buffer->buffer_.IsEof() : true;
-        }
-    );
+    {
+        using RBFX_THIS = LuaMemoryBuffer;
+        lua.new_usertype<LuaMemoryBuffer>("MemoryBuffer",
+            sol::call_constructor, sol::factories([](std::string data) {
+                return LuaMemoryBuffer(data);
+            })
+            RBFX_RAW(ReadString, [](LuaMemoryBuffer* buffer) {
+                return buffer ? buffer->buffer_.ReadString() : ea::string();
+            })
+            RBFX_RAW(ReadFloat, [](LuaMemoryBuffer* buffer) {
+                return buffer ? buffer->buffer_.ReadFloat() : 0.0f;
+            })
+            RBFX_RAW(ReadVLE, [](LuaMemoryBuffer* buffer) {
+                return buffer ? buffer->buffer_.ReadVLE() : 0u;
+            })
+            // Read a packed Vector3, used to walk physics contact data
+            // (18_CharacterDemo).
+            RBFX_RAW(ReadVector3, [](LuaMemoryBuffer* buffer) {
+                return buffer ? buffer->buffer_.ReadVector3() : Vector3::ZERO;
+            })
+            RBFX_RAW(IsEof, [](LuaMemoryBuffer* buffer) {
+                return buffer ? buffer->buffer_.IsEof() : true;
+            })
+        );
+    }
 
     // Reserved base for user-defined network message IDs (Protocol.h).
-    sol::table msg = lua.create_named_table("MSG");
-    msg["USER"] = MSG_USER;
+    RBFX_ENUM_TABLE(MSG, "USER", MSG_USER);
 
     // ReplicationManager: server-side replication hub component. Created
     // through Scene:CreateComponent("ReplicationManager") (17_SceneReplication).
-    lua.new_usertype<ReplicationManager>("ReplicationManager",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<ReplicationManager, Component, Serializable, Object>::bases(lua),
-        "GetClientReplica", &ReplicationManager::GetClientReplica
-    );
+    {
+        using RBFX_THIS = ReplicationManager;
+        RBFX_USERTYPE(ReplicationManager, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(GetClientReplica)
+        );
+    }
     RegisterLuaObjectWrapper<ReplicationManager>();
 
     // ClientReplica: client-side replication session, owned by the manager.
-    lua.new_usertype<ClientReplica>("ClientReplica",
-        sol::no_constructor,
-        "GetOwnedNetworkObject", &ClientReplica::GetOwnedNetworkObject
-    );
+    {
+        using RBFX_THIS = ClientReplica;
+        RBFX_USERTYPE(ClientReplica, sol::no_constructor
+            RBFX_M(GetOwnedNetworkObject)
+        );
+    }
 
     // NetworkObject: replicated object component base.
-    lua.new_usertype<NetworkObject>("NetworkObject",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<NetworkObject, Component, Serializable, Object>::bases(lua),
-        "GetNode", &Component::GetNode
-    );
+    {
+        using RBFX_THIS = NetworkObject;
+        RBFX_USERTYPE(NetworkObject, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_RAW(GetNode, &Component::GetNode)
+        );
+    }
 
     // BehaviorNetworkObject: generic replicated object. Node transform and
     // component attributes replicate automatically; custom logic (like
     // player controls) travels through user network messages.
-    lua.new_usertype<BehaviorNetworkObject>("BehaviorNetworkObject",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<BehaviorNetworkObject, NetworkObject, Component, Serializable, Object>::bases(lua),
-        "SetClientPrefab", &StaticNetworkObject::SetClientPrefab,
-        "SetOwner", [](BehaviorNetworkObject* object, Connection* owner) {
-            if (object)
-                object->SetOwner(owner);
-        }
-    );
+    {
+        using RBFX_THIS = BehaviorNetworkObject;
+        RBFX_USERTYPE(BehaviorNetworkObject, sol::no_constructor
+            RBFX_BASES(NetworkObject, Component, Serializable, Object)
+            RBFX_RAW(SetClientPrefab, &StaticNetworkObject::SetClientPrefab)
+            RBFX_RAW(SetOwner, [](BehaviorNetworkObject* object, Connection* owner) {
+                if (object)
+                    object->SetOwner(owner);
+            })
+        );
+    }
     RegisterLuaObjectWrapper<BehaviorNetworkObject>();
 
     // HttpRequest: async HTTP GET/POST with streamed response
     // (43_HttpRequestDemo). Created through Lua's HttpRequest(url) factory.
-    lua.new_usertype<HttpRequest>("HttpRequest",
-        sol::call_constructor, sol::factories(
-            [](const char* url, sol::optional<std::string> verb, sol::optional<sol::table> headers) {
-                ea::vector<ea::string> headerList;
-                if (headers)
-                {
-                    for (int i = 1; i <= static_cast<int>(headers->size()); ++i)
+    {
+        using RBFX_THIS = HttpRequest;
+        lua.new_usertype<HttpRequest>("HttpRequest",
+            sol::call_constructor, sol::factories(
+                [](const char* url, sol::optional<std::string> verb, sol::optional<sol::table> headers) {
+                    ea::vector<ea::string> headerList;
+                    if (headers)
                     {
-                        const sol::object header = (*headers)[i];
-                        if (header.is<std::string>())
-                            headerList.push_back(header.as<std::string>().c_str());
+                        for (int i = 1; i <= static_cast<int>(headers->size()); ++i)
+                        {
+                            const sol::object header = (*headers)[i];
+                            if (header.is<std::string>())
+                                headerList.push_back(header.as<std::string>().c_str());
+                        }
                     }
-                }
-                return SharedPtr<HttpRequest>(new HttpRequest(url,
-                    verb ? ea::string(verb->c_str()) : ea::string{}, headerList));
-            }),
-        "GetError", &HttpRequest::GetError,
-        "GetState", [](HttpRequest* request) {
-            return request ? static_cast<int>(request->GetState()) : 0;
-        },
-        "GetStatusCode", &HttpRequest::GetStatusCode,
-        "ReadString", [](HttpRequest* request) {
-            return request ? request->ReadString() : ea::string{};
-        },
-        "IsEof", [](HttpRequest* request) {
-            return request ? request->IsEof() : true;
-        }
-    );
+                    return SharedPtr<HttpRequest>(new HttpRequest(url,
+                        verb ? ea::string(verb->c_str()) : ea::string{}, headerList));
+                })
+            RBFX_M(GetError)
+            RBFX_RAW(GetState, [](HttpRequest* request) {
+                return request ? static_cast<int>(request->GetState()) : 0;
+            })
+            RBFX_M(GetStatusCode)
+            RBFX_RAW(ReadString, [](HttpRequest* request) {
+                return request ? request->ReadString() : ea::string{};
+            })
+            RBFX_RAW(IsEof, [](HttpRequest* request) {
+                return request ? request->IsEof() : true;
+            })
+        );
+    }
     // HttpRequest derives from RefCounted/Deserializer/Thread only (not Object),
     // so no subsystem caster registration is possible or needed.
 
     // HTTP connection state constants.
-    sol::table httpState = lua.create_named_table("HTTP");
-    httpState["INITIALIZING"] = HTTP_INITIALIZING;
-    httpState["ERROR"] = HTTP_ERROR;
-    httpState["OPEN"] = HTTP_OPEN;
-    httpState["CLOSED"] = HTTP_CLOSED;
+    RBFX_ENUM_TABLE(HTTP, "INITIALIZING", HTTP_INITIALIZING, "ERROR", HTTP_ERROR,
+        "OPEN", HTTP_OPEN, "CLOSED", HTTP_CLOSED);
 
     // JSONFile: parsed JSON document (43_HttpRequestDemo, 40_Localization).
-    lua.new_usertype<JSONFile>("JSONFile",
-        sol::call_constructor, sol::factories(
-            [context]() { return SharedPtr<JSONFile>(new JSONFile(context)); }),
-        sol::base_classes, LuaBases<JSONFile, Resource, Object>::bases(lua),
-        "FromString", [](JSONFile* file, const char* json) {
-            return file && file->FromString(json);
-        },
-        "GetRoot", [](JSONFile* file) -> JSONValue {
-            return file ? JSONValue(file->GetRoot()) : JSONValue{};
-        }
-    );
+    {
+        using RBFX_THIS = JSONFile;
+        lua.new_usertype<JSONFile>("JSONFile",
+            sol::call_constructor, sol::factories(
+                [context]() { return SharedPtr<JSONFile>(new JSONFile(context)); })
+            RBFX_BASES(Resource, Object)
+            RBFX_RAW(FromString, [](JSONFile* file, const char* json) {
+                return file && file->FromString(json);
+            })
+            RBFX_RAW(GetRoot, [](JSONFile* file) -> JSONValue {
+                return file ? JSONValue(file->GetRoot()) : JSONValue{};
+            })
+        );
+    }
     RegisterLuaObjectWrapper<JSONFile>();
 
     // JSONValue: node of a parsed JSON document.
-    lua.new_usertype<JSONValue>("JSONValue",
-        sol::call_constructor, sol::factories([]() { return JSONValue{}; }),
-        "Get", sol::overload(
-            [](const JSONValue* value, const char* key) -> JSONValue {
-                return value ? JSONValue(value->Get(key)) : JSONValue{};
-            },
-            [](const JSONValue* value, int index) -> JSONValue {
-                return value ? JSONValue(value->Get(index)) : JSONValue{};
-            }),
-        "GetString", [](const JSONValue* value) {
-            return value ? value->GetString() : ea::string{};
-        },
-        "GetInt", &JSONValue::GetInt,
-        "GetBool", &JSONValue::GetBool,
-        "GetDouble", &JSONValue::GetDouble,
-        "GetFloat", &JSONValue::GetFloat,
-        "IsNull", &JSONValue::IsNull,
-        "IsObject", &JSONValue::IsObject,
-        "IsArray", &JSONValue::IsArray,
-        "Size", &JSONValue::Size
-    );
+    {
+        using RBFX_THIS = JSONValue;
+        lua.new_usertype<JSONValue>("JSONValue",
+            sol::call_constructor, sol::factories([]() { return JSONValue{}; })
+            RBFX_OVERLOAD(Get,
+                [](const JSONValue* value, const char* key) -> JSONValue {
+                    return value ? JSONValue(value->Get(key)) : JSONValue{};
+                },
+                [](const JSONValue* value, int index) -> JSONValue {
+                    return value ? JSONValue(value->Get(index)) : JSONValue{};
+                })
+            RBFX_RAW(GetString, [](const JSONValue* value) {
+                return value ? value->GetString() : ea::string{};
+            })
+            RBFX_M(GetInt)
+            RBFX_M(GetBool)
+            RBFX_M(GetDouble)
+            RBFX_M(GetFloat)
+            RBFX_M(IsNull)
+            RBFX_M(IsObject)
+            RBFX_M(IsArray)
+            RBFX_M(Size)
+        );
+    }
 
     // LANDiscoveryManager: LAN server discovery beacons (53_LANDiscovery).
     // Constructed explicitly, mirroring the C++ sample's MakeShared call.
-    lua.new_usertype<LANDiscoveryManager>("LANDiscoveryManager",
-        sol::call_constructor, sol::factories([context]() {
-            return SharedPtr<LANDiscoveryManager>(new LANDiscoveryManager(context));
-        }),
-        sol::base_classes, LuaBases<LANDiscoveryManager, Object>::bases(lua),
-        "Start", [](LANDiscoveryManager* manager, unsigned short port) {
-            return manager && manager->Start(port);
-        },
-        "Stop", &LANDiscoveryManager::Stop,
-        "SetBroadcastData", [](LANDiscoveryManager* manager, sol::table data, sol::this_state s) {
-            if (!manager)
-                return;
-            VariantMap map;
-            for (const auto& kv : data)
-            {
-                const sol::object key = kv.first;
-                if (!key.is<std::string>())
-                    continue;
-                map[key.as<std::string>().c_str()] = LuaToVariant(sol::state_view(s), kv.second);
-            }
-            manager->SetBroadcastData(map);
-        },
-        "SetBroadcastTimeMs", &LANDiscoveryManager::SetBroadcastTimeMs,
-        "GetBroadcastTimeMs", &LANDiscoveryManager::GetBroadcastTimeMs
-    );
+    {
+        using RBFX_THIS = LANDiscoveryManager;
+        lua.new_usertype<LANDiscoveryManager>("LANDiscoveryManager",
+            sol::call_constructor, sol::factories([context]() {
+                return SharedPtr<LANDiscoveryManager>(new LANDiscoveryManager(context));
+            })
+            RBFX_BASES(Object)
+            RBFX_RAW(Start, [](LANDiscoveryManager* manager, unsigned short port) {
+                return manager && manager->Start(port);
+            })
+            RBFX_M(Stop)
+            RBFX_RAW(SetBroadcastData, [](LANDiscoveryManager* manager, sol::table data, sol::this_state s) {
+                if (!manager)
+                    return;
+                VariantMap map;
+                for (const auto& kv : data)
+                {
+                    const sol::object key = kv.first;
+                    if (!key.is<std::string>())
+                        continue;
+                    map[key.as<std::string>().c_str()] = LuaToVariant(sol::state_view(s), kv.second);
+                }
+                manager->SetBroadcastData(map);
+            })
+            RBFX_M(SetBroadcastTimeMs)
+            RBFX_M(GetBroadcastTimeMs)
+        );
+    }
     RegisterLuaObjectWrapper<LANDiscoveryManager>();
 }
 

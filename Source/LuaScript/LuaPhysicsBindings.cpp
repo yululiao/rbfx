@@ -8,6 +8,7 @@
 
 #include "LuaBindings.h"
 #include "LuaBindHelpers.h"
+#include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Math/Ray.h"
@@ -39,240 +40,241 @@ namespace Urho3D
 void RegisterPhysicsBindings(sol::state& lua, Context* context)
 {
     // PhysicsWorld: simulation setup and ray queries.
-    lua.new_usertype<PhysicsWorld>("PhysicsWorld",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<PhysicsWorld, Component, Serializable, Object>::bases(lua),
-        "SetGravity", &PhysicsWorld::SetGravity,
-        "GetGravity", &PhysicsWorld::GetGravity,
-        "SetFps", &PhysicsWorld::SetFps,
-        "SetMaxSubSteps", &PhysicsWorld::SetMaxSubSteps,
-        "SetNumIterations", &PhysicsWorld::SetNumIterations,
-        "SetInterpolation", &PhysicsWorld::SetInterpolation,
-        "SetInternalEdge", &PhysicsWorld::SetInternalEdge,
-        "SetSplitImpulse", &PhysicsWorld::SetSplitImpulse,
-        "DrawDebugGeometry", [](PhysicsWorld* world, bool depthTest) {
-            if (world)
-                world->DrawDebugGeometry(depthTest);
-        },
-        // Ray query returning a table {position, normal, distance, body} or nil.
-        "RaycastSingle", [](PhysicsWorld* world, const Ray& ray, float maxDistance,
-            sol::optional<unsigned> collisionMask, sol::this_state s) -> sol::object {
-            if (!world)
-                return sol::lua_nil;
-            PhysicsRaycastResult result;
-            world->RaycastSingle(result, ray, maxDistance, collisionMask.value_or(M_MAX_UNSIGNED));
-            if (!result.body_)
-                return sol::lua_nil;
-            sol::state_view lua(s);
-            sol::table hit = lua.create_table();
-            hit["position"] = result.position_;
-            hit["normal"] = result.normal_;
-            hit["distance"] = result.distance_;
-            hit["body"] = result.body_;
-            return hit;
-        }
-    );
+    {
+        using RBFX_THIS = PhysicsWorld;
+        RBFX_USERTYPE(PhysicsWorld, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetGravity)
+            RBFX_M(GetGravity)
+            RBFX_M(SetFps)
+            RBFX_M(SetMaxSubSteps)
+            RBFX_M(SetNumIterations)
+            RBFX_M(SetInterpolation)
+            RBFX_M(SetInternalEdge)
+            RBFX_M(SetSplitImpulse)
+            RBFX_RAW(DrawDebugGeometry, [](PhysicsWorld* world, bool depthTest) {
+                if (world)
+                    world->DrawDebugGeometry(depthTest);
+            })
+            // Ray query returning a table {position, normal, distance, body} or nil.
+            RBFX_RAW(RaycastSingle, [](PhysicsWorld* world, const Ray& ray, float maxDistance,
+                sol::optional<unsigned> collisionMask, sol::this_state s) -> sol::object {
+                if (!world)
+                    return sol::lua_nil;
+                PhysicsRaycastResult result;
+                world->RaycastSingle(result, ray, maxDistance, collisionMask.value_or(M_MAX_UNSIGNED));
+                if (!result.body_)
+                    return sol::lua_nil;
+                sol::state_view lua(s);
+                sol::table hit = lua.create_table();
+                hit["position"] = result.position_;
+                hit["normal"] = result.normal_;
+                hit["distance"] = result.distance_;
+                hit["body"] = result.body_;
+                return hit;
+            })
+        );
+    }
     RegisterLuaObjectWrapper<PhysicsWorld>();
 
     // RigidBody: mass properties, velocities, forces.
-    lua.new_usertype<RigidBody>("RigidBody",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<RigidBody, Component, Serializable, Object>::bases(lua),
-        "SetMass", &RigidBody::SetMass,
-        // Debug visualization of the collision shape (46_RaycastVehicle).
-        "DrawDebugGeometry", &RigidBody::DrawDebugGeometry,
-        "GetMass", &RigidBody::GetMass,
-        "SetLinearVelocity", &RigidBody::SetLinearVelocity,
-        "GetLinearVelocity", &RigidBody::GetLinearVelocity,
-        // World-space orientation, for applying vehicle torques (19_VehicleDemo).
-        "GetRotation", &RigidBody::GetRotation,
-        "SetAngularVelocity", &RigidBody::SetAngularVelocity,
-        "GetAngularVelocity", &RigidBody::GetAngularVelocity,
-        "SetLinearDamping", &RigidBody::SetLinearDamping,
-        "SetAngularDamping", &RigidBody::SetAngularDamping,
-        // Lock rotational axes so physics does not turn the body on its own
-        // (18_CharacterDemo).
-        "SetAngularFactor", &RigidBody::SetAngularFactor,
-        "SetFriction", &RigidBody::SetFriction,
-        "SetRollingFriction", &RigidBody::SetRollingFriction,
-        "SetRestitution", &RigidBody::SetRestitution,
-        "SetUseGravity", &RigidBody::SetUseGravity,
-        "SetKinematic", &RigidBody::SetKinematic,
-        "SetTrigger", &RigidBody::SetTrigger,
-        "SetCcdRadius", &RigidBody::SetCcdRadius,
-        "SetCcdMotionThreshold", &RigidBody::SetCcdMotionThreshold,
-        "SetLinearRestThreshold", &RigidBody::SetLinearRestThreshold,
-        "SetAngularRestThreshold", &RigidBody::SetAngularRestThreshold,
-        "SetContactProcessingThreshold", &RigidBody::SetContactProcessingThreshold,
-        "SetCollisionLayer", &RigidBody::SetCollisionLayer,
-        "SetCollisionMask", &RigidBody::SetCollisionMask,
-        "SetCollisionLayerAndMask", &RigidBody::SetCollisionLayerAndMask,
-        "SetCollisionEventMode", [](RigidBody* body, int mode) {
-            if (body)
-                body->SetCollisionEventMode(static_cast<CollisionEventMode>(mode));
-        },
-        "ApplyForce", sol::overload(
-            static_cast<void (RigidBody::*)(const Vector3&)>(&RigidBody::ApplyForce),
-            static_cast<void (RigidBody::*)(const Vector3&, const Vector3&)>(&RigidBody::ApplyForce)),
-        "ApplyTorque", static_cast<void (RigidBody::*)(const Vector3&)>(&RigidBody::ApplyTorque),
-        "ApplyImpulse", sol::overload(
-            static_cast<void (RigidBody::*)(const Vector3&)>(&RigidBody::ApplyImpulse),
-            static_cast<void (RigidBody::*)(const Vector3&, const Vector3&)>(&RigidBody::ApplyImpulse)),
-        "ApplyTorqueImpulse", &RigidBody::ApplyTorqueImpulse,
-        "ResetForces", &RigidBody::ResetForces,
-        "Activate", &RigidBody::Activate
-    );
+    {
+        using RBFX_THIS = RigidBody;
+        RBFX_USERTYPE(RigidBody, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetMass)
+            // Debug visualization of the collision shape (46_RaycastVehicle).
+            RBFX_M(DrawDebugGeometry)
+            RBFX_M(GetMass)
+            RBFX_M(SetLinearVelocity)
+            RBFX_M(GetLinearVelocity)
+            // World-space orientation, for applying vehicle torques (19_VehicleDemo).
+            RBFX_M(GetRotation)
+            RBFX_M(SetAngularVelocity)
+            RBFX_M(GetAngularVelocity)
+            RBFX_M(SetLinearDamping)
+            RBFX_M(SetAngularDamping)
+            // Lock rotational axes so physics does not turn the body on its own
+            // (18_CharacterDemo).
+            RBFX_M(SetAngularFactor)
+            RBFX_M(SetFriction)
+            RBFX_M(SetRollingFriction)
+            RBFX_M(SetRestitution)
+            RBFX_M(SetUseGravity)
+            RBFX_M(SetKinematic)
+            RBFX_M(SetTrigger)
+            RBFX_M(SetCcdRadius)
+            RBFX_M(SetCcdMotionThreshold)
+            RBFX_M(SetLinearRestThreshold)
+            RBFX_M(SetAngularRestThreshold)
+            RBFX_M(SetContactProcessingThreshold)
+            RBFX_M(SetCollisionLayer)
+            RBFX_M(SetCollisionMask)
+            RBFX_M(SetCollisionLayerAndMask)
+            RBFX_M_ENUM(SetCollisionEventMode, CollisionEventMode)
+            RBFX_OVERLOAD(ApplyForce,
+                RBFX_CAST(ApplyForce, void, const Vector3&),
+                RBFX_CAST(ApplyForce, void, const Vector3&, const Vector3&))
+            RBFX_RAW(ApplyTorque,
+                static_cast<void (RigidBody::*)(const Vector3&)>(&RigidBody::ApplyTorque))
+            RBFX_OVERLOAD(ApplyImpulse,
+                RBFX_CAST(ApplyImpulse, void, const Vector3&),
+                RBFX_CAST(ApplyImpulse, void, const Vector3&, const Vector3&))
+            RBFX_M(ApplyTorqueImpulse)
+            RBFX_M(ResetForces)
+            RBFX_M(Activate)
+        );
+    }
     RegisterLuaObjectWrapper<RigidBody>();
 
     // CollisionShape: primitive and mesh shapes. Defaults are expanded in the
     // lambdas so Lua calls stay short: shape:SetBox(Vector3(2,2,2)).
-    lua.new_usertype<CollisionShape>("CollisionShape",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<CollisionShape, Component, Serializable, Object>::bases(lua),
-        "SetBox", [](CollisionShape* shape, const Vector3& size, sol::optional<Vector3> position,
-            sol::optional<Quaternion> rotation) {
-            if (shape)
-                shape->SetBox(size, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
-        },
-        "SetSphere", [](CollisionShape* shape, float diameter, sol::optional<Vector3> position,
-            sol::optional<Quaternion> rotation) {
-            if (shape)
-                shape->SetSphere(diameter, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
-        },
-        "SetCylinder", [](CollisionShape* shape, float diameter, float height, sol::optional<Vector3> position,
-            sol::optional<Quaternion> rotation) {
-            if (shape)
-                shape->SetCylinder(diameter, height, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
-        },
-        "SetCapsule", [](CollisionShape* shape, float diameter, float height, sol::optional<Vector3> position,
-            sol::optional<Quaternion> rotation) {
-            if (shape)
-                shape->SetCapsule(diameter, height, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
-        },
-        // Collision from the sibling Terrain component's heightmap
-        // (19_VehicleDemo).
-        "SetTerrain", [](CollisionShape* shape) {
-            if (shape)
-                shape->SetTerrain();
-        },
-        "SetCone", [](CollisionShape* shape, float diameter, float height, sol::optional<Vector3> position,
-            sol::optional<Quaternion> rotation) {
-            if (shape)
-                shape->SetCone(diameter, height, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
-        },
-        "SetTriangleMesh", [](CollisionShape* shape, Model* model, sol::optional<unsigned> lodLevel) {
-            if (shape)
-                shape->SetTriangleMesh(model, lodLevel.value_or(0));
-        },
-        "SetConvexHull", [](CollisionShape* shape, Model* model, sol::optional<unsigned> lodLevel) {
-            if (shape)
-                shape->SetConvexHull(model, lodLevel.value_or(0));
-        },
-        "SetTerrain", [](CollisionShape* shape, sol::optional<unsigned> lodLevel) {
-            if (shape)
-                shape->SetTerrain(lodLevel.value_or(0));
-        }
-    );
+    {
+        using RBFX_THIS = CollisionShape;
+        RBFX_USERTYPE(CollisionShape, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_RAW(SetBox, [](CollisionShape* shape, const Vector3& size, sol::optional<Vector3> position,
+                sol::optional<Quaternion> rotation) {
+                if (shape)
+                    shape->SetBox(size, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
+            })
+            RBFX_RAW(SetSphere, [](CollisionShape* shape, float diameter, sol::optional<Vector3> position,
+                sol::optional<Quaternion> rotation) {
+                if (shape)
+                    shape->SetSphere(diameter, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
+            })
+            RBFX_RAW(SetCylinder, [](CollisionShape* shape, float diameter, float height, sol::optional<Vector3> position,
+                sol::optional<Quaternion> rotation) {
+                if (shape)
+                    shape->SetCylinder(diameter, height, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
+            })
+            RBFX_RAW(SetCapsule, [](CollisionShape* shape, float diameter, float height, sol::optional<Vector3> position,
+                sol::optional<Quaternion> rotation) {
+                if (shape)
+                    shape->SetCapsule(diameter, height, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
+            })
+            // Collision from the sibling Terrain component's heightmap
+            // (19_VehicleDemo).
+            RBFX_RAW(SetTerrain, [](CollisionShape* shape) {
+                if (shape)
+                    shape->SetTerrain();
+            })
+            RBFX_RAW(SetCone, [](CollisionShape* shape, float diameter, float height, sol::optional<Vector3> position,
+                sol::optional<Quaternion> rotation) {
+                if (shape)
+                    shape->SetCone(diameter, height, position.value_or(Vector3::ZERO), rotation.value_or(Quaternion::IDENTITY));
+            })
+            RBFX_RAW(SetTriangleMesh, [](CollisionShape* shape, Model* model, sol::optional<unsigned> lodLevel) {
+                if (shape)
+                    shape->SetTriangleMesh(model, lodLevel.value_or(0));
+            })
+            RBFX_RAW(SetConvexHull, [](CollisionShape* shape, Model* model, sol::optional<unsigned> lodLevel) {
+                if (shape)
+                    shape->SetConvexHull(model, lodLevel.value_or(0));
+            })
+            RBFX_RAW(SetTerrain, [](CollisionShape* shape, sol::optional<unsigned> lodLevel) {
+                if (shape)
+                    shape->SetTerrain(lodLevel.value_or(0));
+            })
+        );
+    }
     RegisterLuaObjectWrapper<CollisionShape>();
 
     // Constraint base: joint pivots and limits. Concrete joints
     // (ConstraintHinge, ConstraintSlider, ...) are created through
     // Node:CreateComponent and configure themselves via attributes.
-    lua.new_usertype<Constraint>("Constraint",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Constraint, Component, Serializable, Object>::bases(lua),
-        "SetOtherBody", &Constraint::SetOtherBody,
-        "SetPosition", &Constraint::SetPosition,
-        "SetRotation", &Constraint::SetRotation,
-        "SetOtherPosition", &Constraint::SetOtherPosition,
-        "SetOtherRotation", &Constraint::SetOtherRotation,
-        "SetWorldPosition", &Constraint::SetWorldPosition,
-        "SetConstraintType", [](Constraint* constraint, int type) {
-            if (constraint)
-                constraint->SetConstraintType(static_cast<ConstraintType>(type));
-        },
-        "SetAxis", &Constraint::SetAxis,
-        "SetOtherAxis", &Constraint::SetOtherAxis,
-        "SetHighLimit", &Constraint::SetHighLimit,
-        "SetLowLimit", &Constraint::SetLowLimit,
-        "SetDisableCollision", &Constraint::SetDisableCollision
-    );
+    {
+        using RBFX_THIS = Constraint;
+        RBFX_USERTYPE(Constraint, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetOtherBody)
+            RBFX_M(SetPosition)
+            RBFX_M(SetRotation)
+            RBFX_M(SetOtherPosition)
+            RBFX_M(SetOtherRotation)
+            RBFX_M(SetWorldPosition)
+            RBFX_M_ENUM(SetConstraintType, ConstraintType)
+            RBFX_M(SetAxis)
+            RBFX_M(SetOtherAxis)
+            RBFX_M(SetHighLimit)
+            RBFX_M(SetLowLimit)
+            RBFX_M(SetDisableCollision)
+        );
+    }
     RegisterLuaObjectWrapper<Constraint>();
 
     // RaycastVehicle: arcade vehicle simulation on a RigidBody
     // (46_RaycastVehicle). Wheels are RaycastVehicleWheel components on
     // child nodes and self-register with the vehicle.
-    lua.new_usertype<RaycastVehicle>("RaycastVehicle",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<RaycastVehicle, Component, Serializable, Object>::bases(lua),
-        "Init", &RaycastVehicle::Init,
-        "UpdateInput", &RaycastVehicle::UpdateInput,
-        "ResetWheels", &RaycastVehicle::ResetWheels,
-        "ResetSuspension", &RaycastVehicle::ResetSuspension,
-        "GetNumWheels", &RaycastVehicle::GetNumWheels,
-        "GetWheel", &RaycastVehicle::GetWheel,
-        "AddWheel", &RaycastVehicle::AddWheel,
-        "RemoveWheel", &RaycastVehicle::RemoveWheel,
-        "GetMaxSideSlipSpeed", &RaycastVehicle::GetMaxSideSlipSpeed,
-        "SetMaxSideSlipSpeed", &RaycastVehicle::SetMaxSideSlipSpeed,
-        "SetInAirRPM", &RaycastVehicle::SetInAirRPM,
-        "SetEngineForce", &RaycastVehicle::SetEngineForce,
-        "GetEngineForce", &RaycastVehicle::GetEngineForce,
-        "SetBrakingForce", &RaycastVehicle::SetBrakingForce,
-        "GetBrakingForce", &RaycastVehicle::GetBrakingForce
-    );
+    {
+        using RBFX_THIS = RaycastVehicle;
+        RBFX_USERTYPE(RaycastVehicle, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(Init)
+            RBFX_M(UpdateInput)
+            RBFX_M(ResetWheels)
+            RBFX_M(ResetSuspension)
+            RBFX_M(GetNumWheels)
+            RBFX_M(GetWheel)
+            RBFX_M(AddWheel)
+            RBFX_M(RemoveWheel)
+            RBFX_M(GetMaxSideSlipSpeed)
+            RBFX_M(SetMaxSideSlipSpeed)
+            RBFX_M(SetInAirRPM)
+            RBFX_M(SetEngineForce)
+            RBFX_M(GetEngineForce)
+            RBFX_M(SetBrakingForce)
+            RBFX_M(GetBrakingForce)
+        );
+    }
     RegisterLuaObjectWrapper<RaycastVehicle>();
 
     // RaycastVehicleWheel: per-wheel suspension geometry and handling
     // parameters (46_RaycastVehicle Vehicle component).
-    lua.new_usertype<RaycastVehicleWheel>("RaycastVehicleWheel",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<RaycastVehicleWheel, Component, Serializable, Object>::bases(lua),
-        "SetConnectionPoint", &RaycastVehicleWheel::SetConnectionPoint,
-        "GetConnectionPoint", &RaycastVehicleWheel::GetConnectionPoint,
-        "SetDirection", &RaycastVehicleWheel::SetDirection,
-        "GetDirection", &RaycastVehicleWheel::GetDirection,
-        "SetAxle", &RaycastVehicleWheel::SetAxle,
-        "GetAxle", &RaycastVehicleWheel::GetAxle,
-        "SetRotation", &RaycastVehicleWheel::SetRotation,
-        "GetRotation", &RaycastVehicleWheel::GetRotation,
-        "SetOffset", &RaycastVehicleWheel::SetOffset,
-        "SetRadius", &RaycastVehicleWheel::SetRadius,
-        "GetRadius", &RaycastVehicleWheel::GetRadius,
-        "SetSuspensionRestLength", &RaycastVehicleWheel::SetSuspensionRestLength,
-        "GetSuspensionRestLength", &RaycastVehicleWheel::GetSuspensionRestLength,
-        "SetSuspensionStiffness", &RaycastVehicleWheel::SetSuspensionStiffness,
-        "SetDampingRelaxation", &RaycastVehicleWheel::SetDampingRelaxation,
-        "SetDampingCompression", &RaycastVehicleWheel::SetDampingCompression,
-        "SetFrictionSlip", &RaycastVehicleWheel::SetFrictionSlip,
-        "SetRollInfluence", &RaycastVehicleWheel::SetRollInfluence,
-        "SetSteeringFactor", &RaycastVehicleWheel::SetSteeringFactor,
-        "SetEngineFactor", &RaycastVehicleWheel::SetEngineFactor,
-        "SetBrakeFactor", &RaycastVehicleWheel::SetBrakeFactor,
-        "SetSteeringValue", &RaycastVehicleWheel::SetSteeringValue,
-        "SetBrakeValue", &RaycastVehicleWheel::SetBrakeValue,
-        "SetEngineForce", &RaycastVehicleWheel::SetEngineForce,
-        "IsInContact", &RaycastVehicleWheel::IsInContact,
-        "GetSkidInfoCumulative", &RaycastVehicleWheel::GetSkidInfoCumulative,
-        "GetBrakeValue", &RaycastVehicleWheel::GetBrakeValue,
-        "GetContactPosition", &RaycastVehicleWheel::GetContactPosition,
-        // Debug visualization of the wheel (46_RaycastVehicle).
-        "DrawDebugGeometry", &RaycastVehicleWheel::DrawDebugGeometry
-    );
+    {
+        using RBFX_THIS = RaycastVehicleWheel;
+        RBFX_USERTYPE(RaycastVehicleWheel, sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetConnectionPoint)
+            RBFX_M(GetConnectionPoint)
+            RBFX_M(SetDirection)
+            RBFX_M(GetDirection)
+            RBFX_M(SetAxle)
+            RBFX_M(GetAxle)
+            RBFX_M(SetRotation)
+            RBFX_M(GetRotation)
+            RBFX_M(SetOffset)
+            RBFX_M(SetRadius)
+            RBFX_M(GetRadius)
+            RBFX_M(SetSuspensionRestLength)
+            RBFX_M(GetSuspensionRestLength)
+            RBFX_M(SetSuspensionStiffness)
+            RBFX_M(SetDampingRelaxation)
+            RBFX_M(SetDampingCompression)
+            RBFX_M(SetFrictionSlip)
+            RBFX_M(SetRollInfluence)
+            RBFX_M(SetSteeringFactor)
+            RBFX_M(SetEngineFactor)
+            RBFX_M(SetBrakeFactor)
+            RBFX_M(SetSteeringValue)
+            RBFX_M(SetBrakeValue)
+            RBFX_M(SetEngineForce)
+            RBFX_M(IsInContact)
+            RBFX_M(GetSkidInfoCumulative)
+            RBFX_M(GetBrakeValue)
+            RBFX_M(GetContactPosition)
+            // Debug visualization of the wheel (46_RaycastVehicle).
+            RBFX_M(DrawDebugGeometry)
+        );
+    }
     RegisterLuaObjectWrapper<RaycastVehicleWheel>();
 
     // Collision event signaling modes for RigidBody:SetCollisionEventMode.
-    sol::table cem = lua.create_named_table("CEM");
-    cem["NEVER"] = COLLISION_NEVER;
-    cem["ACTIVE"] = COLLISION_ACTIVE;
-    cem["ALWAYS"] = COLLISION_ALWAYS;
+    RBFX_ENUM_TABLE(CEM, "NEVER", COLLISION_NEVER, "ACTIVE", COLLISION_ACTIVE, "ALWAYS", COLLISION_ALWAYS);
 
     // Constraint types for Constraint:SetConstraintType.
-    sol::table ct = lua.create_named_table("CT");
-    ct["POINT"] = CONSTRAINT_POINT;
-    ct["HINGE"] = CONSTRAINT_HINGE;
-    ct["SLIDER"] = CONSTRAINT_SLIDER;
-    ct["CONETWIST"] = CONSTRAINT_CONETWIST;
+    RBFX_ENUM_TABLE(CT, "POINT", CONSTRAINT_POINT, "HINGE", CONSTRAINT_HINGE,
+        "SLIDER", CONSTRAINT_SLIDER, "CONETWIST", CONSTRAINT_CONETWIST);
 }
 
 } // namespace Urho3D

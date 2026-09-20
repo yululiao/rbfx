@@ -15,6 +15,16 @@
 
 namespace sol
 {
+// The missing dispatch key for the ea::string marshalling below. sol3 routes
+// check<T> through `unqualified_checker<T, lua_type_of_v<T>>`, and the
+// unspecialized lua_type_of defaults to type::userdata -- so without this
+// specialization the checker below was DEAD CODE and any binding taking
+// `const ea::string&` rejected Lua strings at runtime ("expected userdata,
+// received string"). Masked while every string member sat behind a
+// const char* conversion lambda; exposed once member-pointer bindings
+// (RBFX_PROP / RBFX_M on string members) bind the engine signature directly.
+template <> struct lua_type_of<ea::string> : std::integral_constant<type, type::string> {};
+
 namespace stack
 {
 
