@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/MemoryBuffer.h"
@@ -87,7 +88,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // bindings accept a "host:port" string or a bare port number.
     lua.new_usertype<Network>("Network",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Network, Object>::bases(lua),
         "Connect", [](Network* network, const char* url, Scene* scene) -> bool {
             return network && network->Connect(URL(url), scene);
         },
@@ -132,7 +133,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // by the engine; the bindings expose the peer state queries.
     lua.new_usertype<Connection>("Connection",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Connection, Object>::bases(lua),
         "Disconnect", static_cast<void (Connection::*)()>(&Connection::Disconnect),
         "GetScene", &Connection::GetScene,
         "SetScene", &Connection::SetScene,
@@ -229,7 +230,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // through Scene:CreateComponent("ReplicationManager") (17_SceneReplication).
     lua.new_usertype<ReplicationManager>("ReplicationManager",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ReplicationManager, Component, Serializable, Object>::bases(lua),
         "GetClientReplica", &ReplicationManager::GetClientReplica
     );
     RegisterLuaObjectWrapper<ReplicationManager>();
@@ -243,7 +244,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // NetworkObject: replicated object component base.
     lua.new_usertype<NetworkObject>("NetworkObject",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<NetworkObject, Component, Serializable, Object>::bases(lua),
         "GetNode", &Component::GetNode
     );
 
@@ -252,7 +253,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // player controls) travels through user network messages.
     lua.new_usertype<BehaviorNetworkObject>("BehaviorNetworkObject",
         sol::no_constructor,
-        sol::base_classes, sol::bases<NetworkObject, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<BehaviorNetworkObject, NetworkObject, Component, Serializable, Object>::bases(lua),
         "SetClientPrefab", &StaticNetworkObject::SetClientPrefab,
         "SetOwner", [](BehaviorNetworkObject* object, Connection* owner) {
             if (object)
@@ -305,7 +306,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     lua.new_usertype<JSONFile>("JSONFile",
         sol::call_constructor, sol::factories(
             [context]() { return SharedPtr<JSONFile>(new JSONFile(context)); }),
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<JSONFile, Resource, Object>::bases(lua),
         "FromString", [](JSONFile* file, const char* json) {
             return file && file->FromString(json);
         },
@@ -344,7 +345,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
         sol::call_constructor, sol::factories([context]() {
             return SharedPtr<LANDiscoveryManager>(new LANDiscoveryManager(context));
         }),
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<LANDiscoveryManager, Object>::bases(lua),
         "Start", [](LANDiscoveryManager* manager, unsigned short port) {
             return manager && manager->Start(port);
         },

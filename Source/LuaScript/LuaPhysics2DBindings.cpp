@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Physics2D/CollisionChain2D.h"
@@ -81,7 +82,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
     // the body the constraint component is attached to (32_Physics2DConstraints).
     lua.new_usertype<Constraint2D>("Constraint2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetOtherBody", &Constraint2D::SetOtherBody,
         "SetCollideConnected", &Constraint2D::SetCollideConnected,
         "GetOwnerBody", &Constraint2D::GetOwnerBody,
@@ -91,7 +92,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintDistance2D>("ConstraintDistance2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintDistance2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetOwnerBodyAnchor", &ConstraintDistance2D::SetOwnerBodyAnchor,
         "SetOtherBodyAnchor", &ConstraintDistance2D::SetOtherBodyAnchor,
         "SetFrequencyHz", &ConstraintDistance2D::SetFrequencyHz,
@@ -102,7 +103,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintFriction2D>("ConstraintFriction2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintFriction2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetAnchor", &ConstraintFriction2D::SetAnchor,
         "SetMaxForce", &ConstraintFriction2D::SetMaxForce,
         "SetMaxTorque", &ConstraintFriction2D::SetMaxTorque
@@ -111,7 +112,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintGear2D>("ConstraintGear2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintGear2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetOwnerConstraint", &ConstraintGear2D::SetOwnerConstraint,
         "SetOtherConstraint", &ConstraintGear2D::SetOtherConstraint,
         "SetRatio", &ConstraintGear2D::SetRatio
@@ -120,7 +121,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintMotor2D>("ConstraintMotor2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintMotor2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetLinearOffset", &ConstraintMotor2D::SetLinearOffset,
         "SetAngularOffset", &ConstraintMotor2D::SetAngularOffset,
         "SetMaxForce", &ConstraintMotor2D::SetMaxForce,
@@ -131,7 +132,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintMouse2D>("ConstraintMouse2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintMouse2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetTarget", &ConstraintMouse2D::SetTarget,
         "SetMaxForce", &ConstraintMouse2D::SetMaxForce,
         "SetFrequencyHz", &ConstraintMouse2D::SetFrequencyHz,
@@ -141,7 +142,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintPrismatic2D>("ConstraintPrismatic2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintPrismatic2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetAnchor", &ConstraintPrismatic2D::SetAnchor,
         "SetAxis", &ConstraintPrismatic2D::SetAxis,
         "SetEnableLimit", &ConstraintPrismatic2D::SetEnableLimit,
@@ -155,7 +156,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintPulley2D>("ConstraintPulley2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintPulley2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetOwnerBodyGroundAnchor", &ConstraintPulley2D::SetOwnerBodyGroundAnchor,
         "SetOtherBodyGroundAnchor", &ConstraintPulley2D::SetOtherBodyGroundAnchor,
         "SetOwnerBodyAnchor", &ConstraintPulley2D::SetOwnerBodyAnchor,
@@ -166,7 +167,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintRevolute2D>("ConstraintRevolute2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintRevolute2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetAnchor", &ConstraintRevolute2D::SetAnchor,
         "SetEnableLimit", &ConstraintRevolute2D::SetEnableLimit,
         "SetLowerAngle", &ConstraintRevolute2D::SetLowerAngle,
@@ -179,7 +180,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintRope2D>("ConstraintRope2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintRope2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetOwnerBodyAnchor", &ConstraintRope2D::SetOwnerBodyAnchor,
         "SetOtherBodyAnchor", &ConstraintRope2D::SetOtherBodyAnchor,
         "SetMaxLength", &ConstraintRope2D::SetMaxLength
@@ -188,7 +189,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintWeld2D>("ConstraintWeld2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintWeld2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetAnchor", &ConstraintWeld2D::SetAnchor,
         "SetFrequencyHz", &ConstraintWeld2D::SetFrequencyHz,
         "SetDampingRatio", &ConstraintWeld2D::SetDampingRatio
@@ -197,7 +198,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ConstraintWheel2D>("ConstraintWheel2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Constraint2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ConstraintWheel2D, Constraint2D, Component, Serializable, Object>::bases(lua),
         "SetAnchor", &ConstraintWheel2D::SetAnchor,
         "SetAxis", &ConstraintWheel2D::SetAxis,
         "SetEnableMotor", &ConstraintWheel2D::SetEnableMotor,
@@ -211,14 +212,14 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
     // Remaining collision shapes taking vertex lists from Lua tables.
     lua.new_usertype<CollisionEdge2D>("CollisionEdge2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<CollisionShape2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionEdge2D, CollisionShape2D, Component, Serializable, Object>::bases(lua),
         "SetVertices", &CollisionEdge2D::SetVertices
     );
     RegisterLuaObjectWrapper<CollisionEdge2D>();
 
     lua.new_usertype<CollisionPolygon2D>("CollisionPolygon2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<CollisionShape2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionPolygon2D, CollisionShape2D, Component, Serializable, Object>::bases(lua),
         // Incremental vertex setup used by the tile-map object shapes (49/50).
         "SetVertexCount", &CollisionPolygon2D::SetVertexCount,
         "SetVertex", &CollisionPolygon2D::SetVertex,
@@ -231,7 +232,7 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<CollisionChain2D>("CollisionChain2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<CollisionShape2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionChain2D, CollisionShape2D, Component, Serializable, Object>::bases(lua),
         // Incremental vertex setup used by the tile-map object shapes (49/50).
         "SetVertexCount", &CollisionChain2D::SetVertexCount,
         "SetVertex", &CollisionChain2D::SetVertex,

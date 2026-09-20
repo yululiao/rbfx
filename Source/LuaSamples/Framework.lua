@@ -26,7 +26,48 @@ function Sample:Run()
     input:SetMouseVisible(false)
     SubscribeToEvent("KeyDown", function(data) self:HandleKeyDown(data) end)
     SubscribeToEvent("Update", function(data) self:Update(data.TimeStep) end)
+    self:StartMemProbe()
     self:OnStart()
+end
+
+-- Lua-heap probe for the sample gate (Source/Tools/LuaBindingCI/run_samples.ps1).
+-- Once per second: force a full GC, then report the resident heap size through
+-- LogInfo into the engine log. The first reading (after OnStart built the
+-- scene) is the baseline; readings above baseline + budget count as overruns,
+-- and only several CONSECUTIVE overruns raise a LogError that the gate turns
+-- into a FAIL: samples like 18_CharacterDemo legitimately swing their
+-- post-GC working set by ~1.8 MB for a few seconds (a full GC during an
+-- allocation burst still sees live objects) before settling back, while a
+-- real leak never settles. The budget comes from the
+-- URHO3D_LUA_MEM_BUDGET_KB environment variable (set by run_samples.ps1).
+function Sample:StartMemProbe()
+    local budgetKB = tonumber(os.getenv("URHO3D_LUA_MEM_BUDGET_KB") or "256")
+    local elapsed = 0.0
+    local baselineKB = nil
+    local overruns = 0
+    SubscribeToEvent("Update", function(data)
+        elapsed = elapsed + data.TimeStep
+        if elapsed < 1.0 then
+            return
+        end
+        elapsed = elapsed - 1.0
+        collectgarbage("collect")
+        local residentKB = math.floor(collectgarbage("count"))
+        if not baselineKB then
+            baselineKB = residentKB
+        end
+        LogInfo(string.format("Lua mem probe: %d KB", residentKB))
+        if residentKB > baselineKB + budgetKB then
+            overruns = overruns + 1
+            if overruns >= 5 then
+                LogError(string.format(
+                    "Lua mem budget exceeded: %d KB (baseline %d KB + budget %d KB, %d consecutive readings)",
+                    residentKB, baselineKB, budgetKB, overruns))
+            end
+        else
+            overruns = 0
+        end
+    end)
 end
 
 function Sample:OnStart() end

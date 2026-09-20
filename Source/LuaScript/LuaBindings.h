@@ -116,6 +116,27 @@ RBFXLUA_API void RegisterLuaObjectCaster(StringHash type, LuaObjectCaster caster
 /// null objects become Lua nil.
 RBFXLUA_API sol::object WrapLuaObject(sol::state_view lua, Object* object);
 
+/// Get (or lazily build) the per-state base-chain audit table used by
+/// LuaBases<T, Bases...> (see LuaBindHelpers.h). Layout: integer key (a
+/// type's StringHash value) -> table { [1] = registration sequence number,
+/// [2..] = declared base type hashes }. Lives in the Lua registry, so it is
+/// scoped to one lua_State and dies with it.
+RBFXLUA_API sol::table GetLuaBaseChainTable(sol::state_view lua);
+
+/// Record one usertype's declared base chain plus its full URHO3D_OBJECT
+/// ancestry (minus the type itself). Called by LuaBases<...>::bases at
+/// registration time. Re-registering the same type is tolerated only while
+/// the declared chain is identical.
+RBFXLUA_API void RecordLuaBaseChain(sol::state_view lua, StringHash type,
+    const ea::vector<StringHash>& bases, const ea::vector<StringHash>& hierarchy);
+
+/// End-of-startup audit over the recorded chains: every declared base must
+/// itself be a recorded usertype, and must have been registered before the
+/// derived type. Violations are already reported (with type names) at the
+/// offending registration; this pass is the definitive final verdict plus
+/// the one-line summary the smoke logs can rely on.
+RBFXLUA_API void VerifyLuaBaseChains(sol::state_view lua);
+
 /// Convert a Lua value into a Variant (type deduction: bool / number /
 /// string / Vector2 / Vector3 / Vector4 / Quaternion / Color / Object*).
 RBFXLUA_API Variant LuaToVariant(sol::state_view lua, const sol::object& value);

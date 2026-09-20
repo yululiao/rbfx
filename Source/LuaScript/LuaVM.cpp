@@ -331,6 +331,13 @@ void LuaVM::RegisterEngineBindings()
         sol::overload(
             [this](const char* eventName) { UnsubscribeEvent(eventName); },
             [this](Object* sender, const char* eventName) { UnsubscribeSenderEvent(sender, eventName); }));
+
+    // Final verdict on the declared inheritance chains: with every module
+    // registered, each declared base must exist and must have been registered
+    // before its derived types (LuaBases<T, Bases...>, see LuaBindHelpers.h).
+    // Violations were already reported at the offending registration; this
+    // prints the summary line the smoke gate can rely on.
+    VerifyLuaBaseChains(*luaState_);
 }
 
 } // namespace Urho3D

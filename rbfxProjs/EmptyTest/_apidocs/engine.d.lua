@@ -32,6 +32,9 @@ function GetResource(typeName, resourceName) end
 function GetSubsystem(...) end
 function GetUIRoot(...) end
 function Lerp(...) end
+function LogError(...) end
+function LogInfo(...) end
+function LogWarning(...) end
 function Max(...) end
 function Min(...) end
 function Random(...) end
@@ -303,13 +306,16 @@ Color.r = nil
 
 ---@class Component : Serializable, Object
 Component = {}
+---@return Node
 function Component.GetNode(...) end
 function Component.IsEnabledEffective(...) end
 function Component.Remove(...) end
 function Component.SetEnabled(...) end
 Component.enabled = nil
 Component.id = nil
+---@type Node
 Component.node = nil
+---@type Scene
 Component.scene = nil
 
 ---@class Connection : Object
@@ -478,7 +484,7 @@ function CrowdManager.SetMaxAgentRadius(...) end
 function CrowdManager.SetMaxAgents(...) end
 function CrowdManager.SetObstacleAvoidanceParams(...) end
 
----@class Cursor : UIElement, Serializable, Object
+---@class Cursor : BorderImage, UIElement, Serializable, Object
 Cursor = {}
 
 ---@class DebugRenderer : Component, Serializable, Object
@@ -510,7 +516,7 @@ Drawable2D = {}
 function Drawable2D.SetLayer(...) end
 function Drawable2D.SetOrderInLayer(...) end
 
----@class DropDownList : BorderImage, UIElement, Serializable, Object
+---@class DropDownList : Button, BorderImage, UIElement, Serializable, Object
 DropDownList = {}
 function DropDownList.AddItem(...) end
 function DropDownList.GetItem(...) end
@@ -794,7 +800,7 @@ function Light.SetShadowNearFarRatio(...) end
 function Light.SetShadowResolution(...) end
 function Light.SetSpecularIntensity(...) end
 
----@class LineEdit : UIElement, Serializable, Object
+---@class LineEdit : BorderImage, UIElement, Serializable, Object
 LineEdit = {}
 ---@return string
 function LineEdit.GetText(...) end

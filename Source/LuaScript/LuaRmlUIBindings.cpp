@@ -21,6 +21,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Graphics/Texture2D.h"
@@ -261,7 +262,7 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
     // RmlUI subsystem (master instance reachable through GetSubsystem("RmlUI")).
     lua.new_usertype<RmlUI>("RmlUI",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<RmlUI, Object>::bases(lua),
         "SetDebuggerVisible", &RmlUI::SetDebuggerVisible,
         "IsDebuggerVisible", &RmlUI::IsDebuggerVisible,
         "LoadFont", [](RmlUI* ui, const char* font, sol::optional<bool> fallback) -> bool {
@@ -278,7 +279,7 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
     // RmlCanvasComponent: renders an off-screen RmlUI into a texture (windows on 3D objects).
     lua.new_usertype<RmlCanvasComponent>("RmlCanvasComponent",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RmlCanvasComponent, Component, Serializable, Object>::bases(lua),
         "SetUISize", &RmlCanvasComponent::SetUISize,
         "SetTexture", &RmlCanvasComponent::SetTexture,
         "GetTexture", &RmlCanvasComponent::GetTexture,
@@ -293,7 +294,7 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
     // before the derived trampoline because sol3 requires base usertypes to exist first.
     lua.new_usertype<RmlUIComponent>("RmlUIComponent",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RmlUIComponent, Component, Serializable, Object>::bases(lua),
         "SetResource", [](RmlUIComponent* component, const char* path) {
             if (component)
                 component->SetResource(ea::string(path));
@@ -318,7 +319,7 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
     // The Lua-facing trampoline. Adds the handler/data-model surface on top of the base.
     lua.new_usertype<LuaRmlUIComponent>("LuaRmlUIComponent",
         sol::no_constructor,
-        sol::base_classes, sol::bases<RmlUIComponent, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<LuaRmlUIComponent, RmlUIComponent, Component, Serializable, Object>::bases(lua),
         "SetHandlers", &LuaRmlUIComponent::SetHandlers,
         "BindProperty", &LuaRmlUIComponent::BindProperty,
         "BindReadonlyProperty", &LuaRmlUIComponent::BindReadonlyProperty,

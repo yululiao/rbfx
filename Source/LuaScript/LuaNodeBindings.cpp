@@ -61,7 +61,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
         sol::no_constructor,
         // Full chain to Object: sol3 type casts (e.g. event senders passed
         // as Object*) only match the directly declared bases.
-        sol::base_classes, sol::bases<Serializable, Object>(),
+        sol::base_classes, LuaBases<Node, Serializable, Object>::bases(lua),
         sol::meta_function::equal_to, [](Node* a, Node* b) { return a == b; },
         sol::meta_function::to_string, [](Node* node) -> std::string {
             return "Node: " + std::string(node->GetName().c_str());
@@ -153,27 +153,43 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             if (node) node->LookAt(target, up, static_cast<TransformSpace>(space)); },
 
         // Hierarchy
-        "parent", sol::readonly_property([](Node* node) -> Node* { return node ? node->GetParent() : nullptr; }),
+        "parent", sol::readonly_property([](Node* node, sol::this_state s) -> sol::object {
+            return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->GetParent()) : sol::lua_nil;
+        }),
         "SetParent", NullChecked(&Node::SetParent),
-        "scene", sol::readonly_property([](Node* node) -> Scene* { return node ? node->GetScene() : nullptr; }),
+        "scene", sol::readonly_property([](Node* node, sol::this_state s) -> sol::object {
+            return node ? WrapLuaObjectAs<Scene>(sol::state_view(s), node->GetScene()) : sol::lua_nil;
+        }),
         "numChildren", sol::readonly_property([](Node* node) -> unsigned { return node ? node->GetNumChildren() : 0; }),
         "numComponents", sol::readonly_property([](Node* node) -> unsigned { return node ? node->GetNumComponents() : 0; }),
         "CreateChild", sol::overload(
-            [](Node* node, const char* name) -> SharedPtr<Node> { return node ? SharedPtr<Node>(node->CreateChild(name)) : nullptr; },
-            [](Node* node) -> SharedPtr<Node> { return node ? SharedPtr<Node>(node->CreateChild()) : nullptr; }),
+            [](Node* node, const char* name, sol::this_state s) -> sol::object {
+                return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->CreateChild(name)) : sol::lua_nil;
+            },
+            [](Node* node, sol::this_state s) -> sol::object {
+                return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->CreateChild()) : sol::lua_nil;
+            }),
         "AddChild", [](Node* node, Node* child) { if (node && child) node->AddChild(child); },
         "RemoveChild", [](Node* node, Node* child) { if (node) node->RemoveChild(child); },
         "RemoveAllChildren", NullChecked(&Node::RemoveAllChildren),
         "Remove", [](Node* node) { if (node) node->Remove(); },
-        "Clone", [](Node* node) -> SharedPtr<Node> { return node ? SharedPtr<Node>(node->Clone()) : nullptr; },
+        "Clone", [](Node* node, sol::this_state s) -> sol::object {
+            return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->Clone()) : sol::lua_nil;
+        },
         // Instantiate a PrefabResource under this node (17_SceneReplication).
         "InstantiatePrefab", [](Node* node, PrefabResource* prefab, const Vector3& position,
-            const Quaternion& rotation) -> Node* {
-            return (node && prefab) ? node->InstantiatePrefab(prefab, position, rotation) : nullptr;
+            const Quaternion& rotation, sol::this_state s) -> sol::object {
+            return (node && prefab)
+                ? WrapLuaObjectAs<Node>(sol::state_view(s), node->InstantiatePrefab(prefab, position, rotation))
+                : sol::lua_nil;
         },
         "GetChild", sol::overload(
-            [](Node* node, const char* name) -> Node* { return node ? node->GetChild(StringHash(name)) : nullptr; },
-            [](Node* node, const char* name, bool recursive) -> Node* { return node ? node->GetChild(StringHash(name), recursive) : nullptr; }),
+            [](Node* node, const char* name, sol::this_state s) -> sol::object {
+                return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->GetChild(StringHash(name))) : sol::lua_nil;
+            },
+            [](Node* node, const char* name, bool recursive, sol::this_state s) -> sol::object {
+                return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->GetChild(StringHash(name), recursive)) : sol::lua_nil;
+            }),
         "GetChildren", [](Node* node, sol::optional<bool> recursive, sol::this_state s) -> sol::object {
             if (!node)
                 return sol::lua_nil;
@@ -317,7 +333,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             {
                 unsigned index = 1;
                 for (Node* child : node->GetChildrenWithTag(tag))
-                    result[index++] = child;
+                    result[index++] = WrapLuaObject(lua, child);
             }
             return result;
         },
@@ -333,7 +349,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<Scene>("Scene",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Node, Serializable, Object>(),
+        sol::base_classes, LuaBases<Scene, Node, Serializable, Object>::bases(lua),
 
         // Instantiate a prefab XML resource under the scene.
         "InstantiateXML", [context](Scene* scene, const char* resourceName, const Vector3& position, const Quaternion& rotation, sol::this_state s) -> sol::object {
@@ -352,8 +368,8 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             XMLFile* xml = cache->GetResource<XMLFile>(resourceName);
             return xml && scene->LoadXML(xml->GetRoot());
         },
-        "GetChildByIndex", [](Scene* scene, unsigned index) -> Node* {
-            return scene ? scene->GetChild(index) : nullptr;
+        "GetChildByIndex", [](Scene* scene, unsigned index, sol::this_state s) -> sol::object {
+            return scene ? WrapLuaObjectAs<Node>(sol::state_view(s), scene->GetChild(index)) : sol::lua_nil;
         },
         // In-memory save/load used by the 2D samples' reload feature
         // (49_Urho2DIsometricDemo).
@@ -375,14 +391,20 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<Component>("Component",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Serializable, Object>(),
+        sol::base_classes, LuaBases<Component, Serializable, Object>::bases(lua),
         sol::meta_function::equal_to, [](Component* a, Component* b) { return a == b; },
         sol::meta_function::to_string, [](Component* component) -> std::string {
             return "Component: " + std::string(component->GetTypeName().c_str());
         },
-        "node", sol::readonly_property(&Component::GetNode),
-        "GetNode", &Component::GetNode,
-        "scene", sol::readonly_property(&Component::GetScene),
+        "node", sol::readonly_property([](Component* component, sol::this_state s) -> sol::object {
+            return component ? WrapLuaObjectAs<Node>(sol::state_view(s), component->GetNode()) : sol::lua_nil;
+        }),
+        "GetNode", [](Component* component, sol::this_state s) -> sol::object {
+            return component ? WrapLuaObjectAs<Node>(sol::state_view(s), component->GetNode()) : sol::lua_nil;
+        },
+        "scene", sol::readonly_property([](Component* component, sol::this_state s) -> sol::object {
+            return component ? WrapLuaObjectAs<Scene>(sol::state_view(s), component->GetScene()) : sol::lua_nil;
+        }),
         "id", sol::readonly_property(&Component::GetID),
         "enabled", sol::property(
             &Component::IsEnabled,
@@ -395,7 +417,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<PrefabReference>("PrefabReference",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<PrefabReference, Component, Serializable, Object>::bases(lua),
         "SetPrefab", [context](PrefabReference* prefab, const char* resourceName) {
             if (!prefab)
                 return;
@@ -412,12 +434,6 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
     );
     RegisterLuaObjectWrapper<PrefabReference>();
 
-    // PrefabResource: instanced scene fragment, consumed by PrefabReference.
-    lua.new_usertype<PrefabResource>("PrefabResource",
-        sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
-    );
-    RegisterLuaObjectWrapper<PrefabResource>();
     lua.new_usertype<ValueAnimation>("ValueAnimation",
         sol::call_constructor, sol::factories([context]() {
             return SharedPtr<ValueAnimation>(new ValueAnimation(context));

@@ -11,7 +11,7 @@ function app:OnStart()
     assert(socket, "require(\"socket\") returned nil")
 
     -- 2. The C core reports its version through the preloaded table.
-    print("socket._VERSION = " .. tostring(socket._VERSION))
+    LogInfo("socket._VERSION = " .. tostring(socket._VERSION))
 
     -- 3. The embedded socket.lua wrapper must be expanded on top of the core:
     --    these are the functions that only exist in the Lua-level module.
@@ -45,7 +45,7 @@ function app:OnStart()
     client:close()
     server:close()
 
-    print("LuaSocket smoke test PASSED: require, wrapper, mime.core and TCP loopback all OK")
+    LogInfo("LuaSocket smoke test PASSED: require, wrapper, mime.core and TCP loopback all OK")
 
     GetSubsystem("Engine"):Exit()
 end

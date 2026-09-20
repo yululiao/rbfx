@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Graphics/AnimatedModel.h"
@@ -139,7 +140,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Graphics subsystem: window & device queries.
     lua.new_usertype<Graphics>("Graphics",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Graphics, Object>::bases(lua),
         "GetWidth", &Graphics::GetWidth,
         "GetHeight", &Graphics::GetHeight,
         "SetWindowTitle", &Graphics::SetWindowTitle,
@@ -164,7 +165,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // RenderDevice: low-level window state queries (54_WindowSettingsDemo).
     lua.new_usertype<RenderDevice>("RenderDevice",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<RenderDevice, Object>::bases(lua),
         "GetWindowSettings", [](RenderDevice* device, sol::this_state s) -> sol::table {
             return WindowSettingsToTable(sol::state_view(s),
                 device ? device->GetWindowSettings() : WindowSettings{});
@@ -215,7 +216,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         sol::no_constructor,
         // Full chain: sol3 type casts (e.g. to Object*) only check the
         // directly declared bases.
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<Image, Resource, Object>::bases(lua),
         "GetWidth", &Image::GetWidth,
         "GetHeight", &Image::GetHeight,
         "GetComponents", &Image::GetComponents,
@@ -234,7 +235,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Renderer subsystem: viewport management.
     lua.new_usertype<Renderer>("Renderer",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Renderer, Object>::bases(lua),
         "SetViewport", &Renderer::SetViewport,
         "GetViewport", &Renderer::GetViewport,
         "GetNumViewports", &Renderer::GetNumViewports,
@@ -249,7 +250,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Camera component.
     lua.new_usertype<Camera>("Camera",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Camera, Component, Serializable, Object>::bases(lua),
         "SetFarClip", &Camera::SetFarClip,
         "SetNearClip", &Camera::SetNearClip,
         "SetFov", &Camera::SetFov,
@@ -287,7 +288,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // components because sol3 requires base usertypes to exist first.
     lua.new_usertype<Drawable>("Drawable",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Drawable, Component, Serializable, Object>::bases(lua),
         "SetCastShadows", &Drawable::SetCastShadows,
         "SetOccluder", &Drawable::SetOccluder,
         "GetWorldBoundingBox", [](Drawable* drawable) { return drawable ? drawable->GetWorldBoundingBox() : BoundingBox(); },
@@ -300,7 +301,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Light component.
     lua.new_usertype<Light>("Light",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Light, Drawable, Component, Serializable, Object>::bases(lua),
         "SetLightType", &Light::SetLightType,
         "SetColor", &Light::SetColor,
         "SetBrightness", &Light::SetBrightness,
@@ -340,7 +341,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // class; Texture2D exists for GetResource("Texture2D", ...) resolution.
     lua.new_usertype<Texture>("Texture",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<Texture, Resource, Object>::bases(lua),
         "GetWidth", &Texture::GetWidth,
         "GetHeight", &Texture::GetHeight,
         "SetFilterMode", [](Texture* texture, int mode) {
@@ -356,7 +357,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     lua.new_usertype<Texture2D>("Texture2D",
         sol::call_constructor, sol::factories(
             [context]() { return SharedPtr<Texture2D>(new Texture2D(context)); }),
-        sol::base_classes, sol::bases<Texture, Resource, Object>(),
+        sol::base_classes, LuaBases<Texture2D, Texture, Resource, Object>::bases(lua),
         "SetSize", [](Texture2D* texture, int width, int height, unsigned format,
             sol::optional<unsigned> flags, sol::optional<int> multiSample) -> bool {
             if (!texture)
@@ -377,7 +378,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Technique: shader pipeline description resource.
     lua.new_usertype<Technique>("Technique",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<Technique, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Technique>();
 
@@ -385,7 +386,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     lua.new_usertype<Model>("Model",
         sol::call_constructor, sol::factories(
             [context]() { return SharedPtr<Model>(new Model(context)); }),
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<Model, Resource, Object>::bases(lua),
         "SetNumGeometries", &Model::SetNumGeometries,
         "SetGeometry", &Model::SetGeometry,
         "SetBoundingBox", &Model::SetBoundingBox,
@@ -433,7 +434,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     lua.new_usertype<Material>("Material",
         sol::call_constructor, sol::factories(
             [context]() { return SharedPtr<Material>(new Material(context)); }),
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<Material, Resource, Object>::bases(lua),
         "SetShaderParameter", [](Material* material, const char* name, sol::object value, sol::this_state s) {
             if (material)
                 material->SetShaderParameter(name, LuaToVariant(sol::state_view(s), value));
@@ -492,7 +493,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<StaticModel>("StaticModel",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
         "SetModel", &StaticModel::SetModel,
         "GetModel", &StaticModel::GetModel,
         "SetMaterial", sol::overload(
@@ -506,7 +507,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // supplying its transform (20_HugeObjectCount).
     lua.new_usertype<StaticModelGroup>("StaticModelGroup",
         sol::no_constructor,
-        sol::base_classes, sol::bases<StaticModel, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<StaticModelGroup, StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
         "AddInstanceNode", &StaticModelGroup::AddInstanceNode,
         "RemoveInstanceNode", &StaticModelGroup::RemoveInstanceNode,
         "GetNumInstanceNodes", &StaticModelGroup::GetNumInstanceNodes,
@@ -517,7 +518,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // RibbonTrail: trail rendered behind a moving node (44_RibbonTrailDemo).
     lua.new_usertype<RibbonTrail>("RibbonTrail",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RibbonTrail, Drawable, Component, Serializable, Object>::bases(lua),
         "SetWidth", &RibbonTrail::SetWidth,
         "SetStartColor", &RibbonTrail::SetStartColor,
         "SetEndColor", &RibbonTrail::SetEndColor,
@@ -653,7 +654,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Text3D: text component in world space (32_Physics2DConstraints).
     lua.new_usertype<Text3D>("Text3D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Text3D, Drawable, Component, Serializable, Object>::bases(lua),
         "SetText", [](Text3D* text, const char* value) {
             if (text)
                 text->SetText(value);
@@ -673,14 +674,14 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Skybox: default environment backdrop used by most samples.
     lua.new_usertype<Skybox>("Skybox",
         sol::no_constructor,
-        sol::base_classes, sol::bases<StaticModel, Drawable, Component, Serializable, Object>()
+        sol::base_classes, LuaBases<Skybox, StaticModel, Drawable, Component, Serializable, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Skybox>();
 
     // Octree: mandatory scene component for visibility.
     lua.new_usertype<Octree>("Octree",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Octree, Component, Serializable, Object>::bases(lua),
         // Raycast helper: triangle-accurate single query returning a table
         // { position, normal, distance, drawable } or nil on miss.
         "RaycastSingle", [](Octree* octree, const Ray& ray, float maxDistance,
@@ -707,7 +708,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Zone: ambient & fog settings.
     lua.new_usertype<Zone>("Zone",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Zone, Drawable, Component, Serializable, Object>::bases(lua),
         "SetBoundingBox", &Zone::SetBoundingBox,
         "SetAmbientColor", &Zone::SetAmbientColor,
         "SetFogColor", &Zone::SetFogColor,
@@ -721,7 +722,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Animation resource: skeleton keyframe track data.
     lua.new_usertype<Animation>("Animation",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<Animation, Resource, Object>::bases(lua),
         "GetLength", &Animation::GetLength,
         "GetAnimationName", &Animation::GetAnimationName
     );
@@ -733,7 +734,9 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         sol::no_constructor,
         "name", [](const Bone* bone) { return bone ? bone->name_ : ea::string(); },
         "animated", &Bone::animated_,
-        "node", [](Bone* bone) -> Node* { return bone ? bone->node_.Get() : nullptr; }
+        "node", [](Bone* bone, sol::this_state s) -> sol::object {
+            return bone ? WrapLuaObjectAs<Node>(sol::state_view(s), bone->node_.Get()) : sol::lua_nil;
+        }
     );
 
     // Skeleton: bone collection of an AnimatedModel.
@@ -753,7 +756,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // inherited from StaticModel / Drawable.
     lua.new_usertype<AnimatedModel>("AnimatedModel",
         sol::no_constructor,
-        sol::base_classes, sol::bases<StaticModel, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<AnimatedModel, StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
         "SetUpdateInvisible", &AnimatedModel::SetUpdateInvisible,
         "GetSkeleton", [](AnimatedModel* model) -> Skeleton* {
             return model ? &model->GetSkeleton() : nullptr;
@@ -765,7 +768,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // flattened into optional positional arguments for Lua.
     lua.new_usertype<AnimationController>("AnimationController",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<AnimationController, Component, Serializable, Object>::bases(lua),
         "PlayNew", [](AnimationController* controller, Animation* animation,
             sol::optional<bool> looped, sol::optional<float> time,
             sol::optional<float> speed, sol::optional<float> fadeInTime) {
@@ -850,7 +853,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // sibling CollisionShape:SetTerrain (19_VehicleDemo).
     lua.new_usertype<Terrain>("Terrain",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Terrain, Component, Serializable, Object>::bases(lua),
         "SetPatchSize", &Terrain::SetPatchSize,
         "SetSpacing", &Terrain::SetSpacing,
         "SetSmoothing", &Terrain::SetSmoothing,
@@ -876,7 +879,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // BillboardSet: particle-like quads facing the camera.
     lua.new_usertype<BillboardSet>("BillboardSet",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<BillboardSet, Drawable, Component, Serializable, Object>::bases(lua),
         "SetNumBillboards", &BillboardSet::SetNumBillboards,
         "GetNumBillboards", &BillboardSet::GetNumBillboards,
         "SetMaterial", &BillboardSet::SetMaterial,
@@ -890,14 +893,14 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // ParticleEmitter:SetEffect.
     lua.new_usertype<ParticleEffect>("ParticleEffect",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<ParticleEffect, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<ParticleEffect>();
 
     // ParticleEmitter: 3D particle effect emitter (46_RaycastVehicle dust).
     lua.new_usertype<ParticleEmitter>("ParticleEmitter",
         sol::no_constructor,
-        sol::base_classes, sol::bases<BillboardSet, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ParticleEmitter, BillboardSet, Drawable, Component, Serializable, Object>::bases(lua),
         "SetEffect", &ParticleEmitter::SetEffect,
         "SetEmitting", &ParticleEmitter::SetEmitting,
         "IsEmitting", &ParticleEmitter::IsEmitting
@@ -907,7 +910,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // DecalSet: paint decals onto drawable geometry (08_Decals).
     lua.new_usertype<DecalSet>("DecalSet",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<DecalSet, Drawable, Component, Serializable, Object>::bases(lua),
         "SetMaterial", &DecalSet::SetMaterial,
         "AddDecal", &DecalSet::AddDecal,
         "RemoveDecals", &DecalSet::RemoveDecals,
@@ -918,7 +921,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Viewport: render setup combining scene + camera.
     lua.new_usertype<Viewport>("Viewport",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Viewport, Object>::bases(lua),
         "SetScene", &Viewport::SetScene,
         "SetCamera", &Viewport::SetCamera,
         "SetRect", &Viewport::SetRect,
@@ -929,7 +932,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // DebugRenderer: programmatic debug drawing.
     lua.new_usertype<DebugRenderer>("DebugRenderer",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<DebugRenderer, Component, Serializable, Object>::bases(lua),
         "AddLine", [](DebugRenderer* debug, const Vector3& start, const Vector3& end, const Color& color) {
             if (debug) debug->AddLine(start, end, color);
         },

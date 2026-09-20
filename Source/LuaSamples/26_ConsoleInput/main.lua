@@ -27,10 +27,11 @@ app.numTurns = 0
 app.hunger = 2
 app.urhoThreat = 0
 
--- Logging appears both in the engine console and stdout (print() is redirected
--- into the engine log by the VM, matching every other sample's logging path).
+-- LogInfo reaches the on-screen console AND the per-sample log file.
+-- (Plain print() is NOT redirected anywhere: the runner is a windowed app, so
+-- its stdout is discarded -- use LogInfo/LogWarning/LogError instead.)
 local function Print(output)
-    print(output)
+    LogInfo(output)
 end
 
 function app:OnStart()

@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Math/Ray.h"
@@ -40,7 +41,7 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // PhysicsWorld: simulation setup and ray queries.
     lua.new_usertype<PhysicsWorld>("PhysicsWorld",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<PhysicsWorld, Component, Serializable, Object>::bases(lua),
         "SetGravity", &PhysicsWorld::SetGravity,
         "GetGravity", &PhysicsWorld::GetGravity,
         "SetFps", &PhysicsWorld::SetFps,
@@ -76,7 +77,7 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // RigidBody: mass properties, velocities, forces.
     lua.new_usertype<RigidBody>("RigidBody",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RigidBody, Component, Serializable, Object>::bases(lua),
         "SetMass", &RigidBody::SetMass,
         // Debug visualization of the collision shape (46_RaycastVehicle).
         "DrawDebugGeometry", &RigidBody::DrawDebugGeometry,
@@ -127,7 +128,7 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // lambdas so Lua calls stay short: shape:SetBox(Vector3(2,2,2)).
     lua.new_usertype<CollisionShape>("CollisionShape",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionShape, Component, Serializable, Object>::bases(lua),
         "SetBox", [](CollisionShape* shape, const Vector3& size, sol::optional<Vector3> position,
             sol::optional<Quaternion> rotation) {
             if (shape)
@@ -179,7 +180,7 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // Node:CreateComponent and configure themselves via attributes.
     lua.new_usertype<Constraint>("Constraint",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Constraint, Component, Serializable, Object>::bases(lua),
         "SetOtherBody", &Constraint::SetOtherBody,
         "SetPosition", &Constraint::SetPosition,
         "SetRotation", &Constraint::SetRotation,
@@ -203,7 +204,7 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // child nodes and self-register with the vehicle.
     lua.new_usertype<RaycastVehicle>("RaycastVehicle",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RaycastVehicle, Component, Serializable, Object>::bases(lua),
         "Init", &RaycastVehicle::Init,
         "UpdateInput", &RaycastVehicle::UpdateInput,
         "ResetWheels", &RaycastVehicle::ResetWheels,
@@ -226,7 +227,7 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // parameters (46_RaycastVehicle Vehicle component).
     lua.new_usertype<RaycastVehicleWheel>("RaycastVehicleWheel",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RaycastVehicleWheel, Component, Serializable, Object>::bases(lua),
         "SetConnectionPoint", &RaycastVehicleWheel::SetConnectionPoint,
         "GetConnectionPoint", &RaycastVehicleWheel::GetConnectionPoint,
         "SetDirection", &RaycastVehicleWheel::SetDirection,

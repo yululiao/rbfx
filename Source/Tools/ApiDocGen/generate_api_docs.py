@@ -345,6 +345,18 @@ def _resolve_cpp_type(seg):
     return ids[-1] if ids else None      # std::string -> 'string', Vector3 -> 'Vector3'
 
 
+def _wrap_lua_object_as(toks):
+    """Recover the Lua-facing type of a cached object accessor: the lambda
+    returns sol::object (the identity-cache wrapper, not nameable as a trailing
+    return), so the intended type rides on WrapLuaObjectAs<X>(...) in the body."""
+    n = len(toks)
+    for i in range(n - 1):
+        if toks[i] == ('id', 'WrapLuaObjectAs') and toks[i + 1] == ('punct', '<'):
+            end = skip_balanced(toks, i + 1, '<', '>')
+            return _resolve_cpp_type(toks[i + 2:end - 1])
+    return None
+
+
 def extract_return_base(toks):
     """Return the C++ *simple* name of a lambda's trailing return type, e.g.
     `-> Scene*` -> 'Scene', `-> std::string` -> 'string', `-> SharedPtr<Node>` -> 'Node'.
@@ -370,7 +382,15 @@ def extract_return_base(toks):
             return None                  # function-pointer / parenthesized declarator
         seg.append((k, v))
         j += 1
-    return _resolve_cpp_type(seg)
+    base = _resolve_cpp_type(seg)
+    if base in (None, 'object'):
+        # Cached object accessors push sol::object; recover the Lua-facing type
+        # from WrapLuaObjectAs<X>(...) so routing an accessor through the
+        # identity cache does not drop its ---@type / ---@return annotation.
+        wrapped = _wrap_lua_object_as(toks)
+        if wrapped:
+            return wrapped
+    return base
 
 
 def cpp_to_lua_type(base, exported):

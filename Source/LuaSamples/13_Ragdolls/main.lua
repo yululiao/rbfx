@@ -43,7 +43,7 @@ local CONSTRAINTS = {
 local function CreateRagdollBone(rootNode, def)
     local boneNode = rootNode:GetChild(def[1], true)
     if not boneNode then
-        print("Could not find bone " .. def[1] .. " for creating ragdoll physics components")
+        LogError("Could not find bone " .. def[1] .. " for creating ragdoll physics components")
         return
     end
 
@@ -72,7 +72,7 @@ local function CreateRagdollConstraint(rootNode, def)
     local boneNode = rootNode:GetChild(def[1], true)
     local parentNode = rootNode:GetChild(def[2], true)
     if not boneNode or not parentNode then
-        print("Could not find bones " .. def[1] .. "/" .. def[2] .. " for creating ragdoll constraint")
+        LogError("Could not find bones " .. def[1] .. "/" .. def[2] .. " for creating ragdoll constraint")
         return
     end
 

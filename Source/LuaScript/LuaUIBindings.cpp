@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/Log.h"
@@ -66,7 +67,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // through UIElement::CreateChild and stay usable via attribute reflection.
     lua.new_usertype<UIElement>("UIElement",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Serializable, Object>(),
+        sol::base_classes, LuaBases<UIElement, Serializable, Object>::bases(lua),
         // sol3 resolves base-class members only one level deep, so widgets
         // derived from BorderImage must list the full chain to also reach
         // UIElement's methods (02_HelloGUI SetMinWidth, 16_Chat SetStyleAuto).
@@ -262,7 +263,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Font resource: only a type marker, consumed by Text:SetFont.
     lua.new_usertype<Font>("Font",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<Font, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Font>();
 
@@ -272,7 +273,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
         sol::call_constructor, sol::factories([context]() {
             return SharedPtr<Text>(new Text(context));
         }),
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<Text, UIElement, Serializable, Object>::bases(lua),
         "SetText", [](Text* text, const char* value) {
             if (text)
                 text->SetText(value);
@@ -309,22 +310,10 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     te["SHADOW"] = TE_SHADOW;
     te["STROKE"] = TE_STROKE;
 
-    // LineEdit: single-line text input with TextFinished event (16_Chat).
-    lua.new_usertype<LineEdit>("LineEdit",
-        sol::no_constructor,
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>(),
-        "SetText", [](LineEdit* edit, const char* value) {
-            if (edit)
-                edit->SetText(value);
-        },
-        "GetText", [](LineEdit* edit) -> const char* { return edit ? edit->GetText().c_str() : ""; }
-    );
-    RegisterLuaObjectWrapper<LineEdit>();
-
     // BorderImage: textured widget base.
     lua.new_usertype<BorderImage>("BorderImage",
         sol::no_constructor,
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<BorderImage, UIElement, Serializable, Object>::bases(lua),
         "SetTexture", &BorderImage::SetTexture,
         "GetTexture", &BorderImage::GetTexture,
         "SetBlendMode", [](BorderImage* image, int mode) {
@@ -340,14 +329,27 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Button: styled through SetStyle("Button") + released/pressed events.
     lua.new_usertype<Button>("Button",
         sol::no_constructor,
-        sol::base_classes, sol::bases<BorderImage, UIElement, Serializable, Object>()
+        sol::base_classes, LuaBases<Button, BorderImage, UIElement, Serializable, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Button>();
+
+    // LineEdit: single-line text input with TextFinished event (16_Chat).
+    // Registered after BorderImage, which its LuaBases chain requires.
+    lua.new_usertype<LineEdit>("LineEdit",
+        sol::no_constructor,
+        sol::base_classes, LuaBases<LineEdit, BorderImage, UIElement, Serializable, Object>::bases(lua),
+        "SetText", [](LineEdit* edit, const char* value) {
+            if (edit)
+                edit->SetText(value);
+        },
+        "GetText", [](LineEdit* edit) -> const char* { return edit ? edit->GetText().c_str() : ""; }
+    );
+    RegisterLuaObjectWrapper<LineEdit>();
 
     // Window: draggable container with optional modality.
     lua.new_usertype<Window>("Window",
         sol::no_constructor,
-        sol::base_classes, sol::bases<BorderImage, UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<Window, BorderImage, UIElement, Serializable, Object>::bases(lua),
         "SetModal", &Window::SetModal,
         "SetMovable", &Window::SetMovable
     );
@@ -356,7 +358,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // CheckBox: two-state toggle widget (14_SoundEffects).
     lua.new_usertype<CheckBox>("CheckBox",
         sol::no_constructor,
-        sol::base_classes, sol::bases<BorderImage, UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<CheckBox, BorderImage, UIElement, Serializable, Object>::bases(lua),
         "SetChecked", &CheckBox::SetChecked,
         "IsChecked", &CheckBox::IsChecked
     );
@@ -365,7 +367,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Slider: float value in a range, fires SliderChanged events.
     lua.new_usertype<Slider>("Slider",
         sol::no_constructor,
-        sol::base_classes, sol::bases<BorderImage, UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<Slider, BorderImage, UIElement, Serializable, Object>::bases(lua),
         "SetRange", &Slider::SetRange,
         "SetValue", &Slider::SetValue,
         "GetValue", &Slider::GetValue
@@ -375,7 +377,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // DropDownList: item picker with a popup list (14_SoundEffects).
     lua.new_usertype<DropDownList>("DropDownList",
         sol::no_constructor,
-        sol::base_classes, sol::bases<BorderImage, UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<DropDownList, Button, BorderImage, UIElement, Serializable, Object>::bases(lua),
         "AddItem", &DropDownList::AddItem,
         "RemoveAllItems", &DropDownList::RemoveAllItems,
         "SetSelection", [](DropDownList* list, double index) {
@@ -392,7 +394,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // ListView: scrollable item list (47_Typography, 54_WindowSettings).
     lua.new_usertype<ListView>("ListView",
         sol::no_constructor,
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<ListView, UIElement, Serializable, Object>::bases(lua),
         "AddItem", &ListView::AddItem,
         "RemoveAllItems", &ListView::RemoveAllItems,
         "SetSelection", [](ListView* list, double index) {
@@ -413,14 +415,14 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // ToolTip: hover help container attached to a widget (48_Hello3DUI).
     lua.new_usertype<ToolTip>("ToolTip",
         sol::no_constructor,
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>()
+        sol::base_classes, LuaBases<ToolTip, UIElement, Serializable, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<ToolTip>();
 
     // Sprite: textured quad for 2D overlay work (18_Urho2DSprite).
     lua.new_usertype<Sprite>("Sprite",
         sol::no_constructor,
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>(),
+        sol::base_classes, LuaBases<Sprite, UIElement, Serializable, Object>::bases(lua),
         "SetTexture", &Sprite::SetTexture,
         "SetImageRect", &Sprite::SetImageRect,
         "SetBlendMode", [](Sprite* sprite, int mode) {
@@ -450,14 +452,14 @@ void RegisterUIBindings(sol::state& lua, Context* context)
         sol::call_constructor, sol::factories([context]() {
             return SharedPtr<Cursor>(new Cursor(context));
         }),
-        sol::base_classes, sol::bases<UIElement, Serializable, Object>()
+        sol::base_classes, LuaBases<Cursor, BorderImage, UIElement, Serializable, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Cursor>();
 
     // UI subsystem: root element access and global scale.
     lua.new_usertype<UI>("UI",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<UI, Object>::bases(lua),
         "GetRoot", &UI::GetRoot,
         "GetRootModalElement", &UI::GetRootModalElement,
         "GetFocusElement", &UI::GetFocusElement,
@@ -503,7 +505,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // parameter name.
     lua.new_usertype<Console>("Console",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Console, Object>::bases(lua),
         "SetVisible", &Console::SetVisible,
         "Toggle", &Console::Toggle,
         "IsVisible", &Console::IsVisible,
@@ -519,7 +521,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // (48_Hello3DUI).
     lua.new_usertype<UIComponent>("UIComponent",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<UIComponent, Component, Serializable, Object>::bases(lua),
         "GetRoot", &UIComponent::GetRoot,
         "GetMaterial", &UIComponent::GetMaterial
     );

@@ -24,14 +24,8 @@ return M
 
 
 2.
-设计缺陷与风险
-手写、按需增长,覆盖率不完整且易漂移。绑定注释里大量出现 49/50_、17_、53_ 等示例编号(LuaNodeBindings.cpp),说明 API 面是「跑通哪个 sample 就补哪个」,而非单一真相源生成。引擎有数百个 URHO3D_OBJECT 类型,这里只注册了几十个 usertype。C++ 侧改签名时,Lua 面没有任何编译期一致性保证(lambdas 复制了签名),长期维护成本 O(API 面)且极易与引擎漂移。相比上游的 codegen,这是用可控性换掉了完整性保证。
-对象身份与生命周期不一致。已注册类型返回 SharedPtr<T>(强引用,会延长对象存活),未注册返回 LuaObjectRef(弱引用)。同一个对象可能以两种 Lua 表示出现;且每次 WrapLuaObject 都新建 userdata,没有缓存,所以 rawequal/作为 table key 的身份不可靠(他们用 __eq 按指针比较补了一半,但没补 hash 身份)。一个遗留的 Lua 引用可能把已从场景移除的节点「续命」。
-空指针静默兜底会掩盖 bug。方法普遍 node ? ... : 默认值(到处都是)。对已销毁/空对象访问返回 Vector3::ZERO 而不是抛 Lua error,脚本拿到的是「错误的值」而非「可追溯的报错」,调试体验差。
-Variant 转换有损且窄。LuaToVariant 只覆盖固定类型列表;矩阵、Rect、StringHash、数组/List 等一律静默变 Variant::EMPTY。SetVar/SetAttribute 传不支持的类型时不报错直接丢数据。
-动态属性查找 O(n)。FindAttribute 每次 index 访问都线性扫描属性表并对 key 做规范化(还分配 ea::string)。ObjectRef 密集型代码会明显偏慢。
-注册顺序的隐式耦合。必须手写完整 sol::base_classes 链、且「Resource 必须先于 Graphics」(LuaVM.cpp#L210-L214),顺序错/漏一个基类就静默破坏向上转型。没有从反射自动推导基类的机制。
-热路径性能一般。跨边界几乎全走 lambda;字符串 getter 每次分配;GetChildren/RaycastSingle 每次新建 Lua table;数学类型按值拷贝。对编辑器/脚本够用,但不是为每帧热点调用优化的。
+rbfx lua_binding剩余缺陷与风险
+三件事：base 链/顺序这个静默失效类的手工不变量、直推路径的身份分裂、以及 smoke 门(全量lua sampbes冒烟)起跑后报错不计 FAIL”这个可修的门禁缺口——前两个是结构性取舍
 
 
 剩余工作项：周更新一次

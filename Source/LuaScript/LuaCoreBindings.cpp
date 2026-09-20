@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Core/StringUtils.h"
@@ -43,6 +44,24 @@ ea::unordered_map<StringHash, LuaObjectCaster>& GetCasterRegistry()
 
 // Registry key holding the per-state object identity cache (a weak-valued table).
 constexpr const char* const sObjectCacheKey = "rbfx.luaObjectCache";
+
+// Registry key holding the per-state base-chain audit table: type hash ->
+// { [1] = registration sequence number, [2..] = declared base type hashes }.
+// Written by LuaBases<T, Bases...>::bases() (LuaBindHelpers.h) at registration
+// time; checked by VerifyLuaBaseChains() once every binding module has run.
+// Plain data (no weak semantics): it is tiny and dies with the state.
+constexpr const char* const sBaseChainKey = "rbfx.luaBaseChainAudit";
+
+// Registry key holding the per-state registration counter for the audit table
+// (the final audit distinguishes "base never registered" from "base registered
+// only after the derived type" via these sequence numbers).
+constexpr const char* const sBaseChainSeqKey = "rbfx.luaBaseChainSeq";
+
+// Registry key holding the per-state ancestry table: type hash -> array of
+// the type's URHO3D_OBJECT ancestor hashes (minus the type itself). The
+// startup audit demands that every ancestor that is itself a bound usertype
+// also appears in the type's declared base chain.
+constexpr const char* const sBaseHierarchyKey = "rbfx.luaBaseHierarchy";
 
 /// Get (or lazily build) the per-state object identity cache. It is a table keyed
 /// by an engine Object's address, mapping to the Lua wrapper already handed out for
@@ -82,6 +101,47 @@ sol::table GetObjectCache(sol::state_view lua)
     sol::table cache(sol::stack_reference(L, -1));
     lua_pop(L, 1);                         // pop cache
     return cache;
+}
+
+/// Monotonic per-state registration counter for the base-chain audit.
+lua_Integer NextBaseChainSequence(sol::state_view lua)
+{
+    lua_State* L = lua.lua_state();
+
+    lua_pushstring(L, sBaseChainSeqKey);
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    const lua_Integer next = (lua_isinteger(L, -1) ? lua_tointeger(L, -1) : 0) + 1;
+    lua_pop(L, 1);
+
+    lua_pushstring(L, sBaseChainSeqKey);
+    lua_pushinteger(L, next);
+    lua_settable(L, LUA_REGISTRYINDEX);
+    return next;
+}
+
+/// Get (or lazily build) a plain table stored in the Lua registry under `key`.
+sol::table GetRegistryTable(sol::state_view lua, const char* key)
+{
+    lua_State* L = lua.lua_state();
+
+    lua_pushstring(L, key);
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    if (lua_istable(L, -1))
+    {
+        sol::table table(sol::stack_reference(L, -1));
+        lua_pop(L, 1);
+        return table;
+    }
+    lua_pop(L, 1); // drop the nil lookup
+
+    lua_newtable(L);
+    lua_pushstring(L, key);
+    lua_pushvalue(L, -2);
+    lua_settable(L, LUA_REGISTRYINDEX);
+
+    sol::table table(sol::stack_reference(L, -1));
+    lua_pop(L, 1);
+    return table;
 }
 
 /// Lowercase a name and drop spaces so Lua keys map to engine attribute names
@@ -175,6 +235,132 @@ sol::object WrapLuaObject(sol::state_view lua, Object* object)
 
     cache[key] = wrapper;
     return wrapper;
+}
+
+sol::table GetLuaBaseChainTable(sol::state_view lua)
+{
+    return GetRegistryTable(lua, sBaseChainKey);
+}
+
+void RecordLuaBaseChain(sol::state_view lua, StringHash type,
+    const ea::vector<StringHash>& bases, const ea::vector<StringHash>& hierarchy)
+{
+    sol::table audit = GetLuaBaseChainTable(lua);
+    const lua_Integer key = static_cast<lua_Integer>(type.Value());
+
+    if (const sol::optional<sol::table> existing = audit.get<sol::optional<sol::table>>(key))
+    {
+        // The same usertype registered twice in one state is tolerated only
+        // while the declared chain is identical (a diverging second
+        // registration would leave sol3's wiring and the audit out of sync).
+        bool identical = existing->size() == bases.size() + 1;
+        for (unsigned i = 0; identical && i < bases.size(); ++i)
+        {
+            const sol::optional<lua_Integer> recorded = existing->get<sol::optional<lua_Integer>>(i + 2);
+            if (!recorded || static_cast<unsigned>(*recorded) != bases[i].Value())
+                identical = false;
+        }
+        if (!identical)
+            URHO3D_LOGERROR("Lua bindings: usertype '{}' registered twice with different base "
+                            "chains; keep exactly one new_usertype registration per type",
+                            type.ToDebugString().c_str());
+        return;
+    }
+
+    sol::table chain = lua.create_table(static_cast<unsigned>(bases.size()) + 1, 0);
+    chain[1] = NextBaseChainSequence(lua);
+    for (unsigned i = 0; i < bases.size(); ++i)
+        chain[i + 2] = static_cast<lua_Integer>(bases[i].Value());
+    audit[key] = chain;
+
+    // Full URHO3D_OBJECT ancestry (minus the type itself) for the startup
+    // audit: every ancestor that ends up bound must also be declared.
+    sol::table ancestors = lua.create_table(static_cast<unsigned>(hierarchy.size()), 0);
+    for (unsigned i = 0; i < hierarchy.size(); ++i)
+        ancestors[i + 1] = static_cast<lua_Integer>(hierarchy[i].Value());
+    GetRegistryTable(lua, sBaseHierarchyKey)[key] = ancestors;
+}
+
+void VerifyLuaBaseChains(sol::state_view lua)
+{
+    sol::table audit = GetLuaBaseChainTable(lua);
+
+    unsigned types = 0;
+    unsigned violations = 0;
+    for (auto& kv : audit)
+    {
+        ++types;
+        const auto typeHash = static_cast<unsigned>(kv.first.as<lua_Integer>());
+        const sol::table chain = kv.second.as<sol::table>();
+        const lua_Integer seq = chain.get<lua_Integer>(1);
+        const unsigned numBases = chain.size() - 1;
+        for (unsigned i = 0; i < numBases; ++i)
+        {
+            const auto baseHash = static_cast<unsigned>(chain.get<lua_Integer>(i + 2));
+            const sol::optional<sol::table> baseChain =
+                audit.get<sol::optional<sol::table>>(static_cast<lua_Integer>(baseHash));
+            if (!baseChain)
+            {
+                ++violations;
+                URHO3D_LOGERROR("Lua bindings: usertype {} declares base {} that is never registered "
+                                "in this Lua state -- the sol3 upcast to it is dead; bind the base "
+                                "before the derived type or drop it from the chain",
+                                StringHash{typeHash}.ToDebugString().c_str(),
+                                StringHash{baseHash}.ToDebugString().c_str());
+                continue;
+            }
+            if (baseChain->get<lua_Integer>(1) >= seq)
+            {
+                ++violations;
+                URHO3D_LOGERROR("Lua bindings: usertype {} was registered before its base {} -- the "
+                                "sol3 upcast to that base is dead; register base usertypes first",
+                                StringHash{typeHash}.ToDebugString().c_str(),
+                                StringHash{baseHash}.ToDebugString().c_str());
+            }
+        }
+    }
+
+    // Every BOUND ancestor of a registered type must appear in its declared
+    // chain: sol3 exposes base members only through declared bases, so a
+    // bound-but-undeclared ancestor's Lua members would be unreachable from
+    // the derived type. Ancestors that are not bound themselves carry no Lua
+    // members and may legitimately be skipped.
+    sol::table hierarchies = GetRegistryTable(lua, sBaseHierarchyKey);
+    for (auto& kv : hierarchies)
+    {
+        const auto typeHash = static_cast<unsigned>(kv.first.as<lua_Integer>());
+        const sol::table ancestors = kv.second.as<sol::table>();
+        const sol::optional<sol::table> declaredChain =
+            audit.get<sol::optional<sol::table>>(static_cast<lua_Integer>(typeHash));
+        if (!declaredChain)
+            continue; // unreachable: the declared chain is always recorded first
+
+        ea::unordered_set<unsigned> declared;
+        for (unsigned i = 2; i <= declaredChain->size(); ++i)
+            declared.insert(static_cast<unsigned>(declaredChain->get<lua_Integer>(i)));
+
+        const unsigned numAncestors = ancestors.size();
+        for (unsigned i = 1; i <= numAncestors; ++i)
+        {
+            const auto ancestorHash = static_cast<unsigned>(ancestors.get<lua_Integer>(i));
+            if (declared.find(ancestorHash) != declared.end())
+                continue;
+            const sol::optional<sol::table> boundAncestor =
+                audit.get<sol::optional<sol::table>>(static_cast<lua_Integer>(ancestorHash));
+            if (!boundAncestor)
+                continue;
+            ++violations;
+            URHO3D_LOGERROR("Lua bindings: bound ancestor {} of usertype {} is missing from its "
+                            "declared base chain -- the ancestor's Lua members are unreachable "
+                            "from {}; add the ancestor to LuaBases",
+                            StringHash{ancestorHash}.ToDebugString().c_str(),
+                            StringHash{typeHash}.ToDebugString().c_str(),
+                            StringHash{typeHash}.ToDebugString().c_str());
+        }
+    }
+
+    if (violations == 0)
+        URHO3D_LOGINFO("Lua bindings: inheritance chains verified for {} usertypes", types);
 }
 
 Variant LuaToVariant(sol::state_view lua, const sol::object& value)
@@ -334,6 +520,10 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // for types without dedicated usertype bindings.
     lua.new_usertype<Object>("Object",
         sol::no_constructor,
+        // Root of every chain: an empty base list (identical to sol3's default),
+        // but routed through LuaBases so the audit table records the root and
+        // derived types can verify their bases against it.
+        sol::base_classes, LuaBases<Object>::bases(lua),
         sol::meta_function::equal_to, [](Object* a, Object* b) { return a == b; },
         "GetTypeName", [](Object* object) -> std::string { return object->GetTypeName().c_str(); },
         "GetCategory", [](Object* object) -> std::string { return object->GetCategory().c_str(); },
@@ -344,7 +534,7 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // Serializable adds the attribute reflection channel.
     lua.new_usertype<Serializable>("Serializable",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Serializable, Object>::bases(lua),
         "GetAttribute", [&lua](Serializable* self, const char* name) -> sol::object {
             return self ? VariantToLua(lua, self->GetAttribute(name)) : sol::lua_nil;
         },
@@ -473,7 +663,7 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // Engine: run control and engine-wide queries.
     lua.new_usertype<Engine>("Engine",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Engine, Object>::bases(lua),
         "Exit", &Engine::Exit,
         "DumpResources", &Engine::DumpResources,
         "IsHeadless", &Engine::IsHeadless
@@ -483,7 +673,7 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // Time: frame delta and total time queries.
     lua.new_usertype<Time>("Time",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Time, Object>::bases(lua),
         "GetTimeStep", &Time::GetTimeStep,
         "GetElapsedTime", &Time::GetElapsedTime,
         "GetFramesPerSecond", &Time::GetFramesPerSecond,
@@ -502,6 +692,14 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
             return sol::lua_nil;
         return WrapLuaObject(sol::state_view(s), context->GetSubsystem(StringHash(name)));
     });
+
+    // Global log sinks. Lua scripts have no other channel into the engine log
+    // file (print goes to a stdout that windowed apps do not have), so expose
+    // the log levels as plain string functions. The sample-framework memory
+    // probe (Source/LuaSamples/Framework.lua) reports through LogInfo/LogError.
+    lua.set_function("LogInfo", [](const char* message) { URHO3D_LOGINFO("{}", message); });
+    lua.set_function("LogWarning", [](const char* message) { URHO3D_LOGWARNING("{}", message); });
+    lua.set_function("LogError", [](const char* message) { URHO3D_LOGERROR("{}", message); });
 }
 
 } // namespace Urho3D

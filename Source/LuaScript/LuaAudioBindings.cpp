@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Audio/Audio.h"
 #include "../Urho3D/Audio/AudioDefs.h"
@@ -44,7 +45,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // Audio subsystem: master gain per sound type, microphone access.
     lua.new_usertype<Audio>("Audio",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Audio, Object>::bases(lua),
         "SetMasterGain", [](Audio* audio, const char* type, float gain) {
             if (audio)
                 audio->SetMasterGain(type, gain);
@@ -77,7 +78,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // Sound resource: pass to SoundSource:Play.
     lua.new_usertype<Sound>("Sound",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<Sound, Resource, Object>::bases(lua),
         "SetLooped", &Sound::SetLooped
     );
     RegisterLuaObjectWrapper<Sound>();
@@ -86,7 +87,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // enough for samples; full control is available through the extra args.
     lua.new_usertype<SoundSource>("SoundSource",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<SoundSource, Component, Serializable, Object>::bases(lua),
         "Play", sol::overload(
             static_cast<void (SoundSource::*)(Sound*)>(&SoundSource::Play),
             static_cast<void (SoundSource::*)(Sound*, float)>(&SoundSource::Play),
@@ -118,7 +119,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // SoundSource3D: positional audio.
     lua.new_usertype<SoundSource3D>("SoundSource3D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<SoundSource, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<SoundSource3D, SoundSource, Component, Serializable, Object>::bases(lua),
         "SetNearDistance", &SoundSource3D::SetNearDistance,
         "SetFarDistance", &SoundSource3D::SetFarDistance
     );
@@ -127,7 +128,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // SoundListener: marks the node ears are attached to.
     lua.new_usertype<SoundListener>("SoundListener",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>()
+        sol::base_classes, LuaBases<SoundListener, Component, Serializable, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<SoundListener>();
 
@@ -147,6 +148,8 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
         sol::call_constructor, sol::factories([]() {
             return SharedPtr<BufferedSoundStream>(new BufferedSoundStream());
         }),
+        // SoundStream is a RefCounted-only hierarchy (not URHO3D_OBJECT), so it
+        // stays on plain sol::bases: LuaBases' audit machinery is Object-only.
         sol::base_classes, sol::bases<SoundStream>(),
         // Raw sample bytes packed by Lua (string.pack or manual assembly).
         "AddData", [](BufferedSoundStream* stream, const std::string& data) {
@@ -161,7 +164,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // Microphone: OS capture device, links into a BufferedSoundStream.
     lua.new_usertype<Microphone>("Microphone",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Microphone, Object>::bases(lua),
         "GetFrequency", &Microphone::GetFrequency,
         "Link", [](Microphone* microphone, BufferedSoundStream* stream) {
             if (microphone && stream)

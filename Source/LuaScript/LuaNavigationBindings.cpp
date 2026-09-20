@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Navigation/CrowdAgent.h"
@@ -42,7 +43,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // from scene geometry, so only configuration and queries are needed.
     lua.new_usertype<NavigationMesh>("NavigationMesh",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<NavigationMesh, Component, Serializable, Object>::bases(lua),
         "SetTileSize", &NavigationMesh::SetTileSize,
         "SetCellSize", &NavigationMesh::SetCellSize,
         "SetCellHeight", &NavigationMesh::SetCellHeight,
@@ -123,7 +124,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // DynamicNavigationMesh: supports obstacles at runtime.
     lua.new_usertype<DynamicNavigationMesh>("DynamicNavigationMesh",
         sol::no_constructor,
-        sol::base_classes, sol::bases<NavigationMesh, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<DynamicNavigationMesh, NavigationMesh, Component, Serializable, Object>::bases(lua),
         "SetDrawObstacles", &DynamicNavigationMesh::SetDrawObstacles
     );
     RegisterLuaObjectWrapper<DynamicNavigationMesh>();
@@ -131,14 +132,14 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // Navigable: flags a subtree as nav geometry source.
     lua.new_usertype<Navigable>("Navigable",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>()
+        sol::base_classes, LuaBases<Navigable, Component, Serializable, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Navigable>();
 
     // OffMeshConnection: jumps and teleports across gaps.
     lua.new_usertype<OffMeshConnection>("OffMeshConnection",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<OffMeshConnection, Component, Serializable, Object>::bases(lua),
         "SetRadius", &OffMeshConnection::SetRadius,
         "SetBidirectional", &OffMeshConnection::SetBidirectional,
         "SetMask", &OffMeshConnection::SetMask,
@@ -152,7 +153,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // (39_CrowdNavigation mushrooms).
     lua.new_usertype<Obstacle>("Obstacle",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Obstacle, Component, Serializable, Object>::bases(lua),
         "SetRadius", &Obstacle::SetRadius,
         "SetHeight", &Obstacle::SetHeight,
         "GetRadius", &Obstacle::GetRadius,
@@ -163,7 +164,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // CrowdAgent: agent inside a CrowdManager crowd (39_CrowdNavigation).
     lua.new_usertype<CrowdAgent>("CrowdAgent",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CrowdAgent, Component, Serializable, Object>::bases(lua),
         "SetTargetPosition", &CrowdAgent::SetTargetPosition,
         "SetTargetVelocity", &CrowdAgent::SetTargetVelocity,
         "SetMaxAccel", &CrowdAgent::SetMaxAccel,
@@ -194,7 +195,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<CrowdManager>("CrowdManager",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CrowdManager, Component, Serializable, Object>::bases(lua),
         "SetCrowdTarget", &CrowdManager::SetCrowdTarget,
         "SetCrowdVelocity", &CrowdManager::SetCrowdVelocity,
         "ResetCrowdTarget", &CrowdManager::ResetCrowdTarget,

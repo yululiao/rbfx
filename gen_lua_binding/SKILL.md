@@ -1,6 +1,6 @@
 ---
 name: gen-lua-binding
-description: Generate rbfx Lua bindings and port C++ demos to Lua samples. Invoke with a target C++ sample (a path like Source/Samples/01_HelloWorld or a bare name 01_HelloWorld) as an argument to scope the run to that one demo. Use when adding an engine type/method to the Lua API, exporting a newly-typed C++ class for Lua, converting a Source/Samples C++ demo into Source/LuaSamples, or refreshing the LuaLS code-hint stubs. Enforces the source-parsing doc-generator invariants, the non-invasive hand-written binding model, and a fixed compile + parity + incremental-smoke verification loop.
+description: Generate rbfx Lua bindings and port C++ demos to Lua samples. Invoke with a target C++ sample (a path like Source/Samples/01_HelloWorld or a bare name 01_HelloWorld) as an argument to scope the run to that one demo. Use when adding an engine type/method to the Lua API, exporting a newly-typed C++ class for Lua, converting a Source/Samples C++ demo into Source/LuaSamples, or refreshing the LuaLS code-hint stubs. Enforces the source-parsing doc-generator invariants, the non-invasive hand-written binding model, the LuaBases inheritance audit, the object-identity cache contract, and a fixed compile + parity + incremental-smoke verification loop with a Lua-heap memory budget.
 ---
 
 # gen-lua-binding
@@ -90,6 +90,11 @@ runtime breakage; rules 4-6 prevent capability regressions.
    `extract_return_base` derives `---@return` / `---@type` from the first `->` in the bound
    value token stream. `return [](Node* n) -> Vector3 { ... }` keeps the annotation;
    a bare member pointer or a helper wrapper has no `->` and the return hint silently vanishes.
+   Cache-routed object getters return `sol::object`, which has no namable `-> Type`: there
+   the annotation comes from the **body** — call `WrapLuaObjectAs<T>(sol::state_view(s), ptr)`
+   and the generator's `_wrap_lua_object_as` rescan recovers `---@return T`. A bare
+   `WrapLuaObject(...)` call loses the hint; in bindings, always use the `WrapLuaObjectAs<T>`
+   form.
 3. **`NullChecked(&T::M)` is for void / side-effect members ONLY** (see
    `Source/LuaScript/LuaBindHelpers.h`). Do NOT wrap a member that is:
    - **overloaded** (e.g. `RemoveChild`, `SetEnabled`, `Remove`) → `&T::M` is ambiguous → C2672/C2784;
@@ -144,22 +149,41 @@ runtime breakage; rules 4-6 prevent capability regressions.
     entry vanishes once Lua drops the wrapper; the strong `SharedPtr` of registered wrappers guarantees
     a cache hit is the same live object, and the `LuaObjectRef` fallback re-validates `Get()==object`
     on a hit to survive address recycling.
-    **Scope limit — this cache only covers the `WrapLuaObject` path** (GetChildren/ForEach*/GetComponent/
-    event senders/subsystems/Variant PTR/unbound types). Accessors that return a registered `T*`/
-    `SharedPtr<T>` *directly* (e.g. `.parent`, `.scene`, `GetChild`, `CreateChild`) are pushed by sol3
-    as fresh userdata and BYPASS the cache, so across those two paths `rawequal`/table-key do NOT unify
-    (only `==` does, via `equal_to`). Do not assume `rawequal` works between a `.parent` value and a
-    `GetChildren()` value of the same node. Prefer `==`, and when a single canonical identity matters,
-    key by `obj.id`/a stable field. Routing the direct-push path through the cache is a deeper,
-    cross-cutting change and must go through the FULL suite.
-11. **Register the FULL `sol::base_classes` chain, and mind TU order.** sol3 upcasts only match the
-    bases you declare, so an object usertype must list its whole ancestor chain up to `Object`
-    (e.g. `sol::bases<Component, Serializable, Object>`); dropping a link silently breaks
-    `Object*`-typed paths (event senders, `GetSubsystem` casts) with no compile error. And the
-    `Register<Sub>Bindings` calls in `LuaVM::RegisterEngineBindings` are order-sensitive —
-    **Resource must precede Graphics** (Model/Material derive from Resource); a new subsystem that
-    binds a type deriving from another TU's type must be registered AFTER that TU. There is no
-    auto-derivation from reflection; both invariants are hand-maintained.
+    **The cache covers BOTH wrap paths — keep it that way.** Historically, accessors that
+    returned a registered `T*`/`SharedPtr<T>` *directly* (`.parent`, `.scene`, `GetChild`,
+    `CreateChild`, `Component.node`, `Bone.node`, ...) were pushed by sol3 as fresh userdata
+    that BYPASSED the cache — identity split plus per-access allocation churn. Those accessors
+    now route through it: the getter returns `sol::object`, takes a trailing `sol::this_state`,
+    and the body calls `WrapLuaObjectAs<T>(sol::state_view(s), ptr)`. `rawequal`/table-key
+    therefore unify across `GetChildren()` and `.parent` values of the same node.
+    **MACHINE CONTRACT for any getter returning an engine `Object`: never return the raw
+    `T*`/`SharedPtr<T>` from a binding — go through `WrapLuaObject` (or `WrapLuaObjectAs<T>`
+    in bindings, per rule 2)**: registered types get the strong-ref wrapper, unregistered ones
+    the `LuaObjectRef`. Changes to the cache itself or to cached accessors are cross-cutting
+    and must go through the FULL suite.
+11. **Declare inheritance with `LuaBases`, never bare `sol::bases`.** sol3 upcasts only match the
+    bases you declare; that used to be a hand-maintained invariant. It is now machine-checked —
+    write `sol::base_classes, LuaBases<T, A, B>::bases(lua)` (see `LuaBindHelpers.h`) and three
+    layers enforce the contract:
+    - **Compile time** (static_asserts in `LuaBases`): every declared base must actually be one
+      (`std::is_base_of`), the chain must reach `Object`, and `T` must be a URHO3D_OBJECT type
+      (it has `TypeHierarchy`). The only legal escape hatch is a non-`Object` hierarchy (pure
+      `RefCounted` bases, e.g. `BufferedSoundStream : SoundStream`), which keeps `sol::bases`
+      because there is no `TypeHierarchy` to audit against.
+    - **Registration time** (`LuaBases::bases` records the declared chain in a registry table):
+      every declared base must ALREADY be registered — a TU-order regression (**Resource still
+      must precede Graphics**) fails immediately with a `URHO3D_LOGERROR` at the offending
+      `new_usertype`, instead of silently breaking `Object*`-typed paths (event senders,
+      `GetSubsystem` casts).
+    - **Startup time** (`VerifyLuaBaseChains`, at the end of `LuaVM::RegisterEngineBindings`):
+      any **already-bound ancestor** missing from a type's declared chain is a
+      `URHO3D_LOGERROR` — sol3 would hide that ancestor's Lua members. Ancestors that are
+      themselves unbound MAY be skipped (they expose no members), so compressing
+      `Sound : ResourceWithMetadata : Resource` to `LuaBases<Sound, Resource>` is legal.
+      A healthy startup logs `Lua bindings: inheritance chains verified for <N> usertypes` —
+      treat that line as the audit anchor.
+    The call-site shape is still what ApiDocGen parses (`LuaBases<T, A, B>::bases(lua)` parses
+    identically to `sol::bases<T, A, B>()`), so the stubs are unchanged.
 12. **A destroyed object reached through `ObjectRef` must report, not silently no-op.** `LuaObjectRef`
     (the generic wrapper for unregistered types) holds a `WeakPtr`, so its userdata outlives the C++
     object; after death `Get()==nullptr` and every attribute read/write used to collapse to a silent
@@ -217,8 +241,10 @@ overrides a virtual). The rule is the same: **enhance the Lua-side binding add-o
   engine method names. Math types are constructed by their usertype ctors
   (`Vector3(x,y,z)`, `Quaternion(...)`) — confirm each in the `new_usertype`.
 - Use named enum constants (`TS.WORLD`, `LIGHT.SPOT`, `MM.RELATIVE`), not raw ints.
-- Use `print()` for console output (the VM redirects `print` into the engine log); there is
-  no `__urho_log_info` global.
+- Use `LogInfo(message)` / `LogWarning` / `LogError` for script output (bound in
+  `LuaCoreBindings.cpp`): they reach the on-screen console AND the per-sample log file.
+  Plain `print()` is NOT redirected — the runner is a windowed app whose stdout is
+  discarded, so print output is simply lost.
 - Layout: a sample dir has `main.lua` (plus its assets). It is staged at build time into
   `msvc/bin/<Config>/LuaSamples/` by the CMake "Copying Lua sample scripts" step.
 
@@ -241,14 +267,15 @@ bindings). Pure Lua local call = ~35 ns; everything below is the engine-boundary
   (`return false` from the callback) — stopping at the first match is ~2.7 µs, ~7× cheaper
   than `GetChildren`. Use `ForEachChild(... return false)` for "find first", keep `GetChildren`
   when you must visit all, and cache the table when the structure is stable.
-- **A global object identity cache now lives in `WrapLuaObject`** (contract rule 10): a per-state
-  weak-valued registry table reuses ONE userdata per live object. Measured effect on the Release
-  build (GC paused, `parent:GetChildren()` over 20 children): cache-cold re-wrap ≈ 19.6 µs, cache-hot
-  (wrappers held) ≈ 15.5 µs — ~20 % cheaper because the ~580 ns re-wrap allocation is skipped on a
-  hit; the throwaway path is unchanged within noise (the cache lookup bookkeeping ≈ the saved alloc).
-  Its larger win is correctness: `rawequal` and userdata-as-table-key now work for values that come
-  through `WrapLuaObject` (GetChildren/GetComponent/event senders/subsystems/unbound types). It does
-  NOT cover direct-push accessors (`.parent`, `GetChild`, …) — see rule 10's scope limit.
+- **A global object identity cache lives in `WrapLuaObject`, covering BOTH wrap paths** (contract
+  rule 10): a per-state weak-valued registry table reuses ONE userdata per live object. Measured
+  effect on the Release build (GC paused, `parent:GetChildren()` over 20 children): cache-cold
+  re-wrap ≈ 19.6 µs, cache-hot (wrappers held) ≈ 15.5 µs — ~20 % cheaper because the ~580 ns
+  re-wrap allocation is skipped on a hit. The former direct-push accessors (`.parent`, `.scene`,
+  `GetChild`, `CreateChild`, `Component.node`, `Bone.node`, ...) now route through the same
+  cache via `WrapLuaObjectAs<T>`, so their per-access ~600 ns allocation churn is gone and
+  `rawequal`/table-key unify across all paths. Its larger win is correctness: `rawequal` and
+  userdata-as-table-key now work for every wrapped value.
 - FindAttribute (the O(n) dynamic-attribute path) is only reached for **unregistered** types
   (`LuaObjectRef`); registered usertypes use direct property methods and never hit it. It now has
   a StringHash fast path, so an exact-name key costs one hash + integer compares (no alloc).
@@ -285,7 +312,21 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 - **Compile**: 0 errors on `RbfxLuaScript` and `LuaSamplesRunner`.
 - **Parity**: `check_api_docs.ps1` reports OK for BOTH engine and editor stubs.
 - **Behavior**: each sample you added/changed PASSES its targeted `-Only` smoke (`FAIL=0`).
-  The full `49/49` suite is a separate human decision via `run_all_samples.bat`, not a step in this skill.
+  A sample now FAILS on ANY `[error]`-level line in its log (the strict criterion that closed
+  the "started, then errors, still PASS" hole: a post-start callback failure logs
+  "event handler error", a bad SetVar payload "LuaToVariant: cannot convert", dead-object
+  access "Lua ObjectRef: ... destroyed" — none of which carry the traceback text markers),
+  plus a load failure OR a memory-budget breach: `Framework.lua` probes the Lua heap once a second (forced full GC,
+  then a resident-KB reading reported as `Lua mem probe: <n> KB`); readings above the first
+  one + `-MemBudgetKB` (default 256) count as overruns, and only **5 consecutive overruns**
+  log `Lua mem budget exceeded` → FAIL — transient working-set swings (18_CharacterDemo
+  legitimately peaks ~1.8 MB above its baseline mid-run) must not fail, while a real leak
+  never settles. That is how per-frame binding leaks (a getter that keeps allocating) get
+  caught — tune with `-MemBudgetKB` / `-Seconds` (leak detection needs ~5+ readings), never
+  disable. The runner exits via engine `--timeout`, NOT a forced kill (a kill loses the
+  buffered log tail, budget lines included). Cross-cutting changes (the identity cache,
+  `LuaBases`, the probe) additionally require the FULL suite via `run_all_samples.bat`;
+  otherwise the full suite remains a human decision, not a step in this skill.
 
 ## Pitfalls (learned the expensive way)
 
@@ -299,9 +340,13 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 - **Editor target**: uses its own `--header` and `EditorLuaScript` sources; run
   `gen_editor_lua_api.bat`, not the engine one, for editor-surface drift.
 - **Silent-drift trio to re-check after any helper/builder refactor**: missing registration
-  keys, lost `-> Type` return annotations, and enum→`sol::enum_` conversions. All three pass
-  compile and can pass parity while breaking runtime or hints; the smoke and stub diff are the
-  only reliable catchers.
+  keys, lost `-> Type` return annotations (including a cached getter that drops its
+  `WrapLuaObjectAs<T>` for a bare `WrapLuaObject`), and enum→`sol::enum_` conversions. All
+  three pass compile and can pass parity while breaking runtime or hints; the smoke and stub
+  diff are the only reliable catchers.
+- **ConstrainedLanguage PowerShell**: `run_samples.ps1` deliberately avoids `[pscustomobject]`
+  (rejected under constrained language mode) and sticks to hashtables plus plain cmdlets.
+  Keep new CI scripts to that subset if they must run in any language mode.
 - **No codegen / manifest**: this repo deliberately generates via AI + this contract, not a
   manifest-driven emitter. Do not reintroduce a build-time generator beyond the existing
   `generate_api_docs.py` stub tool.

@@ -244,7 +244,7 @@ function app:StartMicRecord()
             self.micStream = micStream
         end
     else
-        print("No microphones detected")
+        LogWarning("No microphones detected")
     end
 end
 

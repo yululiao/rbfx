@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Physics2D/CollisionBox2D.h"
@@ -63,7 +64,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // Drawable2D: shared 2D layer/order controls.
     lua.new_usertype<Drawable2D>("Drawable2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<Drawable2D, Drawable, Component, Serializable, Object>::bases(lua),
         "SetLayer", &Drawable2D::SetLayer,
         "SetOrderInLayer", &Drawable2D::SetOrderInLayer
     );
@@ -72,13 +73,13 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // Sprite resources.
     lua.new_usertype<Sprite2D>("Sprite2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<Sprite2D, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<Sprite2D>();
 
     lua.new_usertype<AnimationSet2D>("AnimationSet2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<AnimationSet2D, Resource, Object>::bases(lua),
         "GetNumAnimations", &AnimationSet2D::GetNumAnimations,
         "GetAnimation", &AnimationSet2D::GetAnimation,
         "GetSprite",
@@ -89,7 +90,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // StaticSprite2D: the workhorse of the 2D samples.
     lua.new_usertype<StaticSprite2D>("StaticSprite2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable2D, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<StaticSprite2D, Drawable2D, Drawable, Component, Serializable, Object>::bases(lua),
         "SetSprite", &StaticSprite2D::SetSprite,
         "GetSprite", &StaticSprite2D::GetSprite,
         "SetColor", &StaticSprite2D::SetColor,
@@ -113,7 +114,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
         sol::no_constructor,
         // Full chain: sol3 base lookup is single-level, SetLayer lives on
         // Drawable2D (49/50 Sample2D).
-        sol::base_classes, sol::bases<StaticSprite2D, Drawable2D, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<AnimatedSprite2D, StaticSprite2D, Drawable2D, Drawable, Component, Serializable, Object>::bases(lua),
         "SetAnimationSet", &AnimatedSprite2D::SetAnimationSet,
         "GetAnimationSet", &AnimatedSprite2D::GetAnimationSet,
         "SetAnimation", [](AnimatedSprite2D* sprite, const char* name, sol::optional<bool> looped) {
@@ -136,7 +137,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // StretchableSprite2D: 9-slice sprite (51_Urho2DStretchableSprite).
     lua.new_usertype<StretchableSprite2D>("StretchableSprite2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<StaticSprite2D, Drawable2D, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<StretchableSprite2D, StaticSprite2D, Drawable2D, Drawable, Component, Serializable, Object>::bases(lua),
         "SetBorder", &StretchableSprite2D::SetBorder
     );
     RegisterLuaObjectWrapper<StretchableSprite2D>();
@@ -145,13 +146,13 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // (25_Urho2DParticle).
     lua.new_usertype<ParticleEffect2D>("ParticleEffect2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<ParticleEffect2D, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<ParticleEffect2D>();
 
     lua.new_usertype<ParticleEmitter2D>("ParticleEmitter2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Drawable2D, Drawable, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<ParticleEmitter2D, Drawable2D, Drawable, Component, Serializable, Object>::bases(lua),
         "SetEffect", &ParticleEmitter2D::SetEffect,
         "GetEffect", &ParticleEmitter2D::GetEffect,
         "SetSprite", &ParticleEmitter2D::SetSprite,
@@ -163,7 +164,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // Tile maps (39_TileMap, 41_Dungeon).
     lua.new_usertype<TmxFile2D>("TmxFile2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<TmxFile2D, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<TmxFile2D>();
 
@@ -186,7 +187,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
         sol::no_constructor,
         // rbfx simplified the tile map classes to derive from Component
         // directly (upstream Urho3D used Drawable2D).
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<TileMap2D, Component, Serializable, Object>::bases(lua),
         "SetTmxFile", &TileMap2D::SetTmxFile,
         "GetInfo", [](TileMap2D* tileMap) -> TileMapInfo2D* {
             return tileMap ? const_cast<TileMapInfo2D*>(&tileMap->GetInfo()) : nullptr;
@@ -207,7 +208,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // TileMap layer: tiles, objects or image (36_Urho2DTileMap, 49/50).
     lua.new_usertype<TileMapLayer2D>("TileMapLayer2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<TileMapLayer2D, Component, Serializable, Object>::bases(lua),
         "GetTileMap", &TileMapLayer2D::GetTileMap,
         "SetVisible", &TileMapLayer2D::SetVisible,
         "IsVisible", &TileMapLayer2D::IsVisible,
@@ -271,7 +272,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<RigidBody2D>("RigidBody2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<RigidBody2D, Component, Serializable, Object>::bases(lua),
         "SetBodyType", [](RigidBody2D* body, int type) {
             if (body)
                 body->SetBodyType(static_cast<BodyType2D>(type));
@@ -315,7 +316,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<CollisionShape2D>("CollisionShape2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionShape2D, Component, Serializable, Object>::bases(lua),
         "SetTrigger", &CollisionShape2D::SetTrigger,
         "SetCategoryBits", &CollisionShape2D::SetCategoryBits,
         "SetMaskBits", &CollisionShape2D::SetMaskBits,
@@ -328,7 +329,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<CollisionBox2D>("CollisionBox2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<CollisionShape2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionBox2D, CollisionShape2D, Component, Serializable, Object>::bases(lua),
         "SetSize", sol::overload(
             static_cast<void (CollisionBox2D::*)(const Vector2&)>(&CollisionBox2D::SetSize),
             static_cast<void (CollisionBox2D::*)(float, float)>(&CollisionBox2D::SetSize)),
@@ -341,7 +342,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<CollisionCircle2D>("CollisionCircle2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<CollisionShape2D, Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<CollisionCircle2D, CollisionShape2D, Component, Serializable, Object>::bases(lua),
         "SetRadius", &CollisionCircle2D::SetRadius,
         "SetCenter", sol::overload(
             static_cast<void (CollisionCircle2D::*)(const Vector2&)>(&CollisionCircle2D::SetCenter),
@@ -351,7 +352,7 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<PhysicsWorld2D>("PhysicsWorld2D",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<PhysicsWorld2D, Component, Serializable, Object>::bases(lua),
         "SetGravity", &PhysicsWorld2D::SetGravity,
         "GetGravity", &PhysicsWorld2D::GetGravity,
         "SetDrawShape", &PhysicsWorld2D::SetDrawShape,

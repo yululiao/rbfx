@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Input/Input.h"
@@ -46,7 +47,7 @@ void RegisterInputBindings(sol::state& lua, Context* context)
 {
     lua.new_usertype<Input>("Input",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Input, Object>::bases(lua),
 
         // Key & mouse queries
         "GetKeyDown", &Input::GetKeyDown,
@@ -116,7 +117,7 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // by loading an input map resource.
     lua.new_usertype<MoveAndOrbitController>("MoveAndOrbitController",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<MoveAndOrbitController, Component, Serializable, Object>::bases(lua),
         "LoadInputMap", [](MoveAndOrbitController* controller, const char* name) {
             if (controller)
                 controller->LoadInputMap(name);
@@ -130,7 +131,7 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // it every frame.
     lua.new_usertype<MoveAndOrbitComponent>("MoveAndOrbitComponent",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Component, Serializable, Object>(),
+        sol::base_classes, LuaBases<MoveAndOrbitComponent, Component, Serializable, Object>::bases(lua),
         "SetVelocity", &MoveAndOrbitComponent::SetVelocity,
         "SetYaw", &MoveAndOrbitComponent::SetYaw,
         "SetPitch", &MoveAndOrbitComponent::SetPitch,
@@ -145,7 +146,7 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // (46_RaycastVehicle braking).
     lua.new_usertype<InputMap>("InputMap",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>(),
+        sol::base_classes, LuaBases<InputMap, Resource, Object>::bases(lua),
         "Evaluate", [](InputMap* inputMap, const char* name) -> float {
             return inputMap ? inputMap->Evaluate(name) : 0.0f;
         }

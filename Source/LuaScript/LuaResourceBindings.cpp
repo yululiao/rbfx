@@ -7,6 +7,7 @@
 #include "../Urho3D/Precompiled.h"
 
 #include "LuaBindings.h"
+#include "LuaBindHelpers.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/FileSystem.h"
@@ -15,6 +16,7 @@
 #include "../Urho3D/Resource/ResourceCache.h"
 #include "../Urho3D/Resource/Localization.h"
 #include "../Urho3D/Resource/XMLFile.h"
+#include "../Urho3D/Scene/PrefabResource.h"
 
 #include <sol/sol.hpp>
 
@@ -40,7 +42,7 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
     // attribute reflection.
     lua.new_usertype<Resource>("Resource",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Resource, Object>::bases(lua),
         "name", sol::readonly_property([](Resource* resource) -> std::string {
             return resource ? resource->GetName().c_str() : "";
         }),
@@ -51,7 +53,7 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
 
     lua.new_usertype<ResourceCache>("ResourceCache",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<ResourceCache, Object>::bases(lua),
         // Typed resource getters: the type is resolved by the same name-based
         // factory used by Node::CreateComponent, so every registered resource
         // type works without a dedicated binding.
@@ -79,14 +81,24 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
     // XMLFile: load arbitrary XML resources for manual parsing needs.
     lua.new_usertype<XMLFile>("XMLFile",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Resource, Object>()
+        sol::base_classes, LuaBases<XMLFile, Resource, Object>::bases(lua)
     );
     RegisterLuaObjectWrapper<XMLFile>();
+
+    // PrefabResource: instanced scene fragment, consumed by PrefabReference
+    // (LuaNodeBindings). Lives HERE, not next to its consumer: the LuaBases
+    // audit requires Resource to be registered first, and the Node module
+    // runs before this one.
+    lua.new_usertype<PrefabResource>("PrefabResource",
+        sol::no_constructor,
+        sol::base_classes, LuaBases<PrefabResource, Resource, Object>::bases(lua)
+    );
+    RegisterLuaObjectWrapper<PrefabResource>();
 
     // FileSystem: path helpers.
     lua.new_usertype<FileSystem>("FileSystem",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<FileSystem, Object>::bases(lua),
         "FileExists", &FileSystem::FileExists,
         "DirExists", &FileSystem::DirExists,
         "GetProgramDir", [](FileSystem* fs) -> std::string { return fs ? fs->GetProgramDir().c_str() : ""; },
@@ -97,7 +109,7 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
     // Localization: string translation subsystem (40_Localization).
     lua.new_usertype<Localization>("Localization",
         sol::no_constructor,
-        sol::base_classes, sol::bases<Object>(),
+        sol::base_classes, LuaBases<Localization, Object>::bases(lua),
         "SetLanguage", sol::overload(
             static_cast<void (Localization::*)(int)>(&Localization::SetLanguage),
             [](Localization* l10n, const char* language) {
