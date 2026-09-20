@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include "ResourceEditorTab.h"
-#include "Shared/HierarchyBrowserSource.h"
-#include "Shared/InspectorSource.h"
+#include "../ResourceEditorTab.h"
+#include "../Shared/HierarchyBrowserSource.h"
+#include "../Shared/InspectorSource.h"
 #include "UIViewDocument.h"
 
 namespace Rml
@@ -103,8 +103,8 @@ private:
     void RenderToolbar();
     void RenderPreview();
 
-    /// Create a fresh .rml from the built-in template at the path in the toolbar
-    /// field, then open it (a new document must live on disk to be a resource).
+    /// Create a fresh .rml from the built-in template via a native "Save As" dialog rooted at
+    /// the project Data folder, then open it (a new document must live on disk to be a resource).
     void NewDocument();
 
     /// Raw resource-path <-> text helpers shared by load/save/new.
@@ -147,7 +147,6 @@ private:
     bool dragging_ = false;
 
     ea::string resourcePath_;
-    char pathInputBuf_[512]{};
 
     SharedPtr<UIViewHierarchy> hierarchySource_;
     SharedPtr<UIViewInspector> inspectorSource_;
@@ -198,6 +197,7 @@ public:
     /// @}
 
 private:
+    void RenderTextContent(UiNode* node);
     void RenderAttributes(UiNode* node);
     void RenderInlineStyle(UiNode* node);
     void RenderComputed(UiNode* node);

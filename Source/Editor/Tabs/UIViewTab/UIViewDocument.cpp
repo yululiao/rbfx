@@ -8,7 +8,7 @@
 
 #include "UIViewActions.h"
 
-#include "../Project/Project.h"
+#include "../../Project/Project.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Core/CoreEvents.h>
@@ -23,6 +23,7 @@
 #include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/ElementText.h>
 #include <RmlUi/Core/Types.h>
 
 namespace Urho3D
@@ -205,17 +206,6 @@ bool UIViewDocument::LoadFromText(const ea::string& text, const ea::string& path
     if (!ctx)
         return false;
 
-    // Preserve the <head>...</head> block verbatim (styles / templates the
-    // editor neither parses nor reorders).
-    ea::string head;
-    const size_t headBegin = text.find("<head");
-    if (headBegin != ea::string::npos)
-    {
-        const size_t headEnd = text.find("</head>", headBegin);
-        if (headEnd != ea::string::npos)
-            head = text.substr(headBegin, headEnd + 7 /*len("</head>")*/ - headBegin);
-    }
-
     ctx->UnloadAllDocuments();
     document_ = nullptr;
 
@@ -236,8 +226,10 @@ bool UIViewDocument::LoadFromText(const ea::string& text, const ea::string& path
     // Synchronous layout so the freshly built model sees valid boxes.
     document_->UpdateDocument();
 
-    model_.BuildFromDom(document_);
-    model_.headRaw_ = head;
+    // Build the editor model from the ORIGINAL text (\a text), not the token-substituted
+    // DOM used for the preview: this keeps {{bindings}} / data-model tokens / comments /
+    // head verbatim as the source of truth (see UiDocumentModel::BuildFromText).
+    model_.BuildFromText(text, document_);
     dirty_ = false;
     return true;
 }
@@ -318,6 +310,16 @@ void UIViewDocument::ApplyNodeToDom(UiNode* node)
     Rml::Element* el = node ? node->dom_ : nullptr;
     if (!el)
         return;
+
+    if (node->IsText())
+    {
+        // A text node carries no id/class/style/attributes of its own; the only
+        // editable aspect is its content. Push it straight onto the live
+        // ElementText so the preview reflects the edit without a full reload.
+        if (el->GetTagName() == "#text")
+            static_cast<Rml::ElementText*>(el)->SetText(node->text_.c_str());
+        return;
+    }
 
     if (node->id_.empty())
         el->RemoveAttribute("id");

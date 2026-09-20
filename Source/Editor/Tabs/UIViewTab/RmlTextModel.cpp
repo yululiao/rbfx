@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <utility>
 
 namespace
 {
@@ -807,11 +808,27 @@ bool RmlTextModel::ComputeInsertPatch(int parent, int childOrdinal, const std::s
 
 void RmlTextModel::ApplyPatches(const std::vector<RmlPatch>& patches)
 {
-    std::vector<RmlPatch> ps = patches;
-    // Descending offset so earlier splices never shift the offsets of not-yet-applied (lower) ones.
-    std::sort(ps.begin(), ps.end(), [](const RmlPatch& a, const RmlPatch& b) { return a.span.offset > b.span.offset; });
-    for (const RmlPatch& p : ps)
+    // Sort by descending offset so a splice never shifts the offsets of the not-yet-applied
+    // (lower) patches. Tie-break by DESCENDING original index so patches that share an offset
+    // - e.g. several zero-width inserts at a tag's name end (id + class + style added at once)
+    //   - are applied last-pushed-first. Each replace at the same offset prepends there, so
+    //   reverse application yields them in the order they were queued (deterministic output).
+    std::vector<std::pair<int, size_t>> order; // (span.offset, queue index)
+    order.reserve(patches.size());
+    for (size_t i = 0; i < patches.size(); ++i)
+        order.emplace_back(patches[i].span.offset, i);
+    std::sort(order.begin(), order.end(),
+        [](const std::pair<int, size_t>& a, const std::pair<int, size_t>& b)
+        {
+            if (a.first != b.first)
+                return a.first > b.first;
+            return a.second > b.second;
+        });
+    for (const std::pair<int, size_t>& o : order)
+    {
+        const RmlPatch& p = patches[o.second];
         text_.replace(p.span.offset, p.span.length, p.replacement);
+    }
     std::string snapshot = text_;
     Load(snapshot);
 }

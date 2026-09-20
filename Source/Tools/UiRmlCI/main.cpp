@@ -281,6 +281,23 @@ void TestBatchPatches()
     Check(m.Node(btn).tag == "button", "button is third element child");
 }
 
+void TestStableSameOffset()
+{
+    std::cout << "TestStableSameOffset\n";
+    // The editor's reconcile queues several zero-width inserts at a single offset when a node
+    // gains id + class + style at once. ApplyPatches must keep them in queue order, not scramble.
+    RmlTextModel m;
+    m.Load("<rml><body><div></div></body></rml>");
+    const int div = m.FindFirstElement("div");
+    const int nameEnd = m.Node(div).nameSpan.End();
+    std::vector<RmlPatch> ps;
+    ps.push_back(RmlPatch{{nameEnd, 0}, " id=\"a\""});
+    ps.push_back(RmlPatch{{nameEnd, 0}, " class=\"c\""});
+    m.ApplyPatches(ps);
+    Check(m.GetText().find("<div id=\"a\" class=\"c\">") != std::string::npos,
+        "same-offset inserts keep queue order (id before class)");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -293,6 +310,7 @@ int main(int argc, char** argv)
     TestBindingPreservation();
     TestGenerationInsert();
     TestBatchPatches();
+    TestStableSameOffset();
 
     std::cout << "WalkSamples\n";
     for (const auto& r : roots)

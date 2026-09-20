@@ -10,10 +10,10 @@
 #
 $ErrorActionPreference = "Stop"
 
-# This script lives in <repo>\Source\Tools\UiRmlCI; the model lives in <repo>\Source\Editor\Tabs.
+# This script lives in <repo>\Source\Tools\UiRmlCI; the model lives in <repo>\Source\Editor\Tabs\UIViewTab.
 $ciDir   = $PSScriptRoot
 $repo    = (Resolve-Path (Join-Path $ciDir "..\..\..")).Path
-$modelDir = Join-Path $repo "Source\Editor\Tabs"
+$modelDir = Join-Path $repo "Source\Editor\Tabs\UIViewTab"
 $buildDir = Join-Path $ciDir "build"
 
 $vcvars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"

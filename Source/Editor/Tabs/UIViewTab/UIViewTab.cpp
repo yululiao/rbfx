@@ -4,9 +4,9 @@
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 //
 
-#include "../Tabs/UIViewTab.h"
+#include "UIViewTab.h"
 
-#include "../Project/Project.h"
+#include "../../Project/Project.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -16,12 +16,14 @@
 #include <Urho3D/SystemUI/Widgets.h>
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
+#include <nfd.h>
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 
 #include <math.h>
 #include <algorithm>
+#include <cctype>
 #include <utility>
 
 #include <EASTL/sort.h>
@@ -33,6 +35,25 @@ namespace
 {
 // On-screen radius (in pixels) for grabbing a gizmo handle.
 constexpr float kHandleGrabPx = 7.0f;
+
+// Normalize native path separators to '/' (resource names are '/'-delimited).
+void NormalizePath(ea::string& s)
+{
+    for (char& c : s)
+    {
+        if (c == '\\')
+            c = '/';
+    }
+}
+
+// ASCII-lowercased copy, for case-insensitive path prefix / suffix tests on Windows.
+ea::string LowerCopy(const ea::string& s)
+{
+    ea::string r = s;
+    for (char& c : r)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return r;
+}
 // Half on-screen size of a drawn gizmo handle square.
 constexpr float kHandleDrawPx = 4.0f;
 
@@ -155,7 +176,12 @@ ea::string UIViewTab::ReadResourceFile(const ea::string& resourceName) const
     auto* cache = GetSubsystem<ResourceCache>();
     ea::string abs = cache->GetResourceFileName(resourceName);
     if (abs.empty())
-        abs = resourceName;
+    {
+        // Not registered in the cache yet (e.g. a file New just wrote): resolve against the
+        // project Data folder, mirroring WriteResourceFile, so freshly created documents load.
+        auto* project = GetProject();
+        abs = project ? project->GetDataPath() + resourceName : resourceName;
+    }
 
     File file(context_, abs, FILE_READ);
     if (!file.IsOpen())
@@ -215,7 +241,6 @@ void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
     {
         // Fresh open: start with the root selected.
         resourcePath_ = resourceName;
-        snprintf(pathInputBuf_, sizeof(pathInputBuf_), "%s", resourceName.c_str());
         ResetViewToDocument();
         if (hierarchySource_)
             hierarchySource_->ExpandAncestors(selPath_);
@@ -233,7 +258,6 @@ void UIViewTab::OnResourceUnloaded(const ea::string& resourceName)
     if (resourceName == resourcePath_)
     {
         resourcePath_.clear();
-        pathInputBuf_[0] = '\0';
         selected_ = nullptr;
         selPath_.clear();
         hoveredPath_.clear();
@@ -278,22 +302,62 @@ void UIViewTab::NewDocument()
         "  </body>\n"
         "</rml>\n";
 
-    const ea::string path = Trim(pathInputBuf_);
-    if (path.empty())
+    auto* project = GetProject();
+    if (!project)
+        return;
+
+    // Native "Save As" rooted at the project's Data folder. UI documents must live under
+    // Data to be loadable resources (and to appear in the Resource Browser), so a path that
+    // resolves outside it is rejected rather than silently rewritten.
+    ea::string dataDir = project->GetDataPath().c_str();
+    NormalizePath(dataDir);
+    if (!dataDir.empty() && dataDir.back() != '/')
+        dataDir += '/';
+
+    nfdu8filteritem_t filterItem;
+    filterItem.name = "RmlUi document";
+    filterItem.spec = "rml";
+
+    nfdu8char_t* outPath = nullptr;
+    const nfdresult_t res = NFD_SaveDialogU8(&outPath, &filterItem, 1,
+        dataDir.empty() ? nullptr : dataDir.c_str(), "NewDocument.rml");
+    if (res == NFD_ERROR)
     {
-        URHO3D_LOGWARNING("UIViewTab: type a resource path (e.g. \"RmlUI/NewDocument.rml\") before clicking New.");
+        URHO3D_LOGERROR("UIViewTab: save dialog failed: {}", NFD_GetError());
         return;
     }
-    if (!WriteResourceFile(path, kTemplate))
+    if (res != NFD_OKAY)
+        return; // canceled: leave the current view untouched
+
+    ea::string chosen = outPath;
+    NFD_FreePathU8(outPath);
+    NormalizePath(chosen);
+    if (chosen.size() < 4 || LowerCopy(chosen).compare(chosen.size() - 4, 4, ".rml") != 0)
+        chosen += ".rml";
+
+    const ea::string lowerChosen = LowerCopy(chosen);
+    const ea::string lowerData = LowerCopy(dataDir);
+    if (!dataDir.empty() && lowerChosen.compare(0, lowerData.size(), lowerData) != 0)
     {
-        URHO3D_LOGERROR("UIViewTab: failed to create UI document '{}'", path.c_str());
+        URHO3D_LOGWARNING("UIViewTab: UI documents must be created under the project Data folder "
+            "('{}'); '{}' was ignored.",
+            dataDir.c_str(), chosen.c_str());
+        return;
+    }
+    const ea::string resourceName = chosen.substr(dataDir.length());
+    if (resourceName.empty())
+        return;
+
+    if (!WriteResourceFile(resourceName, kTemplate))
+    {
+        URHO3D_LOGERROR("UIViewTab: failed to create UI document '{}'", resourceName.c_str());
         return;
     }
 
     // (Re)open so the freshly written file becomes the active, tracked document.
-    if (IsResourceOpen(path))
-        CloseResource(path);
-    OpenResource(path);
+    if (IsResourceOpen(resourceName))
+        CloseResource(resourceName);
+    OpenResource(resourceName);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,27 +373,14 @@ void UIViewTab::RenderContent()
 
 void UIViewTab::RenderToolbar()
 {
-    ui::PushItemWidth(-220.0f);
-    if (ui::InputText("##uiPath", pathInputBuf_, sizeof(pathInputBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        // Enter opens the typed resource (routes through the base so it becomes
-        // the tracked active document).
-        const ea::string path = Trim(pathInputBuf_);
-        if (!path.empty())
-            OpenResource(path);
-    }
-    ui::PopItemWidth();
-    ui::SameLine();
+    // Read-only display of the document being edited (empty until one is opened). This
+    // replaces the old type-a-path field: double-clicking a .rml in the Resource Browser now
+    // opens it, and New pops a native Save As, so there is nothing left to type here.
+    ui::AlignTextToFramePadding();
+    ui::TextDisabled("Editing: %s", resourcePath_.empty() ? "(no document open)" : resourcePath_.c_str());
 
     if (ui::Button(ICON_FA_FILE_LINES " New"))
         NewDocument();
-    ui::SameLine();
-    if (ui::Button(ICON_FA_FOLDER_OPEN " Load"))
-    {
-        const ea::string path = Trim(pathInputBuf_);
-        if (!path.empty())
-            OpenResource(path);
-    }
 
     const bool hasDoc = document_ && document_->GetRmlDocument() != nullptr;
     const bool hasActive = !GetActiveResourceName().empty();
@@ -410,7 +461,7 @@ void UIViewTab::RenderPreview()
 {
     if (!document_ || !document_->GetRmlDocument())
     {
-        ui::TextUnformatted("No UI document open.\nDouble-click a .rml in the Resource Browser, type a path and press\nLoad, or enter a new path and click New.");
+        ui::TextUnformatted("No UI document open.\nDouble-click a .rml in the Resource Browser to edit it, or click New\nto create one (a Save As dialog picks the location under the project Data).");
         return;
     }
 
@@ -860,11 +911,48 @@ void UIViewInspector::RenderContent()
     ui::Text(ICON_FA_HAND_POINTER " %s", header.c_str());
     ui::Separator();
 
+    RenderTextContent(node);
     RenderAttributes(node);
     ui::Separator();
     RenderInlineStyle(node);
     ui::Separator();
     RenderComputed(node);
+}
+
+void UIViewInspector::RenderTextContent(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    if (!tab || !tab->GetDocument())
+        return;
+
+    // The visible text of a label/button lives on a #text model node. Expose a
+    // single editable field when the selection is itself a text node, or an
+    // element whose only child is a text node (the "Text"/"Button" widgets and
+    // plain <div>text</div> all take this shape). Mixed containers are skipped.
+    UiNode* textNode = nullptr;
+    if (node->IsText())
+        textNode = node;
+    else if (node->children_.size() == 1 && node->children_[0]->IsText())
+        textNode = node->children_[0].Get();
+    if (!textNode)
+        return;
+
+    if (!ui::CollapsingHeader(ICON_FA_FONT " Content", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    // Same seed-per-frame + commit-on-deactivate model as the id/class rows:
+    // ImGui keeps its own edit buffer while focused, so re-seeding is safe.
+    char textBuf[1024];
+    snprintf(textBuf, sizeof(textBuf), "%s", textNode->text_.c_str());
+    ui::PushItemWidth(-1.0f);
+    ui::InputText("##textContent", textBuf, sizeof(textBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::PopItemWidth();
+    if (ui::IsItemDeactivatedAfterEdit())
+    {
+        UiNodePayload payload = SnapshotUiNodePayload(*textNode);
+        payload.text_ = ea::string(textBuf);
+        tab->GetDocument()->EditNodePayload(textNode, payload);
+    }
 }
 
 void UIViewInspector::RenderAttributes(UiNode* node)

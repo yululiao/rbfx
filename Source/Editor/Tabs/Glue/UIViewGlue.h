@@ -8,7 +8,7 @@
 
 #include "../../Tabs/HierarchyBrowserTab.h"
 #include "../../Tabs/InspectorTab.h"
-#include "../../Tabs/UIViewTab.h"
+#include "../../Tabs/UIViewTab/UIViewTab.h"
 
 namespace Urho3D
 {

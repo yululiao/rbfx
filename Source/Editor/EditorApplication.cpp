@@ -54,7 +54,7 @@
 #include "Assets/StandardFileTypes.h"
 #include "Tabs/Texture2DViewTab.h"
 #include "Tabs/TextureCubeViewTab.h"
-#include "Tabs/UIViewTab.h"
+#include "Tabs/UIViewTab/UIViewTab.h"
 #include "Tabs/Glue/UIViewGlue.h"
 
 #include "Project/ProjectRequest.h"

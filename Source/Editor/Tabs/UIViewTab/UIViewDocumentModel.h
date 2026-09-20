@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "RmlTextModel.h"
+
 #include <Urho3D/Urho3D.h>
 #include <Urho3D/Container/Ptr.h>
 #include <Urho3D/Math/Vector2.h>
@@ -44,6 +46,7 @@ struct UiNode : public RefCounted
     ea::vector<UiStyleDecl> style_; ///< Authored order
     ea::vector<SharedPtr<UiNode>> children_;
     Rml::Element* dom_ = nullptr; ///< Runtime projection; rebuilt with the model on reload
+    int srcNode_ = -1; ///< Index into UiDocumentModel::source_ this node was built from (-1 if editor-created)
 
     int FindStyle(const ea::string& name) const;
     ea::string GetStyle(const ea::string& name) const;
@@ -82,12 +85,16 @@ SharedPtr<UiNode> DeepCloneUiNode(const UiNode& src);
 struct UiDocumentModel
 {
     SharedPtr<UiNode> root_; ///< "body" (maps to the ElementDocument itself)
-    ea::string headRaw_; ///< "<head>...</head>" block taken verbatim from the source text
+    RmlTextModel source_; ///< The authoritative text spine: original bytes + located edit spans
 
-    /// Rebuild the model from a loaded & shown document.
-    void BuildFromDom(Rml::ElementDocument* document);
+    /// Seed the spine from the raw source text and build the editor tree from it
+    /// (so {{bindings}}, data-* tokens, comments and authored order are preserved).
+    /// Then attach the live preview \a document to each node's dom_ by structural
+    /// correlation (elements match by tag/ordinal; exotic subtrees may stay null).
+    bool BuildFromText(const ea::string& sourceText, Rml::ElementDocument* document);
 
-    /// Serialize back to a complete .rml text. Deterministic: same model, same bytes.
+    /// Serialize back to a complete .rml text by diffing the current tree against
+    /// the spine and applying only the changed regions as span patches.
     ea::string EmitRml() const;
 
     UiNode* FindByDom(const Rml::Element* element) const;
