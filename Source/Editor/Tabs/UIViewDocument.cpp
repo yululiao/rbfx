@@ -408,6 +408,13 @@ Vector2 UIViewDocument::GetInlineStyleBase(const UiNode* node) const
 
 bool UIViewDocument::PushUndoAction(const SharedPtr<EditorAction>& action)
 {
+    // Preferred path: let the owning tab attribute the action to the active
+    // resource so ResourceEditorTab can track dirty state and focus the right
+    // document on undo/redo. It declines (returns false) when no resource is
+    // open, in which case fall back to the raw project undo manager.
+    if (undoPusher_ && undoPusher_(action))
+        return true;
+
     // The tab is constructed during project plugin application, when the
     // Project subsystem is already registered, so the undo manager exists.
     // Guard anyway: without it edits simply become non-undoable.

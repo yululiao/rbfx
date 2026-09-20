@@ -13,6 +13,9 @@
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/Math/Vector2.h>
 
+#include <EASTL/functional.h>
+#include <EASTL/utility.h>
+
 namespace Rml
 {
 class Element;
@@ -46,7 +49,13 @@ public:
 
     explicit UIViewDocument(Context* context);
     ~UIViewDocument() override;
-
+    
+    /// Install a callback that routes editing actions through the owning tab so
+    /// the editor can attribute each change to the active resource (per-document
+    /// dirty tracking + undo focus, see ResourceEditorTab). When it is unset or
+    /// declines, commands fall back to the project UndoManager unchanged.
+    void SetUndoPusher(ea::function<bool(SharedPtr<EditorAction>)> pusher) { undoPusher_ = ea::move(pusher); }
+    
     /// Return properties of the document.
     /// @{
     const UiDocumentModel& GetModel() const { return model_; }
@@ -120,6 +129,8 @@ private:
     /// Record a payload change for \a node given its pre-edit snapshot.
     bool PushChangeNodeAction(UiNode* node, const UiNodePayload& oldData);
     bool PushUndoAction(const SharedPtr<EditorAction>& action);
+
+    ea::function<bool(SharedPtr<EditorAction>)> undoPusher_;
 
     SharedPtr<RmlUI> previewUI_;
     SharedPtr<Texture2D> texture_;

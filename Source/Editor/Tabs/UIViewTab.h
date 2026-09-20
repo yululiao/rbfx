@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "EditorTab.h"
+#include "ResourceEditorTab.h"
 #include "Shared/HierarchyBrowserSource.h"
 #include "Shared/InspectorSource.h"
 #include "UIViewDocument.h"
@@ -43,25 +43,20 @@ void Tabs_UIViewTab(Context* context, Project* project);
 /// Deliberately does not use the RmlWorldCanvas Drawable: the editor only needs
 /// a 2D preview and using RmlUI + Texture2D directly keeps this tab independent
 /// of the Octree / Scene plumbing.
-class UIViewTab : public EditorTab
+///
+/// Derives from ResourceEditorTab so that double-clicking a .rml in the
+/// Resource Browser opens it here, and the base owns the surrounding
+/// bookkeeping: active-resource switching, per-document dirty tracking,
+/// undo/redo attribution and the project save/close pipeline. Multi-document is
+/// disabled for now (SupportMultipleResources() == false), so opening another
+/// .rml gracefully closes the current one (prompting to save if it is dirty).
+class UIViewTab : public ResourceEditorTab
 {
-    URHO3D_OBJECT(UIViewTab, EditorTab)
+    URHO3D_OBJECT(UIViewTab, ResourceEditorTab)
 
 public:
     explicit UIViewTab(Context* context);
     ~UIViewTab() override;
-
-    /// Load (or reload) the .rml document from a resource path.
-    void LoadDocument(const ea::string& path);
-    /// Open the given resource path in the editor (loads if not already there).
-    void OpenResource(const ea::string& path);
-    /// Emit the model and write it back to its source file. Returns true on success.
-    bool SaveDocument();
-    /// Emit the model and write it to an explicit resource path (Save-As / first
-    /// save of a new document). Also rebinds resourcePath_.
-    bool SaveDocumentTo(const ea::string& path);
-    /// Create an untitled in-memory document from the built-in template.
-    void NewDocument();
 
     /// The editable document hosted by this tab.
     UIViewDocument* GetDocument() const { return document_.Get(); }
@@ -91,9 +86,35 @@ public:
     void RenderContent() override;
     bool IsUndoSupported() override { return true; }
 
+protected:
+    /// Implement ResourceEditorTab.
+    /// @{
+    ea::string GetResourceTitle() override { return "UI document"; }
+    bool CanOpenResource(const ResourceFileDescriptor& desc) override;
+    bool SupportMultipleResources() override { return false; }
+    void OnResourceLoaded(const ea::string& resourceName) override;
+    void OnResourceUnloaded(const ea::string& resourceName) override;
+    void OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName) override;
+    void OnResourceSaved(const ea::string& resourceName) override;
+    void OnResourceShallowSaved(const ea::string& resourceName) override;
+    /// @}
+
 private:
     void RenderToolbar();
     void RenderPreview();
+
+    /// Create a fresh .rml from the built-in template at the path in the toolbar
+    /// field, then open it (a new document must live on disk to be a resource).
+    void NewDocument();
+
+    /// Raw resource-path <-> text helpers shared by load/save/new.
+    /// @{
+    ea::string ReadResourceFile(const ea::string& resourceName) const;
+    bool WriteResourceFile(const ea::string& resourceName, const ea::string& text);
+    /// @}
+
+    /// Drop selection/gizmo state so it starts fresh against a (re)loaded doc.
+    void ResetViewToDocument();
 
     // --- selection helpers ---------------------------------------------------
     ea::vector<unsigned> NodePath(const UiNode* node) const;

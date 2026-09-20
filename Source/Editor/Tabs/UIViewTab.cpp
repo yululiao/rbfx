@@ -77,11 +77,23 @@ void Tabs_UIViewTab(Context* context, Project* project)
 // ---------------------------------------------------------------------------
 
 UIViewTab::UIViewTab(Context* context)
-    : EditorTab(context, ICON_FA_BEZIER_CURVE " UI", "8f2b1c9e-7d34-4a5b-9c10-ui0preview",
+    : ResourceEditorTab(context, ICON_FA_BEZIER_CURVE " UI", "8f2b1c9e-7d34-4a5b-9c10-ui0preview",
         EditorTabFlags{}, EditorTabPlacement::DockCenter)
 {
     document_ = MakeShared<UIViewDocument>(context_);
     document_->OnModelEdited.Subscribe(this, &UIViewTab::OnModelEdited);
+
+    // Route editing commands through the tab so ResourceEditorTab attributes
+    // each action to the active resource (per-document dirty tracking + undo
+    // focus). When no resource is open the pusher declines and the document
+    // falls back to the raw project undo manager, so edits stay undoable.
+    document_->SetUndoPusher([this](const SharedPtr<EditorAction>& action) -> bool
+    {
+        const ea::string& active = GetActiveResourceName();
+        if (!active.empty() && IsResourceOpen(active))
+            return PushAction(action).has_value();
+        return false;
+    });
 
     hierarchySource_ = MakeShared<UIViewHierarchy>(this);
     inspectorSource_ = MakeShared<UIViewInspector>(this);
@@ -130,77 +142,39 @@ void UIViewTab::SetSelectedNode(UiNode* node)
 }
 
 // ---------------------------------------------------------------------------
-// Document loading / persistence
+// Resource lifecycle (driven by ResourceEditorTab)
 // ---------------------------------------------------------------------------
 
-void UIViewTab::OpenResource(const ea::string& path)
+bool UIViewTab::CanOpenResource(const ResourceFileDescriptor& desc)
 {
-    if (!path.empty())
-        LoadDocument(path);
-    Focus();
+    return !desc.isDirectory_ && desc.HasExtension(".rml");
 }
 
-void UIViewTab::LoadDocument(const ea::string& path)
+ea::string UIViewTab::ReadResourceFile(const ea::string& resourceName) const
 {
-    if (path.empty() || !document_)
-        return;
-
     auto* cache = GetSubsystem<ResourceCache>();
-    ea::string abs = cache->GetResourceFileName(path);
+    ea::string abs = cache->GetResourceFileName(resourceName);
     if (abs.empty())
-        abs = path;
+        abs = resourceName;
 
     File file(context_, abs, FILE_READ);
     if (!file.IsOpen())
-    {
-        URHO3D_LOGERROR("UIViewTab: failed to open UI document '{}'", path.c_str());
-        return;
-    }
-    const ea::string contents = file.ReadText();
-
-    if (document_->LoadFromText(contents, path))
-    {
-        // Fresh open: start with the root selected.
-        selPath_.clear();
-        selected_ = document_->GetModel().root_.Get();
-        resourcePath_ = path;
-        snprintf(pathInputBuf_, sizeof(pathInputBuf_), "%s", path.c_str());
-    }
-    else
-    {
-        URHO3D_LOGERROR("UIViewTab: failed to load UI document '{}'", path.c_str());
-    }
+        return ea::string();
+    return file.ReadText();
 }
 
-bool UIViewTab::SaveDocument()
+bool UIViewTab::WriteResourceFile(const ea::string& resourceName, const ea::string& text)
 {
-    ea::string target = resourcePath_;
-    if (target.empty())
-        target = Trim(pathInputBuf_);
-    if (target.empty())
-    {
-        URHO3D_LOGWARNING("UIViewTab: nothing to save - enter a resource path first.");
-        return false;
-    }
-    return SaveDocumentTo(target);
-}
-
-bool UIViewTab::SaveDocumentTo(const ea::string& path)
-{
-    if (!document_)
-        return false;
-    const ea::string emitted = document_->EmitRml();
-
     auto* cache = GetSubsystem<ResourceCache>();
     auto* fs = GetSubsystem<FileSystem>();
-    ea::string abs = cache->GetResourceFileName(path);
+    ea::string abs = cache->GetResourceFileName(resourceName);
     if (abs.empty())
     {
         // New file: write under the project DataPath (mirrors AssetManager).
         auto* project = GetProject();
         if (!project)
             return false;
-        abs = project->GetDataPath() + path;
+        abs = project->GetDataPath() + resourceName;
         const size_t sep = abs.find_last_of("/\\");
         if (sep != ea::string::npos)
             fs->CreateDirsRecursive(abs.substr(0, sep));
@@ -212,15 +186,84 @@ bool UIViewTab::SaveDocumentTo(const ea::string& path)
         URHO3D_LOGERROR("UIViewTab: cannot open '{}' for writing.", abs.c_str());
         return false;
     }
-    file.Write(emitted.data(), emitted.size());
+    file.Write(text.data(), text.size());
 
-    // Drop any cached File so a later Load sees the new bytes.
-    cache->ReleaseResource(path, true);
-
-    document_->MarkSaved();
-    resourcePath_ = path;
-    snprintf(pathInputBuf_, sizeof(pathInputBuf_), "%s", path.c_str());
+    // Drop any cached File so a later load sees the new bytes.
+    cache->ReleaseResource(resourceName, true);
     return true;
+}
+
+void UIViewTab::ResetViewToDocument()
+{
+    selected_ = document_ ? document_->GetModel().root_.Get() : nullptr;
+    selPath_.clear();
+    hoveredPath_.clear();
+    gizmoNode_ = nullptr;
+    dragging_ = false;
+}
+
+void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
+{
+    const ea::string contents = ReadResourceFile(resourceName);
+    if (contents.empty())
+    {
+        URHO3D_LOGERROR("UIViewTab: failed to read UI document '{}'", resourceName.c_str());
+        return;
+    }
+
+    if (document_->LoadFromText(contents, resourceName))
+    {
+        // Fresh open: start with the root selected.
+        resourcePath_ = resourceName;
+        snprintf(pathInputBuf_, sizeof(pathInputBuf_), "%s", resourceName.c_str());
+        ResetViewToDocument();
+        if (hierarchySource_)
+            hierarchySource_->ExpandAncestors(selPath_);
+    }
+    else
+    {
+        URHO3D_LOGERROR("UIViewTab: failed to parse UI document '{}'", resourceName.c_str());
+    }
+}
+
+void UIViewTab::OnResourceUnloaded(const ea::string& resourceName)
+{
+    // Single-document mode: dropping the active resource clears the view. The
+    // base unloads the outgoing document before loading the next one.
+    if (resourceName == resourcePath_)
+    {
+        resourcePath_.clear();
+        pathInputBuf_[0] = '\0';
+        selected_ = nullptr;
+        selPath_.clear();
+        hoveredPath_.clear();
+        gizmoNode_ = nullptr;
+        dragging_ = false;
+    }
+}
+
+void UIViewTab::OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName)
+{
+    // In single-resource mode a change of the active document is always
+    // bracketed by OnResourceLoaded/Unloaded, which already reseed selection.
+    // Keep it consistent if the two ever disagree.
+    if (resourcePath_ != newResourceName)
+        ResetViewToDocument();
+}
+
+void UIViewTab::OnResourceSaved(const ea::string& resourceName)
+{
+    if (!document_ || !document_->GetRmlDocument())
+        return;
+    const ea::string emitted = document_->EmitRml();
+    WriteResourceFile(resourceName, emitted);
+    document_->MarkSaved();
+}
+
+void UIViewTab::OnResourceShallowSaved(const ea::string& resourceName)
+{
+    // No per-resource "shallow" data distinct from the emitted .rml text.
+    (void)resourceName;
 }
 
 void UIViewTab::NewDocument()
@@ -235,14 +278,22 @@ void UIViewTab::NewDocument()
         "  </body>\n"
         "</rml>\n";
 
-    if (document_ && document_->LoadFromText(kTemplate, ea::string()))
+    const ea::string path = Trim(pathInputBuf_);
+    if (path.empty())
     {
-        selPath_.clear();
-        selected_ = document_->GetModel().root_.Get();
-        resourcePath_.clear();
-        pathInputBuf_[0] = '\0';
-        document_->MarkDirty(); // untitled document does not exist on disk yet
+        URHO3D_LOGWARNING("UIViewTab: type a resource path (e.g. \"RmlUI/NewDocument.rml\") before clicking New.");
+        return;
     }
+    if (!WriteResourceFile(path, kTemplate))
+    {
+        URHO3D_LOGERROR("UIViewTab: failed to create UI document '{}'", path.c_str());
+        return;
+    }
+
+    // (Re)open so the freshly written file becomes the active, tracked document.
+    if (IsResourceOpen(path))
+        CloseResource(path);
+    OpenResource(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,9 +312,11 @@ void UIViewTab::RenderToolbar()
     ui::PushItemWidth(-220.0f);
     if (ui::InputText("##uiPath", pathInputBuf_, sizeof(pathInputBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
     {
+        // Enter opens the typed resource (routes through the base so it becomes
+        // the tracked active document).
         const ea::string path = Trim(pathInputBuf_);
-        if (!path.empty() && document_ && document_->GetRmlDocument())
-            SaveDocumentTo(path);
+        if (!path.empty())
+            OpenResource(path);
     }
     ui::PopItemWidth();
     ui::SameLine();
@@ -275,23 +328,28 @@ void UIViewTab::RenderToolbar()
     {
         const ea::string path = Trim(pathInputBuf_);
         if (!path.empty())
-            LoadDocument(path);
+            OpenResource(path);
     }
 
     const bool hasDoc = document_ && document_->GetRmlDocument() != nullptr;
+    const bool hasActive = !GetActiveResourceName().empty();
     ui::SameLine();
-    ui::BeginDisabled(!hasDoc);
+    ui::BeginDisabled(!hasActive);
     if (ui::Button(ICON_FA_FLOPPY_DISK " Save"))
-        SaveDocument();
+        SaveCurrentResource();
     ui::SameLine();
     if (ui::Button(ICON_FA_ROTATE " Reload"))
     {
-        if (!resourcePath_.empty())
-            LoadDocument(resourcePath_);
+        const ea::string name = GetActiveResourceName();
+        if (!name.empty())
+        {
+            CloseResource(name);
+            OpenResource(name);
+        }
     }
     ui::EndDisabled();
 
-    if (document_ && document_->IsDirty())
+    if (hasActive && IsResourceUnsaved(GetActiveResourceName()))
     {
         ui::SameLine();
         ui::TextDisabled("(unsaved)");
@@ -352,7 +410,7 @@ void UIViewTab::RenderPreview()
 {
     if (!document_ || !document_->GetRmlDocument())
     {
-        ui::TextUnformatted("No UI document loaded.\nType a resource path (e.g. \"UI/HelloRmlUI.rml\") and press Load, or click New.");
+        ui::TextUnformatted("No UI document open.\nDouble-click a .rml in the Resource Browser, type a path and press\nLoad, or enter a new path and click New.");
         return;
     }
 
