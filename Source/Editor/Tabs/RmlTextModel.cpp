@@ -547,48 +547,20 @@ void RmlTextModel::ApplyPatch(const RmlSpan& span, const std::string& replacemen
 
 bool RmlTextModel::SetAttribute(int node, const std::string& name, const std::string& value)
 {
-    if (node < 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+    RmlPatch p;
+    if (!ComputeAttributePatch(node, name, value, p))
         return false;
-    const RmlNode& el = nodes_[node];
-
-    for (const RmlAttribute& a : el.attributes)
-    {
-        if (a.name == name)
-        {
-            ApplyPatch(a.valueSpan, value);
-            return true;
-        }
-    }
-
-    const std::string q(1, detectedQuote_);
-    RmlSpan at;
-    at.offset = el.nameSpan.End();
-    at.length = 0;
-    ApplyPatch(at, " " + name + "=" + q + value + q);
+    ApplyPatch(p.span, p.replacement);
     return true;
 }
 
 bool RmlTextModel::RemoveAttribute(int node, const std::string& name)
 {
-    if (node < 0 || node >= static_cast<int>(nodes_.size()))
+    RmlPatch p;
+    if (!ComputeAttributeRemovalPatch(node, name, p))
         return false;
-    for (const RmlAttribute& a : nodes_[node].attributes)
-    {
-        if (a.name == name)
-        {
-            RmlSpan s = a.whole;
-            int o = s.offset;
-            if (o > 0 && text_[o - 1] == ' ')
-            {
-                --o;
-                s.offset = o;
-                s.length += 1;
-            }
-            ApplyPatch(s, "");
-            return true;
-        }
-    }
-    return false;
+    ApplyPatch(p.span, p.replacement);
+    return true;
 }
 
 bool RmlTextModel::GetStyleProperty(int node, const std::string& property, std::string& outValue) const
@@ -609,52 +581,140 @@ bool RmlTextModel::GetStyleProperty(int node, const std::string& property, std::
 
 bool RmlTextModel::SetStyleProperty(int node, const std::string& property, const std::string& value)
 {
-    if (node < 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+    RmlPatch p;
+    if (!ComputeStylePropertyPatch(node, property, value, p))
         return false;
-
-    const RmlAttribute* style = FindAttribute(node, "style");
-    if (!style)
-        return SetAttribute(node, "style", property + ": " + value);
-
-    std::vector<RmlStyleDecl> decls;
-    ParseStyleDeclarations(style->valueSpan.offset, style->valueSpan.length, decls);
-
-    for (const RmlStyleDecl& d : decls)
-    {
-        if (IEquals(d.property, property))
-        {
-            ApplyPatch(d.valueSpan, value);
-            return true;
-        }
-    }
-
-    RmlSpan at;
-    at.offset = style->valueSpan.End();
-    at.length = 0;
-    const std::string addition = decls.empty() ? (property + ": " + value) : ("; " + property + ": " + value);
-    ApplyPatch(at, addition);
+    ApplyPatch(p.span, p.replacement);
     return true;
 }
 
 bool RmlTextModel::RemoveStyleProperty(int node, const std::string& property)
 {
+    RmlPatch p;
+    if (!ComputeStyleRemovePatch(node, property, p))
+        return false;
+    ApplyPatch(p.span, p.replacement);
+    return true;
+}
+
+int RmlTextModel::InsertElement(int parent, int childOrdinal, const std::string& markup)
+{
+    RmlPatch p;
+    if (!ComputeInsertPatch(parent, childOrdinal, markup, p))
+        return -1;
+    ApplyPatch(p.span, p.replacement);
+    return FindFirstElement(markupTagOf(markup));
+}
+
+bool RmlTextModel::RemoveElement(int node)
+{
+    RmlPatch p;
+    if (!ComputeElementRemovalPatch(node, p))
+        return false;
+    ApplyPatch(p.span, p.replacement);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Patch computation (const, against the current parse) + batch apply.
+// ---------------------------------------------------------------------------
+
+bool RmlTextModel::ComputeAttributePatch(int node, const std::string& name, const std::string& value, RmlPatch& out) const
+{
+    if (node < 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+        return false;
+    const RmlNode& el = nodes_[node];
+    for (const RmlAttribute& a : el.attributes)
+    {
+        if (a.name == name)
+        {
+            out.span = a.valueSpan;
+            out.replacement = value;
+            return true;
+        }
+    }
+    const std::string q(1, detectedQuote_);
+    out.span.offset = el.nameSpan.End();
+    out.span.length = 0;
+    out.replacement = " " + name + "=" + q + value + q;
+    return true;
+}
+
+bool RmlTextModel::ComputeAttributeRemovalPatch(int node, const std::string& name, RmlPatch& out) const
+{
+    if (node < 0 || node >= static_cast<int>(nodes_.size()))
+        return false;
+    for (const RmlAttribute& a : nodes_[node].attributes)
+    {
+        if (a.name == name)
+        {
+            RmlSpan s = a.whole;
+            int o = s.offset;
+            if (o > 0 && text_[o - 1] == ' ')
+            {
+                --o;
+                s.offset = o;
+                s.length += 1;
+            }
+            out.span = s;
+            out.replacement = "";
+            return true;
+        }
+    }
+    return false;
+}
+
+bool RmlTextModel::ComputeStylePropertyPatch(int node, const std::string& property, const std::string& value, RmlPatch& out) const
+{
+    if (node < 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+        return false;
+
+    const RmlAttribute* style = FindAttribute(node, "style");
+    if (!style)
+    {
+        // Create the style attribute carrying a single declaration.
+        const RmlNode& el = nodes_[node];
+        const std::string q(1, detectedQuote_);
+        out.span.offset = el.nameSpan.End();
+        out.span.length = 0;
+        out.replacement = " style=" + q + property + ": " + value + q;
+        return true;
+    }
+
+    for (const RmlStyleDecl& d : style->styleDecls)
+    {
+        if (IEquals(d.property, property))
+        {
+            out.span = d.valueSpan;
+            out.replacement = value;
+            return true;
+        }
+    }
+
+    out.span.offset = style->valueSpan.End();
+    out.span.length = 0;
+    out.replacement = style->styleDecls.empty() ? (property + ": " + value) : ("; " + property + ": " + value);
+    return true;
+}
+
+bool RmlTextModel::ComputeStyleRemovePatch(int node, const std::string& property, RmlPatch& out) const
+{
     const RmlAttribute* style = FindAttribute(node, "style");
     if (!style)
         return false;
-    std::vector<RmlStyleDecl> decls;
-    ParseStyleDeclarations(style->valueSpan.offset, style->valueSpan.length, decls);
-    for (const RmlStyleDecl& d : decls)
+    const int n = static_cast<int>(text_.size());
+    for (const RmlStyleDecl& d : style->styleDecls)
     {
         if (IEquals(d.property, property))
         {
             RmlSpan s = d.whole;
             int e = s.End();
-            while (e < static_cast<int>(text_.size()) && text_[e] == ' ')
+            while (e < n && text_[e] == ' ')
                 ++e;
-            if (e < static_cast<int>(text_.size()) && text_[e] == ';')
+            if (e < n && text_[e] == ';')
             {
                 ++e;
-                if (e < static_cast<int>(text_.size()) && text_[e] == ' ')
+                if (e < n && text_[e] == ' ')
                     ++e;
                 s.length = e - s.offset;
             }
@@ -670,29 +730,48 @@ bool RmlTextModel::RemoveStyleProperty(int node, const std::string& property)
                 }
                 s.length = d.whole.End() - s.offset;
             }
-            ApplyPatch(s, "");
+            out.span = s;
+            out.replacement = "";
             return true;
         }
     }
     return false;
 }
 
-int RmlTextModel::InsertElement(int parent, int childOrdinal, const std::string& markup)
+bool RmlTextModel::ComputeTextPatch(int node, const std::string& newText, RmlPatch& out) const
+{
+    if (node < 0 || node >= static_cast<int>(nodes_.size()))
+        return false;
+    const RmlNode& nd = nodes_[node];
+    if (nd.kind != RmlNodeKind::Text && nd.kind != RmlNodeKind::Raw)
+        return false;
+    out.span = nd.span;
+    out.replacement = newText;
+    return true;
+}
+
+bool RmlTextModel::ComputeElementRemovalPatch(int node, RmlPatch& out) const
+{
+    if (node <= 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+        return false;
+    out.span = nodes_[node].whole;
+    out.replacement = "";
+    return true;
+}
+
+bool RmlTextModel::ComputeInsertPatch(int parent, int childOrdinal, const std::string& markup, RmlPatch& out) const
 {
     if (parent < 0 || parent >= static_cast<int>(nodes_.size()))
-        return -1;
+        return false;
     const RmlNode& p = nodes_[parent];
-    const std::string tag = markupTagOf(markup);
 
     if (p.selfClosing)
     {
-        // Expand <tag .../> into <tag ...>markup</tag> then append.
-        const std::string closeTag = "</" + p.tag + ">";
-        RmlSpan at;
-        at.offset = p.openTag.End() - 2; // the "/>"
-        at.length = 2;
-        ApplyPatch(at, std::string(">") + markup + closeTag);
-        return FindFirstElement(tag);
+        // Expand <tag .../>  ->  <tag ...>markup</tag>
+        out.span.offset = p.openTag.End() - 2; // the "/>"
+        out.span.length = 2;
+        out.replacement = std::string(">") + markup + "</" + p.tag + ">";
+        return true;
     }
 
     int insertOffset = -1;
@@ -703,7 +782,7 @@ int RmlTextModel::InsertElement(int parent, int childOrdinal, const std::string&
     {
         const int before = ElementChildAt(parent, childOrdinal);
         if (before < 0)
-            return -1;
+            return false;
         insertOffset = nodes_[before].whole.offset;
     }
 
@@ -720,19 +799,21 @@ int RmlTextModel::InsertElement(int parent, int childOrdinal, const std::string&
         prefix = "\n" + lead;
     }
 
-    RmlSpan at;
-    at.offset = insertOffset;
-    at.length = 0;
-    ApplyPatch(at, markup + prefix);
-    return FindFirstElement(tag);
+    out.span.offset = insertOffset;
+    out.span.length = 0;
+    out.replacement = markup + prefix;
+    return true;
 }
 
-bool RmlTextModel::RemoveElement(int node)
+void RmlTextModel::ApplyPatches(const std::vector<RmlPatch>& patches)
 {
-    if (node <= 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
-        return false;
-    ApplyPatch(nodes_[node].whole, "");
-    return true;
+    std::vector<RmlPatch> ps = patches;
+    // Descending offset so earlier splices never shift the offsets of not-yet-applied (lower) ones.
+    std::sort(ps.begin(), ps.end(), [](const RmlPatch& a, const RmlPatch& b) { return a.span.offset > b.span.offset; });
+    for (const RmlPatch& p : ps)
+        text_.replace(p.span.offset, p.span.length, p.replacement);
+    std::string snapshot = text_;
+    Load(snapshot);
 }
 
 std::string RmlTextModel::markupTagOf(const std::string& markup) const

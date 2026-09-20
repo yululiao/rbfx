@@ -221,6 +221,66 @@ void TestGenerationInsert()
     Check(m.GetStyleProperty(first, "position", posv) && posv == "absolute", "generated style readable");
 }
 
+// Find the Text-leaf child index of an element node (its inner character data).
+int FirstTextChild(const RmlTextModel& m, int el)
+{
+    for (int c : m.Node(el).children)
+        if (m.Node(c).kind == RmlNodeKind::Text)
+            return c;
+    return -1;
+}
+
+void TestBatchPatches()
+{
+    std::cout << "TestBatchPatches\n";
+    // Multiple logical edits computed against ONE parse, then applied together. This mirrors the
+    // editor's save-time reconcile: every offset must stay consistent until the single apply.
+    const std::string doc =
+        "<rml>\n<body>\n  <div id=\"a\" style=\"width: 10px\">x</div>\n  <span class=\"s\">hi</span>\n</body>\n</rml>";
+    RmlTextModel m;
+    m.Load(doc);
+    int body = m.FindFirstElement("body");
+    int div = m.ElementChildAt(body, 0);
+    int span = m.ElementChildAt(body, 1);
+    int divText = FirstTextChild(m, div);
+    Check(div > 0 && span > 0 && divText > 0, "resolved div/span/text handles");
+
+    std::vector<RmlPatch> ps;
+    RmlPatch p;
+    Check(m.ComputeStylePropertyPatch(div, "width", "99px", p), "patch1 style value");
+    ps.push_back(p);
+    Check(m.ComputeStylePropertyPatch(span, "color", "red", p), "patch2 new style attr");
+    ps.push_back(p);
+    Check(m.ComputeTextPatch(divText, "X!", p), "patch3 text leaf");
+    ps.push_back(p);
+    std::string mk = m.MakeElement("button", "", "", "", false);
+    Check(m.ComputeInsertPatch(body, m.ElementChildCount(body), mk, p), "patch4 append child");
+    ps.push_back(p);
+
+    // Nothing changed until apply (all four computed against the same, still-original parse).
+    Check(m.GetText() == doc, "compute does not mutate");
+
+    m.ApplyPatches(ps);
+    const std::string& after = m.GetText();
+    Check(after.find("width: 99px") != std::string::npos, "style value patched");
+    Check(after.find("style=\"color: red\"") != std::string::npos, "new style attr created");
+    Check(after.find(">X!<") != std::string::npos, "text patched");
+    Check(after.find("<button></button>") != std::string::npos, "child inserted");
+    Check(after.find("id=\"a\"") != std::string::npos, "div id preserved");
+    Check(after.find("class=\"s\"") != std::string::npos, "span class preserved");
+    Check(after.find("<rml>") == 0 && after.find("</body>") != std::string::npos, "document frame intact");
+
+    // Post-apply re-query through the refreshed model.
+    body = m.FindFirstElement("body");
+    div = m.ElementChildAt(body, 0);
+    span = m.ElementChildAt(body, 1);
+    int btn = m.ElementChildAt(body, 2);
+    std::string v;
+    Check(m.GetStyleProperty(div, "width", v) && v == "99px", "width now 99px");
+    Check(m.GetStyleProperty(span, "color", v) && v == "red", "span color red");
+    Check(m.Node(btn).tag == "button", "button is third element child");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -232,6 +292,7 @@ int main(int argc, char** argv)
     TestLocalization();
     TestBindingPreservation();
     TestGenerationInsert();
+    TestBatchPatches();
 
     std::cout << "WalkSamples\n";
     for (const auto& r : roots)

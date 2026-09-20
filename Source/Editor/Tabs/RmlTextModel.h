@@ -76,6 +76,14 @@ struct RmlNode
     RmlSpan span;     // byte range of this leaf
 };
 
+// A located edit: replace `span` with `replacement`. All patches in a batch are computed against
+// the same parse, so their spans refer to consistent offsets until they are applied together.
+struct RmlPatch
+{
+    RmlSpan span;
+    std::string replacement;
+};
+
 class RmlTextModel
 {
 public:
@@ -114,6 +122,20 @@ public:
     // count == append at end of inner). Returns the new node index, or -1 on failure.
     int InsertElement(int parent, int childOrdinal, const std::string& markup);
     bool RemoveElement(int node);
+
+    // ---- Patch collection against the CURRENT parse (no mutation) + batch apply. The editor's
+    // save-time reconcile computes every edit from ONE stable parse (so all returned offsets are
+    // mutually valid) then applies them in a single re-parse. Compute* return false if the target
+    // is missing/invalid. On success `out.span` is a range of the current GetText(). ----
+    bool ComputeAttributePatch(int node, const std::string& name, const std::string& value, RmlPatch& out) const;
+    bool ComputeAttributeRemovalPatch(int node, const std::string& name, RmlPatch& out) const;
+    bool ComputeStylePropertyPatch(int node, const std::string& property, const std::string& value, RmlPatch& out) const;
+    bool ComputeStyleRemovePatch(int node, const std::string& property, RmlPatch& out) const;
+    bool ComputeTextPatch(int node, const std::string& newText, RmlPatch& out) const;
+    bool ComputeElementRemovalPatch(int node, RmlPatch& out) const;
+    bool ComputeInsertPatch(int parent, int childOrdinal, const std::string& markup, RmlPatch& out) const;
+    // Sort by descending offset, splice every replacement into the buffer, then re-parse once.
+    void ApplyPatches(const std::vector<RmlPatch>& patches);
 
     // ---- Standard-RML generators (no proprietary syntax). Style/quote/indent follow the file. ----
     // Build an element open tag: <tag id=".." class=".." style="..">; extraAttrs are raw "name=\"value\"".
