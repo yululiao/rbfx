@@ -8,6 +8,7 @@
 
 #include "LuaBindings.h"
 #include "LuaBindHelpers.h"
+#include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Core/StringUtils.h"
@@ -499,6 +500,9 @@ sol::table VariantVectorToLuaTable(sol::state_view lua, const VariantVector& val
 void RegisterCoreBindings(sol::state& lua, Context* context)
 {
     // Nested VariantMap view used by VariantToLua for VAR_VARIANTMAP values.
+    // Hand-written opener on purpose: the Lua name ("VariantMapView") differs
+    // from the C++ class (LuaVariantMapView), so RBFX_USERTYPE's #NAME would
+    // stringify the wrong name (see LuaBindMacros.h contract).
     lua.new_usertype<LuaVariantMapView>("VariantMapView",
         sol::no_constructor,
         sol::meta_function::index,
@@ -518,53 +522,61 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // Base class of every engine object with an identity. Explicit attribute
     // reflection methods give Lua access to all Serializable attributes even
     // for types without dedicated usertype bindings.
-    lua.new_usertype<Object>("Object",
-        sol::no_constructor,
-        // Root of every chain: an empty base list (identical to sol3's default),
-        // but routed through LuaBases so the audit table records the root and
-        // derived types can verify their bases against it.
-        sol::base_classes, LuaBases<Object>::bases(lua),
-        sol::meta_function::equal_to, [](Object* a, Object* b) { return a == b; },
-        "GetTypeName", [](Object* object) -> std::string { return object->GetTypeName().c_str(); },
-        "GetCategory", [](Object* object) -> std::string { return object->GetCategory().c_str(); },
-        "GetContext", [](Object* object) -> Context* { return object->GetContext(); },
-        "GetType", [](Object* object) { return object->GetType().Value(); }
-    );
+    {
+        using RBFX_THIS = Object;
+        RBFX_USERTYPE(Object,
+            sol::no_constructor,
+            // Root of every chain: an empty base list (identical to sol3's default),
+            // but routed through LuaBases so the audit table records the root and
+            // derived types can verify their bases against it.
+            sol::base_classes, LuaBases<Object>::bases(lua),
+            sol::meta_function::equal_to, [](Object* a, Object* b) { return a == b; },
+            "GetTypeName", [](Object* object) -> std::string { return object->GetTypeName().c_str(); },
+            "GetCategory", [](Object* object) -> std::string { return object->GetCategory().c_str(); },
+            "GetContext", [](Object* object) -> Context* { return object->GetContext(); },
+            "GetType", [](Object* object) { return object->GetType().Value(); }
+        );
+    }
 
     // Serializable adds the attribute reflection channel.
-    lua.new_usertype<Serializable>("Serializable",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Serializable, Object>::bases(lua),
-        "GetAttribute", [&lua](Serializable* self, const char* name) -> sol::object {
-            return self ? VariantToLua(lua, self->GetAttribute(name)) : sol::lua_nil;
-        },
-        "SetAttribute", [&lua](Serializable* self, const char* name, sol::object value) {
-            if (self)
-                self->SetAttribute(name, LuaToVariant(lua, value));
-        },
-        "GetAttributes", [&lua](Serializable* self) -> sol::object {
-            if (!self)
-                return sol::lua_nil;
-            const auto* attributes = self->GetAttributes();
-            if (!attributes)
-                return sol::lua_nil;
-            sol::table result = lua.create_table(static_cast<unsigned>(attributes->size()), 0);
-            for (unsigned i = 0; i < attributes->size(); ++i)
-            {
-                sol::table info = lua.create_table();
-                info["name"] = (*attributes)[i].name_.c_str();
-                info["type"] = (*attributes)[i].type_;
-                result[i + 1] = info;
+    {
+        using RBFX_THIS = Serializable;
+        RBFX_USERTYPE(Serializable,
+            sol::no_constructor,
+            sol::base_classes, LuaBases<Serializable, Object>::bases(lua),
+            "GetAttribute", [&lua](Serializable* self, const char* name) -> sol::object {
+                return self ? VariantToLua(lua, self->GetAttribute(name)) : sol::lua_nil;
+            },
+            "SetAttribute", [&lua](Serializable* self, const char* name, sol::object value) {
+                if (self)
+                    self->SetAttribute(name, LuaToVariant(lua, value));
+            },
+            "GetAttributes", [&lua](Serializable* self) -> sol::object {
+                if (!self)
+                    return sol::lua_nil;
+                const auto* attributes = self->GetAttributes();
+                if (!attributes)
+                    return sol::lua_nil;
+                sol::table result = lua.create_table(static_cast<unsigned>(attributes->size()), 0);
+                for (unsigned i = 0; i < attributes->size(); ++i)
+                {
+                    sol::table info = lua.create_table();
+                    info["name"] = (*attributes)[i].name_.c_str();
+                    info["type"] = (*attributes)[i].type_;
+                    result[i + 1] = info;
+                }
+                return result;
+            },
+            "LoadXML", [](Serializable* self, const char* resourceName) {
+                return self && self->LoadXML(resourceName);
             }
-            return result;
-        },
-        "LoadXML", [](Serializable* self, const char* resourceName) {
-            return self && self->LoadXML(resourceName);
-        }
-    );
+        );
+    }
 
     // Generic weak object reference with dynamic attribute access:
     //   ref.FarClip = 100.0  or  ref["Far Clip"] = 100.0
+    // Hand-written opener on purpose: exposed as "ObjectRef", not the C++
+    // class name (LuaObjectRef) -- same #NAME constraint as VariantMapView.
     lua.new_usertype<LuaObjectRef>("ObjectRef",
         sol::no_constructor,
         // Identity by underlying pointer so == agrees with every other Object wrapper.
@@ -661,29 +673,35 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     );
 
     // Engine: run control and engine-wide queries.
-    lua.new_usertype<Engine>("Engine",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Engine, Object>::bases(lua),
-        "Exit", &Engine::Exit,
-        "DumpResources", &Engine::DumpResources,
-        "IsHeadless", &Engine::IsHeadless
-    );
+    {
+        using RBFX_THIS = Engine;
+        RBFX_USERTYPE(Engine,
+            sol::no_constructor,
+            sol::base_classes, LuaBases<Engine, Object>::bases(lua),
+            "Exit", &Engine::Exit,
+            "DumpResources", &Engine::DumpResources,
+            "IsHeadless", &Engine::IsHeadless
+        );
+    }
     RegisterLuaObjectWrapper<Engine>();
 
     // Time: frame delta and total time queries.
-    lua.new_usertype<Time>("Time",
-        sol::no_constructor,
-        sol::base_classes, LuaBases<Time, Object>::bases(lua),
-        "GetTimeStep", &Time::GetTimeStep,
-        "GetElapsedTime", &Time::GetElapsedTime,
-        "GetFramesPerSecond", &Time::GetFramesPerSecond,
-        "GetFrameNumber", &Time::GetFrameNumber,
-        // Static helpers mirrored through lambdas (50_Sample2D seed,
-        // 53_LANDiscovery expiry timestamps).
-        "GetSystemTime", [](sol::this_state, Time*) { return Time::GetSystemTime(); },
-        "GetTimeSinceEpoch", [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); },
-        "timeStep", sol::readonly_property(&Time::GetTimeStep)
-    );
+    {
+        using RBFX_THIS = Time;
+        RBFX_USERTYPE(Time,
+            sol::no_constructor,
+            sol::base_classes, LuaBases<Time, Object>::bases(lua),
+            "GetTimeStep", &Time::GetTimeStep,
+            "GetElapsedTime", &Time::GetElapsedTime,
+            "GetFramesPerSecond", &Time::GetFramesPerSecond,
+            "GetFrameNumber", &Time::GetFrameNumber,
+            // Static helpers mirrored through lambdas (50_Sample2D seed,
+            // 53_LANDiscovery expiry timestamps).
+            "GetSystemTime", [](sol::this_state, Time*) { return Time::GetSystemTime(); },
+            "GetTimeSinceEpoch", [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); },
+            "timeStep", sol::readonly_property(&Time::GetTimeStep)
+        );
+    }
     RegisterLuaObjectWrapper<Time>();
 
     // Global subsystem accessor, the Lua counterpart of GetSubsystem<T>().

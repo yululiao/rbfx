@@ -141,7 +141,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Graphics subsystem: window & device queries.
     {
         using RBFX_THIS = Graphics;
-        lua.new_usertype<Graphics>("Graphics",
+        RBFX_USERTYPE(Graphics,
             sol::no_constructor,
             sol::base_classes, LuaBases<Graphics, Object>::bases(lua),
             "GetWidth", &Graphics::GetWidth,
@@ -169,7 +169,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // RenderDevice: low-level window state queries (54_WindowSettingsDemo).
     {
         using RBFX_THIS = RenderDevice;
-        lua.new_usertype<RenderDevice>("RenderDevice",
+        RBFX_USERTYPE(RenderDevice,
             sol::no_constructor,
             sol::base_classes, LuaBases<RenderDevice, Object>::bases(lua),
             "GetWindowSettings", [](RenderDevice* device, sol::this_state s) -> sol::table {
@@ -221,7 +221,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Image resource: pixel data for screenshots and texture work.
     {
         using RBFX_THIS = Image;
-        lua.new_usertype<Image>("Image",
+        RBFX_USERTYPE(Image,
             sol::no_constructor,
             // Full chain: sol3 type casts (e.g. to Object*) only check the
             // directly declared bases.
@@ -245,7 +245,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Renderer subsystem: viewport management.
     {
         using RBFX_THIS = Renderer;
-        lua.new_usertype<Renderer>("Renderer",
+        RBFX_USERTYPE(Renderer,
             sol::no_constructor,
             sol::base_classes, LuaBases<Renderer, Object>::bases(lua),
             "SetViewport", &Renderer::SetViewport,
@@ -263,7 +263,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Camera component.
     {
         using RBFX_THIS = Camera;
-        lua.new_usertype<Camera>("Camera",
+        RBFX_USERTYPE(Camera,
             sol::no_constructor,
             sol::base_classes, LuaBases<Camera, Component, Serializable, Object>::bases(lua),
             "SetFarClip", &Camera::SetFarClip,
@@ -304,7 +304,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // components because sol3 requires base usertypes to exist first.
     {
         using RBFX_THIS = Drawable;
-        lua.new_usertype<Drawable>("Drawable",
+        RBFX_USERTYPE(Drawable,
             sol::no_constructor,
             sol::base_classes, LuaBases<Drawable, Component, Serializable, Object>::bases(lua),
             "SetCastShadows", &Drawable::SetCastShadows,
@@ -320,7 +320,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Light component.
     {
         using RBFX_THIS = Light;
-        lua.new_usertype<Light>("Light",
+        RBFX_USERTYPE(Light,
             sol::no_constructor,
             sol::base_classes, LuaBases<Light, Drawable, Component, Serializable, Object>::bases(lua),
             "SetLightType", &Light::SetLightType,
@@ -363,7 +363,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // class; Texture2D exists for GetResource("Texture2D", ...) resolution.
     {
         using RBFX_THIS = Texture;
-        lua.new_usertype<Texture>("Texture",
+        RBFX_USERTYPE(Texture,
             sol::no_constructor,
             sol::base_classes, LuaBases<Texture, Resource, Object>::bases(lua),
             "GetWidth", &Texture::GetWidth,
@@ -381,7 +381,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = Texture2D;
-        lua.new_usertype<Texture2D>("Texture2D",
+        RBFX_USERTYPE(Texture2D,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<Texture2D>(new Texture2D(context)); }),
             sol::base_classes, LuaBases<Texture2D, Texture, Resource, Object>::bases(lua),
@@ -399,7 +399,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // RenderSurface: render target face of a texture; hosts RTT viewports.
     {
         using RBFX_THIS = RenderSurface;
-        lua.new_usertype<RenderSurface>("RenderSurface",
+        RBFX_USERTYPE(RenderSurface,
             sol::no_constructor,
             "SetViewport", &RenderSurface::SetViewport,
             "GetViewport", &RenderSurface::GetViewport
@@ -409,7 +409,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Technique: shader pipeline description resource.
     {
         using RBFX_THIS = Technique;
-        lua.new_usertype<Technique>("Technique",
+        RBFX_USERTYPE(Technique,
             sol::no_constructor,
             sol::base_classes, LuaBases<Technique, Resource, Object>::bases(lua)
         );
@@ -419,7 +419,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // StaticModel and the model/material resources.
     {
         using RBFX_THIS = Model;
-        lua.new_usertype<Model>("Model",
+        RBFX_USERTYPE(Model,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<Model>(new Model(context)); }),
             sol::base_classes, LuaBases<Model, Resource, Object>::bases(lua),
@@ -470,7 +470,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = Material;
-        lua.new_usertype<Material>("Material",
+        RBFX_USERTYPE(Material,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<Material>(new Material(context)); }),
             sol::base_classes, LuaBases<Material, Resource, Object>::bases(lua),
@@ -533,7 +533,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = StaticModel;
-        lua.new_usertype<StaticModel>("StaticModel",
+        RBFX_USERTYPE(StaticModel,
             sol::no_constructor,
             sol::base_classes, LuaBases<StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
             "SetModel", &StaticModel::SetModel,
@@ -550,7 +550,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // supplying its transform (20_HugeObjectCount).
     {
         using RBFX_THIS = StaticModelGroup;
-        lua.new_usertype<StaticModelGroup>("StaticModelGroup",
+        RBFX_USERTYPE(StaticModelGroup,
             sol::no_constructor,
             sol::base_classes, LuaBases<StaticModelGroup, StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
             "AddInstanceNode", &StaticModelGroup::AddInstanceNode,
@@ -564,7 +564,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // RibbonTrail: trail rendered behind a moving node (44_RibbonTrailDemo).
     {
         using RBFX_THIS = RibbonTrail;
-        lua.new_usertype<RibbonTrail>("RibbonTrail",
+        RBFX_USERTYPE(RibbonTrail,
             sol::no_constructor,
             sol::base_classes, LuaBases<RibbonTrail, Drawable, Component, Serializable, Object>::bases(lua),
             "SetWidth", &RibbonTrail::SetWidth,
@@ -591,7 +591,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // (34_DynamicGeometry).
     {
         using RBFX_THIS = VertexElement;
-        lua.new_usertype<VertexElement>("VertexElement",
+        RBFX_USERTYPE(VertexElement,
             sol::call_constructor, sol::factories(
                 []() { return VertexElement(); },
                 [](int type, int semantic, sol::optional<unsigned char> index, sol::optional<unsigned> stepRate) {
@@ -612,7 +612,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = VertexBuffer;
-        lua.new_usertype<VertexBuffer>("VertexBuffer",
+        RBFX_USERTYPE(VertexBuffer,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<VertexBuffer>(new VertexBuffer(context)); }),
             "SetShadowed", &VertexBuffer::SetShadowed,
@@ -677,7 +677,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = IndexBuffer;
-        lua.new_usertype<IndexBuffer>("IndexBuffer",
+        RBFX_USERTYPE(IndexBuffer,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<IndexBuffer>(new IndexBuffer(context)); }),
             "SetShadowed", &IndexBuffer::SetShadowed,
@@ -695,7 +695,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = Geometry;
-        lua.new_usertype<Geometry>("Geometry",
+        RBFX_USERTYPE(Geometry,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<Geometry>(new Geometry(context)); }),
             "SetVertexBuffer", &Geometry::SetVertexBuffer,
@@ -715,7 +715,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Text3D: text component in world space (32_Physics2DConstraints).
     {
         using RBFX_THIS = Text3D;
-        lua.new_usertype<Text3D>("Text3D",
+        RBFX_USERTYPE(Text3D,
             sol::no_constructor,
             sol::base_classes, LuaBases<Text3D, Drawable, Component, Serializable, Object>::bases(lua),
             "SetText", [](Text3D* text, const char* value) {
@@ -738,7 +738,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Skybox: default environment backdrop used by most samples.
     {
         using RBFX_THIS = Skybox;
-        lua.new_usertype<Skybox>("Skybox",
+        RBFX_USERTYPE(Skybox,
             sol::no_constructor,
             sol::base_classes, LuaBases<Skybox, StaticModel, Drawable, Component, Serializable, Object>::bases(lua)
         );
@@ -748,7 +748,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Octree: mandatory scene component for visibility.
     {
         using RBFX_THIS = Octree;
-        lua.new_usertype<Octree>("Octree",
+        RBFX_USERTYPE(Octree,
             sol::no_constructor,
             sol::base_classes, LuaBases<Octree, Component, Serializable, Object>::bases(lua),
             // Raycast helper: triangle-accurate single query returning a table
@@ -778,7 +778,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Zone: ambient & fog settings.
     {
         using RBFX_THIS = Zone;
-        lua.new_usertype<Zone>("Zone",
+        RBFX_USERTYPE(Zone,
             sol::no_constructor,
             sol::base_classes, LuaBases<Zone, Drawable, Component, Serializable, Object>::bases(lua),
             "SetBoundingBox", &Zone::SetBoundingBox,
@@ -795,7 +795,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Animation resource: skeleton keyframe track data.
     {
         using RBFX_THIS = Animation;
-        lua.new_usertype<Animation>("Animation",
+        RBFX_USERTYPE(Animation,
             sol::no_constructor,
             sol::base_classes, LuaBases<Animation, Resource, Object>::bases(lua),
             "GetLength", &Animation::GetLength,
@@ -808,7 +808,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Bone::animated_ flag used to disable keyframe animation per bone.
     {
         using RBFX_THIS = Bone;
-        lua.new_usertype<Bone>("Bone",
+        RBFX_USERTYPE(Bone,
             sol::no_constructor,
             "name", [](const Bone* bone) { return bone ? bone->name_ : ea::string(); },
             "animated", &Bone::animated_,
@@ -821,7 +821,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Skeleton: bone collection of an AnimatedModel.
     {
         using RBFX_THIS = Skeleton;
-        lua.new_usertype<Skeleton>("Skeleton",
+        RBFX_USERTYPE(Skeleton,
             sol::no_constructor,
             "GetNumBones", &Skeleton::GetNumBones,
             "GetBone", sol::overload(
@@ -838,7 +838,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // inherited from StaticModel / Drawable.
     {
         using RBFX_THIS = AnimatedModel;
-        lua.new_usertype<AnimatedModel>("AnimatedModel",
+        RBFX_USERTYPE(AnimatedModel,
             sol::no_constructor,
             sol::base_classes, LuaBases<AnimatedModel, StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
             "SetUpdateInvisible", &AnimatedModel::SetUpdateInvisible,
@@ -853,7 +853,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // flattened into optional positional arguments for Lua.
     {
         using RBFX_THIS = AnimationController;
-        lua.new_usertype<AnimationController>("AnimationController",
+        RBFX_USERTYPE(AnimationController,
             sol::no_constructor,
             sol::base_classes, LuaBases<AnimationController, Component, Serializable, Object>::bases(lua),
             "PlayNew", [](AnimationController* controller, Animation* animation,
@@ -941,7 +941,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // sibling CollisionShape:SetTerrain (19_VehicleDemo).
     {
         using RBFX_THIS = Terrain;
-        lua.new_usertype<Terrain>("Terrain",
+        RBFX_USERTYPE(Terrain,
             sol::no_constructor,
             sol::base_classes, LuaBases<Terrain, Component, Serializable, Object>::bases(lua),
             "SetPatchSize", &Terrain::SetPatchSize,
@@ -961,7 +961,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Billboard: plain data struct describing one quad in a BillboardSet.
     {
         using RBFX_THIS = Billboard;
-        lua.new_usertype<Billboard>("Billboard",
+        RBFX_USERTYPE(Billboard,
             sol::no_constructor,
             "position", &Billboard::position_,
             "size", &Billboard::size_,
@@ -973,7 +973,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // BillboardSet: particle-like quads facing the camera.
     {
         using RBFX_THIS = BillboardSet;
-        lua.new_usertype<BillboardSet>("BillboardSet",
+        RBFX_USERTYPE(BillboardSet,
             sol::no_constructor,
             sol::base_classes, LuaBases<BillboardSet, Drawable, Component, Serializable, Object>::bases(lua),
             "SetNumBillboards", &BillboardSet::SetNumBillboards,
@@ -990,7 +990,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // ParticleEmitter:SetEffect.
     {
         using RBFX_THIS = ParticleEffect;
-        lua.new_usertype<ParticleEffect>("ParticleEffect",
+        RBFX_USERTYPE(ParticleEffect,
             sol::no_constructor,
             sol::base_classes, LuaBases<ParticleEffect, Resource, Object>::bases(lua)
         );
@@ -1000,7 +1000,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // ParticleEmitter: 3D particle effect emitter (46_RaycastVehicle dust).
     {
         using RBFX_THIS = ParticleEmitter;
-        lua.new_usertype<ParticleEmitter>("ParticleEmitter",
+        RBFX_USERTYPE(ParticleEmitter,
             sol::no_constructor,
             sol::base_classes, LuaBases<ParticleEmitter, BillboardSet, Drawable, Component, Serializable, Object>::bases(lua),
             "SetEffect", &ParticleEmitter::SetEffect,
@@ -1013,7 +1013,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // DecalSet: paint decals onto drawable geometry (08_Decals).
     {
         using RBFX_THIS = DecalSet;
-        lua.new_usertype<DecalSet>("DecalSet",
+        RBFX_USERTYPE(DecalSet,
             sol::no_constructor,
             sol::base_classes, LuaBases<DecalSet, Drawable, Component, Serializable, Object>::bases(lua),
             "SetMaterial", &DecalSet::SetMaterial,
@@ -1027,7 +1027,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // Viewport: render setup combining scene + camera.
     {
         using RBFX_THIS = Viewport;
-        lua.new_usertype<Viewport>("Viewport",
+        RBFX_USERTYPE(Viewport,
             sol::no_constructor,
             sol::base_classes, LuaBases<Viewport, Object>::bases(lua),
             "SetScene", &Viewport::SetScene,
@@ -1041,7 +1041,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     // DebugRenderer: programmatic debug drawing.
     {
         using RBFX_THIS = DebugRenderer;
-        lua.new_usertype<DebugRenderer>("DebugRenderer",
+        RBFX_USERTYPE(DebugRenderer,
             sol::no_constructor,
             sol::base_classes, LuaBases<DebugRenderer, Component, Serializable, Object>::bases(lua),
             "AddLine", [](DebugRenderer* debug, const Vector3& start, const Vector3& end, const Color& color) {

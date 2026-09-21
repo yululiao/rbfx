@@ -424,7 +424,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
 
     {
         using RBFX_THIS = ValueAnimation;
-        lua.new_usertype<ValueAnimation>("ValueAnimation",
+        RBFX_USERTYPE(ValueAnimation,
             sol::call_constructor, sol::factories([context]() {
                 return SharedPtr<ValueAnimation>(new ValueAnimation(context));
             })

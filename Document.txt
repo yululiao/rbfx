@@ -63,3 +63,7 @@ iOS 打包(第一梯队,未做)
 🟡 音频:bus/effect 混音编辑器、实时参数
 🟡 高层多人:Godot 有 high-level multiplayer API;rbfx 偏底层 socket
 ❌ 本地化工作流、资源导入 UX(可视化重导入/元数据)
+
+ RBFX_OVERLOAD(SetScale2D,
+            RBFX_CAST(Node, SetScale2D, void, const Vector2&),
+            RBFX_CAST(Node, SetScale2D, void, float, float))

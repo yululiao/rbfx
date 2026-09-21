@@ -156,7 +156,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // (29_SoundSynthesis).
     {
         using RBFX_THIS = BufferedSoundStream;
-        lua.new_usertype<BufferedSoundStream>("BufferedSoundStream",
+        RBFX_USERTYPE(BufferedSoundStream,
             sol::call_constructor, sol::factories([]() {
                 return SharedPtr<BufferedSoundStream>(new BufferedSoundStream());
             }),

@@ -163,7 +163,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // so Lua owns it by value inside the userdata.
     {
         using RBFX_THIS = VectorBuffer;
-        lua.new_usertype<VectorBuffer>("VectorBuffer",
+        RBFX_USERTYPE(VectorBuffer,
             sol::call_constructor, sol::factories([]() {
                 return VectorBuffer();
             })
@@ -284,7 +284,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // (43_HttpRequestDemo). Created through Lua's HttpRequest(url) factory.
     {
         using RBFX_THIS = HttpRequest;
-        lua.new_usertype<HttpRequest>("HttpRequest",
+        RBFX_USERTYPE(HttpRequest,
             sol::call_constructor, sol::factories(
                 [](const char* url, sol::optional<std::string> verb, sol::optional<sol::table> headers) {
                     ea::vector<ea::string> headerList;
@@ -323,7 +323,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // JSONFile: parsed JSON document (43_HttpRequestDemo, 40_Localization).
     {
         using RBFX_THIS = JSONFile;
-        lua.new_usertype<JSONFile>("JSONFile",
+        RBFX_USERTYPE(JSONFile,
             sol::call_constructor, sol::factories(
                 [context]() { return SharedPtr<JSONFile>(new JSONFile(context)); })
             RBFX_BASES(Resource, Object)
@@ -340,7 +340,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // JSONValue: node of a parsed JSON document.
     {
         using RBFX_THIS = JSONValue;
-        lua.new_usertype<JSONValue>("JSONValue",
+        RBFX_USERTYPE(JSONValue,
             sol::call_constructor, sol::factories([]() { return JSONValue{}; })
             RBFX_OVERLOAD(Get,
                 [](const JSONValue* value, const char* key) -> JSONValue {
@@ -367,7 +367,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // Constructed explicitly, mirroring the C++ sample's MakeShared call.
     {
         using RBFX_THIS = LANDiscoveryManager;
-        lua.new_usertype<LANDiscoveryManager>("LANDiscoveryManager",
+        RBFX_USERTYPE(LANDiscoveryManager,
             sol::call_constructor, sol::factories([context]() {
                 return SharedPtr<LANDiscoveryManager>(new LANDiscoveryManager(context));
             })

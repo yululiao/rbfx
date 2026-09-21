@@ -62,10 +62,15 @@
 //     The registration opener: expands to lua.new_usertype<NAME>("NAME",
 //     ...) -- NAME is stringized, so the type name is written once. The
 //     block's `using RBFX_THIS = NAME;` must agree (the block opener repeats
-//     the name by necessity). Registrations whose first members involve
-//     TEMPLATE-ARGUMENT commas -- sol::constructors<A(), B(float, float)> or
-//     multi-capture factories lambdas -- stay literal: the preprocessor
-//     splits macro arguments on those top-level commas.
+//     the name by necessity). Sole constraint: NAME must be the exact Lua
+//     type name -- a registration whose Lua name differs from the C++ class
+//     (LuaObjectRef exposed as "ObjectRef") stays literal, since #NAME
+//     would stringify the wrong name. Constructor forms pass through fine:
+//     the preprocessor splits sol::constructors<A(), B(float, float)> on
+//     its template-argument commas, but __VA_ARGS__ re-joins the pieces
+//     verbatim (the doc generator's splitter/rejoiner mirrors that), so the
+//     expansion is text-identical. Only REARRANGING macros (RBFX_CAST:
+//     arguments injected at several positions) demand comma-free tokens.
 //
 // RBFX_BASES(base, ...)
 //     Expands to the audited base chain for RBFX_THIS. At least one base

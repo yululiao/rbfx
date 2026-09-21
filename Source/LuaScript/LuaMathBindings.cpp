@@ -51,7 +51,7 @@ void RegisterMathBindings(sol::state& lua)
 {
     {
         using RBFX_THIS = Vector2;
-        lua.new_usertype<Vector2>("Vector2",
+        RBFX_USERTYPE(Vector2,
             sol::call_constructor, sol::constructors<Vector2(), Vector2(float, float)>()
             RBFX_RAW(x, &Vector2::x_)
             RBFX_RAW(y, &Vector2::y_)
@@ -80,7 +80,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = Vector3;
-        lua.new_usertype<Vector3>("Vector3",
+        RBFX_USERTYPE(Vector3,
             sol::call_constructor, sol::constructors<Vector3(), Vector3(float, float, float)>()
             RBFX_RAW(x, &Vector3::x_)
             RBFX_RAW(y, &Vector3::y_)
@@ -117,7 +117,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = Vector4;
-        lua.new_usertype<Vector4>("Vector4",
+        RBFX_USERTYPE(Vector4,
             sol::call_constructor, sol::constructors<Vector4(), Vector4(float, float, float, float)>()
             RBFX_RAW(x, &Vector4::x_)
             RBFX_RAW(y, &Vector4::y_)
@@ -134,7 +134,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = IntVector2;
-        lua.new_usertype<IntVector2>("IntVector2",
+        RBFX_USERTYPE(IntVector2,
             sol::call_constructor, sol::factories(
                 []() { return IntVector2(); },
                 [](int x, int y) { return IntVector2(x, y); },
@@ -153,7 +153,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = IntVector3;
-        lua.new_usertype<IntVector3>("IntVector3",
+        RBFX_USERTYPE(IntVector3,
             sol::call_constructor, sol::constructors<IntVector3(), IntVector3(int, int, int)>()
             RBFX_RAW(x, &IntVector3::x_)
             RBFX_RAW(y, &IntVector3::y_)
@@ -167,7 +167,7 @@ void RegisterMathBindings(sol::state& lua)
     // 3 floats = euler angles, 4 floats = (w, x, y, z) components.
     {
         using RBFX_THIS = Quaternion;
-        lua.new_usertype<Quaternion>("Quaternion",
+        RBFX_USERTYPE(Quaternion,
             sol::call_constructor, sol::constructors<Quaternion(), Quaternion(float, float, float), Quaternion(float, float, float, float), Quaternion(float, const Vector3&), Quaternion(const Vector3&, const Vector3&)>()
             RBFX_RAW(w, &Quaternion::w_)
             RBFX_RAW(x, &Quaternion::x_)
@@ -195,7 +195,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = Color;
-        lua.new_usertype<Color>("Color",
+        RBFX_USERTYPE(Color,
             sol::call_constructor, sol::constructors<Color(), Color(float, float, float), Color(float, float, float, float)>()
             RBFX_RAW(r, &Color::r_)
             RBFX_RAW(g, &Color::g_)
@@ -224,7 +224,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = IntRect;
-        lua.new_usertype<IntRect>("IntRect",
+        RBFX_USERTYPE(IntRect,
             sol::call_constructor, sol::factories(
                 []() { return IntRect(); },
                 [](int left, int top, int right, int bottom) { return IntRect(left, top, right, bottom); },
@@ -247,7 +247,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = Rect;
-        lua.new_usertype<Rect>("Rect",
+        RBFX_USERTYPE(Rect,
             sol::call_constructor, sol::constructors<Rect(), Rect(const Vector2&, const Vector2&), Rect(float, float, float, float)>()
             RBFX_RAW(min, &Rect::min_)
             RBFX_RAW(max, &Rect::max_)
@@ -265,7 +265,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = BoundingBox;
-        lua.new_usertype<BoundingBox>("BoundingBox",
+        RBFX_USERTYPE(BoundingBox,
             sol::call_constructor, sol::constructors<BoundingBox(), BoundingBox(const Vector3&, const Vector3&), BoundingBox(float, float)>()
             RBFX_RAW(min, &BoundingBox::min_)
             RBFX_RAW(max, &BoundingBox::max_)
@@ -284,7 +284,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = Plane;
-        lua.new_usertype<Plane>("Plane",
+        RBFX_USERTYPE(Plane,
             sol::call_constructor, sol::constructors<
                 Plane(),
                 Plane(const Vector3&, const Vector3&),
@@ -297,7 +297,7 @@ void RegisterMathBindings(sol::state& lua)
 
     {
         using RBFX_THIS = Ray;
-        lua.new_usertype<Ray>("Ray",
+        RBFX_USERTYPE(Ray,
             sol::call_constructor, sol::constructors<Ray(), Ray(const Vector3&, const Vector3&)>()
             RBFX_RAW(origin, &Ray::origin_)
             RBFX_RAW(direction, &Ray::direction_)

@@ -68,7 +68,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // through UIElement::CreateChild and stay usable via attribute reflection.
     {
         using RBFX_THIS = UIElement;
-        lua.new_usertype<UIElement>("UIElement",
+        RBFX_USERTYPE(UIElement,
             sol::no_constructor,
             sol::base_classes, LuaBases<UIElement, Serializable, Object>::bases(lua),
             // sol3 resolves base-class members only one level deep, so widgets
@@ -267,7 +267,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Font resource: only a type marker, consumed by Text:SetFont.
     {
         using RBFX_THIS = Font;
-        lua.new_usertype<Font>("Font",
+        RBFX_USERTYPE(Font,
             sol::no_constructor,
             sol::base_classes, LuaBases<Font, Resource, Object>::bases(lua)
         );
@@ -278,7 +278,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // ListView/DropDownList item slots (47_Typography, 54_WindowSettings).
     {
         using RBFX_THIS = Text;
-        lua.new_usertype<Text>("Text",
+        RBFX_USERTYPE(Text,
             sol::call_constructor, sol::factories([context]() {
                 return SharedPtr<Text>(new Text(context));
             }),
@@ -323,7 +323,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // BorderImage: textured widget base.
     {
         using RBFX_THIS = BorderImage;
-        lua.new_usertype<BorderImage>("BorderImage",
+        RBFX_USERTYPE(BorderImage,
             sol::no_constructor,
             sol::base_classes, LuaBases<BorderImage, UIElement, Serializable, Object>::bases(lua),
             "SetTexture", &BorderImage::SetTexture,
@@ -342,7 +342,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Button: styled through SetStyle("Button") + released/pressed events.
     {
         using RBFX_THIS = Button;
-        lua.new_usertype<Button>("Button",
+        RBFX_USERTYPE(Button,
             sol::no_constructor,
             sol::base_classes, LuaBases<Button, BorderImage, UIElement, Serializable, Object>::bases(lua)
         );
@@ -353,7 +353,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Registered after BorderImage, which its LuaBases chain requires.
     {
         using RBFX_THIS = LineEdit;
-        lua.new_usertype<LineEdit>("LineEdit",
+        RBFX_USERTYPE(LineEdit,
             sol::no_constructor,
             sol::base_classes, LuaBases<LineEdit, BorderImage, UIElement, Serializable, Object>::bases(lua),
             "SetText", [](LineEdit* edit, const char* value) {
@@ -368,7 +368,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Window: draggable container with optional modality.
     {
         using RBFX_THIS = Window;
-        lua.new_usertype<Window>("Window",
+        RBFX_USERTYPE(Window,
             sol::no_constructor,
             sol::base_classes, LuaBases<Window, BorderImage, UIElement, Serializable, Object>::bases(lua),
             "SetModal", &Window::SetModal,
@@ -380,7 +380,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // CheckBox: two-state toggle widget (14_SoundEffects).
     {
         using RBFX_THIS = CheckBox;
-        lua.new_usertype<CheckBox>("CheckBox",
+        RBFX_USERTYPE(CheckBox,
             sol::no_constructor,
             sol::base_classes, LuaBases<CheckBox, BorderImage, UIElement, Serializable, Object>::bases(lua),
             "SetChecked", &CheckBox::SetChecked,
@@ -392,7 +392,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Slider: float value in a range, fires SliderChanged events.
     {
         using RBFX_THIS = Slider;
-        lua.new_usertype<Slider>("Slider",
+        RBFX_USERTYPE(Slider,
             sol::no_constructor,
             sol::base_classes, LuaBases<Slider, BorderImage, UIElement, Serializable, Object>::bases(lua),
             "SetRange", &Slider::SetRange,
@@ -405,7 +405,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // DropDownList: item picker with a popup list (14_SoundEffects).
     {
         using RBFX_THIS = DropDownList;
-        lua.new_usertype<DropDownList>("DropDownList",
+        RBFX_USERTYPE(DropDownList,
             sol::no_constructor,
             sol::base_classes, LuaBases<DropDownList, Button, BorderImage, UIElement, Serializable, Object>::bases(lua),
             "AddItem", &DropDownList::AddItem,
@@ -425,7 +425,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // ListView: scrollable item list (47_Typography, 54_WindowSettings).
     {
         using RBFX_THIS = ListView;
-        lua.new_usertype<ListView>("ListView",
+        RBFX_USERTYPE(ListView,
             sol::no_constructor,
             sol::base_classes, LuaBases<ListView, UIElement, Serializable, Object>::bases(lua),
             "AddItem", &ListView::AddItem,
@@ -449,7 +449,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // ToolTip: hover help container attached to a widget (48_Hello3DUI).
     {
         using RBFX_THIS = ToolTip;
-        lua.new_usertype<ToolTip>("ToolTip",
+        RBFX_USERTYPE(ToolTip,
             sol::no_constructor,
             sol::base_classes, LuaBases<ToolTip, UIElement, Serializable, Object>::bases(lua)
         );
@@ -459,7 +459,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // Sprite: textured quad for 2D overlay work (18_Urho2DSprite).
     {
         using RBFX_THIS = Sprite;
-        lua.new_usertype<Sprite>("Sprite",
+        RBFX_USERTYPE(Sprite,
             sol::no_constructor,
             sol::base_classes, LuaBases<Sprite, UIElement, Serializable, Object>::bases(lua),
             "SetTexture", &Sprite::SetTexture,
@@ -490,7 +490,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // sample needs to toggle cursor visibility (17_SceneReplication).
     {
         using RBFX_THIS = Cursor;
-        lua.new_usertype<Cursor>("Cursor",
+        RBFX_USERTYPE(Cursor,
             sol::call_constructor, sol::factories([context]() {
                 return SharedPtr<Cursor>(new Cursor(context));
             }),
@@ -502,7 +502,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // UI subsystem: root element access and global scale.
     {
         using RBFX_THIS = UI;
-        lua.new_usertype<UI>("UI",
+        RBFX_USERTYPE(UI,
             sol::no_constructor,
             sol::base_classes, LuaBases<UI, Object>::bases(lua),
             "GetRoot", &UI::GetRoot,
@@ -551,7 +551,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // parameter name.
     {
         using RBFX_THIS = Console;
-        lua.new_usertype<Console>("Console",
+        RBFX_USERTYPE(Console,
             sol::no_constructor,
             sol::base_classes, LuaBases<Console, Object>::bases(lua),
             "SetVisible", &Console::SetVisible,
@@ -570,7 +570,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     // (48_Hello3DUI).
     {
         using RBFX_THIS = UIComponent;
-        lua.new_usertype<UIComponent>("UIComponent",
+        RBFX_USERTYPE(UIComponent,
             sol::no_constructor,
             sol::base_classes, LuaBases<UIComponent, Component, Serializable, Object>::bases(lua),
             "GetRoot", &UIComponent::GetRoot,

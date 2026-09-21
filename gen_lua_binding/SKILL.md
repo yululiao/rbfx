@@ -85,9 +85,12 @@ runtime breakage; rules 4-6 prevent capability regressions.
    docs. Two equivalent forms:
    - Hand-written comma form: `lua.new_usertype<T>("Name", "Key", <value>, ...)` /
      `lua.set_function("name", <value>)` / `lua.create_named_table("X")` /
-     `lua["Name"] = <value>`. Still required for constructor registrations whose
-     `sol::constructors<A(), B(float, float)>` template-argument commas would split a
-     macro argument list (the preprocessor ignores angle brackets).
+     `lua["Name"] = <value>`. Still required when the Lua type name differs from
+     the C++ class name (e.g. LuaObjectRef exposed as "ObjectRef"): `#NAME` in
+     RBFX_USERTYPE would stringify the wrong name. Constructor registrations
+     (`sol::constructors` / `sol::factories`) MAY use RBFX_USERTYPE -- the
+     preprocessor splits their template-argument commas, but `__VA_ARGS__`
+     re-joins the pieces verbatim (text-identical expansion).
    - RBFX macro form (preferred, `Source/LuaScript/LuaBindMacros.h`): every key is an
      IDENTIFIER stringized by the macro — `RBFX_M(SetParent)`, `RBFX_RAW(DrawDebugGeometry,
      ...)`, `RBFX_OVERLOAD(SetScale, RBFX_CAST(...))`, `RBFX_META(equal_to, ...)` — inside a
