@@ -11,109 +11,51 @@
 namespace Urho3D
 {
 
-ChangeUiNodeAction::ChangeUiNodeAction(UIViewDocument* document, const ea::vector<unsigned>& nodePath,
-        const UiNodePayload& oldData, const UiNodePayload& newData)
+UiDocumentSnapshotAction::UiDocumentSnapshotAction(UIViewDocument* document,
+        const ea::vector<unsigned>& mergeKeyPath, const ea::string& undoText, const ea::string& redoText)
     : document_(document)
-    , nodePath_(nodePath)
-    , oldData_(oldData)
-    , newData_(newData)
+    , mergeKeyPath_(mergeKeyPath)
+    , undoText_(undoText)
+    , redoText_(redoText)
 {
 }
 
-bool ChangeUiNodeAction::CanUndoRedo() const
+bool UiDocumentSnapshotAction::CanUndoRedo() const
 {
-    UIViewDocument* document = document_.Get();
-    if (!document)
-        return false;
-    return document->LookupNode(nodePath_) != nullptr;
+    return document_.Get() != nullptr;
 }
 
-void ChangeUiNodeAction::SetPayload(const UiNodePayload& payload) const
+void UiDocumentSnapshotAction::Restore(const ea::string& text) const
 {
     UIViewDocument* document = document_.Get();
     if (!document)
         throw UndoException("UI document is gone");
 
-    if (!document->ApplyNodePayloadInternal(nodePath_, payload))
-        throw UndoException("UI node path no longer resolves");
+    if (!document->RestoreText(text))
+        throw UndoException("UI document failed to reload from snapshot");
 }
 
-void ChangeUiNodeAction::Redo() const
+void UiDocumentSnapshotAction::Redo() const
 {
-    SetPayload(newData_);
+    Restore(redoText_);
 }
 
-void ChangeUiNodeAction::Undo() const
+void UiDocumentSnapshotAction::Undo() const
 {
-    SetPayload(oldData_);
+    Restore(undoText_);
 }
 
-bool ChangeUiNodeAction::MergeWith(const EditorAction& other)
+bool UiDocumentSnapshotAction::MergeWith(const EditorAction& other)
 {
-    const auto otherAction = dynamic_cast<const ChangeUiNodeAction*>(&other);
-    if (!otherAction)
+    const auto otherAction = dynamic_cast<const UiDocumentSnapshotAction*>(&other);
+    if (!otherAction || mergeKeyPath_.empty())
         return false;
 
-    if (document_ != otherAction->document_ || nodePath_ != otherAction->nodePath_)
+    if (document_ != otherAction->document_ || mergeKeyPath_ != otherAction->mergeKeyPath_)
         return false;
 
-    newData_ = otherAction->newData_;
+    redoText_ = otherAction->redoText_;
     return true;
-}
-
-CreateRemoveUiNodeAction::CreateRemoveUiNodeAction(UIViewDocument* document,
-        const ea::vector<unsigned>& parentPath, unsigned indexInParent,
-        const SharedPtr<UiNode>& node, bool removed)
-    : document_(document)
-    , parentPath_(parentPath)
-    , indexInParent_(indexInParent)
-    , node_(node)
-    , removed_(removed)
-{
-}
-
-bool CreateRemoveUiNodeAction::CanUndoRedo() const
-{
-    UIViewDocument* document = document_.Get();
-    if (!document)
-        return false;
-    return document->LookupNode(parentPath_) != nullptr;
-}
-
-void CreateRemoveUiNodeAction::AddNode() const
-{
-    UIViewDocument* document = document_.Get();
-    if (!document)
-        throw UndoException("UI document is gone");
-
-    if (!document->InsertNodeInternal(parentPath_, indexInParent_, node_))
-        throw UndoException("Cannot re-insert UI node (parent path no longer resolves)");
-}
-
-void CreateRemoveUiNodeAction::RemoveNode() const
-{
-    UIViewDocument* document = document_.Get();
-    if (!document)
-        throw UndoException("UI document is gone");
-
-    if (!document->RemoveNodeInternal(parentPath_, indexInParent_, node_))
-        throw UndoException("Cannot remove UI node (path no longer resolves)");
-}
-
-void CreateRemoveUiNodeAction::Redo() const
-{
-    if (removed_)
-        RemoveNode();
-    else
-        AddNode();
-}
-
-void CreateRemoveUiNodeAction::Undo() const
-{
-    if (removed_)
-        AddNode();
-    else
-        RemoveNode();
 }
 
 }

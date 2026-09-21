@@ -35,7 +35,7 @@ struct UiStyleDecl
 
 /// Editor-side document model node: the source of truth for the UI editor,
 /// mirroring one RML element. The RmlUi DOM is only a runtime projection that
-/// is regenerated from the emitted text on every structural change.
+/// is regenerated from the emitted text on every edit.
 struct UiNode : public RefCounted
 {
     ea::string tag_; ///< "div"/"button"/... ; "#text" for raw text nodes

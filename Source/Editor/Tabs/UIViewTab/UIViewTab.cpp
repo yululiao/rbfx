@@ -140,17 +140,18 @@ ea::vector<unsigned> UIViewTab::NodePath(const UiNode* node) const
 
 void UIViewTab::OnModelEdited()
 {
-    // A command or undo/redo may have invalidated the selection pointer.
-    // Restore it from the stable child-index path when possible.
     if (!document_)
         return;
     const UiDocumentModel& model = document_->GetModel();
-    if (selected_ && model.FindParent(selected_) != nullptr) // still attached
-        return;
+    // Every command (and every undo/redo) rebuilds the whole model tree from
+    // text, so no node pointer survives an edit; re-resolve the selection
+    // from its stable child-index path, falling back to the root.
     selected_ = model.ResolvePath(selPath_);
     if (!selected_)
         selected_ = model.root_.Get();
     model.BuildPath(selected_, selPath_);
+    if (inspectorSource_)
+        inspectorSource_->InvalidateCaches();
 }
 
 void UIViewTab::SetSelectedNode(UiNode* node)
@@ -292,10 +293,14 @@ void UIViewTab::OnResourceShallowSaved(const ea::string& resourceName)
 
 void UIViewTab::NewDocument()
 {
+    // RmlUi has no built-in default font: without a font-family rule, text
+    // added to a fresh document renders as blank. Declare the same family the
+    // project's own default.rcss uses (shipped in core Data/Fonts).
     static const ea::string kTemplate =
         "<rml>\n"
         "  <head>\n"
         "    <style>\n"
+        "    body { font-family: \"Noto Sans\"; }\n"
         "    </style>\n"
         "  </head>\n"
         "  <body style=\"width: 1024px; height: 768px;\">\n"
@@ -832,7 +837,11 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     if (ui::IsItemClicked(ImGuiMouseButton_Left) && !ui::IsItemToggledOpen())
         tab->SetSelectedNode(node);
     if (ui::IsItemClicked(ImGuiMouseButton_Right))
-        contextMenuTarget_ = node;
+    {
+        // Store the path, not the pointer: commands rebuild the whole tree.
+        contextMenuTargetPath_ = path;
+        contextMenuTargetValid_ = true;
+    }
 
     if (hasElementChild && open && ui::IsItemToggledOpen())
     {
@@ -865,7 +874,13 @@ void UIViewHierarchy::RenderContextMenuItems()
     if (!tab || !tab->GetDocument())
         return;
     UIViewDocument* doc = tab->GetDocument();
-    UiNode* target = contextMenuTarget_ ? contextMenuTarget_ : tab->GetSelectedNode();
+    // Resolve the right-click target from its path on every use; the node the
+    // click landed on may already have been rebuilt away by an edit.
+    UiNode* target = contextMenuTargetValid_
+        ? doc->GetModel().ResolvePath(contextMenuTargetPath_)
+        : nullptr;
+    if (!target)
+        target = tab->GetSelectedNode();
     if (!target)
         return;
 
@@ -882,7 +897,7 @@ void UIViewHierarchy::RenderContextMenuItems()
             doc->DeleteNode(target);
         }
     }
-    contextMenuTarget_ = nullptr;
+    contextMenuTargetValid_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +932,13 @@ void UIViewInspector::RenderContent()
     RenderInlineStyle(node);
     ui::Separator();
     RenderComputed(node);
+}
+
+void UIViewInspector::InvalidateCaches()
+{
+    // Whole-tree rebuilds (every command / undo) replace all nodes; the cached
+    // inline-style text must be reseeded from the new node on the next render.
+    styleSeedValid_ = false;
 }
 
 void UIViewInspector::RenderTextContent(UiNode* node)

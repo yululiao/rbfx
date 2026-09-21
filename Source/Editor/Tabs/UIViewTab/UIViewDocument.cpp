@@ -23,7 +23,6 @@
 #include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
-#include <RmlUi/Core/ElementText.h>
 #include <RmlUi/Core/Types.h>
 
 namespace Urho3D
@@ -63,9 +62,27 @@ bool TryGetDomBox(Rml::Element* element, const UiNode* node, UiBox& out)
     return out.size_.x_ > 0.0f && out.size_.y_ > 0.0f;
 }
 
+// True when the model carries at least one authored text node (not whitespace),
+// used by the no-effective-font diagnostic in ReloadFromText.
+bool HasAuthoredText(const UiNode& node)
+{
+    if (node.IsText())
+        return !Trim(node.text_).empty();
+    for (const SharedPtr<UiNode>& child : node.children_)
+    {
+        if (HasAuthoredText(*child))
+            return true;
+    }
+    return false;
+}
+
+// Deepest element whose box contains the point, children first in reverse
+// paint order. Template-minted elements (window frames, close buttons) have no
+// model node of their own - they are not part of the authored source - so a
+// hit on them bubbles to the nearest ancestor that has one: clicking the frame
+// selects the body that minted it instead of selecting nothing.
 UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, const Vector2& point)
 {
-    // Children first, tested in reverse (later siblings paint on top).
     const int n = element->GetNumChildren(false);
     for (int i = n - 1; i >= 0; i--)
     {
@@ -81,12 +98,13 @@ UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, cons
     if (!TryGetDomBox(element, node, box))
         return nullptr;
     const Vector2 local = InverseMapPoint(point, box);
-    if (local.x_ >= box.pos_.x_ && local.x_ <= box.pos_.x_ + box.size_.x_ &&
-        local.y_ >= box.pos_.y_ && local.y_ <= box.pos_.y_ + box.size_.y_)
-    {
-        return node;
-    }
-    return nullptr;
+    if (local.x_ < box.pos_.x_ || local.x_ > box.pos_.x_ + box.size_.x_ ||
+        local.y_ < box.pos_.y_ || local.y_ > box.pos_.y_ + box.size_.y_)
+        return nullptr;
+
+    for (Rml::Element* ancestor = element; !node && ancestor; ancestor = ancestor->GetParentNode())
+        node = model->FindByDom(ancestor);
+    return node;
 }
 
 } // namespace
@@ -113,7 +131,7 @@ UIViewDocument::UIViewDocument(Context* context)
     previewUI_->UnsubscribeFromEvent(E_TEXTINPUT);
     previewUI_->UnsubscribeFromEvent(E_DROPFILE);
     // Reload immunity: keep the isolated preview from reacting to the file
-    // watcher. We drive every rebuild ourselves through LoadFromText, so a
+    // watcher. We drive every rebuild ourselves through ReloadFromText, so a
     // disk change (e.g. our own Save) must not hand the engine back ownership
     // of document_ and dangle model_'s dom_ pointers. This is what lets us load
     // with a real source URL (required for <link>/template resolution below).
@@ -197,13 +215,37 @@ void UIViewDocument::Rebuild()
 }
 
 // ---------------------------------------------------------------------------
-// Loading
+// Loading / whole-projection rebuild
 // ---------------------------------------------------------------------------
 
 bool UIViewDocument::LoadFromText(const ea::string& text, const ea::string& path)
 {
+    path_ = path;
+    warnedNoFont_ = false; // per-open diagnostics state
+    if (!ReloadFromText(text))
+    {
+        path_.clear();
+        return false;
+    }
+    dirty_ = false;
+    return true;
+}
+
+bool UIViewDocument::RestoreText(const ea::string& text)
+{
+    // Undo/redo snapshot restore: same rebuild path as an ordinary edit. The
+    // document stays dirty - only an actual save clears the flag.
+    if (!ReloadFromText(text))
+        return false;
+    dirty_ = true;
+    OnModelEdited(this);
+    return true;
+}
+
+bool UIViewDocument::ReloadFromText(const ea::string& text)
+{
     Rml::Context* ctx = previewUI_->GetRmlContext();
-    if (!ctx)
+    if (!ctx || path_.empty())
         return false;
 
     ctx->UnloadAllDocuments();
@@ -212,158 +254,46 @@ bool UIViewDocument::LoadFromText(const ea::string& text, const ea::string& path
     // Load under the document's real resource path so RmlUi resolves relative
     // <link>/<template> hrefs and theme imports the same way the runtime does
     // (RmlFile::Open joins the href onto the source-URL directory). An empty
-    // URL would silently drop e.g. <link href="HelloRmlUI_Window.rml"> and leave
-    // a template="..." body rendering as a bare, content-less box.
+    // URL would silently drop e.g. <link href="HelloRmlUI_Window.rml"> and
+    // leave a template="..." body rendering as a bare, content-less box.
     // E_FILECHANGED is unsubscribed on previewUI_ (see ctor), so using the real
     // URL here stays immune to the engine's hot-reload path.
     document_ = ctx->LoadDocumentFromMemory(
         Rml::String(SubstituteDataModelToken(text).c_str()),
-        Rml::String(path.c_str(), path.length()));
+        Rml::String(path_.c_str(), path_.length()));
     if (!document_)
         return false;
 
     document_->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
-    // Synchronous layout so the freshly built model sees valid boxes.
+    // Synchronous layout so views see valid boxes immediately.
     document_->UpdateDocument();
 
-    // Build the editor model from the ORIGINAL text (\a text), not the token-substituted
-    // DOM used for the preview: this keeps {{bindings}} / data-model tokens / comments /
-    // head verbatim as the source of truth (see UiDocumentModel::BuildFromText).
-    model_.BuildFromText(text, document_);
-    dirty_ = false;
+    // Build the editor model from the ORIGINAL text (\a text), not the
+    // token-substituted DOM used for the preview: this keeps {{bindings}} /
+    // data-model tokens / comments / head verbatim as the source of truth.
+    if (!model_.BuildFromText(text, document_))
+        return false;
+
+    // A document whose body resolves no font face cannot draw a single glyph
+    // (RmlUi has no built-in default font): boxes and borders render, authored
+    // text comes out blank. That looks like a rendering bug, so name the real
+    // cause once per opened document.
+    if (!warnedNoFont_ && model_.root_ && document_->GetFontFaceHandle() == 0
+        && HasAuthoredText(*model_.root_))
+    {
+        warnedNoFont_ = true;
+        URHO3D_LOGWARNING(
+            "UIViewDocument: '{}' carries text but no effective font-family rule, so text renders "
+            "as blank. Add e.g. 'body {{ font-family: \"Noto Sans\"; }}' to the document's <style> "
+            "(or link an .rcss that declares one).",
+            path_.c_str());
+    }
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// Live-DOM editing primitives (no undo recording)
+// Live-DOM primitives (no undo recording)
 // ---------------------------------------------------------------------------
-
-void UIViewDocument::SyncStyleToDom(UiNode* node)
-{
-    Rml::Element* el = node ? node->dom_ : nullptr;
-    if (!el)
-        return;
-    // The model's inline style vector is the source of truth. Drop any
-    // editor-managed property no longer present, then apply the current set via
-    // SetProperty on the *attached* element (RmlUi marks it dirty and re-flows),
-    // which is the same path the live drag uses and visibly updates the render.
-    static const char* const managed[] = {
-        "position", "box-sizing", "left", "top", "right", "bottom",
-        "width", "height", "transform", "background-color", "border", "color",
-    };
-    for (const char* key : managed)
-    {
-        if (node->GetStyle(key).empty())
-            el->RemoveProperty(key);
-    }
-    for (const UiStyleDecl& decl : node->style_)
-        el->SetProperty(decl.name_.c_str(), decl.value_.c_str());
-}
-
-Rml::Element* UIViewDocument::CreateDomForNode(UiNode& node, Rml::Element* parentEl)
-{
-    Rml::ElementDocument* doc = parentEl->GetOwnerDocument();
-    if (!doc)
-        return nullptr;
-
-    if (node.IsText())
-    {
-        Rml::ElementPtr text = doc->CreateTextNode(node.text_.c_str());
-        node.dom_ = parentEl->AppendChild(std::move(text));
-        return node.dom_;
-    }
-
-    Rml::ElementPtr el = doc->CreateElement(node.tag_.c_str());
-    Rml::Element* raw = el.get();
-    if (!node.id_.empty())
-        raw->SetAttribute("id", node.id_.c_str());
-    if (!node.classes_.empty())
-        raw->SetAttribute("class", node.classes_.c_str());
-    for (const auto& attr : node.attributes_)
-        raw->SetAttribute(attr.first.c_str(), attr.second.c_str());
-    node.dom_ = parentEl->AppendChild(std::move(el));
-    // Apply inline style only after insertion: setting the 'style' attribute on a
-    // detached element does not reliably parse into applied properties, so the
-    // new node would render at its default/auto size (a 0x0 dot).
-    SyncStyleToDom(&node);
-    for (const SharedPtr<UiNode>& child : node.children_)
-        CreateDomForNode(*child, node.dom_);
-    return node.dom_;
-}
-
-void UIViewDocument::DetachFromDom(UiNode* node)
-{
-    if (!node)
-        return;
-    if (node->dom_)
-    {
-        if (Rml::Element* parent = node->dom_->GetParentNode())
-            parent->RemoveChild(node->dom_);
-        node->dom_ = nullptr;
-    }
-    for (const SharedPtr<UiNode>& child : node->children_)
-        DetachFromDom(child.Get());
-}
-
-void UIViewDocument::ApplyNodeToDom(UiNode* node)
-{
-    Rml::Element* el = node ? node->dom_ : nullptr;
-    if (!el)
-        return;
-
-    if (node->IsText())
-    {
-        // A text node carries no id/class/style/attributes of its own; the only
-        // editable aspect is its content. Push it straight onto the live
-        // ElementText so the preview reflects the edit without a full reload.
-        if (el->GetTagName() == "#text")
-            static_cast<Rml::ElementText*>(el)->SetText(node->text_.c_str());
-        return;
-    }
-
-    if (node->id_.empty())
-        el->RemoveAttribute("id");
-    else
-        el->SetAttribute("id", node->id_.c_str());
-    if (node->classes_.empty())
-        el->RemoveAttribute("class");
-    else
-        el->SetAttribute("class", node->classes_.c_str());
-    // Inline style is pushed as properties on the attached element, not via the
-    // 'style' attribute (which does not reliably re-parse into applied props).
-    SyncStyleToDom(node);
-
-    // Drop attributes that no longer exist in the model, then rewrite the rest
-    // (SetAttribute on a live element re-parses; style/class refresh in place).
-    ea::vector<Rml::String> stale;
-    for (const auto& pair : el->GetAttributes())
-    {
-        const ea::string name(pair.first.c_str(), pair.first.length());
-        if (name == "id" || name == "class" || name == "style")
-            continue;
-        bool found = false;
-        for (const auto& attr : node->attributes_)
-        {
-            if (attr.first == name)
-            {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            stale.push_back(pair.first);
-    }
-    for (const Rml::String& name : stale)
-        el->RemoveAttribute(name);
-    for (const auto& attr : node->attributes_)
-        el->SetAttribute(attr.first.c_str(), attr.second.c_str());
-}
-
-void UIViewDocument::RefreshLayout()
-{
-    if (document_)
-        document_->UpdateDocument();
-}
 
 void UIViewDocument::SetLiveBox(UiNode* node, const UiBox& box)
 {
@@ -427,28 +357,76 @@ bool UIViewDocument::PushUndoAction(const SharedPtr<EditorAction>& action)
     return true;
 }
 
-bool UIViewDocument::PushChangeNodeAction(UiNode* node, const UiNodePayload& oldData)
+// ---------------------------------------------------------------------------
+// Edit commit: re-emit + whole rebuild + one undoable snapshot
+// ---------------------------------------------------------------------------
+
+bool UIViewDocument::EmitAndReload(ea::string& outText)
 {
-    if (!node)
+    outText = model_.EmitRml();
+    return ReloadFromText(outText);
+}
+
+bool UIViewDocument::CorrectLanding(const ea::vector<unsigned>& path, const Vector2& desiredAbs)
+{
+    UiNode* node = model_.ResolvePath(path);
+    if (!node || !node->dom_ || !node->IsMaterialized())
         return false;
-    ea::vector<unsigned> path;
-    if (!model_.BuildPath(node, path))
+    const Vector2 landed = V2(node->dom_->GetAbsoluteOffset(Rml::BoxArea::Border));
+    if (landed == desiredAbs)
         return false;
-    return PushUndoAction(MakeShared<ChangeUiNodeAction>(this, path, oldData, SnapshotUiNodePayload(*node)));
+    UiBox box;
+    if (!TryGetMaterializedBox(*node, box))
+        return false;
+    box.pos_ += desiredAbs - landed;
+    WriteBoxToStyle(*node, box);
+    return true;
+}
+
+bool UIViewDocument::CommitAndReload(const ea::string& undoText, const ea::vector<unsigned>& mergeKey,
+    const ea::vector<unsigned>* landingPath, const Vector2& desiredAbs)
+{
+    // Every edit funnels through here: emit the model to text, then rebuild the
+    // model and the whole live projection from that text - the exact path a
+    // hand-edited file takes when it is (re)opened. The preview can therefore
+    // never drift from what the saved source renders.
+    ea::string redoText;
+    if (!EmitAndReload(redoText))
+    {
+        URHO3D_LOGERROR("UIViewDocument: projection reload failed; restoring the pre-edit document.");
+        ReloadFromText(undoText); // best effort: keep model and projection in sync
+        return false;
+    }
+
+    // Synthetic absolute boxes (born-centered widgets, baked materializations)
+    // must land exactly where they were authored; correct left/top once if the
+    // containing block shifted the element, then rebuild from the fixed text.
+    if (landingPath && CorrectLanding(*landingPath, desiredAbs))
+    {
+        if (!EmitAndReload(redoText))
+        {
+            URHO3D_LOGERROR("UIViewDocument: projection reload failed; restoring the pre-edit document.");
+            ReloadFromText(undoText);
+            return false;
+        }
+    }
+
+    PushUndoAction(MakeShared<UiDocumentSnapshotAction>(this, mergeKey, undoText, redoText));
+    dirty_ = true;
+    OnModelEdited(this);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
-// Undoable commands
+// Undoable editing commands
 // ---------------------------------------------------------------------------
 
 UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 {
     if (!model_.root_ || !document_ || !tag)
         return nullptr;
-    parent = (parent && parent->dom_) ? parent : model_.root_;
-    Rml::Element* parentEl = parent->dom_;
-    if (!parentEl)
-        return nullptr;
+    if (!parent || parent->IsText())
+        parent = model_.root_.Get();
 
     auto node = MakeShared<UiNode>();
     const ea::string kind = tag;
@@ -482,13 +460,14 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
         node->SetStyle("border", "1px solid #6f86a6");
     }
 
-    // Born materialized: 160x48 centered inside the parent's rendered box so it
-    // lands in view (not off a narrow/auto-sized body) and is draggable at once.
+    // Born materialized: 160x48 centered inside the parent's rendered box when
+    // it has one (else the preview viewport), so the widget lands in view and
+    // is draggable at once.
     UiBox box;
     box.size_ = Vector2{160.0f, 48.0f};
     float cw = static_cast<float>(kPreviewWidth);
     float ch = static_cast<float>(kPreviewHeight);
-    const Vector2 psz = V2(parentEl->GetBox().GetSize(Rml::BoxArea::Border));
+    const Vector2 psz = parent->dom_ ? V2(parent->dom_->GetBox().GetSize(Rml::BoxArea::Border)) : Vector2::ZERO;
     if (psz.x_ > box.size_.x_)
         cw = psz.x_;
     if (psz.y_ > box.size_.y_)
@@ -496,44 +475,45 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
     box.pos_ = Vector2{Max(cw - box.size_.x_, 0.0f) * 0.5f, Max(ch - box.size_.y_, 0.0f) * 0.5f};
     WriteBoxToStyle(*node, box);
 
-    CreateDomForNode(*node, parentEl);
-    RefreshLayout();
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<unsigned> parentPath;
+    if (!model_.BuildPath(parent, parentPath))
+        return nullptr;
+    const unsigned indexInParent = parent->children_.size();
+    parent->children_.push_back(node);
 
-    // Center precisely: measure where the widget actually landed and correct
-    // its left/top once, so the centering is exact regardless of which
-    // containing block the new absolute element resolves against.
-    if (Rml::Element* el = node->dom_)
+    ea::vector<unsigned> nodePath = parentPath;
+    nodePath.push_back(indexInParent);
+
+    // Precise centering: where the widget should end up in absolute document
+    // coordinates (centered inside the parent's own rendered box), used by the
+    // one-shot landing correction after the rebuild.
+    Vector2 desiredAbs = Vector2::ZERO;
+    bool haveDesired = false;
+    if (parent->dom_)
     {
-        const Vector2 pAbs = V2(parentEl->GetAbsoluteOffset(Rml::BoxArea::Border));
-        const Vector2 desired = pAbs + Vector2{Max(psz.x_ - box.size_.x_, 0.0f) * 0.5f,
-                                               Max(psz.y_ - box.size_.y_, 0.0f) * 0.5f};
-        const Vector2 landed = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-        if (landed != desired)
-        {
-            box.pos_ += desired - landed;
-            WriteBoxToStyle(*node, box);
-            SyncStyleToDom(node.Get());
-            RefreshLayout();
-        }
+        const Vector2 pAbs = V2(parent->dom_->GetAbsoluteOffset(Rml::BoxArea::Border));
+        desiredAbs = pAbs + Vector2{Max(psz.x_ - box.size_.x_, 0.0f) * 0.5f,
+                                    Max(psz.y_ - box.size_.y_, 0.0f) * 0.5f};
+        haveDesired = true;
     }
 
-    const unsigned indexInParent = parent->children_.size();
-    ea::vector<unsigned> parentPath;
-    model_.BuildPath(parent, parentPath);
-    PushUndoAction(MakeShared<CreateRemoveUiNodeAction>(this, parentPath, indexInParent, node, false));
-
-    parent->children_.push_back(node);
-    dirty_ = true;
-    OnModelEdited(this);
-    return node.Get();
+    if (!CommitAndReload(undoText, {}, haveDesired ? &nodePath : nullptr, desiredAbs))
+        return nullptr;
+    return model_.ResolvePath(nodePath);
 }
 
 UiNode* UIViewDocument::DuplicateNode(UiNode* node)
 {
-    if (!node || node == model_.root_)
+    if (!node || node == model_.root_.Get() || node->IsText())
         return nullptr;
     UiNode* parent = model_.FindParent(node);
-    if (!parent || !parent->dom_)
+    if (!parent)
+        return nullptr;
+
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<unsigned> parentPath;
+    if (!model_.BuildPath(parent, parentPath))
         return nullptr;
 
     SharedPtr<UiNode> copy = DeepCloneUiNode(*node);
@@ -547,65 +527,63 @@ UiNode* UIViewDocument::DuplicateNode(UiNode* node)
         WriteBoxToStyle(*copy, b);
     }
 
-    CreateDomForNode(*copy, parent->dom_);
-    RefreshLayout();
-
     const unsigned indexInParent = parent->children_.size();
-    ea::vector<unsigned> parentPath;
-    model_.BuildPath(parent, parentPath);
-    PushUndoAction(MakeShared<CreateRemoveUiNodeAction>(this, parentPath, indexInParent, copy, false));
-
     parent->children_.push_back(copy);
-    dirty_ = true;
-    OnModelEdited(this);
-    return copy.Get();
+
+    ea::vector<unsigned> copyPath = parentPath;
+    copyPath.push_back(indexInParent);
+
+    // The copy should sit 16px off the original's rendered spot.
+    Vector2 desiredAbs = Vector2::ZERO;
+    bool haveDesired = false;
+    if (node->dom_)
+    {
+        desiredAbs = V2(node->dom_->GetAbsoluteOffset(Rml::BoxArea::Border)) + Vector2{16.0f, 16.0f};
+        haveDesired = true;
+    }
+
+    if (!CommitAndReload(undoText, {}, haveDesired ? &copyPath : nullptr, desiredAbs))
+        return nullptr;
+    return model_.ResolvePath(copyPath);
 }
 
 bool UIViewDocument::DeleteNode(UiNode* node)
 {
-    if (!node || node == model_.root_)
+    if (!node || node == model_.root_.Get() || node->IsText())
         return false;
     UiNode* parent = model_.FindParent(node);
     if (!parent)
         return false;
 
     unsigned indexInParent = 0;
-    SharedPtr<UiNode> victim; // keeps the subtree alive through the action
     for (unsigned i = 0; i < parent->children_.size(); i++)
     {
         if (parent->children_[i] == node)
         {
             indexInParent = i;
-            victim = parent->children_[i];
             break;
         }
     }
-    if (!victim)
-        return false;
 
-    // Remove from the live DOM first, then mirror in the model. No reload.
-    DetachFromDom(node);
-
-    ea::vector<unsigned> parentPath;
-    model_.BuildPath(parent, parentPath);
-    PushUndoAction(MakeShared<CreateRemoveUiNodeAction>(this, parentPath, indexInParent, victim, true));
-
+    const ea::string undoText = model_.EmitRml();
     parent->children_.erase(parent->children_.begin() + indexInParent);
-    RefreshLayout();
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
+    return CommitAndReload(undoText, {});
 }
 
 bool UIViewDocument::MaterializeNode(UiNode* node)
 {
-    if (!node || !node->dom_ || node->IsMaterialized())
+    if (!node || !node->dom_ || node->IsText() || node->IsMaterialized())
         return false;
 
-    // Bake the computed border box. The guess for the left/top frame origin is
-    // then verified against the re-laid-out element and corrected once, so the
-    // element never shifts (regardless of containing-block padding/border).
-    const UiNodePayload oldData = SnapshotUiNodePayload(*node);
+    // Bake the computed border box into explicit px style, then let the reload
+    // below land the element where the authored box says. CommitAndReload's
+    // landing correction fixes any containing-block offset afterwards, so
+    // nothing visibly moves (regardless of the containing block's padding or
+    // border).
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<unsigned> path;
+    if (!model_.BuildPath(node, path))
+        return false;
 
     Rml::Element* el = node->dom_;
     const Vector2 absBefore = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
@@ -619,103 +597,35 @@ bool UIViewDocument::MaterializeNode(UiNode* node)
     box.xform_ = ParseUiTransform(node->GetStyle("transform"));
     WriteBoxToStyle(*node, box);
 
-    // Push straight onto the live element - never re-emit/reload, which would
-    // re-instantiate templates and data-bound subtrees.
-    ApplyNodeToDom(node);
-    RefreshLayout();
-
-    const Vector2 absAfter = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-    if (absAfter != absBefore)
-    {
-        box.pos_ += absBefore - absAfter;
-        WriteBoxToStyle(*node, box);
-        ApplyNodeToDom(node);
-        RefreshLayout();
-    }
-
-    PushChangeNodeAction(node, oldData);
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
+    return CommitAndReload(undoText, path, &path, absBefore);
 }
 
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 {
     if (!node)
         return false;
-    const UiNodePayload oldData = SnapshotUiNodePayload(*node);
+    const ea::string undoText = model_.EmitRml();
+    // Child-index path doubles as the merge key: consecutive payload edits of
+    // the same node collapse into one undo step.
+    ea::vector<unsigned> mergeKey;
+    if (!model_.BuildPath(node, mergeKey))
+        return false;
     ApplyUiNodePayload(*node, newData);
-    ApplyNodeToDom(node);
-    RefreshLayout();
-    PushChangeNodeAction(node, oldData);
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
+    return CommitAndReload(undoText, mergeKey);
 }
 
 bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
 {
     if (!node)
         return false;
-    const UiNodePayload oldData = SnapshotUiNodePayload(*node);
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<unsigned> mergeKey;
+    if (!model_.BuildPath(node, mergeKey))
+        return false;
+    // The live DOM already shows the dragged box (SetLiveBox); the reload just
+    // makes model, text and projection canonically identical again.
     WriteBoxToStyle(*node, box);
-    PushChangeNodeAction(node, oldData);
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Apply helpers used by the undo actions
-// ---------------------------------------------------------------------------
-
-bool UIViewDocument::ApplyNodePayloadInternal(const ea::vector<unsigned>& path, const UiNodePayload& payload)
-{
-    UiNode* node = model_.ResolvePath(path);
-    if (!node)
-        return false;
-    ApplyUiNodePayload(*node, payload);
-    ApplyNodeToDom(node);
-    RefreshLayout();
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
-}
-
-bool UIViewDocument::InsertNodeInternal(const ea::vector<unsigned>& parentPath, unsigned index,
-    const SharedPtr<UiNode>& node)
-{
-    UiNode* parent = model_.ResolvePath(parentPath);
-    if (!parent || !node || !parent->dom_)
-        return false;
-    if (index > parent->children_.size())
-        return false;
-    if (index < parent->children_.size() && parent->children_[index]->tag_ != node->tag_)
-        return false; // guard against a desynchronized path
-
-    CreateDomForNode(*node, parent->dom_);
-    RefreshLayout();
-    parent->children_.insert(parent->children_.begin() + index, node);
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
-}
-
-bool UIViewDocument::RemoveNodeInternal(const ea::vector<unsigned>& parentPath, unsigned index,
-    const SharedPtr<UiNode>& expected)
-{
-    UiNode* parent = model_.ResolvePath(parentPath);
-    if (!parent || index >= parent->children_.size())
-        return false;
-    if (parent->children_[index] != expected)
-        return false; // guard against a desynchronized path
-
-    DetachFromDom(parent->children_[index].Get());
-    RefreshLayout();
-    parent->children_.erase(parent->children_.begin() + index);
-    dirty_ = true;
-    OnModelEdited(this);
-    return true;
+    return CommitAndReload(undoText, mergeKey);
 }
 
 }

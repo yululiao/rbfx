@@ -61,11 +61,11 @@ public:
     /// The editable document hosted by this tab.
     UIViewDocument* GetDocument() const { return document_.Get(); }
 
-    /// Selected model node, may be null. Node identity is stable across DOM
-    /// reloads (only its dom_ projection is refreshed), so this never dangles
-    /// between commands within the same document generation.
+    /// Selected model node, may be null. Valid only within the current model
+    /// generation: every command rebuilds the whole tree from text, and
+    /// OnModelEdited re-resolves this from the child-index path.
     UiNode* GetSelectedNode() const { return selected_; }
-    /// Child-index path of the selection (stable across DOM reloads).
+    /// Child-index path of the selection (stable across model rebuilds).
     const ea::vector<unsigned>& GetSelectedPath() const { return selPath_; }
     /// Select from the preview or the hierarchy; keeps selPath_ and the
     /// hierarchy expand state in sync. Passing null clears the selection.
@@ -176,7 +176,10 @@ private:
     static bool PathIn(const ea::vector<ea::vector<unsigned>>& set, const ea::vector<unsigned>& path);
 
     WeakPtr<UIViewTab> owner_;
-    UiNode* contextMenuTarget_ = nullptr;
+    // Right-click target, stored as a path: node pointers do not survive the
+    // whole-tree rebuilds that every editing command performs.
+    ea::vector<unsigned> contextMenuTargetPath_;
+    bool contextMenuTargetValid_ = false;
     ea::vector<ea::vector<unsigned>> openedPaths_;
     ea::vector<ea::vector<unsigned>> closedPaths_;
     bool focusPathOnly_ = false;
@@ -195,6 +198,10 @@ public:
     EditorTab* GetOwnerTab() override { return owner_; }
     void RenderContent() override;
     /// @}
+
+    /// Drop cached per-node edit state (inline-style seed) so the next render
+    /// re-reads it from the rebuilt model.
+    void InvalidateCaches();
 
 private:
     void RenderTextContent(UiNode* node);

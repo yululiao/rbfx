@@ -33,29 +33,33 @@ class EditorAction;
 /// UIViewTab so the tab keeps only ImGui drawing and input routing.
 ///
 /// Editing goes through the undoable commands (AddWidget / DuplicateNode /
-/// DeleteNode / MaterializeNode / EditNodePayload / CommitBoxEdit), which
-/// mutate the model, synchronize the live DOM in place (never re-emit/reload,
-/// so template and data-bound subtrees are not re-instantiated) and record an
-/// EditorAction on the project's UndoManager.
+/// DeleteNode / MaterializeNode / EditNodePayload / CommitBoxEdit). Each
+/// command mutates the in-memory model, re-emits the whole document and then
+/// rebuilds the model and the live projection from the emitted text - the
+/// exact path a hand-edited file takes when it is (re)opened - so the preview
+/// can never drift from what the saved source renders. Undo and redo restore
+/// whole-document text snapshots (UiDocumentSnapshotAction). Views therefore
+/// hold node pointers only within one generation and must revalidate on
+/// OnModelEdited.
 class UIViewDocument : public Object
 {
     URHO3D_OBJECT(UIViewDocument, Object)
 
 public:
-    /// Fired after any model mutation (commands, undo, redo). Views holding
-    /// raw UiNode pointers must revalidate on this signal (selection paths may
-    /// have become stale or nodes may have been destroyed).
+    /// Fired after any model mutation (commands, undo, redo). The whole model
+    /// tree has been rebuilt by then: views holding UiNode pointers must
+    /// re-resolve them from stable child-index paths.
     Signal<void()> OnModelEdited;
 
     explicit UIViewDocument(Context* context);
     ~UIViewDocument() override;
-    
+
     /// Install a callback that routes editing actions through the owning tab so
     /// the editor can attribute each change to the active resource (per-document
     /// dirty tracking + undo focus, see ResourceEditorTab). When it is unset or
     /// declines, commands fall back to the project UndoManager unchanged.
     void SetUndoPusher(ea::function<bool(SharedPtr<EditorAction>)> pusher) { undoPusher_ = ea::move(pusher); }
-    
+
     /// Return properties of the document.
     /// @{
     const UiDocumentModel& GetModel() const { return model_; }
@@ -63,6 +67,9 @@ public:
     RmlUI* GetPreviewUI() const { return previewUI_; }
     Texture2D* GetPreviewTexture() const { return texture_; }
     const IntVector2& GetPreviewSize() const { return previewSize_; }
+    /// Resource path the document was opened under (empty until loaded). Used
+    /// as the reload URL and as the undo snapshot's document identity.
+    const ea::string& GetSourcePath() const { return path_; }
     bool IsDirty() const { return dirty_; }
     void MarkSaved() { dirty_ = false; }
     void MarkDirty() { dirty_ = true; }
@@ -71,23 +78,14 @@ public:
     /// Seed the model + projection from raw RML source text loaded under its
     /// real resource path (so relative <link>/<template> hrefs resolve).
     bool LoadFromText(const ea::string& text, const ea::string& path);
+    /// Rebuild the model + projection from a snapshot text (undo/redo).
+    bool RestoreText(const ea::string& text);
     /// Serialize the model back to complete .rml text.
     ea::string EmitRml() const { return model_.EmitRml(); }
 
-    /// Live-DOM editing primitives. Push model state onto the attached
-    /// elements without any undo recording; used by the commands, by the undo
-    /// actions and by the drag controller for live previews.
-    /// @{
-    void SyncStyleToDom(UiNode* node);
-    void ApplyNodeToDom(UiNode* node);
-    Rml::Element* CreateDomForNode(UiNode& node, Rml::Element* parentEl);
-    /// Detach a subtree from the live DOM and null all its dom_ links.
-    void DetachFromDom(UiNode* node);
-    /// Synchronously update + re-layout the document.
-    void RefreshLayout();
-    /// During-drag DOM-only preview write (model is only touched on commit).
+    /// During-drag DOM-only preview write (the model is only touched on
+    /// commit; layout re-flows on the next engine update).
     void SetLiveBox(UiNode* node, const UiBox& box);
-    /// @}
 
     /// DOM queries for the views (document-space boxes and hit testing).
     /// @{
@@ -96,9 +94,9 @@ public:
     Vector2 GetInlineStyleBase(const UiNode* node) const;
     /// @}
 
-    /// Undoable editing commands. Each mutates the model AND the live DOM,
-    /// marks the document dirty, notifies views (OnModelEdited) and records an
-    /// action on the project's UndoManager when available.
+    /// Undoable editing commands. Each mutates the model, rebuilds the whole
+    /// projection from the re-emitted text, marks the document dirty, records
+    /// a snapshot action and notifies views (OnModelEdited).
     /// @{
     UiNode* AddWidget(UiNode* parent, const char* tag);
     UiNode* DuplicateNode(UiNode* node);
@@ -109,16 +107,6 @@ public:
     bool CommitBoxEdit(UiNode* node, const UiBox& box);
     /// @}
 
-    /// Apply helpers used by the undo actions: apply without recording.
-    /// @{
-    UiNode* LookupNode(const ea::vector<unsigned>& path) const { return model_.ResolvePath(path); }
-    bool ApplyNodePayloadInternal(const ea::vector<unsigned>& path, const UiNodePayload& payload);
-    bool InsertNodeInternal(const ea::vector<unsigned>& parentPath, unsigned index,
-        const SharedPtr<UiNode>& node);
-    bool RemoveNodeInternal(const ea::vector<unsigned>& parentPath, unsigned index,
-        const SharedPtr<UiNode>& expected);
-    /// @}
-
 private:
     /// Renders the offscreen preview at a valid render-phase event.
     void HandleBeginRendering(StringHash eventType, VariantMap& eventData);
@@ -126,8 +114,20 @@ private:
     ea::string SubstituteDataModelToken(const ea::string& text) const;
     /// (Re)create the preview render-target texture.
     void Rebuild();
-    /// Record a payload change for \a node given its pre-edit snapshot.
-    bool PushChangeNodeAction(UiNode* node, const UiNodePayload& oldData);
+    /// Rebuild the RmlUi document and the whole model from \a text. path_
+    /// must already be set (LoadFromText does that on open).
+    bool ReloadFromText(const ea::string& text);
+    /// Emit the model to text and rebuild the projection from it.
+    bool EmitAndReload(ea::string& outText);
+    /// Shift the authored left/top of the materialized node at \a path so it
+    /// renders at \a desiredAbs. True when a correction was written (the
+    /// caller re-emits and rebuilds).
+    bool CorrectLanding(const ea::vector<unsigned>& path, const Vector2& desiredAbs);
+    /// Commit one model edit: emit + whole rebuild (+ optional landing
+    /// correction), record the undoable snapshot, mark dirty, notify views.
+    /// On reload failure the pre-edit \a undoText is restored best-effort.
+    bool CommitAndReload(const ea::string& undoText, const ea::vector<unsigned>& mergeKey,
+        const ea::vector<unsigned>* landingPath = nullptr, const Vector2& desiredAbs = Vector2::ZERO);
     bool PushUndoAction(const SharedPtr<EditorAction>& action);
 
     ea::function<bool(SharedPtr<EditorAction>)> undoPusher_;
@@ -137,8 +137,13 @@ private:
     Rml::ElementDocument* document_ = nullptr;
 
     UiDocumentModel model_;
+    /// Resource path the document was loaded under; reused as the reload URL.
+    ea::string path_;
     IntVector2 previewSize_{1024, 768};
     bool dirty_ = false;
+    /// Set once per opened document after the no-effective-font warning fired,
+    /// so the per-edit reloads do not spam the log.
+    bool warnedNoFont_ = false;
 };
 
 }

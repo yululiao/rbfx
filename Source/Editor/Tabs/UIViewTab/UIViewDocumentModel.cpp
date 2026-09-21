@@ -11,7 +11,6 @@
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
-#include <RmlUi/Core/ElementText.h>
 #include <RmlUi/Core/StringUtilities.h>
 #include <RmlUi/Core/Variant.h>
 
@@ -23,6 +22,7 @@
 #include <string.h>
 
 #include <EASTL/sort.h>
+#include <EASTL/unordered_set.h>
 
 namespace Urho3D
 {
@@ -138,38 +138,145 @@ SharedPtr<UiNode> BuildElement(const RmlTextModel& src, int nodeIdx)
     return node;
 }
 
-/// Best-effort attach of the live preview DOM to each node's dom_ by structural
-/// correlation (children matched by tag in document order). Template-expanded or otherwise
-/// exotic DOM subtrees that do not correspond to the authored source simply stay null; the
-/// model remains the source of truth regardless.
-void CorrelateDom(UiNode& node, Rml::Element* element)
+/// True when \a cand can stand for \a child tag- and id-wise. Template-minted
+/// structure carries its own ids, so a DOM element with a different id must
+/// never absorb an id-less model node's link: the window frame would steal
+/// edits meant for the authored content nested inside it.
+bool TagIdCompatible(const UiNode& child, Rml::Element* cand)
+{
+    return ToStr(cand->GetTagName()) == child.tag_ && ToStr(cand->GetId()) == child.id_;
+}
+
+/// How many of \a cand's attribute names the model node also declares. Values
+/// are not compared: data bindings ({{...}}) come out substituted in the DOM,
+/// while the names survive, so overlap still tells same-tag candidates apart
+/// inside template-generated structure (e.g. data-model).
+int AttributeOverlap(const UiNode& child, Rml::Element* cand)
+{
+    int score = 0;
+    for (const auto& pair : cand->GetAttributes())
+    {
+        const ea::string name = ToStr(pair.first);
+        if (name == "id" || name == "class" || name == "style")
+            continue;
+        for (const auto& attr : child.attributes_)
+        {
+            if (attr.first == name)
+            {
+                ++score;
+                break;
+            }
+        }
+    }
+    return score;
+}
+
+/// DOM elements already claimed by a model node. Their subtrees are skipped
+/// during rescue searches so nothing gets double-booked.
+using UsedDomElems = ea::unordered_set<const Rml::Element*>;
+
+struct SubtreeMatch
+{
+    Rml::Element* element = nullptr;
+    int score = 0;
+};
+
+/// Best unused counterpart of \a child anywhere inside \a parent's subtree,
+/// in document order, preferring the candidate with the highest attribute-name
+/// overlap (ties stay in document order). Data bindings ({{...}}) come out
+/// substituted in the DOM while the attribute names survive, so overlap still
+/// tells same-tag candidates apart inside template-generated structure.
+SubtreeMatch FindFreeMatch(Rml::Element* parent, const UiNode& child, const UsedDomElems& used)
+{
+    SubtreeMatch best;
+    const int count = parent->GetNumChildren(false);
+    for (int i = 0; i < count; ++i)
+    {
+        Rml::Element* cand = parent->GetChild(i);
+        if (!cand || cand->GetTagName() == "#text" || used.find(cand) != used.end())
+            continue;
+        if (TagIdCompatible(child, cand))
+        {
+            const SubtreeMatch here{cand, AttributeOverlap(child, cand)};
+            if (!best.element || here.score > best.score)
+                best = here;
+        }
+        const SubtreeMatch deeper = FindFreeMatch(cand, child, used);
+        if (deeper.element && (!best.element || deeper.score > best.score))
+            best = deeper;
+    }
+    return best;
+}
+
+/// Best-effort attach of the live preview DOM to each element node's dom_ by
+/// structural correlation. Plain documents line up as direct children;
+/// templated bodies (e.g. <body template="window">) relocate the authored
+/// nodes into the template's content slot, so children without a direct match
+/// are rescued by a subtree search. Text children are not correlated: the
+/// whole projection is rebuilt from the emitted text on every edit, so a text
+/// node never needs a live element to push changes onto. Whatever still cannot
+/// be correlated stays null; the model remains the source of truth regardless.
+void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
 {
     node.dom_ = element;
-    if (!element || node.IsText())
+    if (!element)
         return;
+    used.insert(element);
 
+    // Pass 1: direct children in document order, exactly how a plain document
+    // lays them out. Already-claimed candidates (grabbed by an earlier rescue)
+    // are skipped so nothing is double-booked.
     const int numChildren = element->GetNumChildren(false);
     int cursor = 0;
     for (const SharedPtr<UiNode>& child : node.children_)
     {
         if (child->IsText())
-            continue; // text geometry is not needed; hit-testing skips #text
+            continue; // no live-element link for text nodes (see note above)
         Rml::Element* match = nullptr;
         int matchIndex = -1;
         for (int i = cursor; i < numChildren; ++i)
         {
             Rml::Element* cand = element->GetChild(i);
-            if (ToStr(cand->GetTagName()) == child->tag_)
+            if (!cand || used.find(cand) != used.end())
+                continue;
+            if (TagIdCompatible(*child, cand))
             {
                 match = cand;
                 matchIndex = i;
                 break;
             }
         }
-        CorrelateDom(*child, match);
         if (match)
+        {
             cursor = matchIndex + 1;
+            child->dom_ = match;
+            used.insert(match);
+        }
     }
+
+    // Pass 2: rescue children that found no direct counterpart (the templated
+    // case). Each rescue is marked used immediately so later siblings cannot
+    // double-book it and results stay deterministic.
+    for (const SharedPtr<UiNode>& child : node.children_)
+    {
+        if (child->IsText() || child->dom_)
+            continue;
+        const SubtreeMatch found = FindFreeMatch(element, *child, used);
+        if (found.element)
+        {
+            child->dom_ = found.element;
+            used.insert(found.element);
+        }
+    }
+
+    for (const SharedPtr<UiNode>& child : node.children_)
+        CorrelateDomRec(*child, child->dom_, used);
+}
+
+void CorrelateDom(UiNode& node, Rml::Element* element)
+{
+    UsedDomElems used;
+    CorrelateDomRec(node, element, used);
 }
 
 /// Generate standard RML for a wholly-new subtree (every node lacks a spine anchor). Used at

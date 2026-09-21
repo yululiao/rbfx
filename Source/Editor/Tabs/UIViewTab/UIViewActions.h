@@ -6,10 +6,9 @@
 
 #pragma once
 
-#include "UIViewDocumentModel.h"
-
 #include "../../Core/UndoManager.h"
 
+#include <EASTL/string.h>
 #include <EASTL/vector.h>
 
 namespace Urho3D
@@ -17,15 +16,21 @@ namespace Urho3D
 
 class UIViewDocument;
 
-/// Replace the editable payload (id / class / attributes / inline style /
-/// text) of one model node. Mirrors ChangeNodeAttributesAction: old/new
-/// snapshots identified by the node's child-index path, merged while the edit
-/// continues within the same action group.
-class ChangeUiNodeAction : public EditorAction
+/// One undoable UI edit, recorded as whole-document source-text snapshots.
+/// The model (source text) is the single source of truth and every command
+/// rebuilds the whole tree from it, so undo/redo simply restores the text that
+/// was current before/after the edit and lets the document rebuild through its
+/// ordinary load path. No node paths or pointers are held across edits, which
+/// makes the action immune to structural drift.
+///
+/// \a mergeKeyPath lets consecutive payload edits of the same node collapse
+/// into one undo step (mirrors the old ChangeUiNodeAction merge). Structural
+/// commands (add/remove) pass an empty key and never merge.
+class UiDocumentSnapshotAction : public EditorAction
 {
 public:
-    ChangeUiNodeAction(UIViewDocument* document, const ea::vector<unsigned>& nodePath,
-        const UiNodePayload& oldData, const UiNodePayload& newData);
+    UiDocumentSnapshotAction(UIViewDocument* document, const ea::vector<unsigned>& mergeKeyPath,
+        const ea::string& undoText, const ea::string& redoText);
 
     /// Implement EditorAction.
     /// @{
@@ -36,39 +41,12 @@ public:
     /// @}
 
 private:
-    void SetPayload(const UiNodePayload& payload) const;
+    void Restore(const ea::string& text) const;
 
     WeakPtr<UIViewDocument> document_;
-    ea::vector<unsigned> nodePath_;
-    UiNodePayload oldData_;
-    UiNodePayload newData_;
-};
-
-/// Insert or remove a whole model-node subtree (AddWidget / Duplicate /
-/// Delete). The removed subtree stays alive through the action's SharedPtr;
-/// undo re-creates its live DOM elements, redo detaches them again.
-class CreateRemoveUiNodeAction : public EditorAction
-{
-public:
-    CreateRemoveUiNodeAction(UIViewDocument* document, const ea::vector<unsigned>& parentPath,
-        unsigned indexInParent, const SharedPtr<UiNode>& node, bool removed);
-
-    /// Implement EditorAction.
-    /// @{
-    bool CanUndoRedo() const override;
-    void Redo() const override;
-    void Undo() const override;
-    /// @}
-
-private:
-    void AddNode() const;
-    void RemoveNode() const;
-
-    WeakPtr<UIViewDocument> document_;
-    ea::vector<unsigned> parentPath_;
-    unsigned indexInParent_{};
-    SharedPtr<UiNode> node_;
-    bool removed_{};
+    ea::vector<unsigned> mergeKeyPath_; ///< Same-node edits merge; empty never merges
+    ea::string undoText_;
+    ea::string redoText_;
 };
 
 }
