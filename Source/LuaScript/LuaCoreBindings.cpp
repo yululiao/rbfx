@@ -689,17 +689,17 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Time;
         RBFX_USERTYPE(Time,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Time, Object>::bases(lua),
-            "GetTimeStep", &Time::GetTimeStep,
-            "GetElapsedTime", &Time::GetElapsedTime,
-            "GetFramesPerSecond", &Time::GetFramesPerSecond,
-            "GetFrameNumber", &Time::GetFrameNumber,
+            sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_M(GetTimeStep)
+            RBFX_M(GetElapsedTime)
+            RBFX_M(GetFramesPerSecond)
+            RBFX_M(GetFrameNumber)
             // Static helpers mirrored through lambdas (50_Sample2D seed,
             // 53_LANDiscovery expiry timestamps).
-            "GetSystemTime", [](sol::this_state, Time*) { return Time::GetSystemTime(); },
-            "GetTimeSinceEpoch", [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); },
-            "timeStep", sol::readonly_property(&Time::GetTimeStep)
+            RBFX_RAW(GetSystemTime, [](sol::this_state, Time*) { return Time::GetSystemTime(); })
+            RBFX_RAW(GetTimeSinceEpoch, [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); })
+            RBFX_PROP_R(timeStep, float, GetTimeStep)
         );
     }
     RegisterLuaObjectWrapper<Time>();

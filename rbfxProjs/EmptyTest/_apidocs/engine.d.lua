@@ -312,6 +312,7 @@ function Component.IsEnabledEffective(...) end
 function Component.Remove(...) end
 function Component.SetEnabled(...) end
 Component.enabled = nil
+---@type integer
 Component.id = nil
 ---@type Node
 Component.node = nil
@@ -1954,10 +1955,14 @@ function TileMap2D.TileIndexToPosition(...) end
 TileMapInfo2D = {}
 function TileMapInfo2D.GetMapHeight(...) end
 function TileMapInfo2D.GetMapWidth(...) end
+---@type integer
 TileMapInfo2D.height = nil
 TileMapInfo2D.orientation = nil
+---@type number
 TileMapInfo2D.tileHeight = nil
+---@type number
 TileMapInfo2D.tileWidth = nil
+---@type integer
 TileMapInfo2D.width = nil
 
 ---@class TileMapLayer2D : Component, Serializable, Object
@@ -2002,6 +2007,7 @@ function Time.GetFramesPerSecond(...) end
 function Time.GetSystemTime(...) end
 function Time.GetTimeSinceEpoch(...) end
 function Time.GetTimeStep(...) end
+---@type number
 Time.timeStep = nil
 
 ---@class TmxFile2D : Resource, Object

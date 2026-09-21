@@ -147,8 +147,8 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             RBFX_OBJ_R(parent, Node, GetParent)
             RBFX_M(SetParent)
             RBFX_OBJ_R(scene, Scene, GetScene)
-            RBFX_RAW(numChildren, sol::readonly_property([](Node* node) -> unsigned { return node ? node->GetNumChildren() : 0; }))
-            RBFX_RAW(numComponents, sol::readonly_property([](Node* node) -> unsigned { return node ? node->GetNumComponents() : 0; }))
+            RBFX_PROP_R(numChildren, unsigned, GetNumChildren)
+            RBFX_PROP_R(numComponents, unsigned, GetNumComponents)
             RBFX_OVERLOAD(CreateChild,
                 [](Node* node, const char* name, sol::this_state s) -> sol::object {
                     return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->CreateChild(name)) : sol::lua_nil;
@@ -390,7 +390,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             RBFX_OBJ_R(node, Node, GetNode)
             RBFX_OBJ_M(GetNode, Node, GetNode)
             RBFX_OBJ_R(scene, Scene, GetScene)
-            RBFX_RAW(id, sol::readonly_property(&Component::GetID))
+            RBFX_PROP_R(id, unsigned, GetID)
             RBFX_RAW(enabled, sol::property(
                 &Component::IsEnabled,
                 [](Component* component, bool enabled) { if (component) component->SetEnabled(enabled); }))

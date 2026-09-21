@@ -197,10 +197,10 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
             RBFX_RAW(orientation, sol::readonly_property([](TileMapInfo2D* info) {
                 return info ? static_cast<int>(info->orientation_) : 0;
             }))
-            RBFX_RAW(width, sol::readonly_property(&TileMapInfo2D::width_))
-            RBFX_RAW(height, sol::readonly_property(&TileMapInfo2D::height_))
-            RBFX_RAW(tileWidth, sol::readonly_property(&TileMapInfo2D::tileWidth_))
-            RBFX_RAW(tileHeight, sol::readonly_property(&TileMapInfo2D::tileHeight_))
+            RBFX_PROP_R(width, int, width_)
+            RBFX_PROP_R(height, int, height_)
+            RBFX_PROP_R(tileWidth, float, tileWidth_)
+            RBFX_PROP_R(tileHeight, float, tileHeight_)
         );
     }
 
