@@ -142,26 +142,26 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Graphics;
         RBFX_USERTYPE(Graphics,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Graphics, Object>::bases(lua),
-            "GetWidth", &Graphics::GetWidth,
-            "GetHeight", &Graphics::GetHeight,
-            "SetWindowTitle", &Graphics::SetWindowTitle,
-            "TakeScreenShot", [context](Graphics* graphics, sol::this_state s) -> sol::object {
+            sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_M(GetWidth)
+            RBFX_M(GetHeight)
+            RBFX_M(SetWindowTitle)
+            RBFX_RAW(TakeScreenShot, [context](Graphics* graphics, sol::this_state s) -> sol::object {
                 if (!graphics)
                     return sol::lua_nil;
                 SharedPtr<Image> image(new Image(context));
                 if (!graphics->TakeScreenShot(*image))
                     return sol::lua_nil;
                 return sol::make_object(sol::state_view(s), image);
-            },
-            "ToggleFullscreen", &Graphics::ToggleFullscreen,
+            })
+            RBFX_M(ToggleFullscreen)
             // Multi-monitor setup (54_WindowSettingsDemo).
-            "GetMonitorCount", &Graphics::GetMonitorCount,
-            "SetDefaultWindowModes", [](Graphics* graphics, const sol::table& settings) -> bool {
+            RBFX_M(GetMonitorCount)
+            RBFX_RAW(SetDefaultWindowModes, [](Graphics* graphics, const sol::table& settings) -> bool {
                 return graphics ? graphics->SetDefaultWindowModes(TableToWindowSettings(settings, WindowSettings{})) : false;
-            },
-            "windowTitle", sol::property(&Graphics::GetWindowTitle, &Graphics::SetWindowTitle)
+            })
+            RBFX_RAW(windowTitle, sol::property(&Graphics::GetWindowTitle, &Graphics::SetWindowTitle))
         );
     }
     RegisterLuaObjectWrapper<Graphics>();
@@ -170,21 +170,21 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = RenderDevice;
         RBFX_USERTYPE(RenderDevice,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<RenderDevice, Object>::bases(lua),
-            "GetWindowSettings", [](RenderDevice* device, sol::this_state s) -> sol::table {
+            sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_RAW(GetWindowSettings, [](RenderDevice* device, sol::this_state s) -> sol::table {
                 return WindowSettingsToTable(sol::state_view(s),
                     device ? device->GetWindowSettings() : WindowSettings{});
-            },
-            "GetSwapChainSize", [](RenderDevice* device) -> IntVector2 {
+            })
+            RBFX_RAW(GetSwapChainSize, [](RenderDevice* device) -> IntVector2 {
                 return device ? device->GetSwapChainSize() : IntVector2::ZERO;
-            },
-            "GetDpiScale", [](RenderDevice* device) -> float {
+            })
+            RBFX_RAW(GetDpiScale, [](RenderDevice* device) -> float {
                 return device ? device->GetDpiScale() : 1.0f;
-            },
+            })
             // Enumerate fullscreen resolutions of a monitor as an array of
             // tables { width, height, refreshRate }.
-            "GetFullscreenModes", [](RenderDevice* device, int monitor, sol::this_state s) -> sol::table {
+            RBFX_RAW(GetFullscreenModes, [](RenderDevice* device, int monitor, sol::this_state s) -> sol::table {
                 sol::state_view lua(s);
                 sol::table result = lua.create_table();
                 unsigned index = 1;
@@ -197,10 +197,10 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                     result[index++] = entry;
                 }
                 return result;
-            },
+            })
             // Index into the table produced by GetFullscreenModes that best
             // matches the given size and refresh rate.
-            "GetClosestFullscreenModeIndex", [](RenderDevice* device, const sol::table& modes, const IntVector2& size,
+            RBFX_RAW(GetClosestFullscreenModeIndex, [](RenderDevice* device, const sol::table& modes, const IntVector2& size,
                 int refreshRate) -> unsigned {
                 FullscreenModeVector parsed;
                 for (unsigned i = 1; i <= modes.size(); ++i)
@@ -213,7 +213,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                     parsed.push_back(mode);
                 }
                 return RenderDevice::GetClosestFullscreenModeIndex(parsed, FullscreenMode{size, refreshRate});
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<RenderDevice>();
@@ -222,22 +222,20 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Image;
         RBFX_USERTYPE(Image,
-            sol::no_constructor,
-            // Full chain: sol3 type casts (e.g. to Object*) only check the
-            // directly declared bases.
-            sol::base_classes, LuaBases<Image, Resource, Object>::bases(lua),
-            "GetWidth", &Image::GetWidth,
-            "GetHeight", &Image::GetHeight,
-            "GetComponents", &Image::GetComponents,
-            "SetSize", [](Image* image, int width, int height, unsigned components) {
+            sol::no_constructor
+            RBFX_BASES(Resource, Object)
+            RBFX_M(GetWidth)
+            RBFX_M(GetHeight)
+            RBFX_M(GetComponents)
+            RBFX_RAW(SetSize, [](Image* image, int width, int height, unsigned components) {
                 return image ? image->SetSize(width, height, components) : false;
-            },
-            "SavePNG", [](const Image* image, const ea::string& fileName) {
+            })
+            RBFX_RAW(SavePNG, [](const Image* image, const ea::string& fileName) {
                 return image && image->SavePNG(fileName);
-            },
-            "SaveJPG", [](const Image* image, const ea::string& fileName, int quality) {
+            })
+            RBFX_RAW(SaveJPG, [](const Image* image, const ea::string& fileName, int quality) {
                 return image && image->SaveJPG(fileName, quality);
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<Image>();
@@ -246,16 +244,16 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Renderer;
         RBFX_USERTYPE(Renderer,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Renderer, Object>::bases(lua),
-            "SetViewport", &Renderer::SetViewport,
-            "GetViewport", &Renderer::GetViewport,
-            "GetNumViewports", &Renderer::GetNumViewports,
-            "SetTextureAnisotropy", &Renderer::SetTextureAnisotropy,
-            "SetTextureFilterMode", &Renderer::SetTextureFilterMode,
-            "SetTextureQuality", &Renderer::SetTextureQuality,
-            "DrawDebugGeometry", &Renderer::DrawDebugGeometry,
-            "GetDefaultZone", &Renderer::GetDefaultZone
+            sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_M(SetViewport)
+            RBFX_M(GetViewport)
+            RBFX_M(GetNumViewports)
+            RBFX_M(SetTextureAnisotropy)
+            RBFX_M(SetTextureFilterMode)
+            RBFX_M(SetTextureQuality)
+            RBFX_M(DrawDebugGeometry)
+            RBFX_M(GetDefaultZone)
         );
     }
     RegisterLuaObjectWrapper<Renderer>();
@@ -264,38 +262,38 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Camera;
         RBFX_USERTYPE(Camera,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Camera, Component, Serializable, Object>::bases(lua),
-            "SetFarClip", &Camera::SetFarClip,
-            "SetNearClip", &Camera::SetNearClip,
-            "SetFov", &Camera::SetFov,
-            "SetOrthographic", &Camera::SetOrthographic,
-            "SetOrthoSize", sol::overload(
+            sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetFarClip)
+            RBFX_M(SetNearClip)
+            RBFX_M(SetFov)
+            RBFX_M(SetOrthographic)
+            RBFX_OVERLOAD(SetOrthoSize,
                 RBFX_CAST(SetOrthoSize, void, float),
-                RBFX_CAST(SetOrthoSize, void, const Vector2&)),
-            "SetAspectRatio", &Camera::SetAspectRatio,
-            "SetAutoAspectRatio", &Camera::SetAutoAspectRatio,
-            "SetFillMode", &Camera::SetFillMode,
-            "SetViewMask", &Camera::SetViewMask,
-            "SetViewOverrideFlags", [](Camera* camera, unsigned flags) {
+                RBFX_CAST(SetOrthoSize, void, const Vector2&))
+            RBFX_M(SetAspectRatio)
+            RBFX_M(SetAutoAspectRatio)
+            RBFX_M(SetFillMode)
+            RBFX_M(SetViewMask)
+            RBFX_RAW(SetViewOverrideFlags, [](Camera* camera, unsigned flags) {
                 if (camera)
                     camera->SetViewOverrideFlags(ViewOverrideFlags{static_cast<ViewOverride>(flags)});
-            },
-            "GetFarClip", &Camera::GetFarClip,
-            "GetNearClip", &Camera::GetNearClip,
-            "GetFov", &Camera::GetFov,
-            "IsOrthographic", &Camera::IsOrthographic,
-            "GetScreenRay", &Camera::GetScreenRay,
-            "GetScreenRayFromMouse", &Camera::GetScreenRayFromMouse,
-            "WorldToScreenPoint", &Camera::WorldToScreenPoint,
-            "ScreenToWorldPoint", &Camera::ScreenToWorldPoint,
+            })
+            RBFX_M(GetFarClip)
+            RBFX_M(GetNearClip)
+            RBFX_M(GetFov)
+            RBFX_M(IsOrthographic)
+            RBFX_M(GetScreenRay)
+            RBFX_M(GetScreenRayFromMouse)
+            RBFX_M(WorldToScreenPoint)
+            RBFX_M(ScreenToWorldPoint)
             // Planar reflection & clipping (23_Water).
-            "SetUseReflection", &Camera::SetUseReflection,
-            "SetReflectionPlane", &Camera::SetReflectionPlane,
-            "SetUseClipping", &Camera::SetUseClipping,
-            "SetClipPlane", &Camera::SetClipPlane,
-            "SetZoom", &Camera::SetZoom,
-            "GetZoom", &Camera::GetZoom
+            RBFX_M(SetUseReflection)
+            RBFX_M(SetReflectionPlane)
+            RBFX_M(SetUseClipping)
+            RBFX_M(SetClipPlane)
+            RBFX_M(SetZoom)
+            RBFX_M(GetZoom)
         );
     }
     RegisterLuaObjectWrapper<Camera>();
@@ -305,15 +303,15 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Drawable;
         RBFX_USERTYPE(Drawable,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Drawable, Component, Serializable, Object>::bases(lua),
-            "SetCastShadows", &Drawable::SetCastShadows,
-            "SetOccluder", &Drawable::SetOccluder,
-            "GetWorldBoundingBox", [](Drawable* drawable) { return drawable ? drawable->GetWorldBoundingBox() : BoundingBox(); },
-            "SetViewMask", &Drawable::SetViewMask,
-            "SetDrawDistance", &Drawable::SetDrawDistance,
-            "SetShadowDistance", &Drawable::SetShadowDistance,
-            "SetEnabled", &Component::SetEnabled
+            sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetCastShadows)
+            RBFX_M(SetOccluder)
+            RBFX_RAW(GetWorldBoundingBox, [](Drawable* drawable) { return drawable ? drawable->GetWorldBoundingBox() : BoundingBox(); })
+            RBFX_M(SetViewMask)
+            RBFX_M(SetDrawDistance)
+            RBFX_M(SetShadowDistance)
+            RBFX_RAW(SetEnabled, &Component::SetEnabled)
         );
     }
 
@@ -321,24 +319,24 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Light;
         RBFX_USERTYPE(Light,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Light, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetLightType", &Light::SetLightType,
-            "SetColor", &Light::SetColor,
-            "SetBrightness", &Light::SetBrightness,
-            "SetRange", &Light::SetRange,
-            "SetFov", &Light::SetFov,
-            "SetRadius", &Light::SetRadius,
-            "SetLength", &Light::SetLength,
-            "SetAspectRatio", &Light::SetAspectRatio,
-            "SetSpecularIntensity", &Light::SetSpecularIntensity,
-            "SetCastShadows", &Light::SetCastShadows,
-            "SetShadowIntensity", &Light::SetShadowIntensity,
-            "SetShadowBias", [](Light* light, float constantBias, float slopeScaledBias, sol::optional<float> normalOffset) {
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_M(SetLightType)
+            RBFX_M(SetColor)
+            RBFX_M(SetBrightness)
+            RBFX_M(SetRange)
+            RBFX_M(SetFov)
+            RBFX_M(SetRadius)
+            RBFX_M(SetLength)
+            RBFX_M(SetAspectRatio)
+            RBFX_M(SetSpecularIntensity)
+            RBFX_M(SetCastShadows)
+            RBFX_M(SetShadowIntensity)
+            RBFX_RAW(SetShadowBias, [](Light* light, float constantBias, float slopeScaledBias, sol::optional<float> normalOffset) {
                 if (light)
                     light->SetShadowBias(BiasParameters(constantBias, slopeScaledBias, normalOffset.value_or(0.0f)));
-            },
-            "SetShadowCascade", [](Light* light, float split1, float split2, float split3,
+            })
+            RBFX_RAW(SetShadowCascade, [](Light* light, float split1, float split2, float split3,
                 sol::optional<float> split4, sol::optional<float> fadeStart,
                 sol::optional<float> biasAutoAdjust) {
                 // Mirror the C++ defaults: split4 = 0.0, fadeStart = 0.8,
@@ -346,15 +344,15 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 if (light)
                     light->SetShadowCascade(CascadeParameters(split1, split2, split3,
                         split4.value_or(0.0f), fadeStart.value_or(0.8f), biasAutoAdjust.value_or(0.8f)));
-            },
-            "SetShadowResolution", &Light::SetShadowResolution,
-            "SetShadowFadeDistance", &Light::SetShadowFadeDistance,
-            "SetShadowNearFarRatio", &Light::SetShadowNearFarRatio,
-            "SetRampTexture", &Light::SetRampTexture,
-            "GetLightType", &Light::GetLightType,
-            "GetColor", &Light::GetColor,
-            "GetBrightness", &Light::GetBrightness,
-            "GetRange", &Light::GetRange
+            })
+            RBFX_M(SetShadowResolution)
+            RBFX_M(SetShadowFadeDistance)
+            RBFX_M(SetShadowNearFarRatio)
+            RBFX_M(SetRampTexture)
+            RBFX_M(GetLightType)
+            RBFX_M(GetColor)
+            RBFX_M(GetBrightness)
+            RBFX_M(GetRange)
         );
     }
     RegisterLuaObjectWrapper<Light>();
@@ -364,17 +362,17 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Texture;
         RBFX_USERTYPE(Texture,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Texture, Resource, Object>::bases(lua),
-            "GetWidth", &Texture::GetWidth,
-            "GetHeight", &Texture::GetHeight,
-            "SetFilterMode", [](Texture* texture, int mode) {
+            sol::no_constructor
+            RBFX_BASES(Resource, Object)
+            RBFX_M(GetWidth)
+            RBFX_M(GetHeight)
+            RBFX_RAW(SetFilterMode, [](Texture* texture, int mode) {
                 if (texture)
                     texture->SetFilterMode(static_cast<TextureFilterMode>(mode));
-            },
-            "GetRenderSurface", [](Texture* texture) -> RenderSurface* {
+            })
+            RBFX_RAW(GetRenderSurface, [](Texture* texture) -> RenderSurface* {
                 return texture ? texture->GetRenderSurface() : nullptr;
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<Texture>();
@@ -383,15 +381,15 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         using RBFX_THIS = Texture2D;
         RBFX_USERTYPE(Texture2D,
             sol::call_constructor, sol::factories(
-                [context]() { return SharedPtr<Texture2D>(new Texture2D(context)); }),
-            sol::base_classes, LuaBases<Texture2D, Texture, Resource, Object>::bases(lua),
-            "SetSize", [](Texture2D* texture, int width, int height, unsigned format,
+                [context]() { return SharedPtr<Texture2D>(new Texture2D(context)); })
+            RBFX_BASES(Texture, Resource, Object)
+            RBFX_RAW(SetSize, [](Texture2D* texture, int width, int height, unsigned format,
                 sol::optional<unsigned> flags, sol::optional<int> multiSample) -> bool {
                 if (!texture)
                     return false;
                 return texture->SetSize(width, height, static_cast<TextureFormat>(format),
                     TextureFlags{static_cast<TextureFlag>(flags.value_or(0))}, multiSample.value_or(1));
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<Texture2D>();
@@ -400,9 +398,9 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = RenderSurface;
         RBFX_USERTYPE(RenderSurface,
-            sol::no_constructor,
-            "SetViewport", &RenderSurface::SetViewport,
-            "GetViewport", &RenderSurface::GetViewport
+            sol::no_constructor
+            RBFX_M(SetViewport)
+            RBFX_M(GetViewport)
         );
     }
 
@@ -410,8 +408,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Technique;
         RBFX_USERTYPE(Technique,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Technique, Resource, Object>::bases(lua)
+            sol::no_constructor
+            RBFX_BASES(Resource, Object)
         );
     }
     RegisterLuaObjectWrapper<Technique>();
@@ -421,19 +419,19 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         using RBFX_THIS = Model;
         RBFX_USERTYPE(Model,
             sol::call_constructor, sol::factories(
-                [context]() { return SharedPtr<Model>(new Model(context)); }),
-            sol::base_classes, LuaBases<Model, Resource, Object>::bases(lua),
-            "SetNumGeometries", &Model::SetNumGeometries,
-            "SetGeometry", &Model::SetGeometry,
-            "SetBoundingBox", &Model::SetBoundingBox,
-            "GetNumGeometries", &Model::GetNumGeometries,
-            "GetGeometry", &Model::GetGeometry,
-            "Clone", [](Model* model) -> SharedPtr<Model> {
+                [context]() { return SharedPtr<Model>(new Model(context)); })
+            RBFX_BASES(Resource, Object)
+            RBFX_M(SetNumGeometries)
+            RBFX_M(SetGeometry)
+            RBFX_M(SetBoundingBox)
+            RBFX_M(GetNumGeometries)
+            RBFX_M(GetGeometry)
+            RBFX_RAW(Clone, [](Model* model) -> SharedPtr<Model> {
                 return model ? SharedPtr<Model>(model->Clone()) : nullptr;
-            },
+            })
             // Explicit buffer registration so the model can be saved properly
             // (34_DynamicGeometry).
-            "SetVertexBuffers", [](Model* model, const sol::table& buffers,
+            RBFX_RAW(SetVertexBuffers, [](Model* model, const sol::table& buffers,
                 const sol::table& morphRangeStarts, const sol::table& morphRangeCounts) {
                 if (!model)
                     return;
@@ -451,8 +449,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 for (int i = 1; i <= static_cast<int>(morphRangeCounts.size()); ++i)
                     counts.push_back(morphRangeCounts[i].get_or<unsigned>(0));
                 model->SetVertexBuffers(vbs, starts, counts);
-            },
-            "SetIndexBuffers", [](Model* model, const sol::table& buffers) {
+            })
+            RBFX_RAW(SetIndexBuffers, [](Model* model, const sol::table& buffers) {
                 if (!model)
                     return;
                 ea::vector<SharedPtr<IndexBuffer>> ibs;
@@ -463,7 +461,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                         ibs.push_back(SharedPtr<IndexBuffer>(obj.as<IndexBuffer*>()));
                 }
                 model->SetIndexBuffers(ibs);
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<Model>();
@@ -472,61 +470,61 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         using RBFX_THIS = Material;
         RBFX_USERTYPE(Material,
             sol::call_constructor, sol::factories(
-                [context]() { return SharedPtr<Material>(new Material(context)); }),
-            sol::base_classes, LuaBases<Material, Resource, Object>::bases(lua),
-            "SetShaderParameter", [](Material* material, const char* name, sol::object value, sol::this_state s) {
+                [context]() { return SharedPtr<Material>(new Material(context)); })
+            RBFX_BASES(Resource, Object)
+            RBFX_RAW(SetShaderParameter, [](Material* material, const char* name, sol::object value, sol::this_state s) {
                 if (material)
                     material->SetShaderParameter(name, LuaToVariant(sol::state_view(s), value));
-            },
-            "SetTechnique", [](Material* material, unsigned index, Technique* technique) {
+            })
+            RBFX_RAW(SetTechnique, [](Material* material, unsigned index, Technique* technique) {
                 if (material)
                     material->SetTechnique(index, technique);
-            },
-            "SetTexture", [](Material* material, const char* name, Texture* texture) {
+            })
+            RBFX_RAW(SetTexture, [](Material* material, const char* name, Texture* texture) {
                 if (material)
                     material->SetTexture(name, texture);
-            },
-            "SetDepthBias", [](Material* material, float constantBias, float slopeScaledBias, sol::optional<float> normalOffset) {
+            })
+            RBFX_RAW(SetDepthBias, [](Material* material, float constantBias, float slopeScaledBias, sol::optional<float> normalOffset) {
                 if (material)
                     material->SetDepthBias(BiasParameters(constantBias, slopeScaledBias, normalOffset.value_or(0.0f)));
-            },
-            "GetNumTechniques", &Material::GetNumTechniques,
-            "Clone", [](Material* material) -> SharedPtr<Material> {
+            })
+            RBFX_M(GetNumTechniques)
+            RBFX_RAW(Clone, [](Material* material) -> SharedPtr<Material> {
                 return material ? SharedPtr<Material>(material->Clone()) : nullptr;
-            },
-            "SetCullMode", &Material::SetCullMode,
-            "SetVertexShaderDefines", [](Material* material, const char* defines) {
+            })
+            RBFX_M(SetCullMode)
+            RBFX_RAW(SetVertexShaderDefines, [](Material* material, const char* defines) {
                 if (material)
                     material->SetVertexShaderDefines(defines);
-            },
-            "SetPixelShaderDefines", [](Material* material, const char* defines) {
+            })
+            RBFX_RAW(SetPixelShaderDefines, [](Material* material, const char* defines) {
                 if (material)
                     material->SetPixelShaderDefines(defines);
-            },
-            "GetVertexShaderDefines", [](Material* material) -> const char* {
+            })
+            RBFX_RAW(GetVertexShaderDefines, [](Material* material) -> const char* {
                 static thread_local ea::string value;
                 value = material ? material->GetVertexShaderDefines() : ea::string{};
                 return value.c_str();
-            },
-            "GetPixelShaderDefines", [](Material* material) -> const char* {
+            })
+            RBFX_RAW(GetPixelShaderDefines, [](Material* material) -> const char* {
                 static thread_local ea::string value;
                 value = material ? material->GetPixelShaderDefines() : ea::string{};
                 return value.c_str();
-            },
-            "SetShaderParameterAnimation", [](Material* material, const char* name,
+            })
+            RBFX_RAW(SetShaderParameterAnimation, [](Material* material, const char* name,
                 ValueAnimation* animation, sol::optional<int> wrapMode, sol::optional<float> speed) {
                 if (material)
                     material->SetShaderParameterAnimation(name, animation,
                         static_cast<WrapMode>(wrapMode.value_or(WM_LOOP)), speed.value_or(1.0f));
-            },
-            "SetShaderParameterAnimationWrapMode", [](Material* material, const char* name, int wrapMode) {
+            })
+            RBFX_RAW(SetShaderParameterAnimationWrapMode, [](Material* material, const char* name, int wrapMode) {
                 if (material)
                     material->SetShaderParameterAnimationWrapMode(name, static_cast<WrapMode>(wrapMode));
-            },
-            "SetShaderParameterAnimationSpeed", &Material::SetShaderParameterAnimationSpeed,
+            })
+            RBFX_M(SetShaderParameterAnimationSpeed)
             // Associate material with scene so shader parameter animation
             // respects scene time scale (31_MaterialAnimation).
-            "SetScene", &Material::SetScene
+            RBFX_M(SetScene)
         );
     }
     RegisterLuaObjectWrapper<Material>();
@@ -534,14 +532,14 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = StaticModel;
         RBFX_USERTYPE(StaticModel,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetModel", &StaticModel::SetModel,
-            "GetModel", &StaticModel::GetModel,
-            "SetMaterial", sol::overload(
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_M(SetModel)
+            RBFX_M(GetModel)
+            RBFX_OVERLOAD(SetMaterial,
                 RBFX_CAST(SetMaterial, void, Material*),
-                RBFX_CAST(SetMaterial, bool, unsigned, Material*)),
-            "GetMaterial", static_cast<Material* (StaticModel::*)() const>(&StaticModel::GetMaterial)
+                RBFX_CAST(SetMaterial, bool, unsigned, Material*))
+            RBFX_RAW(GetMaterial, static_cast<Material* (StaticModel::*)() const>(&StaticModel::GetMaterial))
         );
     }
     RegisterLuaObjectWrapper<StaticModel>();
@@ -551,12 +549,12 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = StaticModelGroup;
         RBFX_USERTYPE(StaticModelGroup,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<StaticModelGroup, StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
-            "AddInstanceNode", &StaticModelGroup::AddInstanceNode,
-            "RemoveInstanceNode", &StaticModelGroup::RemoveInstanceNode,
-            "GetNumInstanceNodes", &StaticModelGroup::GetNumInstanceNodes,
-            "GetInstanceNode", &StaticModelGroup::GetInstanceNode
+            sol::no_constructor
+            RBFX_BASES(StaticModel, Drawable, Component, Serializable, Object)
+            RBFX_M(AddInstanceNode)
+            RBFX_M(RemoveInstanceNode)
+            RBFX_M(GetNumInstanceNodes)
+            RBFX_M(GetInstanceNode)
         );
     }
     RegisterLuaObjectWrapper<StaticModelGroup>();
@@ -565,24 +563,24 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = RibbonTrail;
         RBFX_USERTYPE(RibbonTrail,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<RibbonTrail, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetWidth", &RibbonTrail::SetWidth,
-            "SetStartColor", &RibbonTrail::SetStartColor,
-            "SetEndColor", &RibbonTrail::SetEndColor,
-            "SetTrailType", [](RibbonTrail* trail, int type) {
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_M(SetWidth)
+            RBFX_M(SetStartColor)
+            RBFX_M(SetEndColor)
+            RBFX_RAW(SetTrailType, [](RibbonTrail* trail, int type) {
                 if (trail)
                     trail->SetTrailType(static_cast<TrailType>(type));
-            },
-            "SetLifetime", &RibbonTrail::SetLifetime,
-            "SetEmitting", &RibbonTrail::SetEmitting,
-            "IsEmitting", &RibbonTrail::IsEmitting,
-            "SetTailColumn", &RibbonTrail::SetTailColumn,
-            "SetMaterial", &RibbonTrail::SetMaterial,
-            "SetUpdateInvisible", &RibbonTrail::SetUpdateInvisible,
-            "GetTrailType", [](RibbonTrail* trail) {
+            })
+            RBFX_M(SetLifetime)
+            RBFX_M(SetEmitting)
+            RBFX_M(IsEmitting)
+            RBFX_M(SetTailColumn)
+            RBFX_M(SetMaterial)
+            RBFX_M(SetUpdateInvisible)
+            RBFX_RAW(GetTrailType, [](RibbonTrail* trail) {
                 return trail ? static_cast<int>(trail->GetTrailType()) : 0;
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<RibbonTrail>();
@@ -597,16 +595,16 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 [](int type, int semantic, sol::optional<unsigned char> index, sol::optional<unsigned> stepRate) {
                     return VertexElement(static_cast<VertexElementType>(type),
                         static_cast<VertexElementSemantic>(semantic), index.value_or(0), stepRate.value_or(0));
-                }),
-            "type", sol::property(
+                })
+            RBFX_RAW(type, sol::property(
                 [](VertexElement* element) { return element ? static_cast<int>(element->type_) : 0; },
-                [](VertexElement* element, int type) { if (element) element->type_ = static_cast<VertexElementType>(type); }),
-            "semantic", sol::property(
+                [](VertexElement* element, int type) { if (element) element->type_ = static_cast<VertexElementType>(type); }))
+            RBFX_RAW(semantic, sol::property(
                 [](VertexElement* element) { return element ? static_cast<int>(element->semantic_) : 0; },
-                [](VertexElement* element, int semantic) { if (element) element->semantic_ = static_cast<VertexElementSemantic>(semantic); }),
-            "index", sol::property(
+                [](VertexElement* element, int semantic) { if (element) element->semantic_ = static_cast<VertexElementSemantic>(semantic); }))
+            RBFX_RAW(index, sol::property(
                 [](VertexElement* element) { return element ? static_cast<int>(element->index_) : 0; },
-                [](VertexElement* element, int index) { if (element) element->index_ = static_cast<unsigned char>(index); })
+                [](VertexElement* element, int index) { if (element) element->index_ = static_cast<unsigned char>(index); }))
         );
     }
 
@@ -614,10 +612,10 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         using RBFX_THIS = VertexBuffer;
         RBFX_USERTYPE(VertexBuffer,
             sol::call_constructor, sol::factories(
-                [context]() { return SharedPtr<VertexBuffer>(new VertexBuffer(context)); }),
-            "SetShadowed", &VertexBuffer::SetShadowed,
-            "SetDebugName", &VertexBuffer::SetDebugName,
-            "SetSize", sol::overload(
+                [context]() { return SharedPtr<VertexBuffer>(new VertexBuffer(context)); })
+            RBFX_M(SetShadowed)
+            RBFX_M(SetDebugName)
+            RBFX_OVERLOAD(SetSize,
                 [](VertexBuffer* buffer, unsigned vertexCount, const sol::table& elements,
                     sol::optional<bool> dynamic) {
                     if (!buffer)
@@ -631,16 +629,16 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                     }
                     return buffer->SetSize(vertexCount, elems, dynamic.value_or(false));
                 },
-                RBFX_CAST(SetSize, bool, unsigned, unsigned, bool)),
-            "Update", [](VertexBuffer* buffer, const std::string& data) {
+                RBFX_CAST(SetSize, bool, unsigned, unsigned, bool))
+            RBFX_RAW(Update, [](VertexBuffer* buffer, const std::string& data) {
                 if (buffer && !data.empty())
                     buffer->Update(data.data(), static_cast<unsigned>(data.size()));
-            },
-            "GetVertexCount", &VertexBuffer::GetVertexCount,
-            "GetVertexSize", static_cast<unsigned (VertexBuffer::*)() const>(&VertexBuffer::GetVertexSize),
+            })
+            RBFX_M(GetVertexCount)
+            RBFX_RAW(GetVertexSize, static_cast<unsigned (VertexBuffer::*)() const>(&VertexBuffer::GetVertexSize))
             // Read original vertex positions from the shadowed buffer
             // (34_DynamicGeometry).
-            "GetVertexPositions", [](VertexBuffer* buffer, sol::this_state s) -> sol::table {
+            RBFX_RAW(GetVertexPositions, [](VertexBuffer* buffer, sol::this_state s) -> sol::table {
                 sol::state_view lua(s);
                 sol::table result = lua.create_table();
                 const auto* data = buffer ? buffer->GetShadowData() : nullptr;
@@ -651,10 +649,10 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 for (unsigned i = 0; i < count; ++i)
                     result[i + 1] = *reinterpret_cast<const Vector3*>(data + i * vertexSize);
                 return result;
-            },
+            })
             // Rewrite vertex positions in-place, preserving other elements
             // (normals, UVs) that the Lua side never touches.
-            "UpdateVertexPositions", [](VertexBuffer* buffer, const sol::table& positions) {
+            RBFX_RAW(UpdateVertexPositions, [](VertexBuffer* buffer, const sol::table& positions) {
                 if (!buffer)
                     return;
                 auto* data = static_cast<unsigned char*>(buffer->Map());
@@ -670,7 +668,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                         *reinterpret_cast<Vector3*>(data + i * vertexSize) = obj.as<Vector3>();
                 }
                 buffer->Unmap();
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<VertexBuffer>();
@@ -679,16 +677,16 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         using RBFX_THIS = IndexBuffer;
         RBFX_USERTYPE(IndexBuffer,
             sol::call_constructor, sol::factories(
-                [context]() { return SharedPtr<IndexBuffer>(new IndexBuffer(context)); }),
-            "SetShadowed", &IndexBuffer::SetShadowed,
-            "SetDebugName", &IndexBuffer::SetDebugName,
-            "SetSize", &IndexBuffer::SetSize,
-            "Update", [](IndexBuffer* buffer, const std::string& data) {
+                [context]() { return SharedPtr<IndexBuffer>(new IndexBuffer(context)); })
+            RBFX_M(SetShadowed)
+            RBFX_M(SetDebugName)
+            RBFX_M(SetSize)
+            RBFX_RAW(Update, [](IndexBuffer* buffer, const std::string& data) {
                 if (buffer && !data.empty())
                     buffer->Update(data.data(), static_cast<unsigned>(data.size()));
-            },
-            "GetIndexCount", &IndexBuffer::GetIndexCount,
-            "GetIndexSize", &IndexBuffer::GetIndexSize
+            })
+            RBFX_M(GetIndexCount)
+            RBFX_M(GetIndexSize)
         );
     }
     RegisterLuaObjectWrapper<IndexBuffer>();
@@ -697,17 +695,17 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         using RBFX_THIS = Geometry;
         RBFX_USERTYPE(Geometry,
             sol::call_constructor, sol::factories(
-                [context]() { return SharedPtr<Geometry>(new Geometry(context)); }),
-            "SetVertexBuffer", &Geometry::SetVertexBuffer,
-            "SetIndexBuffer", &Geometry::SetIndexBuffer,
-            "SetDrawRange", [](Geometry* geometry, int primitiveType, unsigned indexStart,
+                [context]() { return SharedPtr<Geometry>(new Geometry(context)); })
+            RBFX_M(SetVertexBuffer)
+            RBFX_M(SetIndexBuffer)
+            RBFX_RAW(SetDrawRange, [](Geometry* geometry, int primitiveType, unsigned indexStart,
                 unsigned indexCount, sol::optional<bool> getUsedVertexRange) {
                 if (geometry)
                     geometry->SetDrawRange(static_cast<PrimitiveType>(primitiveType), indexStart, indexCount,
                         getUsedVertexRange.value_or(true));
-            },
-            "SetLodDistance", &Geometry::SetLodDistance,
-            "GetVertexBuffer", &Geometry::GetVertexBuffer
+            })
+            RBFX_M(SetLodDistance)
+            RBFX_M(GetVertexBuffer)
         );
     }
     RegisterLuaObjectWrapper<Geometry>();
@@ -716,21 +714,21 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Text3D;
         RBFX_USERTYPE(Text3D,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Text3D, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetText", [](Text3D* text, const char* value) {
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_RAW(SetText, [](Text3D* text, const char* value) {
                 if (text)
                     text->SetText(value);
-            },
-            "SetFont", sol::overload(
+            })
+            RBFX_OVERLOAD(SetFont,
                 [](Text3D* text, Font* font, float size) -> bool { return text && text->SetFont(font, size); },
-                [](Text3D* text, const char* fontName, float size) -> bool { return text && text->SetFont(fontName, size); }),
-            "SetAlignment", &Text3D::SetAlignment,
-            "SetTextAlignment", &Text3D::SetTextAlignment,
-            "SetColor", static_cast<void (Text3D::*)(const Color&)>(&Text3D::SetColor),
-            "SetTextEffect", &Text3D::SetTextEffect,
-            "SetEffectColor", &Text3D::SetEffectColor,
-            "SetFontSize", &Text3D::SetFontSize
+                [](Text3D* text, const char* fontName, float size) -> bool { return text && text->SetFont(fontName, size); })
+            RBFX_M(SetAlignment)
+            RBFX_M(SetTextAlignment)
+            RBFX_RAW(SetColor, static_cast<void (Text3D::*)(const Color&)>(&Text3D::SetColor))
+            RBFX_M(SetTextEffect)
+            RBFX_M(SetEffectColor)
+            RBFX_M(SetFontSize)
         );
     }
     RegisterLuaObjectWrapper<Text3D>();
@@ -739,8 +737,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Skybox;
         RBFX_USERTYPE(Skybox,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Skybox, StaticModel, Drawable, Component, Serializable, Object>::bases(lua)
+            sol::no_constructor
+            RBFX_BASES(StaticModel, Drawable, Component, Serializable, Object)
         );
     }
     RegisterLuaObjectWrapper<Skybox>();
@@ -749,11 +747,11 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Octree;
         RBFX_USERTYPE(Octree,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Octree, Component, Serializable, Object>::bases(lua),
+            sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
             // Raycast helper: triangle-accurate single query returning a table
             // { position, normal, distance, drawable } or nil on miss.
-            "RaycastSingle", [](Octree* octree, const Ray& ray, float maxDistance,
+            RBFX_RAW(RaycastSingle, [](Octree* octree, const Ray& ray, float maxDistance,
                 sol::optional<unsigned> drawableFlags, sol::this_state s) -> sol::object {
                 if (!octree)
                     return sol::lua_nil;
@@ -770,7 +768,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 hit["distance"] = results[0].distance_;
                 hit["drawable"] = WrapLuaObject(lua, results[0].drawable_);
                 return hit;
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<Octree>();
@@ -779,15 +777,15 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Zone;
         RBFX_USERTYPE(Zone,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Zone, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetBoundingBox", &Zone::SetBoundingBox,
-            "SetAmbientColor", &Zone::SetAmbientColor,
-            "SetFogColor", &Zone::SetFogColor,
-            "SetFogStart", &Zone::SetFogStart,
-            "SetFogEnd", &Zone::SetFogEnd,
-            "SetHeightFog", &Zone::SetHeightFog,
-            "SetPriority", &Zone::SetPriority
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_M(SetBoundingBox)
+            RBFX_M(SetAmbientColor)
+            RBFX_M(SetFogColor)
+            RBFX_M(SetFogStart)
+            RBFX_M(SetFogEnd)
+            RBFX_M(SetHeightFog)
+            RBFX_M(SetPriority)
         );
     }
     RegisterLuaObjectWrapper<Zone>();
@@ -796,10 +794,10 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Animation;
         RBFX_USERTYPE(Animation,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Animation, Resource, Object>::bases(lua),
-            "GetLength", &Animation::GetLength,
-            "GetAnimationName", &Animation::GetAnimationName
+            sol::no_constructor
+            RBFX_BASES(Resource, Object)
+            RBFX_M(GetLength)
+            RBFX_M(GetAnimationName)
         );
     }
     RegisterLuaObjectWrapper<Animation>();
@@ -809,12 +807,12 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Bone;
         RBFX_USERTYPE(Bone,
-            sol::no_constructor,
-            "name", [](const Bone* bone) { return bone ? bone->name_ : ea::string(); },
-            "animated", &Bone::animated_,
-            "node", [](Bone* bone, sol::this_state s) -> sol::object {
+            sol::no_constructor
+            RBFX_RAW(name, [](const Bone* bone) { return bone ? bone->name_ : ea::string(); })
+            RBFX_RAW(animated, &Bone::animated_)
+            RBFX_RAW(node, [](Bone* bone, sol::this_state s) -> sol::object {
                 return bone ? WrapLuaObjectAs<Node>(sol::state_view(s), bone->node_.Get()) : sol::lua_nil;
-            }
+            })
         );
     }
 
@@ -822,9 +820,9 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Skeleton;
         RBFX_USERTYPE(Skeleton,
-            sol::no_constructor,
-            "GetNumBones", &Skeleton::GetNumBones,
-            "GetBone", sol::overload(
+            sol::no_constructor
+            RBFX_M(GetNumBones)
+            RBFX_OVERLOAD(GetBone,
                 [](Skeleton* skeleton, unsigned index) -> Bone* {
                     return skeleton ? skeleton->GetBone(index) : nullptr;
                 },
@@ -839,12 +837,12 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = AnimatedModel;
         RBFX_USERTYPE(AnimatedModel,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<AnimatedModel, StaticModel, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetUpdateInvisible", &AnimatedModel::SetUpdateInvisible,
-            "GetSkeleton", [](AnimatedModel* model) -> Skeleton* {
+            sol::no_constructor
+            RBFX_BASES(StaticModel, Drawable, Component, Serializable, Object)
+            RBFX_M(SetUpdateInvisible)
+            RBFX_RAW(GetSkeleton, [](AnimatedModel* model) -> Skeleton* {
                 return model ? &model->GetSkeleton() : nullptr;
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<AnimatedModel>();
@@ -854,9 +852,9 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = AnimationController;
         RBFX_USERTYPE(AnimationController,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<AnimationController, Component, Serializable, Object>::bases(lua),
-            "PlayNew", [](AnimationController* controller, Animation* animation,
+            sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_RAW(PlayNew, [](AnimationController* controller, Animation* animation,
                 sol::optional<bool> looped, sol::optional<float> time,
                 sol::optional<float> speed, sol::optional<float> fadeInTime) {
                 if (!controller)
@@ -869,8 +867,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 if (speed)
                     params.Speed(*speed);
                 return controller->PlayNew(params, fadeInTime.value_or(0.0f));
-            },
-            "PlayNewExclusive", [](AnimationController* controller, Animation* animation,
+            })
+            RBFX_RAW(PlayNewExclusive, [](AnimationController* controller, Animation* animation,
                 sol::optional<bool> looped, sol::optional<float> time,
                 sol::optional<float> speed, sol::optional<float> fadeInTime,
                 sol::optional<bool> keepOnCompletion) {
@@ -886,10 +884,10 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 if (keepOnCompletion.value_or(false))
                     params.KeepOnCompletion();
                 return controller->PlayNewExclusive(params, fadeInTime.value_or(0.0f));
-            },
+            })
             // Resume or start an animation by name, fading out all others in
             // its layer. Used every physics step by 18_CharacterDemo.
-            "PlayExistingExclusive", [](AnimationController* controller, Animation* animation,
+            RBFX_RAW(PlayExistingExclusive, [](AnimationController* controller, Animation* animation,
                 sol::optional<bool> looped, sol::optional<bool> keepOnCompletion,
                 sol::optional<float> fadeInTime) {
                 if (!controller)
@@ -900,39 +898,39 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
                 if (keepOnCompletion.value_or(false))
                     params.KeepOnCompletion();
                 return controller->PlayExistingExclusive(params, fadeInTime.value_or(0.0f));
-            },
+            })
             // Adjust playback speed of a running animation, by name.
-            "SetSpeed", [](AnimationController* controller, const char* name, float speed) {
+            RBFX_RAW(SetSpeed, [](AnimationController* controller, const char* name, float speed) {
                 return controller && controller->SetSpeed(name, speed);
-            },
-            "Play", [](AnimationController* controller, const char* name,
+            })
+            RBFX_RAW(Play, [](AnimationController* controller, const char* name,
                 unsigned char layer, bool looped, sol::optional<float> fadeTime) {
                 return controller && controller->Play(name, layer, looped, fadeTime.value_or(0.0f));
-            },
-            "PlayExclusive", [](AnimationController* controller, const char* name,
+            })
+            RBFX_RAW(PlayExclusive, [](AnimationController* controller, const char* name,
                 unsigned char layer, bool looped, sol::optional<float> fadeTime) {
                 return controller && controller->PlayExclusive(name, layer, looped, fadeTime.value_or(0.0f));
-            },
-            "Fade", [](AnimationController* controller, const char* name,
+            })
+            RBFX_RAW(Fade, [](AnimationController* controller, const char* name,
                 float targetWeight, sol::optional<float> fadeTime) {
                 return controller && controller->Fade(name, targetWeight, fadeTime.value_or(0.0f));
-            },
-            "Stop", [](AnimationController* controller, const char* name,
+            })
+            RBFX_RAW(Stop, [](AnimationController* controller, const char* name,
                 sol::optional<float> fadeTime) {
                 return controller && controller->Stop(name, fadeTime.value_or(0.0f));
-            },
-            "IsPlaying", sol::overload(
+            })
+            RBFX_OVERLOAD(IsPlaying,
                 [](AnimationController* controller, const char* name) {
                     return controller && controller->IsPlaying(name);
                 },
                 [](AnimationController* controller, Animation* animation) {
                     return controller && controller->IsPlaying(animation);
-                }),
+                })
             // Current playback time of a named animation (44_RibbonTrailDemo
             // toggles emission at a fixed track time).
-            "GetTime", [](AnimationController* controller, const char* name) -> float {
+            RBFX_RAW(GetTime, [](AnimationController* controller, const char* name) -> float {
                 return controller ? controller->GetTime(name) : 0.0f;
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<AnimationController>();
@@ -942,18 +940,18 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Terrain;
         RBFX_USERTYPE(Terrain,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Terrain, Component, Serializable, Object>::bases(lua),
-            "SetPatchSize", &Terrain::SetPatchSize,
-            "SetSpacing", &Terrain::SetSpacing,
-            "SetSmoothing", &Terrain::SetSmoothing,
-            "SetHeightMap", [](Terrain* terrain, Image* image) -> bool {
+            sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_M(SetPatchSize)
+            RBFX_M(SetSpacing)
+            RBFX_M(SetSmoothing)
+            RBFX_RAW(SetHeightMap, [](Terrain* terrain, Image* image) -> bool {
                 return terrain && terrain->SetHeightMap(image);
-            },
-            "SetMaterial", &Terrain::SetMaterial,
-            "SetOccluder", &Terrain::SetOccluder,
-            "GetHeight", &Terrain::GetHeight,
-            "GetNormal", &Terrain::GetNormal
+            })
+            RBFX_M(SetMaterial)
+            RBFX_M(SetOccluder)
+            RBFX_M(GetHeight)
+            RBFX_M(GetNormal)
         );
     }
     RegisterLuaObjectWrapper<Terrain>();
@@ -962,11 +960,11 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Billboard;
         RBFX_USERTYPE(Billboard,
-            sol::no_constructor,
-            "position", &Billboard::position_,
-            "size", &Billboard::size_,
-            "rotation", &Billboard::rotation_,
-            "enabled", &Billboard::enabled_
+            sol::no_constructor
+            RBFX_RAW(position, &Billboard::position_)
+            RBFX_RAW(size, &Billboard::size_)
+            RBFX_RAW(rotation, &Billboard::rotation_)
+            RBFX_RAW(enabled, &Billboard::enabled_)
         );
     }
 
@@ -974,14 +972,14 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = BillboardSet;
         RBFX_USERTYPE(BillboardSet,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<BillboardSet, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetNumBillboards", &BillboardSet::SetNumBillboards,
-            "GetNumBillboards", &BillboardSet::GetNumBillboards,
-            "SetMaterial", &BillboardSet::SetMaterial,
-            "SetSorted", &BillboardSet::SetSorted,
-            "GetBillboard", &BillboardSet::GetBillboard,
-            "Commit", &BillboardSet::Commit
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_M(SetNumBillboards)
+            RBFX_M(GetNumBillboards)
+            RBFX_M(SetMaterial)
+            RBFX_M(SetSorted)
+            RBFX_M(GetBillboard)
+            RBFX_M(Commit)
         );
     }
     RegisterLuaObjectWrapper<BillboardSet>();
@@ -991,8 +989,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = ParticleEffect;
         RBFX_USERTYPE(ParticleEffect,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<ParticleEffect, Resource, Object>::bases(lua)
+            sol::no_constructor
+            RBFX_BASES(Resource, Object)
         );
     }
     RegisterLuaObjectWrapper<ParticleEffect>();
@@ -1001,11 +999,11 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = ParticleEmitter;
         RBFX_USERTYPE(ParticleEmitter,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<ParticleEmitter, BillboardSet, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetEffect", &ParticleEmitter::SetEffect,
-            "SetEmitting", &ParticleEmitter::SetEmitting,
-            "IsEmitting", &ParticleEmitter::IsEmitting
+            sol::no_constructor
+            RBFX_BASES(BillboardSet, Drawable, Component, Serializable, Object)
+            RBFX_M(SetEffect)
+            RBFX_M(SetEmitting)
+            RBFX_M(IsEmitting)
         );
     }
     RegisterLuaObjectWrapper<ParticleEmitter>();
@@ -1014,12 +1012,12 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = DecalSet;
         RBFX_USERTYPE(DecalSet,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<DecalSet, Drawable, Component, Serializable, Object>::bases(lua),
-            "SetMaterial", &DecalSet::SetMaterial,
-            "AddDecal", &DecalSet::AddDecal,
-            "RemoveDecals", &DecalSet::RemoveDecals,
-            "RemoveAllDecals", &DecalSet::RemoveAllDecals
+            sol::no_constructor
+            RBFX_BASES(Drawable, Component, Serializable, Object)
+            RBFX_M(SetMaterial)
+            RBFX_M(AddDecal)
+            RBFX_M(RemoveDecals)
+            RBFX_M(RemoveAllDecals)
         );
     }
     RegisterLuaObjectWrapper<DecalSet>();
@@ -1028,13 +1026,13 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = Viewport;
         RBFX_USERTYPE(Viewport,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<Viewport, Object>::bases(lua),
-            "SetScene", &Viewport::SetScene,
-            "SetCamera", &Viewport::SetCamera,
-            "SetRect", &Viewport::SetRect,
-            "GetScene", &Viewport::GetScene,
-            "GetCamera", &Viewport::GetCamera
+            sol::no_constructor
+            RBFX_BASES(Object)
+            RBFX_M(SetScene)
+            RBFX_M(SetCamera)
+            RBFX_M(SetRect)
+            RBFX_M(GetScene)
+            RBFX_M(GetCamera)
         );
     }
 
@@ -1042,20 +1040,20 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     {
         using RBFX_THIS = DebugRenderer;
         RBFX_USERTYPE(DebugRenderer,
-            sol::no_constructor,
-            sol::base_classes, LuaBases<DebugRenderer, Component, Serializable, Object>::bases(lua),
-            "AddLine", [](DebugRenderer* debug, const Vector3& start, const Vector3& end, const Color& color) {
+            sol::no_constructor
+            RBFX_BASES(Component, Serializable, Object)
+            RBFX_RAW(AddLine, [](DebugRenderer* debug, const Vector3& start, const Vector3& end, const Color& color) {
                 if (debug) debug->AddLine(start, end, color);
-            },
-            "AddBoundingBox", [](DebugRenderer* debug, const BoundingBox& box, const Color& color) {
+            })
+            RBFX_RAW(AddBoundingBox, [](DebugRenderer* debug, const BoundingBox& box, const Color& color) {
                 if (debug) debug->AddBoundingBox(box, color);
-            },
-            "AddSphere", [](DebugRenderer* debug, const Vector3& center, float radius, const Color& color) {
+            })
+            RBFX_RAW(AddSphere, [](DebugRenderer* debug, const Vector3& center, float radius, const Color& color) {
                 if (debug) debug->AddSphere(Sphere(center, radius), color);
-            },
-            "AddNode", [](DebugRenderer* debug, Node* node, float scale) {
+            })
+            RBFX_RAW(AddNode, [](DebugRenderer* debug, Node* node, float scale) {
                 if (debug) debug->AddNode(node, scale);
-            }
+            })
         );
     }
     RegisterLuaObjectWrapper<DebugRenderer>();
@@ -1087,80 +1085,54 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     });
 
     // Light type constants.
-    sol::table lightType = lua.create_named_table("LIGHT");
-    lightType["POINT"] = LIGHT_POINT;
-    lightType["SPOT"] = LIGHT_SPOT;
-    lightType["DIRECTIONAL"] = LIGHT_DIRECTIONAL;
+    RBFX_ENUM_TABLE(LIGHT, "POINT", LIGHT_POINT, "SPOT", LIGHT_SPOT, "DIRECTIONAL",
+        LIGHT_DIRECTIONAL);
 
     // RibbonTrail trail types (44_RibbonTrailDemo).
-    sol::table tt = lua.create_named_table("TT");
-    tt["FACE_CAMERA"] = TT_FACE_CAMERA;
-    tt["BONE"] = TT_BONE;
+    RBFX_ENUM_TABLE(TT, "FACE_CAMERA", TT_FACE_CAMERA, "BONE", TT_BONE);
 
     // Window modes for Graphics:SetDefaultWindowModes
     // (54_WindowSettingsDemo).
-    sol::table wmode = lua.create_named_table("WMODE");
-    wmode["WINDOWED"] = static_cast<int>(WindowMode::Windowed);
-    wmode["BORDERLESS"] = static_cast<int>(WindowMode::Borderless);
-    wmode["FULLSCREEN"] = static_cast<int>(WindowMode::Fullscreen);
+    RBFX_ENUM_TABLE(WMODE, "WINDOWED", static_cast<int>(WindowMode::Windowed), "BORDERLESS",
+        static_cast<int>(WindowMode::Borderless), "FULLSCREEN",
+        static_cast<int>(WindowMode::Fullscreen));
 
     // Vertex element datatypes and semantics for VertexElement()
     // (34_DynamicGeometry).
-    sol::table vet = lua.create_named_table("VET");
-    vet["INT"] = TYPE_INT;
-    vet["FLOAT"] = TYPE_FLOAT;
-    vet["VECTOR2"] = TYPE_VECTOR2;
-    vet["VECTOR3"] = TYPE_VECTOR3;
-    vet["VECTOR4"] = TYPE_VECTOR4;
-    vet["UBYTE4"] = TYPE_UBYTE4;
-    vet["UBYTE4_NORM"] = TYPE_UBYTE4_NORM;
+    RBFX_ENUM_TABLE(VET, "INT", TYPE_INT, "FLOAT", TYPE_FLOAT, "VECTOR2", TYPE_VECTOR2, "VECTOR3",
+        TYPE_VECTOR3, "VECTOR4", TYPE_VECTOR4, "UBYTE4", TYPE_UBYTE4, "UBYTE4_NORM",
+        TYPE_UBYTE4_NORM);
 
-    sol::table vsem = lua.create_named_table("VSEM");
-    vsem["POSITION"] = SEM_POSITION;
-    vsem["NORMAL"] = SEM_NORMAL;
-    vsem["BINORMAL"] = SEM_BINORMAL;
-    vsem["TANGENT"] = SEM_TANGENT;
-    vsem["TEXCOORD"] = SEM_TEXCOORD;
-    vsem["COLOR"] = SEM_COLOR;
-    vsem["BLENDWEIGHTS"] = SEM_BLENDWEIGHTS;
-    vsem["BLENDINDICES"] = SEM_BLENDINDICES;
-    vsem["OBJECTINDEX"] = SEM_OBJECTINDEX;
+    RBFX_ENUM_TABLE(VSEM, "POSITION", SEM_POSITION, "NORMAL", SEM_NORMAL, "BINORMAL", SEM_BINORMAL,
+        "TANGENT", SEM_TANGENT, "TEXCOORD", SEM_TEXCOORD, "COLOR", SEM_COLOR, "BLENDWEIGHTS",
+        SEM_BLENDWEIGHTS, "BLENDINDICES", SEM_BLENDINDICES, "OBJECTINDEX", SEM_OBJECTINDEX);
 
     // View override flags for Camera:SetViewOverrideFlags.
-    sol::table vo = lua.create_named_table("VO");
-    vo["DISABLE_OCCLUSION"] = VO_DISABLE_OCCLUSION;
-    vo["NO_SHADOWS"] = VO_DISABLE_SHADOWS;
+    RBFX_ENUM_TABLE(VO, "DISABLE_OCCLUSION", VO_DISABLE_OCCLUSION, "NO_SHADOWS",
+        VO_DISABLE_SHADOWS);
 
     // Texture filter modes for Texture:SetFilterMode.
-    sol::table filter = lua.create_named_table("FILTER");
-    filter["NEAREST"] = FILTER_NEAREST;
-    filter["BILINEAR"] = FILTER_BILINEAR;
-    filter["TRILINEAR"] = FILTER_TRILINEAR;
-    filter["ANISOTROPIC"] = FILTER_ANISOTROPIC;
-    filter["DEFAULT"] = FILTER_DEFAULT;
+    RBFX_ENUM_TABLE(FILTER, "NEAREST", FILTER_NEAREST, "BILINEAR", FILTER_BILINEAR, "TRILINEAR",
+        FILTER_TRILINEAR, "ANISOTROPIC", FILTER_ANISOTROPIC, "DEFAULT", FILTER_DEFAULT);
 
     // Cull modes for Material:SetCullMode / GetCullMode. Material binding took
     // raw ints before this table existed; scripts can now name them. Additive
     // (no prior Lua name for CULL_*), and kept as plain ints to match the
     // existing int-passing idiom every other enum table uses (sol2 marshals the
     // unregistered CullMode parameter from an integer, so this is behavior-neutral).
-    sol::table cull = lua.create_named_table("CULL");
-    cull["NONE"] = CULL_NONE;
-    cull["CCW"] = CULL_CCW;
-    cull["CW"] = CULL_CW;
+    RBFX_ENUM_TABLE(CULL, "NONE", CULL_NONE, "CCW", CULL_CCW, "CW", CULL_CW);
 
     // Common texture formats for Texture2D:SetSize.
-    sol::table texf = lua.create_named_table("TEXF");
-    texf["RGBA8_UNORM"] = static_cast<int>(TextureFormat::TEX_FORMAT_RGBA8_UNORM);
-    texf["RGBA8_UNORM_SRGB"] = static_cast<int>(TextureFormat::TEX_FORMAT_RGBA8_UNORM_SRGB);
-    texf["BGRA8_UNORM"] = static_cast<int>(TextureFormat::TEX_FORMAT_BGRA8_UNORM);
-    texf["R8_UNORM"] = static_cast<int>(TextureFormat::TEX_FORMAT_R8_UNORM);
-    texf["RG16_UNORM"] = static_cast<int>(TextureFormat::TEX_FORMAT_RG16_UNORM);
-    texf["RGBA16_FLOAT"] = static_cast<int>(TextureFormat::TEX_FORMAT_RGBA16_FLOAT);
-    texf["R32_FLOAT"] = static_cast<int>(TextureFormat::TEX_FORMAT_R32_FLOAT);
-    texf["RGBA32_FLOAT"] = static_cast<int>(TextureFormat::TEX_FORMAT_RGBA32_FLOAT);
-    texf["D32"] = static_cast<int>(TextureFormat::TEX_FORMAT_D32_FLOAT);
-    texf["D24S8"] = static_cast<int>(TextureFormat::TEX_FORMAT_D24_UNORM_S8_UINT);
+    RBFX_ENUM_TABLE(TEXF, "RGBA8_UNORM", static_cast<int>(TextureFormat::TEX_FORMAT_RGBA8_UNORM),
+        "RGBA8_UNORM_SRGB", static_cast<int>(TextureFormat::TEX_FORMAT_RGBA8_UNORM_SRGB),
+        "BGRA8_UNORM", static_cast<int>(TextureFormat::TEX_FORMAT_BGRA8_UNORM), "R8_UNORM",
+        static_cast<int>(TextureFormat::TEX_FORMAT_R8_UNORM), "RG16_UNORM",
+        static_cast<int>(TextureFormat::TEX_FORMAT_RG16_UNORM), "RGBA16_FLOAT",
+        static_cast<int>(TextureFormat::TEX_FORMAT_RGBA16_FLOAT), "R32_FLOAT",
+        static_cast<int>(TextureFormat::TEX_FORMAT_R32_FLOAT), "RGBA32_FLOAT",
+        static_cast<int>(TextureFormat::TEX_FORMAT_RGBA32_FLOAT), "D32",
+        static_cast<int>(TextureFormat::TEX_FORMAT_D32_FLOAT), "D24S8",
+        static_cast<int>(TextureFormat::TEX_FORMAT_D24_UNORM_S8_UINT));
 }
 
 } // namespace Urho3D
