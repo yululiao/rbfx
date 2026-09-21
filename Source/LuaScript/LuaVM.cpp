@@ -312,6 +312,9 @@ void LuaVM::RegisterEngineBindings()
     // sender overload lets a script listen to one object only (e.g. one Node's events), and
     // the handler dies with the sender. Same shape in every VM so shared helper scripts
     // behave the same way in the game and in editor plugins.
+    // Hand-written on purpose (not LUA_GLOBAL_FUNC): these live in the VM bootstrap,
+    // not in a binding TU, and capture `this` -- the macro assumes the registration
+    // function's `lua` parameter is in scope (see LuaBindMacros.h contract).
     luaState_->set_function("SubscribeToEvent",
         sol::overload(
             [this](const char* eventName, sol::protected_function callback)

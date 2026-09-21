@@ -43,34 +43,34 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // NavigationMesh: agent config + path queries. The mesh rebuilds itself
     // from scene geometry, so only configuration and queries are needed.
     {
-        using RBFX_THIS = NavigationMesh;
-        RBFX_USERTYPE(NavigationMesh, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_M(SetTileSize)
-            RBFX_M(SetCellSize)
-            RBFX_M(SetCellHeight)
-            RBFX_M(SetAgentHeight)
-            RBFX_M(SetAgentRadius)
-            RBFX_M(SetAgentMaxClimb)
-            RBFX_M(SetAgentMaxSlope)
-            RBFX_M(SetPadding)
+        using LUA_THIS = NavigationMesh;
+        LUA_CLASS(NavigationMesh, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetTileSize)
+            LUA_MEMBER_FUNC(SetCellSize)
+            LUA_MEMBER_FUNC(SetCellHeight)
+            LUA_MEMBER_FUNC(SetAgentHeight)
+            LUA_MEMBER_FUNC(SetAgentRadius)
+            LUA_MEMBER_FUNC(SetAgentMaxClimb)
+            LUA_MEMBER_FUNC(SetAgentMaxSlope)
+            LUA_MEMBER_FUNC(SetPadding)
             // Debug draw toggles (39_CrowdNavigation).
-            RBFX_M(SetDrawOffMeshConnections)
+            LUA_MEMBER_FUNC(SetDrawOffMeshConnections)
             // Build / streaming control (15_Navigation).
-            RBFX_RAW(Rebuild, [](NavigationMesh* nav) -> bool { return nav && nav->Rebuild(); })
-            RBFX_RAW(Allocate, [](NavigationMesh* nav) -> bool { return nav && nav->Allocate(); })
-            RBFX_RAW(BuildTilesInRegion, [](NavigationMesh* nav, const BoundingBox& box) -> bool {
+            LUA_MEMBER_FUNC_RAW(Rebuild, [](NavigationMesh* nav) -> bool { return nav && nav->Rebuild(); })
+            LUA_MEMBER_FUNC_RAW(Allocate, [](NavigationMesh* nav) -> bool { return nav && nav->Allocate(); })
+            LUA_MEMBER_FUNC_RAW(BuildTilesInRegion, [](NavigationMesh* nav, const BoundingBox& box) -> bool {
                 return nav && nav->BuildTilesInRegion(box);
             })
-            RBFX_RAW(DrawDebugGeometry, [](NavigationMesh* nav, bool depthTest) {
+            LUA_MEMBER_FUNC_RAW(DrawDebugGeometry, [](NavigationMesh* nav, bool depthTest) {
                 if (nav)
                     nav->DrawDebugGeometry(depthTest);
             })
-            RBFX_RAW(FindNearestPoint, [](NavigationMesh* nav, const Vector3& point, sol::optional<Vector3> extents) {
+            LUA_MEMBER_FUNC_RAW(FindNearestPoint, [](NavigationMesh* nav, const Vector3& point, sol::optional<Vector3> extents) {
                 return nav ? nav->FindNearestPoint(point, extents.value_or(Vector3::ONE)) : Vector3::ZERO;
             })
             // Path query returning an array of waypoints.
-            RBFX_RAW(FindPath, [](NavigationMesh* nav, const Vector3& start, const Vector3& end,
+            LUA_MEMBER_FUNC_RAW(FindPath, [](NavigationMesh* nav, const Vector3& start, const Vector3& end,
                 sol::this_state s) -> sol::table {
                 sol::state_view lua(s);
                 sol::table result = lua.create_table();
@@ -85,13 +85,13 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
             })
             // Tile-level streaming API. Tile data crosses the boundary as a Lua
             // array of byte values.
-            RBFX_M(GetTileIndex)
-            RBFX_M(HasTile)
-            RBFX_RAW(RemoveTile, [](NavigationMesh* nav, const IntVector2& tileIndex) {
+            LUA_MEMBER_FUNC(GetTileIndex)
+            LUA_MEMBER_FUNC(HasTile)
+            LUA_MEMBER_FUNC_RAW(RemoveTile, [](NavigationMesh* nav, const IntVector2& tileIndex) {
                 if (nav)
                     nav->RemoveTile(tileIndex);
             })
-            RBFX_RAW(GetAllTileIndices, [](NavigationMesh* nav, sol::this_state s) -> sol::object {
+            LUA_MEMBER_FUNC_RAW(GetAllTileIndices, [](NavigationMesh* nav, sol::this_state s) -> sol::object {
                 if (!nav)
                     return sol::lua_nil;
                 sol::state_view lua(s);
@@ -101,7 +101,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
                     result[index++] = tile;
                 return result;
             })
-            RBFX_RAW(GetTileData, [](NavigationMesh* nav, const IntVector2& tileIndex, sol::this_state s) -> sol::object {
+            LUA_MEMBER_FUNC_RAW(GetTileData, [](NavigationMesh* nav, const IntVector2& tileIndex, sol::this_state s) -> sol::object {
                 if (!nav)
                     return sol::lua_nil;
                 sol::state_view lua(s);
@@ -111,7 +111,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
                     result[i + 1] = data[i];
                 return result;
             })
-            RBFX_RAW(AddTile, [](NavigationMesh* nav, sol::table data) -> bool {
+            LUA_MEMBER_FUNC_RAW(AddTile, [](NavigationMesh* nav, sol::table data) -> bool {
                 if (!nav)
                     return false;
                 ea::vector<unsigned char> bytes;
@@ -126,34 +126,34 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
 
     // DynamicNavigationMesh: supports obstacles at runtime.
     {
-        using RBFX_THIS = DynamicNavigationMesh;
-        RBFX_USERTYPE(DynamicNavigationMesh, sol::no_constructor
-            RBFX_BASES(NavigationMesh, Component, Serializable, Object)
-            RBFX_M(SetDrawObstacles)
+        using LUA_THIS = DynamicNavigationMesh;
+        LUA_CLASS(DynamicNavigationMesh, sol::no_constructor
+            LUA_BASES(NavigationMesh, Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetDrawObstacles)
         );
     }
     RegisterLuaObjectWrapper<DynamicNavigationMesh>();
 
     // Navigable: flags a subtree as nav geometry source.
     {
-        using RBFX_THIS = Navigable;
-        RBFX_USERTYPE(Navigable, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
+        using LUA_THIS = Navigable;
+        LUA_CLASS(Navigable, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
         );
     }
     RegisterLuaObjectWrapper<Navigable>();
 
     // OffMeshConnection: jumps and teleports across gaps.
     {
-        using RBFX_THIS = OffMeshConnection;
-        RBFX_USERTYPE(OffMeshConnection, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_M(SetRadius)
-            RBFX_M(SetBidirectional)
-            RBFX_M(SetMask)
+        using LUA_THIS = OffMeshConnection;
+        LUA_CLASS(OffMeshConnection, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetRadius)
+            LUA_MEMBER_FUNC(SetBidirectional)
+            LUA_MEMBER_FUNC(SetMask)
             // Target node of the jump (39_CrowdNavigation box climbing).
-            RBFX_M(SetEndPoint)
-            RBFX_M(GetEndPoint)
+            LUA_MEMBER_FUNC(SetEndPoint)
+            LUA_MEMBER_FUNC(GetEndPoint)
         );
     }
     RegisterLuaObjectWrapper<OffMeshConnection>();
@@ -161,65 +161,65 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     // Obstacle: dynamic blocker carved out of the DynamicNavigationMesh
     // (39_CrowdNavigation mushrooms).
     {
-        using RBFX_THIS = Obstacle;
-        RBFX_USERTYPE(Obstacle, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_M(SetRadius)
-            RBFX_M(SetHeight)
-            RBFX_M(GetRadius)
-            RBFX_M(GetHeight)
+        using LUA_THIS = Obstacle;
+        LUA_CLASS(Obstacle, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetRadius)
+            LUA_MEMBER_FUNC(SetHeight)
+            LUA_MEMBER_FUNC(GetRadius)
+            LUA_MEMBER_FUNC(GetHeight)
         );
     }
     RegisterLuaObjectWrapper<Obstacle>();
 
     // CrowdAgent: agent inside a CrowdManager crowd (39_CrowdNavigation).
     {
-        using RBFX_THIS = CrowdAgent;
-        RBFX_USERTYPE(CrowdAgent, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_M(SetTargetPosition)
-            RBFX_M(SetTargetVelocity)
-            RBFX_M(SetMaxAccel)
-            RBFX_M(SetMaxSpeed)
-            RBFX_M(SetRadius)
-            RBFX_M(SetHeight)
-            RBFX_M(SetQueryFilterType)
-            RBFX_M(SetObstacleAvoidanceType)
-            RBFX_M_ENUM(SetNavigationQuality, NavigationQuality)
-            RBFX_RAW(GetNavigationQuality, [](CrowdAgent* agent) {
+        using LUA_THIS = CrowdAgent;
+        LUA_CLASS(CrowdAgent, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetTargetPosition)
+            LUA_MEMBER_FUNC(SetTargetVelocity)
+            LUA_MEMBER_FUNC(SetMaxAccel)
+            LUA_MEMBER_FUNC(SetMaxSpeed)
+            LUA_MEMBER_FUNC(SetRadius)
+            LUA_MEMBER_FUNC(SetHeight)
+            LUA_MEMBER_FUNC(SetQueryFilterType)
+            LUA_MEMBER_FUNC(SetObstacleAvoidanceType)
+            LUA_MEMBER_FUNC_ENUM(SetNavigationQuality, NavigationQuality)
+            LUA_MEMBER_FUNC_RAW(GetNavigationQuality, [](CrowdAgent* agent) {
                 return agent ? static_cast<int>(agent->GetNavigationQuality()) : 0;
             })
-            RBFX_M(GetTargetPosition)
-            RBFX_M(GetDesiredVelocity)
-            RBFX_M(GetActualVelocity)
-            RBFX_RAW(GetAgentState, [](CrowdAgent* agent) {
+            LUA_MEMBER_FUNC(GetTargetPosition)
+            LUA_MEMBER_FUNC(GetDesiredVelocity)
+            LUA_MEMBER_FUNC(GetActualVelocity)
+            LUA_MEMBER_FUNC_RAW(GetAgentState, [](CrowdAgent* agent) {
                 return agent ? static_cast<int>(agent->GetAgentState()) : 0;
             })
-            RBFX_M(GetMaxAccel)
-            RBFX_M(GetMaxSpeed)
-            RBFX_M(GetRadius)
-            RBFX_M(GetQueryFilterType)
+            LUA_MEMBER_FUNC(GetMaxAccel)
+            LUA_MEMBER_FUNC(GetMaxSpeed)
+            LUA_MEMBER_FUNC(GetRadius)
+            LUA_MEMBER_FUNC(GetQueryFilterType)
         );
     }
     RegisterLuaObjectWrapper<CrowdAgent>();
 
     {
-        using RBFX_THIS = CrowdManager;
-        RBFX_USERTYPE(CrowdManager, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_M(SetCrowdTarget)
-            RBFX_M(SetCrowdVelocity)
-            RBFX_M(ResetCrowdTarget)
-            RBFX_M(SetMaxAgents)
-            RBFX_M(SetMaxAgentRadius)
-            RBFX_M(GetMaxAgents)
-            RBFX_RAW(DrawDebugGeometry, [](CrowdManager* manager, bool depthTest) {
+        using LUA_THIS = CrowdManager;
+        LUA_CLASS(CrowdManager, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetCrowdTarget)
+            LUA_MEMBER_FUNC(SetCrowdVelocity)
+            LUA_MEMBER_FUNC(ResetCrowdTarget)
+            LUA_MEMBER_FUNC(SetMaxAgents)
+            LUA_MEMBER_FUNC(SetMaxAgentRadius)
+            LUA_MEMBER_FUNC(GetMaxAgents)
+            LUA_MEMBER_FUNC_RAW(DrawDebugGeometry, [](CrowdManager* manager, bool depthTest) {
                 if (manager)
                     manager->DrawDebugGeometry(depthTest);
             })
             // Obstacle avoidance tuning, passed as flat Lua tables
             // (39_CrowdNavigation InitCrowdParams).
-            RBFX_RAW(GetObstacleAvoidanceParams, [](CrowdManager* manager, unsigned type, sol::this_state s) -> sol::table {
+            LUA_MEMBER_FUNC_RAW(GetObstacleAvoidanceParams, [](CrowdManager* manager, unsigned type, sol::this_state s) -> sol::table {
                 sol::state_view lua(s);
                 sol::table result = lua.create_table();
                 if (manager)
@@ -238,7 +238,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
                 }
                 return result;
             })
-            RBFX_RAW(SetObstacleAvoidanceParams, [](CrowdManager* manager, unsigned type, const sol::table& table) {
+            LUA_MEMBER_FUNC_RAW(SetObstacleAvoidanceParams, [](CrowdManager* manager, unsigned type, const sol::table& table) {
                 if (!manager)
                     return;
                 CrowdObstacleAvoidanceParams params = manager->GetObstacleAvoidanceParams(type);
@@ -256,7 +256,7 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
             })
             // Random reachable point near a position (39_CrowdNavigation
             // wandering mushrooms).
-            RBFX_RAW(GetRandomPointInCircle, [](CrowdManager* manager, const Vector3& center, float radius,
+            LUA_MEMBER_FUNC_RAW(GetRandomPointInCircle, [](CrowdManager* manager, const Vector3& center, float radius,
                 sol::optional<int> queryFilterType) -> Vector3 {
                 return manager
                     ? manager->GetRandomPointInCircle(center, radius, queryFilterType.value_or(0))
@@ -267,10 +267,10 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
     RegisterLuaObjectWrapper<CrowdManager>();
 
     // Crowd navigation enums (39_CrowdNavigation).
-    RBFX_ENUM_TABLE(NAV_QUALITY, "LOW", NAVIGATIONQUALITY_LOW, "MEDIUM", NAVIGATIONQUALITY_MEDIUM,
+    LUA_ENUM_TABLE(NAV_QUALITY, "LOW", NAVIGATIONQUALITY_LOW, "MEDIUM", NAVIGATIONQUALITY_MEDIUM,
         "HIGH", NAVIGATIONQUALITY_HIGH);
 
-    RBFX_ENUM_TABLE(CROWD_STATE, "INVALID", CA_STATE_INVALID, "WALKING", CA_STATE_WALKING,
+    LUA_ENUM_TABLE(CROWD_STATE, "INVALID", CA_STATE_INVALID, "WALKING", CA_STATE_WALKING,
         "OFFMESH", CA_STATE_OFFMESH);
 }
 

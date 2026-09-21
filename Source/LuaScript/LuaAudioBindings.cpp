@@ -45,20 +45,20 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
 {
     // Audio subsystem: master gain per sound type, microphone access.
     {
-        using RBFX_THIS = Audio;
-        RBFX_USERTYPE(Audio, sol::no_constructor
-            RBFX_BASES(Object)
-            RBFX_RAW(SetMasterGain, [](Audio* audio, const char* type, float gain) {
+        using LUA_THIS = Audio;
+        LUA_CLASS(Audio, sol::no_constructor
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC_RAW(SetMasterGain, [](Audio* audio, const char* type, float gain) {
                 if (audio)
                     audio->SetMasterGain(type, gain);
             })
-            RBFX_RAW(GetMasterGain, [](Audio* audio, const char* type) -> float {
+            LUA_MEMBER_FUNC_RAW(GetMasterGain, [](Audio* audio, const char* type) -> float {
                 return audio ? audio->GetMasterGain(type) : 0.0f;
             })
-            RBFX_M(ResumeAll)
-            RBFX_M(Stop)
+            LUA_MEMBER_FUNC(ResumeAll)
+            LUA_MEMBER_FUNC(Stop)
             // Enumerate available microphone pretty-names as a Lua array.
-            RBFX_RAW(EnumerateMicrophones, [](Audio* audio, sol::this_state s) -> sol::object {
+            LUA_MEMBER_FUNC_RAW(EnumerateMicrophones, [](Audio* audio, sol::this_state s) -> sol::object {
                 if (!audio)
                     return sol::lua_nil;
                 const StringVector names = audio->EnumerateMicrophones();
@@ -68,7 +68,7 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
                     result[i + 1] = names[i];
                 return result;
             })
-            RBFX_RAW(CreateMicrophone, [](Audio* audio, const char* name, bool forSpeechRecog,
+            LUA_MEMBER_FUNC_RAW(CreateMicrophone, [](Audio* audio, const char* name, bool forSpeechRecog,
                 unsigned wantedFreq, sol::optional<unsigned> silenceLevelLimit) -> SharedPtr<Microphone> {
                 if (!audio)
                     return nullptr;
@@ -80,10 +80,10 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
 
     // Sound resource: pass to SoundSource:Play.
     {
-        using RBFX_THIS = Sound;
-        RBFX_USERTYPE(Sound, sol::no_constructor
-            RBFX_BASES(Resource, Object)
-            RBFX_M(SetLooped)
+        using LUA_THIS = Sound;
+        LUA_CLASS(Sound, sol::no_constructor
+            LUA_BASES(Resource, Object)
+            LUA_MEMBER_FUNC(SetLooped)
         );
     }
     RegisterLuaObjectWrapper<Sound>();
@@ -91,63 +91,63 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // SoundSource: playback control. The single-argument Play overload is
     // enough for samples; full control is available through the extra args.
     {
-        using RBFX_THIS = SoundSource;
-        RBFX_USERTYPE(SoundSource, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_OVERLOAD(Play,
-                RBFX_CAST(Play, void, Sound*),
-                RBFX_CAST(Play, void, Sound*, float),
-                RBFX_CAST(Play, void, Sound*, float, float),
-                RBFX_CAST(Play, void, Sound*, float, float, float),
-                RBFX_CAST(Play, void, SoundStream*))
-            RBFX_RAW(Stop, static_cast<void (SoundSource::*)()>(&SoundSource::Stop))
-            RBFX_RAW(SetSoundType, [](SoundSource* source, const char* type) {
+        using LUA_THIS = SoundSource;
+        LUA_CLASS(SoundSource, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC_OVERLOAD(Play,
+                LUA_CAST(Play, void, Sound*),
+                LUA_CAST(Play, void, Sound*, float),
+                LUA_CAST(Play, void, Sound*, float, float),
+                LUA_CAST(Play, void, Sound*, float, float, float),
+                LUA_CAST(Play, void, SoundStream*))
+            LUA_MEMBER_FUNC_RAW(Stop, static_cast<void (SoundSource::*)()>(&SoundSource::Stop))
+            LUA_MEMBER_FUNC_RAW(SetSoundType, [](SoundSource* source, const char* type) {
                 if (source)
                     source->SetSoundType(type);
             })
-            RBFX_M(SetFrequency)
-            RBFX_M(SetGain)
-            RBFX_M(SetAttenuation)
-            RBFX_M(SetPanning)
-            RBFX_M(SetReach)
-            RBFX_M(SetLowFrequency)
-            RBFX_M_ENUM(SetAutoRemoveMode, AutoRemoveMode)
+            LUA_MEMBER_FUNC(SetFrequency)
+            LUA_MEMBER_FUNC(SetGain)
+            LUA_MEMBER_FUNC(SetAttenuation)
+            LUA_MEMBER_FUNC(SetPanning)
+            LUA_MEMBER_FUNC(SetReach)
+            LUA_MEMBER_FUNC(SetLowFrequency)
+            LUA_MEMBER_FUNC_ENUM(SetAutoRemoveMode, AutoRemoveMode)
             // Keep synthesizing audio even when the scene is paused
             // (29_SoundSynthesis).
-            RBFX_M(SetIgnoreSceneTimeScale)
-            RBFX_M(IsPlaying)
+            LUA_MEMBER_FUNC(SetIgnoreSceneTimeScale)
+            LUA_MEMBER_FUNC(IsPlaying)
         );
     }
     RegisterLuaObjectWrapper<SoundSource>();
 
     // SoundSource3D: positional audio.
     {
-        using RBFX_THIS = SoundSource3D;
-        RBFX_USERTYPE(SoundSource3D, sol::no_constructor
-            RBFX_BASES(SoundSource, Component, Serializable, Object)
-            RBFX_M(SetNearDistance)
-            RBFX_M(SetFarDistance)
+        using LUA_THIS = SoundSource3D;
+        LUA_CLASS(SoundSource3D, sol::no_constructor
+            LUA_BASES(SoundSource, Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetNearDistance)
+            LUA_MEMBER_FUNC(SetFarDistance)
         );
     }
     RegisterLuaObjectWrapper<SoundSource3D>();
 
     // SoundListener: marks the node ears are attached to.
     {
-        using RBFX_THIS = SoundListener;
-        RBFX_USERTYPE(SoundListener, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
+        using LUA_THIS = SoundListener;
+        LUA_CLASS(SoundListener, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
         );
     }
     RegisterLuaObjectWrapper<SoundListener>();
 
     // SoundStream: abstract producer of audio data (SoundStream.h).
     {
-        using RBFX_THIS = SoundStream;
-        RBFX_USERTYPE(SoundStream, sol::no_constructor
-            RBFX_M(SetFormat)
-            RBFX_M(SetStopAtEnd)
-            RBFX_M(GetFrequency)
-            RBFX_M(GetSampleSize)
+        using LUA_THIS = SoundStream;
+        LUA_CLASS(SoundStream, sol::no_constructor
+            LUA_MEMBER_FUNC(SetFormat)
+            LUA_MEMBER_FUNC(SetStopAtEnd)
+            LUA_MEMBER_FUNC(GetFrequency)
+            LUA_MEMBER_FUNC(GetSampleSize)
         );
     }
 
@@ -155,8 +155,8 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
     // capture playback (14_SoundEffects) and runtime synthesis
     // (29_SoundSynthesis).
     {
-        using RBFX_THIS = BufferedSoundStream;
-        RBFX_USERTYPE(BufferedSoundStream,
+        using LUA_THIS = BufferedSoundStream;
+        LUA_CLASS(BufferedSoundStream,
             sol::call_constructor, sol::factories([]() {
                 return SharedPtr<BufferedSoundStream>(new BufferedSoundStream());
             }),
@@ -164,23 +164,23 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
             // stays on plain sol::bases: LuaBases' audit machinery is Object-only.
             sol::base_classes, sol::bases<SoundStream>()
             // Raw sample bytes packed by Lua (string.pack or manual assembly).
-            RBFX_RAW(AddData, [](BufferedSoundStream* stream, const std::string& data) {
+            LUA_MEMBER_FUNC_RAW(AddData, [](BufferedSoundStream* stream, const std::string& data) {
                 if (stream && !data.empty())
                     stream->AddData(const_cast<char*>(data.data()), static_cast<unsigned>(data.size()));
             })
-            RBFX_M(Clear)
-            RBFX_M(GetBufferNumBytes)
-            RBFX_M(GetBufferLength)
+            LUA_MEMBER_FUNC(Clear)
+            LUA_MEMBER_FUNC(GetBufferNumBytes)
+            LUA_MEMBER_FUNC(GetBufferLength)
         );
     }
 
     // Microphone: OS capture device, links into a BufferedSoundStream.
     {
-        using RBFX_THIS = Microphone;
-        RBFX_USERTYPE(Microphone, sol::no_constructor
-            RBFX_BASES(Object)
-            RBFX_M(GetFrequency)
-            RBFX_RAW(Link, [](Microphone* microphone, BufferedSoundStream* stream) {
+        using LUA_THIS = Microphone;
+        LUA_CLASS(Microphone, sol::no_constructor
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC(GetFrequency)
+            LUA_MEMBER_FUNC_RAW(Link, [](Microphone* microphone, BufferedSoundStream* stream) {
                 if (microphone && stream)
                     microphone->Link(SharedPtr<BufferedSoundStream>(stream));
             })
@@ -189,11 +189,11 @@ void RegisterAudioBindings(sol::state& lua, Context* context)
 
     // Sound type names for Audio:SetMasterGain / SoundSource:SetSoundType
     // (AudioDefs.h).
-    RBFX_ENUM_TABLE(SOUND, "MASTER", SOUND_MASTER, "EFFECT", SOUND_EFFECT,
+    LUA_ENUM_TABLE(SOUND, "MASTER", SOUND_MASTER, "EFFECT", SOUND_EFFECT,
         "AMBIENT", SOUND_AMBIENT, "MUSIC", SOUND_MUSIC);
 
     // Auto-remove modes for SoundSource:SetAutoRemoveMode (Component.h).
-    RBFX_ENUM_TABLE(REMOVE, "DISABLED", REMOVE_DISABLED, "COMPONENT", REMOVE_COMPONENT, "NODE", REMOVE_NODE);
+    LUA_ENUM_TABLE(REMOVE, "DISABLED", REMOVE_DISABLED, "COMPONENT", REMOVE_COMPONENT, "NODE", REMOVE_NODE);
 }
 
 } // namespace Urho3D

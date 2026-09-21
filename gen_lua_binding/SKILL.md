@@ -87,28 +87,31 @@ runtime breakage; rules 4-6 prevent capability regressions.
      `lua.set_function("name", <value>)` / `lua.create_named_table("X")` /
      `lua["Name"] = <value>`. Still required when the Lua type name differs from
      the C++ class name (e.g. LuaObjectRef exposed as "ObjectRef"): `#NAME` in
-     RBFX_USERTYPE would stringify the wrong name. Constructor registrations
-     (`sol::constructors` / `sol::factories`) MAY use RBFX_USERTYPE -- the
+     LUA_CLASS would stringify the wrong name. Constructor registrations
+     (`sol::constructors` / `sol::factories`) MAY use LUA_CLASS -- the
      preprocessor splits their template-argument commas, but `__VA_ARGS__`
      re-joins the pieces verbatim (text-identical expansion).
-   - RBFX macro form (preferred, `Source/LuaScript/LuaBindMacros.h`): every key is an
-     IDENTIFIER stringized by the macro — `RBFX_M(SetParent)`, `RBFX_RAW(DrawDebugGeometry,
-     ...)`, `RBFX_OVERLOAD(SetScale, RBFX_CAST(...))`, `RBFX_META(equal_to, ...)` — inside a
-     `{ using RBFX_THIS = T; RBFX_USERTYPE(T, sol::no_constructor ...); }` block (one block
-     per usertype: a using-alias cannot be redeclared; `RegisterLuaObjectWrapper<T>()`
-     stays outside the block). The generator expands these back to the hand-written
-     tokens; parity locks the mirror, and an unknown macro or wrong arity fails loudly.
-   - Do NOT mix forms: the leading-comma RBFX list macros cannot be dropped into a
-     hand-written comma-form registration (double comma). `RBFX_CAST`/`RBFX_CAST_C` are
+   - LUA macro form (preferred, `Source/LuaScript/LuaBindMacros.h`, ejoy-style two-axis
+     names `LUA_<subject>_<shape>`): every key is an IDENTIFIER stringized by the
+     macro — `LUA_MEMBER_FUNC(SetParent)`, `LUA_MEMBER_FUNC_RAW(DrawDebugGeometry,
+     ...)`, `LUA_MEMBER_FUNC_OVERLOAD(SetScale, LUA_CAST(...))`, `LUA_META(equal_to, ...)`
+     — inside a `{ using LUA_THIS = T; LUA_CLASS(T, sol::no_constructor ...); }` block
+     (one block per usertype: a using-alias cannot be redeclared;
+     `RegisterLuaObjectWrapper<T>()` stays outside the block). The generator expands
+     these back to the hand-written tokens; parity locks the mirror, and an unknown
+     macro, wrong arity, or a value filed in the wrong bucket (func vs prop vs const
+     RAW -- the generator checks the value head) fails loudly.
+   - Do NOT mix forms: the leading-comma LUA list macros cannot be dropped into a
+     hand-written comma-form registration (double comma). `LUA_CAST`/`LUA_CAST_C` are
      expression macros (no leading comma) and may appear anywhere, including nested
-     inside `RBFX_OVERLOAD`.
+     inside `LUA_MEMBER_FUNC_OVERLOAD`.
 2. **Getters / annotated returns keep an explicit lambda with a trailing `-> Type`.**
    `extract_return_base` derives `---@return` / `---@type` from the first `->` in the bound
    value token stream. `return [](Node* n) -> Vector3 { ... }` keeps the annotation;
    a bare member pointer or a helper wrapper has no `->` and the return hint silently vanishes.
    In the macro form the TYPE/RET argument is the annotation carrier instead:
-   `RBFX_M_RET(GetPosition2D, Vector2)`, `RBFX_PROP(name, std::string, GetName, SetName)`,
-   `RBFX_PROP_R(id, unsigned, GetID)` — the generator re-synthesizes the `-> Type` from it.
+   `LUA_MEMBER_FUNC_RET(GetPosition2D, Vector2)`, `LUA_MEMBER_PROP_F(name, std::string, GetName, SetName)`,
+   `LUA_MEMBER_PROP_FR(id, unsigned, GetID)` — the generator re-synthesizes the `-> Type` from it.
    KEEP the literal lambda when it carries real adaptation — the lambda IS the adaptation:
    default-argument hiding (`Pitch(angle)` hides `TransformSpace`), `sol::optional`
    unwrapping, overload disambiguation (`&T::M` is ambiguous when the engine member

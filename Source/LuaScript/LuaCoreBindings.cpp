@@ -501,7 +501,7 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
 {
     // Nested VariantMap view used by VariantToLua for VAR_VARIANTMAP values.
     // Hand-written opener on purpose: the Lua name ("VariantMapView") differs
-    // from the C++ class (LuaVariantMapView), so RBFX_USERTYPE's #NAME would
+    // from the C++ class (LuaVariantMapView), so LUA_CLASS's #NAME would
     // stringify the wrong name (see LuaBindMacros.h contract).
     lua.new_usertype<LuaVariantMapView>("VariantMapView",
         sol::no_constructor,
@@ -523,8 +523,8 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // reflection methods give Lua access to all Serializable attributes even
     // for types without dedicated usertype bindings.
     {
-        using RBFX_THIS = Object;
-        RBFX_USERTYPE(Object,
+        using LUA_THIS = Object;
+        LUA_CLASS(Object,
             sol::no_constructor,
             // Root of every chain: an empty base list (identical to sol3's default),
             // but routed through LuaBases so the audit table records the root and
@@ -540,8 +540,8 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
 
     // Serializable adds the attribute reflection channel.
     {
-        using RBFX_THIS = Serializable;
-        RBFX_USERTYPE(Serializable,
+        using LUA_THIS = Serializable;
+        LUA_CLASS(Serializable,
             sol::no_constructor,
             sol::base_classes, LuaBases<Serializable, Object>::bases(lua),
             "GetAttribute", [&lua](Serializable* self, const char* name) -> sol::object {
@@ -674,8 +674,8 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
 
     // Engine: run control and engine-wide queries.
     {
-        using RBFX_THIS = Engine;
-        RBFX_USERTYPE(Engine,
+        using LUA_THIS = Engine;
+        LUA_CLASS(Engine,
             sol::no_constructor,
             sol::base_classes, LuaBases<Engine, Object>::bases(lua),
             "Exit", &Engine::Exit,
@@ -687,25 +687,25 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
 
     // Time: frame delta and total time queries.
     {
-        using RBFX_THIS = Time;
-        RBFX_USERTYPE(Time,
+        using LUA_THIS = Time;
+        LUA_CLASS(Time,
             sol::no_constructor
-            RBFX_BASES(Object)
-            RBFX_M(GetTimeStep)
-            RBFX_M(GetElapsedTime)
-            RBFX_M(GetFramesPerSecond)
-            RBFX_M(GetFrameNumber)
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC(GetTimeStep)
+            LUA_MEMBER_FUNC(GetElapsedTime)
+            LUA_MEMBER_FUNC(GetFramesPerSecond)
+            LUA_MEMBER_FUNC(GetFrameNumber)
             // Static helpers mirrored through lambdas (50_Sample2D seed,
             // 53_LANDiscovery expiry timestamps).
-            RBFX_RAW(GetSystemTime, [](sol::this_state, Time*) { return Time::GetSystemTime(); })
-            RBFX_RAW(GetTimeSinceEpoch, [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); })
-            RBFX_PROP_R(timeStep, float, GetTimeStep)
+            LUA_MEMBER_FUNC_RAW(GetSystemTime, [](sol::this_state, Time*) { return Time::GetSystemTime(); })
+            LUA_MEMBER_FUNC_RAW(GetTimeSinceEpoch, [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); })
+            LUA_MEMBER_PROP_FR(timeStep, float, GetTimeStep)
         );
     }
     RegisterLuaObjectWrapper<Time>();
 
     // Global subsystem accessor, the Lua counterpart of GetSubsystem<T>().
-    lua.set_function("GetSubsystem", [context](sol::this_state s, const char* name) -> sol::object {
+    LUA_GLOBAL_FUNC(GetSubsystem, [context](sol::this_state s, const char* name) -> sol::object {
         if (!context)
             return sol::lua_nil;
         return WrapLuaObject(sol::state_view(s), context->GetSubsystem(StringHash(name)));
@@ -715,9 +715,9 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
     // file (print goes to a stdout that windowed apps do not have), so expose
     // the log levels as plain string functions. The sample-framework memory
     // probe (Source/LuaSamples/Framework.lua) reports through LogInfo/LogError.
-    lua.set_function("LogInfo", [](const char* message) { URHO3D_LOGINFO("{}", message); });
-    lua.set_function("LogWarning", [](const char* message) { URHO3D_LOGWARNING("{}", message); });
-    lua.set_function("LogError", [](const char* message) { URHO3D_LOGERROR("{}", message); });
+    LUA_GLOBAL_FUNC(LogInfo, [](const char* message) { URHO3D_LOGINFO("{}", message); });
+    LUA_GLOBAL_FUNC(LogWarning, [](const char* message) { URHO3D_LOGWARNING("{}", message); });
+    LUA_GLOBAL_FUNC(LogError, [](const char* message) { URHO3D_LOGERROR("{}", message); });
 }
 
 } // namespace Urho3D

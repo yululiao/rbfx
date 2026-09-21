@@ -42,26 +42,26 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
     // dedicated modules; everything else flows through LuaObjectRef with
     // attribute reflection.
     {
-        using RBFX_THIS = Resource;
-        RBFX_USERTYPE(Resource, sol::no_constructor
-            RBFX_BASES(Object)
-            RBFX_RAW(name, sol::readonly_property([](Resource* resource) -> std::string {
+        using LUA_THIS = Resource;
+        LUA_CLASS(Resource, sol::no_constructor
+            LUA_BASES(Object)
+            LUA_MEMBER_PROP_RAW(name, sol::readonly_property([](Resource* resource) -> std::string {
                 return resource ? resource->GetName().c_str() : "";
             }))
-            RBFX_M_RET(GetName, std::string)
-            RBFX_M(GetMemoryUse)
-            RBFX_M(SetName)
+            LUA_MEMBER_FUNC_RET(GetName, std::string)
+            LUA_MEMBER_FUNC(GetMemoryUse)
+            LUA_MEMBER_FUNC(SetName)
         );
     }
 
     {
-        using RBFX_THIS = ResourceCache;
-        RBFX_USERTYPE(ResourceCache, sol::no_constructor
-            RBFX_BASES(Object)
+        using LUA_THIS = ResourceCache;
+        LUA_CLASS(ResourceCache, sol::no_constructor
+            LUA_BASES(Object)
             // Typed resource getters: the type is resolved by the same name-based
             // factory used by Node::CreateComponent, so every registered resource
             // type works without a dedicated binding.
-            RBFX_RAW(GetResource, [context](ResourceCache* cache, const char* typeName, const char* name, sol::this_state s) -> sol::object {
+            LUA_MEMBER_FUNC_RAW(GetResource, [context](ResourceCache* cache, const char* typeName, const char* name, sol::this_state s) -> sol::object {
                 if (!cache)
                     return sol::lua_nil;
                 const StringHash type{typeName};
@@ -73,21 +73,21 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
                 URHO3D_LOGERROR("Resource type '{}' is not registered", typeName);
                 return sol::lua_nil;
             })
-            RBFX_M(Exists)
-            RBFX_RAW(GetResourceFileName, [](ResourceCache* cache, const char* name) -> std::string {
+            LUA_MEMBER_FUNC(Exists)
+            LUA_MEMBER_FUNC_RAW(GetResourceFileName, [](ResourceCache* cache, const char* name) -> std::string {
                 return cache ? cache->GetResourceFileName(name).c_str() : "";
             })
-            RBFX_OVERLOAD(ReleaseResource,
-                RBFX_CAST(ReleaseResource, void, const ea::string&, bool))
+            LUA_MEMBER_FUNC_OVERLOAD(ReleaseResource,
+                LUA_CAST(ReleaseResource, void, const ea::string&, bool))
         );
     }
     RegisterLuaObjectWrapper<ResourceCache>();
 
     // XMLFile: load arbitrary XML resources for manual parsing needs.
     {
-        using RBFX_THIS = XMLFile;
-        RBFX_USERTYPE(XMLFile, sol::no_constructor
-            RBFX_BASES(Resource, Object)
+        using LUA_THIS = XMLFile;
+        LUA_CLASS(XMLFile, sol::no_constructor
+            LUA_BASES(Resource, Object)
         );
     }
     RegisterLuaObjectWrapper<XMLFile>();
@@ -97,62 +97,62 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
     // audit requires Resource to be registered first, and the Node module
     // runs before this one.
     {
-        using RBFX_THIS = PrefabResource;
-        RBFX_USERTYPE(PrefabResource, sol::no_constructor
-            RBFX_BASES(Resource, Object)
+        using LUA_THIS = PrefabResource;
+        LUA_CLASS(PrefabResource, sol::no_constructor
+            LUA_BASES(Resource, Object)
         );
     }
     RegisterLuaObjectWrapper<PrefabResource>();
 
     // FileSystem: path helpers.
     {
-        using RBFX_THIS = FileSystem;
-        RBFX_USERTYPE(FileSystem, sol::no_constructor
-            RBFX_BASES(Object)
-            RBFX_M(FileExists)
-            RBFX_M(DirExists)
-            RBFX_M_RET(GetProgramDir, std::string)
-            RBFX_M_RET(GetUserDocumentsDir, std::string)
+        using LUA_THIS = FileSystem;
+        LUA_CLASS(FileSystem, sol::no_constructor
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC(FileExists)
+            LUA_MEMBER_FUNC(DirExists)
+            LUA_MEMBER_FUNC_RET(GetProgramDir, std::string)
+            LUA_MEMBER_FUNC_RET(GetUserDocumentsDir, std::string)
         );
     }
     RegisterLuaObjectWrapper<FileSystem>();
 
     // Localization: string translation subsystem (40_Localization).
     {
-        using RBFX_THIS = Localization;
-        RBFX_USERTYPE(Localization, sol::no_constructor
-            RBFX_BASES(Object)
-            RBFX_OVERLOAD(SetLanguage,
-                RBFX_CAST(SetLanguage, void, int),
+        using LUA_THIS = Localization;
+        LUA_CLASS(Localization, sol::no_constructor
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC_OVERLOAD(SetLanguage,
+                LUA_CAST(SetLanguage, void, int),
                 [](Localization* l10n, const char* language) {
                     if (l10n)
                         l10n->SetLanguage(language);
                 })
-            RBFX_OVERLOAD(GetLanguageIndex,
-                RBFX_CAST_C(GetLanguageIndex, int),
+            LUA_MEMBER_FUNC_OVERLOAD(GetLanguageIndex,
+                LUA_CAST_C(GetLanguageIndex, int),
                 [](Localization* l10n, const char* language) -> int {
                     return l10n ? l10n->GetLanguageIndex(language) : -1;
                 })
-            RBFX_OVERLOAD(GetLanguage,
-                RBFX_CAST(GetLanguage, const ea::string&),
+            LUA_MEMBER_FUNC_OVERLOAD(GetLanguage,
+                LUA_CAST(GetLanguage, const ea::string&),
                 [](Localization* l10n, int index) -> ea::string {
                     return l10n ? l10n->GetLanguage(index) : ea::string{};
                 })
-            RBFX_M(GetNumLanguages)
-            RBFX_RAW(LoadJSONFile, [](Localization* l10n, const char* name, sol::optional<const char*> language) {
+            LUA_MEMBER_FUNC(GetNumLanguages)
+            LUA_MEMBER_FUNC_RAW(LoadJSONFile, [](Localization* l10n, const char* name, sol::optional<const char*> language) {
                 if (l10n)
                     l10n->LoadJSONFile(name, language ? *language : "");
             })
-            RBFX_RAW(GetString, [](Localization* l10n, const char* id, sol::optional<int> index) -> std::string {
+            LUA_MEMBER_FUNC_RAW(GetString, [](Localization* l10n, const char* id, sol::optional<int> index) -> std::string {
                 return l10n ? std::string(l10n->Get(id, index.value_or(-1)).c_str()) : std::string{};
             })
-            RBFX_M(Reset)
+            LUA_MEMBER_FUNC(Reset)
         );
     }
     RegisterLuaObjectWrapper<Localization>();
 
     // Global helper mirroring cache->GetResource<T>(name) with type name.
-    lua.set_function("GetResource", [context](sol::this_state s, const char* typeName, const char* name) -> sol::object {
+    LUA_GLOBAL_FUNC(GetResource, [context](sol::this_state s, const char* typeName, const char* name) -> sol::object {
         auto* cache = context->GetSubsystem<ResourceCache>();
         if (!cache)
             return sol::lua_nil;

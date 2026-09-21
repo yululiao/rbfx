@@ -47,59 +47,59 @@ struct InputConstants
 void RegisterInputBindings(sol::state& lua, Context* context)
 {
     {
-        using RBFX_THIS = Input;
-        RBFX_USERTYPE(Input, sol::no_constructor
-            RBFX_BASES(Object)
+        using LUA_THIS = Input;
+        LUA_CLASS(Input, sol::no_constructor
+            LUA_BASES(Object)
 
             // Key & mouse queries
-            RBFX_M(GetKeyDown)
-            RBFX_M(GetKeyPress)
+            LUA_MEMBER_FUNC(GetKeyDown)
+            LUA_MEMBER_FUNC(GetKeyPress)
             // MouseButton args arrive as Lua numbers; FlagSet<MouseButton> is
             // not directly convertible so the cast happens here.
-            RBFX_RAW(GetMouseButtonDown, [](Input* input, int button) {
+            LUA_MEMBER_FUNC_RAW(GetMouseButtonDown, [](Input* input, int button) {
                 return input && input->GetMouseButtonDown(static_cast<MouseButton>(button));
             })
-            RBFX_RAW(GetMouseButtonPress, [](Input* input, int button) {
+            LUA_MEMBER_FUNC_RAW(GetMouseButtonPress, [](Input* input, int button) {
                 return input && input->GetMouseButtonPress(static_cast<MouseButton>(button));
             })
-            RBFX_M(GetMousePosition)
-            RBFX_M(GetMouseMove)
-            RBFX_M(GetMouseMoveX)
-            RBFX_M(GetMouseMoveY)
+            LUA_MEMBER_FUNC(GetMousePosition)
+            LUA_MEMBER_FUNC(GetMouseMove)
+            LUA_MEMBER_FUNC(GetMouseMoveX)
+            LUA_MEMBER_FUNC(GetMouseMoveY)
             // Wheel scrolling (49/50 zoom-to-cursor) and mouse re-centering
             // (16_Chat style mouse lock helpers).
-            RBFX_M(GetMouseMoveWheel)
-            RBFX_M(CenterMousePosition)
-            RBFX_M(GetKeyFromName)
-            RBFX_RAW(GetQualifierDown, [](Input* input, int qualifier) {
+            LUA_MEMBER_FUNC(GetMouseMoveWheel)
+            LUA_MEMBER_FUNC(CenterMousePosition)
+            LUA_MEMBER_FUNC(GetKeyFromName)
+            LUA_MEMBER_FUNC_RAW(GetQualifierDown, [](Input* input, int qualifier) {
                 return input && input->GetQualifierDown(static_cast<Qualifier>(qualifier));
             })
 
             // Mouse state management. The suppressEvent parameters are optional
             // in C++ and must be mirrored with sol::optional for Lua calls.
-            RBFX_RAW(SetMouseVisible, [](Input* input, bool enable, sol::optional<bool> suppressEvent) {
+            LUA_MEMBER_FUNC_RAW(SetMouseVisible, [](Input* input, bool enable, sol::optional<bool> suppressEvent) {
                 if (input)
                     input->SetMouseVisible(enable, suppressEvent.value_or(false));
             })
-            RBFX_M(IsMouseVisible)
-            RBFX_RAW(SetMouseMode, [](Input* input, int mode, sol::optional<bool> suppressEvent) {
+            LUA_MEMBER_FUNC(IsMouseVisible)
+            LUA_MEMBER_FUNC_RAW(SetMouseMode, [](Input* input, int mode, sol::optional<bool> suppressEvent) {
                 if (input)
                     input->SetMouseMode(static_cast<MouseMode>(mode), suppressEvent.value_or(false));
             })
-            RBFX_M(GetMouseMode)
-            RBFX_RAW(SetMouseGrabbed, [](Input* input, bool grab, sol::optional<bool> suppressEvent) {
+            LUA_MEMBER_FUNC(GetMouseMode)
+            LUA_MEMBER_FUNC_RAW(SetMouseGrabbed, [](Input* input, bool grab, sol::optional<bool> suppressEvent) {
                 if (input)
                     input->SetMouseGrabbed(grab, suppressEvent.value_or(false));
             })
-            RBFX_M(IsMouseLocked)
-            RBFX_M(IsMouseGrabbed)
+            LUA_MEMBER_FUNC(IsMouseLocked)
+            LUA_MEMBER_FUNC(IsMouseGrabbed)
 
             // Misc
-            RBFX_M(GetNumTouches)
-            RBFX_M(GetTouch)
-            RBFX_M(GetNumJoysticks)
-            RBFX_M(IsMinimized)
-            RBFX_M(SetToggleFullscreen)
+            LUA_MEMBER_FUNC(GetNumTouches)
+            LUA_MEMBER_FUNC(GetTouch)
+            LUA_MEMBER_FUNC(GetNumJoysticks)
+            LUA_MEMBER_FUNC(IsMinimized)
+            LUA_MEMBER_FUNC(SetToggleFullscreen)
         );
     }
     RegisterLuaObjectWrapper<Input>();
@@ -107,13 +107,13 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // TouchState: plain struct describing one finger. Fetched through
     // Input:GetTouch(index), never constructed from Lua (37_UIDrag).
     {
-        using RBFX_THIS = TouchState;
-        RBFX_USERTYPE(TouchState, sol::no_constructor
-            RBFX_RAW(touchID, &TouchState::touchID_)
-            RBFX_RAW(position, &TouchState::position_)
-            RBFX_RAW(lastPosition, &TouchState::lastPosition_)
-            RBFX_RAW(delta, &TouchState::delta_)
-            RBFX_RAW(pressure, &TouchState::pressure_)
+        using LUA_THIS = TouchState;
+        LUA_CLASS(TouchState, sol::no_constructor
+            LUA_MEMBER_PROP_RAW(touchID, &TouchState::touchID_)
+            LUA_MEMBER_PROP_RAW(position, &TouchState::position_)
+            LUA_MEMBER_PROP_RAW(lastPosition, &TouchState::lastPosition_)
+            LUA_MEMBER_PROP_RAW(delta, &TouchState::delta_)
+            LUA_MEMBER_PROP_RAW(pressure, &TouchState::pressure_)
         );
     }
 
@@ -121,14 +121,14 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // (46_RaycastVehicle). Created through Node:CreateComponent, configured
     // by loading an input map resource.
     {
-        using RBFX_THIS = MoveAndOrbitController;
-        RBFX_USERTYPE(MoveAndOrbitController, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_RAW(LoadInputMap, [](MoveAndOrbitController* controller, const char* name) {
+        using LUA_THIS = MoveAndOrbitController;
+        LUA_CLASS(MoveAndOrbitController, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC_RAW(LoadInputMap, [](MoveAndOrbitController* controller, const char* name) {
                 if (controller)
                     controller->LoadInputMap(name);
             })
-            RBFX_M(GetInputMap)
+            LUA_MEMBER_FUNC(GetInputMap)
         );
     }
     RegisterLuaObjectWrapper<MoveAndOrbitController>();
@@ -137,16 +137,16 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // The Lua vehicle logic (46_RaycastVehicle) reads velocity/yaw/pitch from
     // it every frame.
     {
-        using RBFX_THIS = MoveAndOrbitComponent;
-        RBFX_USERTYPE(MoveAndOrbitComponent, sol::no_constructor
-            RBFX_BASES(Component, Serializable, Object)
-            RBFX_M(SetVelocity)
-            RBFX_M(SetYaw)
-            RBFX_M(SetPitch)
-            RBFX_M(GetVelocity)
-            RBFX_M(GetYaw)
-            RBFX_M(GetPitch)
-            RBFX_M(GetYawPitchRotation)
+        using LUA_THIS = MoveAndOrbitComponent;
+        LUA_CLASS(MoveAndOrbitComponent, sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetVelocity)
+            LUA_MEMBER_FUNC(SetYaw)
+            LUA_MEMBER_FUNC(SetPitch)
+            LUA_MEMBER_FUNC(GetVelocity)
+            LUA_MEMBER_FUNC(GetYaw)
+            LUA_MEMBER_FUNC(GetPitch)
+            LUA_MEMBER_FUNC(GetYawPitchRotation)
         );
     }
     RegisterLuaObjectWrapper<MoveAndOrbitComponent>();
@@ -154,10 +154,10 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     // InputMap: named action evaluation from a loaded input map resource
     // (46_RaycastVehicle braking).
     {
-        using RBFX_THIS = InputMap;
-        RBFX_USERTYPE(InputMap, sol::no_constructor
-            RBFX_BASES(Resource, Object)
-            RBFX_RAW(Evaluate, [](InputMap* inputMap, const char* name) -> float {
+        using LUA_THIS = InputMap;
+        LUA_CLASS(InputMap, sol::no_constructor
+            LUA_BASES(Resource, Object)
+            LUA_MEMBER_FUNC_RAW(Evaluate, [](InputMap* inputMap, const char* name) -> float {
                 return inputMap ? inputMap->Evaluate(name) : 0.0f;
             })
         );
@@ -209,15 +209,15 @@ void RegisterInputBindings(sol::state& lua, Context* context)
     }
 
     // Mouse buttons.
-    RBFX_ENUM_TABLE(MOUSEB, "LEFT", MOUSEB_LEFT, "RIGHT", MOUSEB_RIGHT, "MIDDLE", MOUSEB_MIDDLE,
+    LUA_ENUM_TABLE(MOUSEB, "LEFT", MOUSEB_LEFT, "RIGHT", MOUSEB_RIGHT, "MIDDLE", MOUSEB_MIDDLE,
         "X1", MOUSEB_X1, "X2", MOUSEB_X2);
 
     // Mouse modes.
-    RBFX_ENUM_TABLE(MM, "ABSOLUTE", MM_ABSOLUTE, "RELATIVE", MM_RELATIVE, "WRAP", MM_WRAP,
+    LUA_ENUM_TABLE(MM, "ABSOLUTE", MM_ABSOLUTE, "RELATIVE", MM_RELATIVE, "WRAP", MM_WRAP,
         "FREE", MM_FREE, "INVALID", MM_INVALID);
 
     // Keyboard qualifiers (InputConstants.h).
-    RBFX_ENUM_TABLE(QUAL, "NONE", QUAL_NONE, "SHIFT", QUAL_SHIFT, "CTRL", QUAL_CTRL, "ALT", QUAL_ALT,
+    LUA_ENUM_TABLE(QUAL, "NONE", QUAL_NONE, "SHIFT", QUAL_SHIFT, "CTRL", QUAL_CTRL, "ALT", QUAL_ALT,
         "ANY", QUAL_ANY);
 }
 
