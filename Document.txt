@@ -23,11 +23,6 @@ function M.makeTimer(...) ... end
 return M
 
 
-2.
-rbfx lua_binding剩余缺陷与风险
-三件事：base 链/顺序这个静默失效类的手工不变量、直推路径的身份分裂、以及 smoke 门(全量lua sampbes冒烟)起跑后报错不计 FAIL”这个可修的门禁缺口——前两个是结构性取舍
-
-
 剩余工作项：周更新一次
 
 第一层:三支柱愿景内的剩余任务
@@ -64,6 +59,8 @@ iOS 打包(第一梯队,未做)
 🟡 高层多人:Godot 有 high-level multiplayer API;rbfx 偏底层 socket
 ❌ 本地化工作流、资源导入 UX(可视化重导入/元数据)
 
- RBFX_OVERLOAD(SetScale2D,
-            RBFX_CAST(Node, SetScale2D, void, const Vector2&),
-            RBFX_CAST(Node, SetScale2D, void, float, float))
+			
+BindTool缺点：
+它自述的定位：README 第一句 "A source code generator for source code generator™"（给 SWIG 这个生成器生成输入），且是手动偶尔执行的工具，不在任何持续集成环节里。
+就算改造它做 Lua 生成，也是回头路：clang-AST codegen 正是 gen_lua_binding/SKILL.md 第 305-307 行明确禁止重新引入的方案。当初的边界条件没变——rbfx 引擎无方法级反射基建，
+codegen 产出的绑定会失去“绑到成员函数指针、引擎改签名即编译期报错”的性质，还得维护 AST dump 与引擎演进的同步

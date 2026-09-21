@@ -568,6 +568,28 @@ def _expand_rbfx(name, args, cls):
             out += [('punct', ',')] + a
         out.append(('punct', ')'))
         return out
+    if name == 'LUA_TABLE_FUNC':
+        if len(args) < 3 or len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        if len(args[1]) != 1 or args[1][0][0] != 'id':
+            return None
+        # Namespace-table function: expands to TABLE.set_function("NAME",
+        # ...) so the parser's set_function branch (any receiver resolved
+        # through namespace_var / assignment tracking) takes over as before.
+        out = tokenize('%s.set_function("%s"' % (args[0][0][1], args[1][0][1]))
+        for a in args[2:]:
+            out += [('punct', ',')] + a
+        out.append(('punct', ')'))
+        return out
+    if name == 'LUA_TABLE_ENUM':
+        if len(args) != 3 or len(args[0]) != 1 or args[0][0][0] != 'id':
+            return None
+        if len(args[1]) != 1 or args[1][0][0] != 'id':
+            return None
+        # One namespace-table constant: expands to TABLE["KEY"] = VALUE;
+        # the parser's bracket-assignment branch (assign_value_kind) takes
+        # over as before.
+        return tokenize('%s["%s"] =' % (args[0][0][1], args[1][0][1])) + args[2]
     if name == 'LUA_BASES':
         if not cls:
             return None

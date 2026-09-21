@@ -41,7 +41,7 @@
 //     LUA_<subject>_<shape>
 //
 //   subject:  CLASS | BASES | MEMBER_FUNC | MEMBER_PROP | MEMBER_CONST |
-//             GLOBAL_FUNC
+//             GLOBAL_FUNC | TABLE_FUNC | TABLE_ENUM
 //   shape:    (none) = the plain direct form
 //             _RAW   = explicit value, escape hatch (semantics carried by
 //                      the value's head token, see the bucket contracts)
@@ -170,6 +170,27 @@
 //     state handle (LuaVM.cpp's SubscribeToEvent family) stay hand-written
 //     -- they carry a guard comment.
 //
+// LUA_TABLE_FUNC(TABLE, NAME, ...)
+//     Namespace-table function: expands to `TABLE.set_function(#NAME,
+//     __VA_ARGS__)`. TABLE is the sol::table variable holding a namespace
+//     (the editor-side shape: `sol::table editor = lua.create_named_table
+//     ("Editor"); LUA_TABLE_FUNC(editor, log, ...)`) -- no usertype is
+//     involved, unlike the LUA_MEMBER_FUNC family. NAME is an identifier
+//     stringized by the macro, so a typo'd key cannot compile silently.
+//     The doc generator rewrites the call to the hand-written
+//     `TABLE.set_function("NAME", ...)` tokens and the parser's
+//     set_function branch (any receiver) takes over as before.
+//
+// LUA_TABLE_ENUM(TABLE, KEY, VALUE)
+//     One namespace-table enum constant: expands to `TABLE["KEY"] =
+//     VALUE;` -- the statement-level counterpart of LUA_MEMBER_CONST for
+//     a non-usertype receiver. The C preprocessor cannot iterate, so a
+//     constants block is one LUA_TABLE_ENUM line per pair (the editor-side
+//     enum tables: a local table, N constant lines, then a hand-written
+//     mount `imgui["WindowFlags"] = windowFlags;` -- the macro registers
+//     the CONSTANT pairs, not the table plumbing). VALUE must be
+//     comma-free at the top level.
+//
 // LUA_ENUM_TABLE(NAME, "KEY", VALUE, ...)
 //     Standalone statement (outside usertype calls): creates the named
 //     global enum table with the given string-keyed pairs in one line.
@@ -241,6 +262,12 @@
 
 #define LUA_GLOBAL_FUNC(NAME, ...) \
     lua.set_function(#NAME, __VA_ARGS__)
+
+#define LUA_TABLE_FUNC(TABLE, NAME, ...) \
+    TABLE.set_function(#NAME, __VA_ARGS__)
+
+#define LUA_TABLE_ENUM(TABLE, KEY, VALUE) \
+    TABLE[#KEY] = VALUE
 
 #define LUA_ENUM_TABLE(NAME, ...) \
     lua.create_named_table(#NAME, __VA_ARGS__)

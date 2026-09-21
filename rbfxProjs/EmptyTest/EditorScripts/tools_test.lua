@@ -300,7 +300,7 @@ end)
 -- 想连续出多个平台就在回调里链下一次 build，这样任一环节失败都不会串错顺序。
 -- ---------------------------------------------------------------------------
 
-local profiles = Editor.buildProfiles()
+local profiles = Editor.buildPlatforms()
 Editor.log("Build profiles: " .. table.concat(profiles, ", "))
 
 -- 事件里的字段就是构建结束时那四个值，跟 BuildTab 显示的是同一份数据
@@ -310,7 +310,7 @@ Editor.subscribe("buildFinished", function(data)
 end)
 
 Editor.addMenuItem("Tools/Build First Profile (Lua)", function()
-    local names = Editor.buildProfiles()
+    local names = Editor.buildPlatforms()
     if #names == 0 then
         Editor.logWarning("No build profile in Build.json - open Project > Build Settings first")
         return

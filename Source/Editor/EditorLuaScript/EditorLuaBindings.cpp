@@ -12,6 +12,7 @@
 #include "LuaUIState.h"
 
 #include <LuaScript/LuaBindings.h>
+#include <LuaScript/LuaBindMacros.h>
 
 #include "../Tabs/SceneViewTab.h"
 #include "../Core/CommonEditorActions.h"
@@ -494,38 +495,38 @@ void RegisterEditorLuaAPI(Context* context)
     sol::table editor = lua.create_named_table("Editor");
 
     // Logging helpers, prefixed so plugin output is easy to spot in the editor console.
-    editor.set_function("log", [](const char* message) { URHO3D_LOGINFO("[EditorLua] {}", message); });
-    editor.set_function("logWarning", [](const char* message) { URHO3D_LOGWARNING("[EditorLua] {}", message); });
-    editor.set_function("logError", [](const char* message) { URHO3D_LOGERROR("[EditorLua] {}", message); });
+    LUA_TABLE_FUNC(editor, log, [](const char* message) { URHO3D_LOGINFO("[EditorLua] {}", message); });
+    LUA_TABLE_FUNC(editor, logWarning, [](const char* message) { URHO3D_LOGWARNING("[EditorLua] {}", message); });
+    LUA_TABLE_FUNC(editor, logError, [](const char* message) { URHO3D_LOGERROR("[EditorLua] {}", message); });
 
     // Event bridge aliases so plugins can use Editor.subscribe(...) as well as the global one.
-    editor.set_function("subscribe",
+    LUA_TABLE_FUNC(editor, subscribe,
         [host = editorLua](const char* eventName, sol::protected_function callback)
         {
             host->SubscribeGlobalEvent(eventName, std::move(callback));
         });
-    editor.set_function("unsubscribe",
+    LUA_TABLE_FUNC(editor, unsubscribe,
         [host = editorLua](const char* eventName) { host->UnsubscribeEvent(eventName); });
 
     // Evaluate a Lua chunk on demand (handy for console-driven experimentation).
-    editor.set_function("exec", [host = editorLua](const char* code) { return host->ExecuteString(code); });
+    LUA_TABLE_FUNC(editor, exec, [host = editorLua](const char* code) { return host->ExecuteString(code); });
 
     // Project access. Empty results when no project is open.
-    editor.set_function("hasProject", [context]() {
+    LUA_TABLE_FUNC(editor, hasProject, [context]() {
         return context->GetSubsystem<Project>() != nullptr;
     });
-    editor.set_function("getProjectDataPath", [context]() -> std::string {
+    LUA_TABLE_FUNC(editor, getProjectDataPath, [context]() -> std::string {
         auto* project = context->GetSubsystem<Project>();
         return project ? std::string(project->GetDataPath().c_str()) : std::string();
     });
-    editor.set_function("getProjectPath", [context]() -> std::string {
+    LUA_TABLE_FUNC(editor, getProjectPath, [context]() -> std::string {
         auto* project = context->GetSubsystem<Project>();
         return project ? std::string(project->GetProjectPath().c_str()) : std::string();
     });
 
     // Re-run the last plugin directory. Resetting the editor-side UI bookkeeping has to happen
     // on this side of the boundary, which is why the function lives here.
-    editor.set_function("reloadPlugins", [context]() {
+    LUA_TABLE_FUNC(editor, reloadPlugins, [context]() {
         auto* lua = context->GetSubsystem<EditorLuaVMHost>();
         if (!lua)
             return;
@@ -535,7 +536,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Create (or update, for an existing title) a dockable panel whose content a Lua function
     // draws every frame. Runs inside the ImGui frame, so any imgui.* call is valid there.
-    editor.set_function("addTab",
+    LUA_TABLE_FUNC(editor, addTab,
         [context, editorLua](const std::string& title, sol::protected_function drawFunction) -> bool
         {
             if (!drawFunction.valid())
@@ -575,7 +576,7 @@ void RegisterEditorLuaAPI(Context* context)
     // encode a menu path: "Tools/Test" puts "Test" into a top-level "Tools" menu, which is
     // reused when the editor already has one and created otherwise; deeper segments become
     // nested submenus. A label without '/' is placed in the Project menu.
-    editor.set_function("addMenuItem",
+    LUA_TABLE_FUNC(editor, addMenuItem,
         [context, editorLua](const std::string& label, sol::protected_function clickFunction) -> bool
         {
             if (!clickFunction.valid())
@@ -593,7 +594,7 @@ void RegisterEditorLuaAPI(Context* context)
     // Persistent floating window drawn every frame by the editor. The content function should
     // only emit widgets (no Begin/End); the editor wraps them and owns the title-bar close.
     // The window starts hidden; show it from a menu click via Editor.showWindow(title).
-    editor.set_function("addWindow",
+    LUA_TABLE_FUNC(editor, addWindow,
         [context, editorLua](const std::string& title, sol::protected_function drawFunction,
             sol::optional<unsigned> flags) -> bool
         {
@@ -619,7 +620,7 @@ void RegisterEditorLuaAPI(Context* context)
                 Detail::LuaWindow{ titleStr, handle, false, flags.value_or(0u) });
             return true;
         });
-    editor.set_function("showWindow", [](const std::string& title) -> bool {
+    LUA_TABLE_FUNC(editor, showWindow, [](const std::string& title) -> bool {
         for (Detail::LuaWindow& window : Detail::LuaWindows())
             if (window.title == ea::string(title.c_str()))
             {
@@ -628,7 +629,7 @@ void RegisterEditorLuaAPI(Context* context)
             }
         return false;
     });
-    editor.set_function("hideWindow", [](const std::string& title) -> bool {
+    LUA_TABLE_FUNC(editor, hideWindow, [](const std::string& title) -> bool {
         for (Detail::LuaWindow& window : Detail::LuaWindows())
             if (window.title == ea::string(title.c_str()))
             {
@@ -640,15 +641,15 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Live editor context. Wrapped engine objects come back as the same usertypes the engine
     // bindings expose, so plugins can call e.g. node.Name or component.node directly.
-    editor.set_function("getActiveScene", [context, editorLua]() -> sol::object {
+    LUA_TABLE_FUNC(editor, getActiveScene, [context, editorLua]() -> sol::object {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         return WrapLuaObject(editorLua->GetState(), page ? page->scene_.Get() : nullptr);
     });
-    editor.set_function("getActiveNode", [context, editorLua]() -> sol::object {
+    LUA_TABLE_FUNC(editor, getActiveNode, [context, editorLua]() -> sol::object {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         return WrapLuaObject(editorLua->GetState(), page ? page->selection_.GetActiveNode() : nullptr);
     });
-    editor.set_function("getSelection", [context](sol::this_state s) -> sol::object {
+    LUA_TABLE_FUNC(editor, getSelection, [context](sol::this_state s) -> sol::object {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
@@ -679,7 +680,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Build pipeline. The editor keeps all of its state, so a plugin never holds a piece of a
     // running build: it asks what can be built, asks for a build, and looks at the status.
-    editor.set_function("buildPlatforms", [context](sol::this_state s) -> sol::object
+    LUA_TABLE_FUNC(editor, buildPlatforms, [context](sol::this_state s) -> sol::object
     {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
@@ -698,7 +699,7 @@ void RegisterEditorLuaAPI(Context* context)
     // arrives later either through the optional callback (as the same EventData table the
     // "buildFinished" event carries) or through that event alone. A plugin that builds several
     // platforms in sequence chains them from the callback, which is why the callback is one-shot.
-    editor.set_function("build",
+    LUA_TABLE_FUNC(editor, build,
         [context, editorLua](const std::string& platform,
             sol::optional<sol::protected_function> callback) -> bool
         {
@@ -743,7 +744,7 @@ void RegisterEditorLuaAPI(Context* context)
             return true;
         });
 
-    editor.set_function("buildStatus", [context](sol::this_state s) -> sol::object
+    LUA_TABLE_FUNC(editor, buildStatus, [context](sol::this_state s) -> sol::object
     {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
@@ -771,34 +772,34 @@ void RegisterEditorLuaAPI(Context* context)
     // Editor.project -- dirty marking and save (P0).
     // ---------------------------------------------------------------------------
     sol::table projectApi = editor.create_named("project");
-    projectApi.set_function("hasProject", [context]() -> bool {
+    LUA_TABLE_FUNC(projectApi, hasProject, [context]() -> bool {
         return context->GetSubsystem<Project>() != nullptr;
     });
-    projectApi.set_function("path", [context]() -> std::string {
+    LUA_TABLE_FUNC(projectApi, path, [context]() -> std::string {
         auto* project = context->GetSubsystem<Project>();
         return project ? std::string(project->GetProjectPath().c_str()) : std::string();
     });
-    projectApi.set_function("dataPath", [context]() -> std::string {
+    LUA_TABLE_FUNC(projectApi, dataPath, [context]() -> std::string {
         auto* project = context->GetSubsystem<Project>();
         return project ? std::string(project->GetDataPath().c_str()) : std::string();
     });
     // Mark the project as having unsaved changes so the title bar shows the dirty indicator and a
     // close prompts. Use it after mutating the scene from a plugin (the engine bindings do not mark
     // it on their own).
-    projectApi.set_function("markDirty", [context]() -> bool {
+    LUA_TABLE_FUNC(projectApi, markDirty, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         if (!project)
             return false;
         project->MarkUnsaved();
         return true;
     });
-    projectApi.set_function("isDirty", [context]() -> bool {
+    LUA_TABLE_FUNC(projectApi, isDirty, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         return project && project->HasUnsavedChanges();
     });
     // Save the active scene through the very routine Ctrl+S uses (the scene view tab's current
     // resource). Returns false when no project or scene view is open.
-    projectApi.set_function("save", [context]() -> bool {
+    LUA_TABLE_FUNC(projectApi, save, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         if (!project)
             return false;
@@ -814,15 +815,15 @@ void RegisterEditorLuaAPI(Context* context)
     // Objects flow in and out through the same wrappers the engine bindings use.
     // ---------------------------------------------------------------------------
     sol::table selectionApi = editor.create_named("selection");
-    selectionApi.set_function("scene", [context, editorLua]() -> sol::object {
+    LUA_TABLE_FUNC(selectionApi, scene, [context, editorLua]() -> sol::object {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         return WrapLuaObject(editorLua->GetState(), page ? page->scene_.Get() : nullptr);
     });
-    selectionApi.set_function("activeNode", [context, editorLua]() -> sol::object {
+    LUA_TABLE_FUNC(selectionApi, activeNode, [context, editorLua]() -> sol::object {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         return WrapLuaObject(editorLua->GetState(), page ? page->selection_.GetActiveNode() : nullptr);
     });
-    selectionApi.set_function("nodes", [context](sol::this_state s) -> sol::object {
+    LUA_TABLE_FUNC(selectionApi, nodes, [context](sol::this_state s) -> sol::object {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
@@ -835,7 +836,7 @@ void RegisterEditorLuaAPI(Context* context)
         }
         return result;
     });
-    selectionApi.set_function("components", [context](sol::this_state s) -> sol::object {
+    LUA_TABLE_FUNC(selectionApi, components, [context](sol::this_state s) -> sol::object {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
@@ -849,7 +850,7 @@ void RegisterEditorLuaAPI(Context* context)
         return result;
     });
     // set replaces the selection, add extends it; each takes one object or an array of objects.
-    selectionApi.set_function("set", [context](sol::object target, sol::optional<bool> activate) -> bool {
+    LUA_TABLE_FUNC(selectionApi, set, [context](sol::object target, sol::optional<bool> activate) -> bool {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         if (!page)
             return false;
@@ -857,14 +858,14 @@ void RegisterEditorLuaAPI(Context* context)
         ApplySelection(page->selection_, target, activate.value_or(true));
         return true;
     });
-    selectionApi.set_function("add", [context](sol::object target, sol::optional<bool> activate) -> bool {
+    LUA_TABLE_FUNC(selectionApi, add, [context](sol::object target, sol::optional<bool> activate) -> bool {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         if (!page)
             return false;
         ApplySelection(page->selection_, target, activate.value_or(true));
         return true;
     });
-    selectionApi.set_function("clear", [context]() -> bool {
+    LUA_TABLE_FUNC(selectionApi, clear, [context]() -> bool {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         if (!page)
             return false;
@@ -874,7 +875,7 @@ void RegisterEditorLuaAPI(Context* context)
     // Register a callback fired whenever the active selection changes (the editor polls the packed
     // selection each frame, so it also catches changes made by the user or other tabs). Callbacks
     // read the new selection via the getters; they are cleared on plugin reload.
-    selectionApi.set_function("onChanged",
+    LUA_TABLE_FUNC(selectionApi, onChanged,
         [host = editorLua](sol::protected_function callback) -> bool {
             if (!callback.valid())
                 return false;
@@ -887,7 +888,7 @@ void RegisterEditorLuaAPI(Context* context)
     // window pass; handles are the host's callback handles so a reload can never invoke a stale one.
     // ---------------------------------------------------------------------------
     sol::table tickApi = editor.create_named("tick");
-    tickApi.set_function("defer", [host = editorLua](sol::protected_function callback) -> bool {
+    LUA_TABLE_FUNC(tickApi, defer, [host = editorLua](sol::protected_function callback) -> bool {
         if (!callback.valid())
             return false;
         Detail::LuaScheduledTask task;
@@ -898,7 +899,7 @@ void RegisterEditorLuaAPI(Context* context)
         Detail::LuaScheduledTasks().push_back(task);
         return true;
     });
-    tickApi.set_function("after", [context, host = editorLua](double seconds,
+    LUA_TABLE_FUNC(tickApi, after, [context, host = editorLua](double seconds,
                              sol::protected_function callback) -> bool {
         if (!callback.valid())
             return false;
@@ -910,7 +911,7 @@ void RegisterEditorLuaAPI(Context* context)
         Detail::LuaScheduledTasks().push_back(task);
         return true;
     });
-    tickApi.set_function("every", [context, host = editorLua](double seconds,
+    LUA_TABLE_FUNC(tickApi, every, [context, host = editorLua](double seconds,
                              sol::protected_function callback) -> unsigned long long {
         if (!callback.valid())
             return 0ull;
@@ -922,7 +923,7 @@ void RegisterEditorLuaAPI(Context* context)
         Detail::LuaScheduledTasks().push_back(task);
         return task.handle;
     });
-    tickApi.set_function("cancel", [host = editorLua](unsigned long long handle) -> bool {
+    LUA_TABLE_FUNC(tickApi, cancel, [host = editorLua](unsigned long long handle) -> bool {
         auto& tasks = Detail::LuaScheduledTasks();
         for (size_t i = 0; i < tasks.size(); ++i)
         {
@@ -941,7 +942,7 @@ void RegisterEditorLuaAPI(Context* context)
     // modals are drawn by the per-frame plugin pass.
     // ---------------------------------------------------------------------------
     sol::table uiApi = editor.create_named("ui");
-    uiApi.set_function("notify", [context](const std::string& text,
+    LUA_TABLE_FUNC(uiApi, notify, [context](const std::string& text,
                            sol::optional<double> seconds) -> bool {
         Detail::LuaToast toast;
         toast.text = ea::string(text.c_str());
@@ -949,7 +950,7 @@ void RegisterEditorLuaAPI(Context* context)
         Detail::LuaToasts().push_back(toast);
         return true;
     });
-    uiApi.set_function("confirm", [context, host = editorLua](const std::string& title,
+    LUA_TABLE_FUNC(uiApi, confirm, [context, host = editorLua](const std::string& title,
                                    const std::string& text, sol::protected_function onYes,
                                    sol::optional<sol::protected_function> onNo) -> bool {
         if (!onYes.valid())
@@ -965,7 +966,7 @@ void RegisterEditorLuaAPI(Context* context)
         Detail::LuaModals().push_back(modal);
         return true;
     });
-    uiApi.set_function("input", [context, host = editorLua](const std::string& title,
+    LUA_TABLE_FUNC(uiApi, input, [context, host = editorLua](const std::string& title,
                                  const std::string& label, const std::string& defaultText,
                                  sol::protected_function onDone) -> bool {
         if (!onDone.valid())
@@ -994,7 +995,7 @@ void RegisterEditorLuaAPI(Context* context)
     // Re-run the import pipeline for one asset or, when given a directory (trailing slash),
     // everything under it. Reprocessing happens on the AssetManager's next update, so watch
     // status()/onProcessed for completion.
-    assetsApi.set_function("reimport", [context](const std::string& path) -> bool {
+    LUA_TABLE_FUNC(assetsApi, reimport, [context](const std::string& path) -> bool {
         auto* project = context->GetSubsystem<Project>();
         auto* assets = project ? project->GetAssetManager() : nullptr;
         if (!assets)
@@ -1004,7 +1005,7 @@ void RegisterEditorLuaAPI(Context* context)
     });
 
     // Import activity snapshot: { processing:boolean, processed:integer, total:integer }.
-    assetsApi.set_function("status", [context](sol::this_state s) -> sol::object {
+    LUA_TABLE_FUNC(assetsApi, status, [context](sol::this_state s) -> sol::object {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
         auto* project = context->GetSubsystem<Project>();
@@ -1020,7 +1021,7 @@ void RegisterEditorLuaAPI(Context* context)
     // One persistent callback fired whenever an import run finishes (processing -> idle). Pass
     // nil to clear; replaced on re-registration and dropped on plugin reload. It takes no
     // argument -- call status()/list() from the handler to inspect what changed.
-    assetsApi.set_function("onProcessed",
+    LUA_TABLE_FUNC(assetsApi, onProcessed,
         [host = editorLua](sol::optional<sol::protected_function> callback) -> bool {
             auto& stored = Detail::LuaAssetProcessedCallback();
             if (stored)
@@ -1040,7 +1041,7 @@ void RegisterEditorLuaAPI(Context* context)
     //    pair it with 'dir'/'extension' to narrow the scan.
     // Each entry: { name, path, extension, isDirectory } plus, when types were resolved,
     // { type = most-derived, types = { all matched type names } }.
-    assetsApi.set_function("list",
+    LUA_TABLE_FUNC(assetsApi, list,
         [context](sol::this_state s, sol::optional<sol::table> opts) -> sol::object {
             sol::state_view lua(s);
             sol::table result = lua.create_table();
@@ -1104,7 +1105,7 @@ void RegisterEditorLuaAPI(Context* context)
         });
 
     // Metadata for one resource (types always resolved), or nil when it does not exist.
-    assetsApi.set_function("info", [context](sol::this_state s, const std::string& name) -> sol::object {
+    LUA_TABLE_FUNC(assetsApi, info, [context](sol::this_state s, const std::string& name) -> sol::object {
         sol::state_view lua(s);
         auto* project = context->GetSubsystem<Project>();
         auto* fs = context->GetSubsystem<FileSystem>();
@@ -1131,7 +1132,7 @@ void RegisterEditorLuaAPI(Context* context)
     });
 
     // Cheap existence check (a file or directory under Data), no type resolution.
-    assetsApi.set_function("exists", [context](const std::string& name) -> bool {
+    LUA_TABLE_FUNC(assetsApi, exists, [context](const std::string& name) -> bool {
         auto* project = context->GetSubsystem<Project>();
         auto* fs = context->GetSubsystem<FileSystem>();
         if (!project || !fs)
@@ -1142,10 +1143,10 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Open the resource in its editor tab / just highlight it in the browser without stealing the
     // Inspector. Both return false with no project or an empty name.
-    assetsApi.set_function("open", [context](const std::string& name) -> bool {
+    LUA_TABLE_FUNC(assetsApi, open, [context](const std::string& name) -> bool {
         return OpenAssetResource(context, name, false);
     });
-    assetsApi.set_function("reveal", [context](const std::string& name) -> bool {
+    LUA_TABLE_FUNC(assetsApi, reveal, [context](const std::string& name) -> bool {
         return OpenAssetResource(context, name, true);
     });
 
@@ -1159,7 +1160,7 @@ void RegisterEditorLuaAPI(Context* context)
     sol::table settingsApi = editor.create_named("settings");
 
     // Read a key, or 'default' (nil when omitted) when it is absent.
-    settingsApi.set_function("get", [](sol::this_state s, const std::string& key,
+    LUA_TABLE_FUNC(settingsApi, get, [](sol::this_state s, const std::string& key,
                                 sol::optional<sol::object> fallback) -> sol::object {
         sol::state_view lua(s);
         auto it = Detail::LuaPluginSettings().find(ea::string(key.c_str()));
@@ -1172,7 +1173,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Store a key. Returns false (and leaves the store untouched) when the value is not
     // convertible -- e.g. nil, a function or arbitrary userdata.
-    settingsApi.set_function("set", [](sol::this_state s, const std::string& key, sol::object value) -> bool {
+    LUA_TABLE_FUNC(settingsApi, set, [](sol::this_state s, const std::string& key, sol::object value) -> bool {
         const Variant variant = LuaToVariant(sol::state_view(s), value);
         if (variant.IsEmpty())
             return false;
@@ -1181,12 +1182,12 @@ void RegisterEditorLuaAPI(Context* context)
         return true;
     });
 
-    settingsApi.set_function("has", [](const std::string& key) -> bool {
+    LUA_TABLE_FUNC(settingsApi, has, [](const std::string& key) -> bool {
         return Detail::LuaPluginSettings().find(ea::string(key.c_str())) != Detail::LuaPluginSettings().end();
     });
 
     // Remove a key; true when one was actually erased (which marks the store dirty).
-    settingsApi.set_function("erase", [](const std::string& key) -> bool {
+    LUA_TABLE_FUNC(settingsApi, erase, [](const std::string& key) -> bool {
         auto& store = Detail::LuaPluginSettings();
         if (store.erase(ea::string(key.c_str())) == 0)
             return false;
@@ -1195,7 +1196,7 @@ void RegisterEditorLuaAPI(Context* context)
     });
 
     // All keys, optionally limited to a prefix, sorted lexicographically for stable output.
-    settingsApi.set_function("keys",
+    LUA_TABLE_FUNC(settingsApi, keys,
         [](sol::this_state s, sol::optional<std::string> prefix) -> sol::object {
             sol::state_view lua(s);
             sol::table result = lua.create_table();
@@ -1212,7 +1213,7 @@ void RegisterEditorLuaAPI(Context* context)
         });
 
     // Absolute path of the backing JSON file, or "" with no project (for transparency / debugging).
-    settingsApi.set_function("path", [context]() -> std::string {
+    LUA_TABLE_FUNC(settingsApi, path, [context]() -> std::string {
         auto* project = context->GetSubsystem<Project>();
         if (!project)
             return std::string();
@@ -1226,7 +1227,7 @@ void RegisterEditorLuaAPI(Context* context)
     // Editor.settings.get/set. The page object is owned by the SettingsManager and outlives reloads,
     // so the first registration adds it and every later one (after a reload) only re-points the
     // draw callback -- registering the same title twice never stacks duplicate pages.
-    settingsApi.set_function("registerPage", [context, host = editorLua](const std::string& title,
+    LUA_TABLE_FUNC(settingsApi, registerPage, [context, host = editorLua](const std::string& title,
                                                 sol::protected_function drawFn) -> bool {
         if (title.empty() || !drawFn.valid())
             return false;
@@ -1258,7 +1259,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Run doFn now and record an undoable step that re-runs doFn on redo and undoFn on undo. Works
     // without a scene (the state is whatever the closures touch). Returns false if either is missing.
-    undoApi.set_function("perform", [context, host = editorLua](const std::string& label,
+    LUA_TABLE_FUNC(undoApi, perform, [context, host = editorLua](const std::string& label,
                                        sol::protected_function doFn,
                                        sol::protected_function undoFn) -> bool {
         if (!doFn.valid() || !undoFn.valid())
@@ -1273,7 +1274,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Group every undoable operation the body performs into a single undo step. Nested batches fold
     // into the outermost one. The body runs even if it records nothing (a plain no-op step results).
-    undoApi.set_function("batch", [context](const std::string& /*label*/,
+    LUA_TABLE_FUNC(undoApi, batch, [context](const std::string& /*label*/,
                              sol::protected_function body) -> bool {
         if (!body.valid())
             return false;
@@ -1300,7 +1301,7 @@ void RegisterEditorLuaAPI(Context* context)
         return true;
     });
 
-    undoApi.set_function("setComponentAttribute",
+    LUA_TABLE_FUNC(undoApi, setComponentAttribute,
         [context, host = editorLua](sol::object target, const std::string& attributeName,
             sol::object value) -> bool {
             auto* component = dynamic_cast<Component*>(ToEngineObject(target));
@@ -1311,7 +1312,7 @@ void RegisterEditorLuaAPI(Context* context)
                 context, component, attributeName, variant);
         });
 
-    undoApi.set_function("setNodeAttribute",
+    LUA_TABLE_FUNC(undoApi, setNodeAttribute,
         [context, host = editorLua](sol::object target, const std::string& attributeName,
             sol::object value) -> bool {
             auto* node = dynamic_cast<Node*>(ToEngineObject(target));
@@ -1324,7 +1325,7 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Create a node under 'parent' (defaults to the scene root), optionally named; selects it and
     // returns the new node, or nil with no scene.
-    undoApi.set_function("createNode",
+    LUA_TABLE_FUNC(undoApi, createNode,
         [context, host = editorLua](sol::optional<sol::object> parentObj,
             sol::optional<std::string> name) -> sol::object {
             sol::state_view lua(host->GetState());
@@ -1347,7 +1348,7 @@ void RegisterEditorLuaAPI(Context* context)
             return WrapLuaObject(lua, node);
         });
 
-    undoApi.set_function("removeNode", [context](sol::object target) -> bool {
+    LUA_TABLE_FUNC(undoApi, removeNode, [context](sol::object target) -> bool {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         if (!page || !page->scene_)
             return false;
@@ -1361,7 +1362,7 @@ void RegisterEditorLuaAPI(Context* context)
     });
 
     // Add a component of the named type to a node; selects it and returns it, or nil on failure.
-    undoApi.set_function("addComponent",
+    LUA_TABLE_FUNC(undoApi, addComponent,
         [context, host = editorLua](sol::object target, const std::string& componentType) -> sol::object {
             sol::state_view lua(host->GetState());
             SceneViewPage* page = Detail::ActiveSceneViewPage(context);
@@ -1379,7 +1380,7 @@ void RegisterEditorLuaAPI(Context* context)
             return WrapLuaObject(lua, component);
         });
 
-    undoApi.set_function("removeComponent", [context](sol::object target) -> bool {
+    LUA_TABLE_FUNC(undoApi, removeComponent, [context](sol::object target) -> bool {
         SceneViewPage* page = Detail::ActiveSceneViewPage(context);
         if (!page || !page->scene_)
             return false;
@@ -1394,22 +1395,22 @@ void RegisterEditorLuaAPI(Context* context)
 
     // Stack queries -- forwarded to the editor's own UndoManager, so these drive the very same
     // history Ctrl+Z / Ctrl+Y use (including native actions pushed by other tabs).
-    undoApi.set_function("canUndo", [context]() -> bool {
+    LUA_TABLE_FUNC(undoApi, canUndo, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         auto* undoManager = project ? project->GetUndoManager() : nullptr;
         return undoManager && undoManager->CanUndo();
     });
-    undoApi.set_function("canRedo", [context]() -> bool {
+    LUA_TABLE_FUNC(undoApi, canRedo, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         auto* undoManager = project ? project->GetUndoManager() : nullptr;
         return undoManager && undoManager->CanRedo();
     });
-    undoApi.set_function("undo", [context]() -> bool {
+    LUA_TABLE_FUNC(undoApi, undo, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         auto* undoManager = project ? project->GetUndoManager() : nullptr;
         return undoManager && undoManager->Undo();
     });
-    undoApi.set_function("redo", [context]() -> bool {
+    LUA_TABLE_FUNC(undoApi, redo, [context]() -> bool {
         auto* project = context->GetSubsystem<Project>();
         auto* undoManager = project ? project->GetUndoManager() : nullptr;
         return undoManager && undoManager->Redo();
@@ -1423,7 +1424,7 @@ void RegisterEditorLuaAPI(Context* context)
     // { icon?, tooltip? } where 'icon' is a name from Editor.toolbar.iconNames().
     // ---------------------------------------------------------------------------
     sol::table toolbarApi = editor.create_named("toolbar");
-    toolbarApi.set_function("add", [host = editorLua](const std::string& label,
+    LUA_TABLE_FUNC(toolbarApi, add, [host = editorLua](const std::string& label,
                              sol::protected_function callback, sol::optional<sol::table> opts) -> bool {
         if (!callback.valid() || label.empty())
             return false;
@@ -1442,7 +1443,7 @@ void RegisterEditorLuaAPI(Context* context)
         return true;
     });
     // The icon names Editor.toolbar.add accepts, so a plugin can list what is available.
-    toolbarApi.set_function("iconNames", [](sol::this_state s) -> sol::object {
+    LUA_TABLE_FUNC(toolbarApi, iconNames, [](sol::this_state s) -> sol::object {
         sol::state_view lua(s);
         sol::table result = lua.create_table();
         const ea::vector<ea::string>& names = LuaToolbarIconNames();
@@ -1459,7 +1460,7 @@ void RegisterEditorLuaAPI(Context* context)
     // combo is a "+"-separated string such as "ctrl+shift+k", "alt+f5" or "mouse1".
     // ---------------------------------------------------------------------------
     sol::table hotkeyApi = editor.create_named("hotkey");
-    hotkeyApi.set_function("bind", [context, host = editorLua](const std::string& combo,
+    LUA_TABLE_FUNC(hotkeyApi, bind, [context, host = editorLua](const std::string& combo,
                                      sol::protected_function callback) -> bool {
         if (!callback.valid())
             return false;
@@ -1487,7 +1488,7 @@ void RegisterEditorLuaAPI(Context* context)
     });
     // Echo a combo back in the editor's canonical display form ("Ctrl+Shift+K"), or "" when it does
     // not parse -- handy for showing a bound shortcut in a menu or tooltip.
-    hotkeyApi.set_function("comboLabel", [](const std::string& combo) -> std::string {
+    LUA_TABLE_FUNC(hotkeyApi, comboLabel, [](const std::string& combo) -> std::string {
         const ea::optional<EditorHotkey> hotkey = ParseLuaHotkey(combo, ea::string("Lua.label"));
         if (!hotkey)
             return std::string();

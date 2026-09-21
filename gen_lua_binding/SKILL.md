@@ -101,6 +101,17 @@ runtime breakage; rules 4-6 prevent capability regressions.
      these back to the hand-written tokens; parity locks the mirror, and an unknown
      macro, wrong arity, or a value filed in the wrong bucket (func vs prop vs const
      RAW -- the generator checks the value head) fails loudly.
+     Namespace-table registrations (the editor TUs: `Editor.*` / `imgui.*`, zero
+     usertypes) use the table-axis STATEMENT macros instead —
+     `LUA_TABLE_FUNC(imgui, Button, ...)` for `imgui.set_function("Button", ...)`,
+     and one `LUA_TABLE_ENUM(windowFlags, None, static_cast<int>(ImGuiWindowFlags_None));`
+     line per constant pair (the local table + its hand-written mount
+     `imgui["WindowFlags"] = windowFlags;` stay hand-written). Note
+     `LUA_TABLE_ENUM` expands WITHOUT a trailing semicolon, so every call site
+     must end in `;` — the same statement-macro discipline as `LUA_ENUM_TABLE`.
+     Editor TUs take the macros via
+     `#include <LuaScript/LuaBindMacros.h>` (engine TUs get it from their own
+     directory; nothing else pulls it in).
    - Do NOT mix forms: the leading-comma LUA list macros cannot be dropped into a
      hand-written comma-form registration (double comma). `LUA_CAST`/`LUA_CAST_C` are
      expression macros (no leading comma) and may appear anywhere, including nested
@@ -146,6 +157,7 @@ runtime breakage; rules 4-6 prevent capability regressions.
    reject the integer arguments and the `==` comparisons that every existing site uses. To
    expose a previously-magic-number enum that HAS a bound consumer, add a literal table, e.g.
    `sol::table cull = lua.create_named_table("CULL"); cull["NONE"] = CULL_NONE;` …
+   (editor-side namespace tables bind the pairs with `LUA_TABLE_ENUM`, rule 1).
 5. **Object types returned to Lua need `RegisterLuaObjectWrapper<T>()`** so `GetComponent`,
    event payloads, etc. hand back the full usertype (methods/properties) rather than the
    minimal `LuaObjectRef` catch-all.
