@@ -197,10 +197,10 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
             LUA_MEMBER_PROP_RAW(orientation, sol::readonly_property([](TileMapInfo2D* info) {
                 return info ? static_cast<int>(info->orientation_) : 0;
             }))
-            LUA_MEMBER_PROP_FR(width, int, width_)
-            LUA_MEMBER_PROP_FR(height, int, height_)
-            LUA_MEMBER_PROP_FR(tileWidth, float, tileWidth_)
-            LUA_MEMBER_PROP_FR(tileHeight, float, tileHeight_)
+            LUA_MEMBER_PROP_RAW(width, &TileMapInfo2D::width_)
+            LUA_MEMBER_PROP_RAW(height, &TileMapInfo2D::height_)
+            LUA_MEMBER_PROP_RAW(tileWidth, &TileMapInfo2D::tileWidth_)
+            LUA_MEMBER_PROP_RAW(tileHeight, &TileMapInfo2D::tileHeight_)
         );
     }
 

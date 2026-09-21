@@ -699,7 +699,6 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
             // 53_LANDiscovery expiry timestamps).
             LUA_MEMBER_FUNC_RAW(GetSystemTime, [](sol::this_state, Time*) { return Time::GetSystemTime(); })
             LUA_MEMBER_FUNC_RAW(GetTimeSinceEpoch, [](sol::this_state, Time*) { return Time::GetTimeSinceEpoch(); })
-            LUA_MEMBER_PROP_FR(timeStep, float, GetTimeStep)
         );
     }
     RegisterLuaObjectWrapper<Time>();

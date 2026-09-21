@@ -306,18 +306,17 @@ Color.r = nil
 
 ---@class Component : Serializable, Object
 Component = {}
+---@return integer
+function Component.GetID(...) end
 ---@return Node
 function Component.GetNode(...) end
+---@return Scene
+function Component.GetScene(...) end
+---@return boolean
+function Component.IsEnabled(...) end
 function Component.IsEnabledEffective(...) end
 function Component.Remove(...) end
 function Component.SetEnabled(...) end
-Component.enabled = nil
----@type integer
-Component.id = nil
----@type Node
-Component.node = nil
----@type Scene
-Component.scene = nil
 
 ---@class Connection : Object
 Connection = {}
@@ -587,12 +586,13 @@ Graphics = {}
 function Graphics.GetHeight(...) end
 function Graphics.GetMonitorCount(...) end
 function Graphics.GetWidth(...) end
+---@return string
+function Graphics.GetWindowTitle(...) end
 ---@return boolean
 function Graphics.SetDefaultWindowModes(...) end
 function Graphics.SetWindowTitle(...) end
 function Graphics.TakeScreenShot(...) end
 function Graphics.ToggleFullscreen(...) end
-Graphics.windowTitle = nil
 
 ---@class HA
 HA = {}
@@ -1149,9 +1149,16 @@ function Node.GetChildrenWithTag(...) end
 ---@return Component
 function Node:GetComponent(typeName) end
 function Node.GetComponents(...) end
+---@return Vector3
+function Node.GetDirection(...) end
+---@return integer
+function Node.GetID(...) end
 ---@return string
 function Node.GetName(...) end
+---@return integer
 function Node.GetNumChildren(...) end
+---@return integer
+function Node.GetNumComponents(...) end
 ---@overload fun(self: Node, typeName: "AnimatedModel"): AnimatedModel
 ---@overload fun(self: Node, typeName: "AnimatedSprite2D"): AnimatedSprite2D
 ---@overload fun(self: Node, typeName: "AnimationController"): AnimationController
@@ -1226,27 +1233,40 @@ function Node.GetNumChildren(...) end
 ---@param typeName string
 ---@return Component
 function Node:GetOrCreateComponent(typeName) end
+---@return Node
+function Node.GetParent(...) end
 ---@return Vector3
 function Node.GetPosition(...) end
 ---@return Vector2
 function Node.GetPosition2D(...) end
 ---@return Quaternion
 function Node.GetRotation(...) end
+---@return number
+function Node.GetRotation2D(...) end
 ---@return Vector3
 function Node.GetScale(...) end
+---@return Scene
+function Node.GetScene(...) end
 function Node.GetVar(...) end
+---@return Vector3
 function Node.GetWorldDirection(...) end
+---@return Vector3
 function Node.GetWorldPosition(...) end
 ---@return Vector2
 function Node.GetWorldPosition2D(...) end
 function Node.GetWorldRight(...) end
+---@return Quaternion
 function Node.GetWorldRotation(...) end
+---@return Vector3
+function Node.GetWorldScale(...) end
 function Node.GetWorldUp(...) end
 ---@return boolean
 function Node.HasComponent(...) end
 function Node.HasTag(...) end
 ---@return Node
 function Node.InstantiatePrefab(...) end
+---@return boolean
+function Node.IsEnabled(...) end
 ---@return Vector3
 function Node.LocalToWorld(...) end
 function Node.LookAt(...) end
@@ -1266,6 +1286,7 @@ function Node.SetParent(...) end
 function Node.SetPosition(...) end
 function Node.SetPosition2D(...) end
 function Node.SetRotation(...) end
+function Node.SetRotation2D(...) end
 function Node.SetScale(...) end
 function Node.SetScale2D(...) end
 function Node.SetTemporary(...) end
@@ -1279,38 +1300,6 @@ function Node.Translate2D(...) end
 ---@return Vector3
 function Node.WorldToLocal(...) end
 function Node.Yaw(...) end
----@type Vector3
-Node.direction = nil
----@type boolean
-Node.enabled = nil
----@type integer
-Node.id = nil
----@type string
-Node.name = nil
----@type integer
-Node.numChildren = nil
----@type integer
-Node.numComponents = nil
----@type Node
-Node.parent = nil
----@type Vector3
-Node.position = nil
----@type Quaternion
-Node.rotation = nil
----@type number
-Node.rotation2D = nil
----@type Vector3
-Node.scale = nil
----@type Scene
-Node.scene = nil
----@type Vector3
-Node.worldDirection = nil
----@type Vector3
-Node.worldPosition = nil
----@type Quaternion
-Node.worldRotation = nil
----@type Vector3
-Node.worldScale = nil
 
 ---@class ORIENT2D
 ORIENT2D = {}
@@ -1571,8 +1560,6 @@ function Resource.GetMemoryUse(...) end
 ---@return string
 function Resource.GetName(...) end
 function Resource.SetName(...) end
----@type string
-Resource.name = nil
 
 ---@class ResourceCache : Object
 ResourceCache = {}
@@ -1955,14 +1942,10 @@ function TileMap2D.TileIndexToPosition(...) end
 TileMapInfo2D = {}
 function TileMapInfo2D.GetMapHeight(...) end
 function TileMapInfo2D.GetMapWidth(...) end
----@type integer
 TileMapInfo2D.height = nil
 TileMapInfo2D.orientation = nil
----@type number
 TileMapInfo2D.tileHeight = nil
----@type number
 TileMapInfo2D.tileWidth = nil
----@type integer
 TileMapInfo2D.width = nil
 
 ---@class TileMapLayer2D : Component, Serializable, Object
@@ -2007,8 +1990,6 @@ function Time.GetFramesPerSecond(...) end
 function Time.GetSystemTime(...) end
 function Time.GetTimeSinceEpoch(...) end
 function Time.GetTimeStep(...) end
----@type number
-Time.timeStep = nil
 
 ---@class TmxFile2D : Resource, Object
 TmxFile2D = {}

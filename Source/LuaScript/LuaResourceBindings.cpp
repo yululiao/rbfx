@@ -45,9 +45,6 @@ void RegisterResourceBindings(sol::state& lua, Context* context)
         using LUA_THIS = Resource;
         LUA_CLASS(Resource, sol::no_constructor
             LUA_BASES(Object)
-            LUA_MEMBER_PROP_RAW(name, sol::readonly_property([](Resource* resource) -> std::string {
-                return resource ? resource->GetName().c_str() : "";
-            }))
             LUA_MEMBER_FUNC_RET(GetName, std::string)
             LUA_MEMBER_FUNC(GetMemoryUse)
             LUA_MEMBER_FUNC(SetName)

@@ -105,18 +105,27 @@ runtime breakage; rules 4-6 prevent capability regressions.
      hand-written comma-form registration (double comma). `LUA_CAST`/`LUA_CAST_C` are
      expression macros (no leading comma) and may appear anywhere, including nested
      inside `LUA_MEMBER_FUNC_OVERLOAD`.
-2. **Getters / annotated returns keep an explicit lambda with a trailing `-> Type`.**
-   `extract_return_base` derives `---@return` / `---@type` from the first `->` in the bound
-   value token stream. `return [](Node* n) -> Vector3 { ... }` keeps the annotation;
-   a bare member pointer or a helper wrapper has no `->` and the return hint silently vanishes.
-   In the macro form the TYPE/RET argument is the annotation carrier instead:
-   `LUA_MEMBER_FUNC_RET(GetPosition2D, Vector2)`, `LUA_MEMBER_PROP_F(name, std::string, GetName, SetName)`,
-   `LUA_MEMBER_PROP_FR(id, unsigned, GetID)` — the generator re-synthesizes the `-> Type` from it.
+2. **One member, one Lua shape — accessor properties for PRIVATE members are forbidden.**
+   A C++ member is exposed in exactly ONE form, mirroring the C++ surface:
+   PRIVATE members (data behind getters/setters) are bound as METHODS only —
+   `LUA_MEMBER_FUNC_RET(GetPosition, Vector3)` for the getter, `LUA_MEMBER_FUNC` /
+   `_OVERLOAD` / `_RAW` for the setter. Never register a `sol::property` /
+   `sol::readonly_property` sugar for them (the LUA_MEMBER_PROP_F/_FR/_OBJ_R macros
+   are retired; `obj.prop` for accessors was removed 2026-09). The field shape
+   (`LUA_MEMBER_PROP_RAW`) is reserved for PUBLIC data members (`&Vector2::x_`),
+   with a property wrapper allowed ONLY as a type adaptation of a public field
+   (enum↔int: `VertexElement.type`, `TileMapInfo2D.orientation`).
+   Annotated returns: `extract_return_base` derives `---@return` / `---@type` from
+   the first `->` in the bound value token stream. `return [](Node* n) -> Vector3 { ... }`
+   keeps the annotation; a bare member pointer or a helper wrapper has no `->` and the
+   return hint silently vanishes. In the macro form the RET argument is the annotation
+   carrier instead: `LUA_MEMBER_FUNC_RET(GetPosition2D, Vector2)`,
+   `LUA_MEMBER_FUNC_RET(GetID, unsigned)` — the generator re-synthesizes the `-> Type` from it.
    KEEP the literal lambda when it carries real adaptation — the lambda IS the adaptation:
    default-argument hiding (`Pitch(angle)` hides `TransformSpace`), `sol::optional`
    unwrapping, overload disambiguation (`&T::M` is ambiguous when the engine member
-   overloads), or a property whose type differs from the member's (`rotation2D`'s
-   Quaternion↔float). Members taking/returning `ea::string` bind directly (LuaBindings.h
+   overloads), or a type-shimmed field access (`VertexElement.type`'s enum↔int).
+   Members taking/returning `ea::string` bind directly (LuaBindings.h
    marshals it to a Lua string) — no `const char*` shim lambda needed.
    Cache-routed object getters return `sol::object`, which has no namable `-> Type`: there
    the annotation comes from the **body** — call `WrapLuaObjectAs<T>(sol::state_view(s), ptr)`

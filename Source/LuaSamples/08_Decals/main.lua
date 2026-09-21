@@ -196,7 +196,7 @@ function app:PaintDecal()
     -- Add a square decal to the decal set using the geometry of the drawable
     -- that was hit, orient it to face the camera, use full texture UV's
     -- (0,0) to (1,1)
-    decal:AddDecal(hitDrawable, hit.position, self.cameraNode.rotation,
+    decal:AddDecal(hitDrawable, hit.position, self.cameraNode:GetRotation(),
         0.5, 1.0, 1.0, Vector2.ZERO, Vector2.ONE)
 end
 

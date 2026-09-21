@@ -110,7 +110,7 @@ end
 function app:Update(timeStep)
     for _, mover in ipairs(self.movers) do
         local node = mover.node
-        node:Translate(node.direction * mover.moveSpeed * timeStep, TS.LOCAL)
+        node:Translate(node:GetDirection() * mover.moveSpeed * timeStep, TS.LOCAL)
 
         local pos = node:GetPosition()
         if pos.x < mover.bounds.min.x or pos.x > mover.bounds.max.x

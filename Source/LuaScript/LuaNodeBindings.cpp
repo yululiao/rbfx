@@ -70,21 +70,17 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             })
 
             // Identification
-            LUA_MEMBER_PROP_F(name, std::string, GetName, SetName)
-            LUA_MEMBER_PROP_FR(id, unsigned, GetID)
+            LUA_MEMBER_FUNC_RET(GetName, std::string)
+            LUA_MEMBER_FUNC(SetName)
+            LUA_MEMBER_FUNC_RET(GetID, unsigned)
 
             // Local transform
-            LUA_MEMBER_PROP_F(position, Vector3, GetPosition, SetPosition)
-            LUA_MEMBER_PROP_F(rotation, Quaternion, GetRotation, SetRotation)
-            // Transform-adapted property (RollAngle / single-float Quaternion ctor).
-            LUA_MEMBER_PROP_RAW(rotation2D, sol::property(
-                [](Node* node) -> float { return node ? node->GetRotation().RollAngle() : 0.0f; },
-                [](Node* node, float value) { if (node) node->SetRotation(Quaternion(value)); }))
-            // SetScale is overloaded engine-side, so the setter method is a separate
-            // LUA_MEMBER_FUNC_OVERLOAD and the property stays a plain forwarding one.
-            LUA_MEMBER_PROP_RAW(scale, sol::property(
-                [](Node* node) -> Vector3 { return node ? node->GetScale() : Vector3::ONE; },
-                [](Node* node, const Vector3& value) { if (node) node->SetScale(value); }))
+            LUA_MEMBER_FUNC_RET(GetPosition, Vector3)
+            LUA_MEMBER_FUNC(SetPosition)
+            LUA_MEMBER_FUNC_RET(GetRotation, Quaternion)
+            LUA_MEMBER_FUNC(SetRotation)
+            LUA_MEMBER_FUNC_RET(GetRotation2D, float)
+            LUA_MEMBER_FUNC(SetRotation2D)
             LUA_MEMBER_FUNC_RET(GetPosition2D, Vector2)
             LUA_MEMBER_FUNC_RET(GetWorldPosition2D, Vector2)
             LUA_MEMBER_FUNC_RET(GetScale, Vector3)
@@ -105,20 +101,14 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
                 LUA_CAST(SetScale2D, void, const Vector2&),
                 LUA_CAST(SetScale2D, void, float, float))
 
-            // World transform. worldPosition/worldRotation stay literal: their
-            // getter methods are bare member pointers (no ---@return in the stubs),
-            // which LUA_MEMBER_PROP_F's synthesized arrow would drift.
-            LUA_MEMBER_PROP_RAW(worldPosition, sol::property(
-                [](Node* node) -> Vector3 { return node ? node->GetWorldPosition() : Vector3::ZERO; },
-                [](Node* node, const Vector3& value) { if (node) node->SetWorldPosition(value); }))
-            LUA_MEMBER_PROP_RAW(worldRotation, sol::property(
-                [](Node* node) -> Quaternion { return node ? node->GetWorldRotation() : Quaternion::IDENTITY; },
-                [](Node* node, const Quaternion& value) { if (node) node->SetWorldRotation(value); }))
-            LUA_MEMBER_PROP_FR(worldScale, Vector3, GetWorldScale)
-            LUA_MEMBER_PROP_FR(worldDirection, Vector3, GetWorldDirection)
-            LUA_MEMBER_PROP_FR(direction, Vector3, GetDirection)
+            // World transform
+            LUA_MEMBER_FUNC_RET(GetWorldPosition, Vector3)
             LUA_MEMBER_FUNC(SetWorldPosition)
+            LUA_MEMBER_FUNC_RET(GetWorldRotation, Quaternion)
             LUA_MEMBER_FUNC(SetWorldRotation)
+            LUA_MEMBER_FUNC_RET(GetWorldScale, Vector3)
+            LUA_MEMBER_FUNC_RET(GetWorldDirection, Vector3)
+            LUA_MEMBER_FUNC_RET(GetDirection, Vector3)
             LUA_MEMBER_FUNC_RAW(LocalToWorld, [](Node* node, const Vector3& position) -> Vector3 {
                 return node ? node->LocalToWorld(position) : Vector3::ZERO;
             })
@@ -144,11 +134,11 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
                 if (node) node->LookAt(target, up, static_cast<TransformSpace>(space)); })
 
             // Hierarchy
-            LUA_MEMBER_PROP_OBJ_R(parent, Node, GetParent)
+            LUA_MEMBER_FUNC_OBJ(GetParent, Node, GetParent)
             LUA_MEMBER_FUNC(SetParent)
-            LUA_MEMBER_PROP_OBJ_R(scene, Scene, GetScene)
-            LUA_MEMBER_PROP_FR(numChildren, unsigned, GetNumChildren)
-            LUA_MEMBER_PROP_FR(numComponents, unsigned, GetNumComponents)
+            LUA_MEMBER_FUNC_OBJ(GetScene, Scene, GetScene)
+            LUA_MEMBER_FUNC_RET(GetNumChildren, unsigned)
+            LUA_MEMBER_FUNC_RET(GetNumComponents, unsigned)
             LUA_MEMBER_FUNC_OVERLOAD(CreateChild,
                 [](Node* node, const char* name, sol::this_state s) -> sol::object {
                     return node ? WrapLuaObjectAs<Node>(sol::state_view(s), node->CreateChild(name)) : sol::lua_nil;
@@ -294,9 +284,7 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             })
 
             // State
-            LUA_MEMBER_PROP_RAW(enabled, sol::property(
-                [](Node* node) -> bool { return node && node->IsEnabled(); },
-                [](Node* node, bool enabled) { if (node) node->SetEnabled(enabled); }))
+            LUA_MEMBER_FUNC_RET(IsEnabled, bool)
             LUA_MEMBER_FUNC_RAW(SetEnabled, [](Node* node, bool enabled) { if (node) node->SetEnabled(enabled); })
 
             // User variables
@@ -387,13 +375,10 @@ void RegisterNodeBindings(sol::state& lua, Context* context)
             LUA_META(to_string, [](Component* component) -> std::string {
                 return "Component: " + std::string(component->GetTypeName().c_str());
             })
-            LUA_MEMBER_PROP_OBJ_R(node, Node, GetNode)
             LUA_MEMBER_FUNC_OBJ(GetNode, Node, GetNode)
-            LUA_MEMBER_PROP_OBJ_R(scene, Scene, GetScene)
-            LUA_MEMBER_PROP_FR(id, unsigned, GetID)
-            LUA_MEMBER_PROP_RAW(enabled, sol::property(
-                &Component::IsEnabled,
-                [](Component* component, bool enabled) { if (component) component->SetEnabled(enabled); }))
+            LUA_MEMBER_FUNC_OBJ(GetScene, Scene, GetScene)
+            LUA_MEMBER_FUNC_RET(GetID, unsigned)
+            LUA_MEMBER_FUNC_RET(IsEnabled, bool)
             LUA_MEMBER_FUNC_RAW(SetEnabled, [](Component* component, bool enabled) { if (component) component->SetEnabled(enabled); })
             LUA_MEMBER_FUNC(IsEnabledEffective)
             // Remove from the node and destroy (49/50 orc body removal).

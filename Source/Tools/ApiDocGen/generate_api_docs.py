@@ -607,17 +607,6 @@ def _expand_rbfx(name, args, cls):
         return tokenize(', "%s", [](%s* self, int value) '
                         '{ if (self) self->%s(static_cast<%s>(value)); }'
                         % (member, cls, member, enum))
-    if name == 'LUA_MEMBER_PROP_OBJ_R':
-        if not cls:
-            return None
-        ids = id_args()
-        if not ids or len(ids) != 3:
-            return None
-        key, ret, getter = ids
-        return tokenize(', "%s", sol::readonly_property([](%s* self, sol::this_state s) '
-                        '-> sol::object { return self ? WrapLuaObjectAs<%s>'
-                        '(sol::state_view(s), self->%s()) : sol::lua_nil; })'
-                        % (key, cls, ret, getter))
     if name == 'LUA_MEMBER_FUNC_OBJ':
         if not cls:
             return None
@@ -692,43 +681,6 @@ def _expand_rbfx(name, args, cls):
         # parser skips the non-string key exactly as with the literal form.
         return tokenize(', sol::meta_function::%s' % args[0][0][1]) \
             + [('punct', ',')] + args[1]
-    if name == 'LUA_MEMBER_PROP_F':
-        if not cls or len(args) != 4:
-            return None
-        def single(a):
-            return a[0][1] if len(a) == 1 and a[0][0] == 'id' else None
-        key, getter, setter = (single(args[i]) for i in (0, 2, 3))
-        # TYPE may be a qualified chain (std::string, ea::string) -- accept
-        # id/:: runs there, not just a single identifier.
-        type_ = qualified_id(args[1])
-        if not (key and type_ and getter and setter):
-            return None
-        # The C++ macro binds bare member pointers (no `-> Type` for the stub
-        # scanner to read), so re-synthesize the arrow-lambda form the
-        # hand-written clusters used: the property's getter half drives the
-        # field's ---@type, the getter method's lambda drives ---@return, and
-        # the setter stays a bare member pointer (setters carry no annotation).
-        return tokenize(', "%s", sol::property([](%s* self) -> %s { return '
-                        'self->%s(); }, &%s::%s), '
-                        '"%s", [](%s* self) -> %s { return self->%s(); }, '
-                        '"%s", &%s::%s'
-                        % (key, cls, type_, getter, cls, setter,
-                           getter, cls, type_, getter,
-                           setter, cls, setter))
-    if name == 'LUA_MEMBER_PROP_FR':
-        if not cls or len(args) != 3:
-            return None
-        def single(a):
-            return a[0][1] if len(a) == 1 and a[0][0] == 'id' else None
-        key, getter = (single(args[i]) for i in (0, 2))
-        type_ = qualified_id(args[1])
-        if not (key and type_ and getter):
-            return None
-        # Readonly twin of LUA_MEMBER_PROP_F: the field's ---@type comes from the
-        # synthesized arrow; no method entries are emitted.
-        return tokenize(', "%s", sol::readonly_property([](%s* self) -> %s '
-                        '{ return self->%s(); })'
-                        % (key, cls, type_, getter))
     if name == 'LUA_MEMBER_FUNC_OVERLOAD':
         if len(args) < 2 or len(args[0]) != 1 or args[0][0][0] != 'id':
             return None

@@ -133,7 +133,7 @@ Editor.addMenuItem("Demo/Rename (input)", function()
             Editor.ui.notify("empty name, skipped", 3)
             return
         end
-        local ok = pcall(function() node.name = text end)
+        local ok = pcall(function() node:SetName(text) end)
         Editor.log(ok and ("renamed -> " .. tostring(text) .. "  (direct write, not undoable)")
                         or ("rename failed for " .. tostring(text)))
         Editor.project.markDirty()

@@ -121,7 +121,7 @@ function app:Update(timeStep)
 end
 
 function app:SpawnObject()
-    local cameraRotation = self.cameraNode.rotation
+    local cameraRotation = self.cameraNode:GetRotation()
 
     -- Create a smaller box at camera position
     local boxNode = self.scene:CreateChild("SmallBox")

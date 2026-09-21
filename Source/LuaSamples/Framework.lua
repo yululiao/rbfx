@@ -111,7 +111,7 @@ function Sample:MoveCameraByMouse(sensitivity)
     self.yaw = self.yaw + mouseMove.x * sensitivity
     self.pitch = self.pitch + mouseMove.y * sensitivity
     self.pitch = math.max(-90.0, math.min(90.0, self.pitch))
-    self.cameraNode.rotation = Quaternion(self.pitch, self.yaw, 0.0)
+    self.cameraNode:SetRotation(Quaternion(self.pitch, self.yaw, 0.0))
 end
 
 -- Classic WASD movement, speed doubled while CTRL held.
@@ -122,7 +122,7 @@ function Sample:MoveCamera(timeStep, moveSpeed)
         moveSpeed = moveSpeed * 2.0
     end
     local translation = Vector3(0.0, 0.0, 0.0)
-    local dir = self.cameraNode.direction
+    local dir = self.cameraNode:GetDirection()
     if input:GetKeyDown(string.byte("w")) or input:GetKeyDown(KEY.UP) then
         translation = translation + dir
     end

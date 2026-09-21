@@ -19,9 +19,17 @@
 //     inheritance audit (compile-time static_asserts, registration-time
 //     base-already-registered check, startup VerifyLuaBaseChains) runs
 //     exactly as with the hand-written form.
-//   * LUA_MEMBER_PROP_OBJ_R / LUA_MEMBER_FUNC_OBJ route through
-//     WrapLuaObjectAs<T>, so the per-state identity cache (rawequal /
-//     table-key semantics) holds.
+//   * LUA_MEMBER_FUNC_OBJ routes through WrapLuaObjectAs<T>, so the
+//     per-state identity cache (rawequal / table-key semantics) holds.
+//
+// Property policy (single-track): a C++ member is exposed in exactly ONE
+// Lua shape, mirroring the C++ surface. PRIVATE members (data behind
+// getters/setters) are bound as METHODS only -- LUA_MEMBER_FUNC / _RET for
+// the getter (RET carries the ---@return annotation), LUA_MEMBER_FUNC /
+// _OVERLOAD / _RAW for the setter. No Lua `obj.prop` sugar is generated for
+// them. PUBLIC data members (rbfx trailing-underscore fields) keep the field
+// shape: a bare member pointer via LUA_MEMBER_PROP_RAW, or a property
+// wrapper only when the access needs a type adaptation (enum <-> int).
 //
 // ---------------------------------------------------------------------------
 // Naming: two axes, after ejoy2dx's tolua.h (lua_class / lua_member_func /
@@ -40,7 +48,6 @@
 //             _RET   = doc generator re-synthesizes ---@return from RET
 //             _ENUM  = int -> enum adapter lambda
 //             _OBJ   = return value routed through the identity cache
-//             _F/_FR = property from a getter/setter pair / getter only
 //             _OVERLOAD = sol::overload set
 //
 // ---------------------------------------------------------------------------
@@ -56,7 +63,7 @@
 //             LUA_BASES(Component, Serializable, Object)
 //             LUA_MEMBER_FUNC(SetMass)
 //             LUA_MEMBER_FUNC_ENUM(SetCollisionEventMode, CollisionEventMode)
-//             LUA_MEMBER_PROP_F(mass, float, GetMass, SetMass)
+//             LUA_MEMBER_FUNC_RET(GetMass, float)
 //             LUA_MEMBER_FUNC_OVERLOAD(ApplyForce,
 //                 LUA_CAST(ApplyForce, void, const Vector3&),
 //                 LUA_CAST(ApplyForce, void, const Vector3&, const Vector3&))
@@ -125,26 +132,6 @@
 //     Object-derived usertype (often NOT LUA_THIS -- Component::GetNode
 //     returns Node) and GETTER must return a raw pointer to it.
 //
-// LUA_MEMBER_PROP_OBJ_R(NAME, RET, GETTER)
-//     Readonly-property twin of LUA_MEMBER_FUNC_OBJ (the `obj.prop` form).
-//
-// LUA_MEMBER_PROP_F(KEY, TYPE, GETTER, SETTER)
-//     ejoy lua_member_prop_f: ONE line registers the read-write property KEY
-//     plus its GETTER and SETTER methods (three entries). The C++ expansion
-//     binds bare member pointers -- `if (self)` guards are unreachable
-//     defensive code for registered types (contract rule 12a), and member
-//     pointers keep the engine signature compile-checked. TYPE is consumed
-//     ONLY by the doc generator: the macro hides the `-> Type` trailing
-//     return the stub scanner reads, so the generator re-synthesizes it from
-//     TYPE. Use it where the hand-written form used arrow lambdas; clusters
-//     whose stubs carry NO annotations (member-pointer originals) stay
-//     literal so parity does not drift.
-//
-// LUA_MEMBER_PROP_FR(KEY, TYPE, GETTER)
-//     ejoy lua_member_prop_fr: readonly property only. No method entries --
-//     readonly clusters in this codebase register no paired getter methods.
-//     TYPE feeds the doc generator exactly as in LUA_MEMBER_PROP_F.
-//
 // LUA_MEMBER_FUNC_RAW(KEY, VALUE)
 //     Escape hatch for METHOD-shaped pairs: KEY is an identifier stringized
 //     like every other macro in this family; VALUE is a lambda, a member
@@ -159,11 +146,15 @@
 //     misfiling fails the parity gate.
 //
 // LUA_MEMBER_PROP_RAW(KEY, VALUE)
-//     The PROPERTY-shaped escape hatch: VALUE is a sol::property /
-//     sol::readonly_property wrapper (adapting lambdas: `rotation2D`'s
-//     Quaternion<->float pair) or a bare data-member pointer
-//     (`&Vector2::x_`, the trailing underscore marks rbfx data members).
-//     Same comma rules as LUA_MEMBER_FUNC_RAW.
+//     The FIELD-shaped escape hatch, for PUBLIC data members only (see the
+//     property policy above): VALUE is either a bare data-member pointer
+//     (`&Vector2::x_`, the trailing underscore marks rbfx data members) or,
+//     when the field access needs a type adaptation (enum <-> int on
+//     VertexElement.type / TileMapInfo2D.orientation), a sol::property /
+//     sol::readonly_property wrapper reading and writing that public field.
+//     PRIVATE members behind getters/setters have no property form here at
+//     all -- they are bound as methods (LUA_MEMBER_FUNC / _RET / _OVERLOAD /
+//     _RAW). Same comma rules as LUA_MEMBER_FUNC_RAW.
 //
 // LUA_MEMBER_CONST(KEY, VALUE)
 //     ejoy lua_const: class-level constant (Vector2.ZERO, Quaternion.
@@ -205,9 +196,10 @@
 // Source/Tools/ApiDocGen/generate_api_docs.py recognizes this macro family
 // at token level and emits exactly the same stub entries as the equivalent
 // hand-written form. It also ENFORCES the bucket taxonomy: LUA_MEMBER_PROP_RAW
-// must carry a property-shaped value head, LUA_MEMBER_FUNC_RAW must not, and
-// a misfiled call makes check_api_docs.ps1 fail loudly. The parity guard
-// must stay green after any change to a call site or to this header.
+// must carry a field-shaped value head (property wrapper or tail-underscore
+// member pointer), LUA_MEMBER_FUNC_RAW must not, and a misfiled call makes
+// check_api_docs.ps1 fail loudly. The parity guard must stay green after any
+// change to a call site or to this header.
 // ===========================================================================
 
 #define LUA_CLASS(NAME, ...) \
@@ -235,27 +227,11 @@
             : sol::lua_nil; \
     }
 
-#define LUA_MEMBER_PROP_OBJ_R(NAME, RET, GETTER) \
-    , #NAME, sol::readonly_property( \
-        [](LUA_THIS* self, sol::this_state s) -> sol::object { \
-            return self \
-                ? WrapLuaObjectAs<RET>(sol::state_view(s), self->GETTER()) \
-                : sol::lua_nil; \
-        })
-
 #define LUA_MEMBER_FUNC_OVERLOAD(MEMBER, ...) \
     , #MEMBER, sol::overload(__VA_ARGS__)
 
 #define LUA_MEMBER_FUNC_RAW(KEY, VALUE) \
     , #KEY, VALUE
-
-#define LUA_MEMBER_PROP_F(KEY, TYPE, GETTER, SETTER) \
-    , #KEY, sol::property(&LUA_THIS::GETTER, &LUA_THIS::SETTER) \
-    , #GETTER, &LUA_THIS::GETTER \
-    , #SETTER, &LUA_THIS::SETTER
-
-#define LUA_MEMBER_PROP_FR(KEY, TYPE, GETTER) \
-    , #KEY, sol::readonly_property(&LUA_THIS::GETTER)
 
 #define LUA_MEMBER_PROP_RAW(KEY, VALUE) \
     , #KEY, VALUE

@@ -161,7 +161,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC_RAW(SetDefaultWindowModes, [](Graphics* graphics, const sol::table& settings) -> bool {
                 return graphics ? graphics->SetDefaultWindowModes(TableToWindowSettings(settings, WindowSettings{})) : false;
             })
-            LUA_MEMBER_PROP_RAW(windowTitle, sol::property(&Graphics::GetWindowTitle, &Graphics::SetWindowTitle))
+            LUA_MEMBER_FUNC_RET(GetWindowTitle, std::string)
         );
     }
     RegisterLuaObjectWrapper<Graphics>();
