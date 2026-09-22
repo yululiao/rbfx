@@ -109,13 +109,16 @@ struct PaletteEntry
 // border (shape without a fill, so project-styled internal chrome - the
 // select's arrow, the progress's fill - is never covered); label and text
 // render their own content and get nothing. Text has no element of its own in
-// RmlUi (it lives inside a block), so the entry is an honest <div> with a
-// text child: no fake styling, no pinned position - it joins the flow.
+// RmlUi (it lives inside a block), so the Text entry mints a <p> with a text
+// child: p is the semantic name for a paragraph and, like div, a pure
+// stylesheet key - the default rml.rcss gives it the same display: block, so
+// the look and flow are identical while the tag keeps its meaning. No fake
+// styling, no pinned position - it joins the flow.
 const PaletteEntry kPalette[] = {
     {ICON_FA_SQUARE "  div", "Structure", "div", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 160.0f, 48.0f},
     {ICON_FA_TABLE_LIST "  form", "Structure", "form", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 240.0f, 96.0f},
     {ICON_FA_IMAGE "  img", "Content", "img", "src", "", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 160.0f, 48.0f},
-    {ICON_FA_FONT "  Text (div)", "Content", "div", nullptr, nullptr, "Text", nullptr, nullptr, 0, UiWidgetStylePolicy::None, false, 0.0f, 0.0f},
+    {ICON_FA_FONT "  Text (p)", "Content", "p", nullptr, nullptr, "Text", nullptr, nullptr, 0, UiWidgetStylePolicy::None, false, 0.0f, 0.0f},
     {ICON_FA_TOGGLE_ON "  button", "Controls", "button", nullptr, nullptr, "Button", nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 48.0f},
     {ICON_FA_KEYBOARD "  input (text)", "Controls", "input", "type", "text", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 28.0f},
     {ICON_FA_SQUARE_CHECK "  input (checkbox)", "Controls", "input", "type", "checkbox", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 20.0f, 20.0f},
