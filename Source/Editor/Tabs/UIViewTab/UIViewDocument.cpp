@@ -79,8 +79,9 @@ bool HasAuthoredText(const UiNode& node)
 // Deepest element whose box contains the point, children first in reverse
 // paint order. Template-minted elements (window frames, close buttons) have no
 // model node of their own - they are not part of the authored source - so a
-// hit on them bubbles to the nearest ancestor that has one: clicking the frame
-// selects the body that minted it instead of selecting nothing.
+// hit on them bubbles to the nearest ancestor that has one. A bubble that can
+// only reach the body is a hit on the nested document's chrome: it selects the
+// nested-doc virtual node as a whole instead of the body.
 UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, const Vector2& point)
 {
     const int n = element->GetNumChildren(false);
@@ -103,7 +104,15 @@ UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, cons
         return nullptr;
 
     for (Rml::Element* ancestor = element; !node && ancestor; ancestor = ancestor->GetParentNode())
+    {
         node = model->FindByDom(ancestor);
+        if (node == model->root_.Get())
+        {
+            if (UiNode* nested = model->GetNestedDoc())
+                node = nested;
+            break;
+        }
+    }
     return node;
 }
 
@@ -114,8 +123,12 @@ UIViewDocument::UIViewDocument(Context* context)
 {
     // Private RmlUi context that renders the document under edit into a dynamic
     // texture. Deliberately not the master RmlUI subsystem so editing does not
-    // leak into the running game view.
-    previewUI_ = new RmlUI(context_, "UIViewPreview");
+    // leak into the running game view. Rml::CreateContext fails on duplicate
+    // names, and several documents can be open at once, so give each instance
+    // its own context name.
+    static unsigned instanceCounter = 0;
+    const ea::string contextName = Format("UIViewPreview-{}", ++instanceCounter);
+    previewUI_ = new RmlUI(context_, contextName.c_str());
     // Input isolation: drop RmlUI's global input subscriptions so the preview
     // cannot steal editor focus. SetBlockEvents() must NOT be used - it blocks
     // E_POSTUPDATE too, stalling Context::Update so the document never renders.
@@ -170,7 +183,7 @@ void UIViewDocument::HandleBeginRendering(StringHash, VariantMap&)
     // Layout was already updated on E_POSTUPDATE (CPU-side); here, at the start
     // of the graphics frame, it is safe to issue GPU draws into the offscreen
     // surface. The preview widget samples the resulting texture later this frame.
-    if (previewUI_)
+    if (previewUI_ && previewActive_)
         previewUI_->Render();
 }
 
@@ -324,9 +337,29 @@ UiNode* UIViewDocument::HitTest(const Vector2& docPos) const
     return HitTestRecurse(document_, &model_, docPos);
 }
 
-bool UIViewDocument::TryGetDomBox(const UiNode* node, UiBox& out) const
+bool UIViewDocument::TryGetDomBoxes(const UiNode* node, ea::vector<UiBox>& out) const
 {
-    return node ? Urho3D::TryGetDomBox(node->dom_, node, out) : false;
+    out.clear();
+    if (!node)
+        return false;
+    // The nested-doc virtual node outlines the chrome elements themselves
+    // (one rect each) rather than the body its dom_ points at: the body's
+    // box is the whole canvas and would read as "the entire outer document".
+    if (node->IsNestedDoc())
+    {
+        for (Rml::Element* chrome : node->nestedChromeElems_)
+        {
+            UiBox box;
+            if (Urho3D::TryGetDomBox(chrome, nullptr, box))
+                out.push_back(box);
+        }
+        return !out.empty();
+    }
+    UiBox box;
+    if (!Urho3D::TryGetDomBox(node->dom_, node, box))
+        return false;
+    out.push_back(box);
+    return true;
 }
 
 Vector2 UIViewDocument::GetInlineStyleBase(const UiNode* node) const
@@ -425,7 +458,7 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 {
     if (!model_.root_ || !document_ || !tag)
         return nullptr;
-    if (!parent || parent->IsText())
+    if (!parent || parent->IsText() || parent->IsNestedDoc())
         parent = model_.root_.Get();
 
     auto node = MakeShared<UiNode>();
@@ -505,7 +538,7 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 
 UiNode* UIViewDocument::DuplicateNode(UiNode* node)
 {
-    if (!node || node == model_.root_.Get() || node->IsText())
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc())
         return nullptr;
     UiNode* parent = model_.FindParent(node);
     if (!parent)
@@ -549,7 +582,7 @@ UiNode* UIViewDocument::DuplicateNode(UiNode* node)
 
 bool UIViewDocument::DeleteNode(UiNode* node)
 {
-    if (!node || node == model_.root_.Get() || node->IsText())
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc())
         return false;
     UiNode* parent = model_.FindParent(node);
     if (!parent)
@@ -572,7 +605,7 @@ bool UIViewDocument::DeleteNode(UiNode* node)
 
 bool UIViewDocument::MaterializeNode(UiNode* node)
 {
-    if (!node || !node->dom_ || node->IsText() || node->IsMaterialized())
+    if (!node || !node->dom_ || node->IsText() || node->IsNestedDoc() || node->IsMaterialized())
         return false;
 
     // Bake the computed border box into explicit px style, then let the reload
@@ -602,7 +635,7 @@ bool UIViewDocument::MaterializeNode(UiNode* node)
 
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 {
-    if (!node)
+    if (!node || node->IsNestedDoc())
         return false;
     const ea::string undoText = model_.EmitRml();
     // Child-index path doubles as the merge key: consecutive payload edits of
@@ -616,7 +649,7 @@ bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 
 bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
 {
-    if (!node)
+    if (!node || node->IsNestedDoc())
         return false;
     const ea::string undoText = model_.EmitRml();
     ea::vector<unsigned> mergeKey;

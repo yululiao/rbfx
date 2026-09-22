@@ -15,6 +15,7 @@
 
 #include <EASTL/functional.h>
 #include <EASTL/utility.h>
+#include <EASTL/vector.h>
 
 namespace Rml
 {
@@ -48,7 +49,9 @@ class UIViewDocument : public Object
 public:
     /// Fired after any model mutation (commands, undo, redo). The whole model
     /// tree has been rebuilt by then: views holding UiNode pointers must
-    /// re-resolve them from stable child-index paths.
+    /// re-resolve them from stable child-index paths. Only the active document
+    /// emits this: the UI edits the active document, and undo/redo re-focuses a
+    /// document (ResourceActionWrapper) before restoring its text.
     Signal<void()> OnModelEdited;
 
     explicit UIViewDocument(Context* context);
@@ -87,10 +90,19 @@ public:
     /// commit; layout re-flows on the next engine update).
     void SetLiveBox(UiNode* node, const UiBox& box);
 
+    /// Offscreen rendering gate: with several documents open at once only the
+    /// active one needs its preview texture refreshed every frame.
+    void SetPreviewActive(bool active) { previewActive_ = active; }
+
     /// DOM queries for the views (document-space boxes and hit testing).
     /// @{
     UiNode* HitTest(const Vector2& docPos) const;
-    bool TryGetDomBox(const UiNode* node, UiBox& out) const;
+    /// Fill \a out with the document-space border boxes the node projects
+    /// onto. A regular node yields exactly one box; the nested-doc virtual
+    /// node yields one box per chrome element its template minted into the
+    /// document (title bar, resize handles) so its outline marks the nested
+    /// document's own contribution instead of the whole canvas.
+    bool TryGetDomBoxes(const UiNode* node, ea::vector<UiBox>& out) const;
     Vector2 GetInlineStyleBase(const UiNode* node) const;
     /// @}
 
@@ -144,6 +156,8 @@ private:
     /// Set once per opened document after the no-effective-font warning fired,
     /// so the per-edit reloads do not spam the log.
     bool warnedNoFont_ = false;
+    /// Whether HandleBeginRendering draws this document's preview this frame.
+    bool previewActive_ = true;
 };
 
 }

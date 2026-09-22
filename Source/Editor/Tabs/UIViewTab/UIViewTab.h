@@ -20,6 +20,8 @@ class ElementDocument;
 namespace Urho3D
 {
 
+class HierarchyBrowserTab;
+class InspectorTab;
 class UIViewTab;
 class UIViewHierarchy;
 class UIViewInspector;
@@ -46,10 +48,19 @@ void Tabs_UIViewTab(Context* context, Project* project);
 ///
 /// Derives from ResourceEditorTab so that double-clicking a .rml in the
 /// Resource Browser opens it here, and the base owns the surrounding
-/// bookkeeping: active-resource switching, per-document dirty tracking,
-/// undo/redo attribution and the project save/close pipeline. Multi-document is
-/// disabled for now (SupportMultipleResources() == false), so opening another
-/// .rml gracefully closes the current one (prompting to save if it is dirty).
+/// bookkeeping: active-resource tracking, per-document dirty tracking,
+/// undo/redo attribution and the project save/close pipeline.
+///
+/// Multi-instance editors: every open .rml gets its OWN UIViewTab instance
+/// (VS Code style - one document per editor tab). The editor framework keys
+/// a tab's identity on its title (ImGui window id, ini section, Project tab
+/// registry), so each instance takes a unique title ("UI", "UI (2)", ...).
+/// Opening is routed through OpenInBestInstance: an already-open document
+/// focuses its owning instance, an idle instance takes a new document, and
+/// when every instance is busy a fresh one is spawned. The first instance
+/// (the one the plugin bootstraps) is the persistent entry point: it stays
+/// around with its "open/new document" empty state after its document
+/// closes, while secondary instances close together with their document.
 class UIViewTab : public ResourceEditorTab
 {
     URHO3D_OBJECT(UIViewTab, ResourceEditorTab)
@@ -57,13 +68,12 @@ class UIViewTab : public ResourceEditorTab
 public:
     explicit UIViewTab(Context* context);
     ~UIViewTab() override;
-
     /// The editable document hosted by this tab.
     UIViewDocument* GetDocument() const { return document_.Get(); }
 
     /// Selected model node, may be null. Valid only within the current model
     /// generation: every command rebuilds the whole tree from text, and
-    /// OnModelEdited re-resolves this from the child-index path.
+    /// OnDocumentEdited re-resolves this from the child-index path.
     UiNode* GetSelectedNode() const { return selected_; }
     /// Child-index path of the selection (stable across model rebuilds).
     const ea::vector<unsigned>& GetSelectedPath() const { return selPath_; }
@@ -71,16 +81,15 @@ public:
     /// hierarchy expand state in sync. Passing null clears the selection.
     void SetSelectedNode(UiNode* node);
 
-    const ea::string& GetResourcePath() const { return resourcePath_; }
-
     /// Hierarchy/Inspector data sources hosted by this tab. The Glue binds
     /// the shared HierarchyBrowserTab / InspectorTab to these on focus.
     UIViewHierarchy* GetHierarchySource() const { return hierarchySource_; }
     UIViewInspector* GetInspectorSource() const { return inspectorSource_; }
 
-    /// Shared tab used by Hierarchy/Inspector sources to look up the
-    /// project-scope instance.
-    static UIViewTab* GetActive(Project* project);
+    /// Route a .rml to the best UIViewTab instance: the one already editing
+    /// it (focus), an idle instance, or a freshly spawned one. Idempotent,
+    /// so every subscribed instance can funnel an OpenResourceRequest here.
+    static void OpenInBestInstance(Project* project, const ea::string& resourceName);
 
     /// Implement EditorTab.
     void RenderContent() override;
@@ -91,13 +100,29 @@ protected:
     /// @{
     ea::string GetResourceTitle() override { return "UI document"; }
     bool CanOpenResource(const ResourceFileDescriptor& desc) override;
+    /// Single-document instance (one .rml per editor tab). Multi-document
+    /// workflows are served by several UIViewTab instances - see
+    /// OpenInBestInstance.
     bool SupportMultipleResources() override { return false; }
     void OnResourceLoaded(const ea::string& resourceName) override;
     void OnResourceUnloaded(const ea::string& resourceName) override;
     void OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName) override;
     void OnResourceSaved(const ea::string& resourceName) override;
     void OnResourceShallowSaved(const ea::string& resourceName) override;
+    /// Route open requests through OpenInBestInstance instead of opening the
+    /// resource in every subscribed instance (the base behavior).
+    void OnProjectRequest(ProjectRequest* request) override;
     /// @}
+
+    /// Persist open documents. The primary instance serializes the active
+    /// document of EVERY UIViewTab instance under its own ini section and
+    /// re-creates the secondary instances on restore; secondary instances
+    /// persist nothing (their sections would have no reader after restart).
+    /// @{
+    void WriteIniSettings(ImGuiTextBuffer& output) override;
+    void ReadIniSettings(const char* line) override;
+    /// @}
+    bool CloseShouldRemove() override { return true; }
 
 private:
     void RenderToolbar();
@@ -116,10 +141,20 @@ private:
     /// Drop selection/gizmo state so it starts fresh against a (re)loaded doc.
     void ResetViewToDocument();
 
+    /// Rebind the shared Hierarchy/Inspector tabs to this instance. Complements
+    /// the focus glue, which only fires after the window actually gains ImGui
+    /// focus: on a runtime open the browser's InspectResourceRequest is
+    /// processed earlier in the same request queue and hands the Inspector to
+    /// the placeholder fallback (.rml has no dedicated inspector), and nothing
+    /// would hand it back until the window is focused.
+    void ConnectSharedPanels();
+
     // --- selection helpers ---------------------------------------------------
     ea::vector<unsigned> NodePath(const UiNode* node) const;
-    /// Revalidate the selection after a model mutation (OnModelEdited).
-    void OnModelEdited();
+    /// Revalidate the selection after a model mutation. Only the active
+    /// document emits OnModelEdited (see UIViewDocument) - the UI edits the
+    /// active document and undo/redo re-focuses before restoring.
+    void OnDocumentEdited();
 
     // --- pointer / overlay (view + controller) ------------------------------
     void HandlePreviewPointer(const DocViewport& vp);
@@ -129,12 +164,18 @@ private:
     void UpdateDrag(const DocViewport& vp);
     void CommitDrag();
 
-    /// The editable document (model + live DOM projection + undo commands).
+    /// The document (model + live DOM projection + undo commands) edited by
+    /// this instance. One instance edits at most one resource; the base
+    /// swaps it via the load/unload/activate callbacks.
     SharedPtr<UIViewDocument> document_;
 
     UiNode* selected_ = nullptr;
     ea::vector<unsigned> selPath_;
     ea::vector<unsigned> hoveredPath_;
+
+    /// First-ever instance (plugin-bootstrapped): the persistent "new/open
+    /// document" entry point; stays open when its document closes.
+    bool isPrimary_ = true;
 
     // --- gizmo drag state (data-driven; solved via UIViewLayoutMath) --------
     UiNode* gizmoNode_ = nullptr;
@@ -145,8 +186,6 @@ private:
     Vector2 gizmoPressDoc_; ///< document-space mouse at press
     Vector2 gizmoCurDoc_; ///< document-space mouse of the latest frame
     bool dragging_ = false;
-
-    ea::string resourcePath_;
 
     SharedPtr<UIViewHierarchy> hierarchySource_;
     SharedPtr<UIViewInspector> inspectorSource_;
@@ -204,9 +243,12 @@ public:
     void InvalidateCaches();
 
 private:
+    /// Navigation panel for the nested-doc virtual node (path + reveal/open).
+    void RenderNestedDoc(UiNode* node);
     void RenderTextContent(UiNode* node);
     void RenderAttributes(UiNode* node);
     void RenderInlineStyle(UiNode* node);
+    void RenderTemplates(UiNode* node);
     void RenderComputed(UiNode* node);
 
     WeakPtr<UIViewTab> owner_;

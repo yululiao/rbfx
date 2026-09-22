@@ -230,6 +230,8 @@ void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
     int cursor = 0;
     for (const SharedPtr<UiNode>& child : node.children_)
     {
+        if (child->IsNestedDoc())
+            continue; // view-only virtual node; gets the body element below
         if (child->IsText())
             continue; // no live-element link for text nodes (see note above)
         Rml::Element* match = nullptr;
@@ -259,7 +261,7 @@ void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
     // double-book it and results stay deterministic.
     for (const SharedPtr<UiNode>& child : node.children_)
     {
-        if (child->IsText() || child->dom_)
+        if (child->IsText() || child->IsNestedDoc() || child->dom_)
             continue;
         const SubtreeMatch found = FindFreeMatch(element, *child, used);
         if (found.element)
@@ -270,13 +272,69 @@ void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
     }
 
     for (const SharedPtr<UiNode>& child : node.children_)
+    {
+        if (child->IsNestedDoc())
+            continue;
         CorrelateDomRec(*child, child->dom_, used);
+    }
 }
 
 void CorrelateDom(UiNode& node, Rml::Element* element)
 {
     UsedDomElems used;
     CorrelateDomRec(node, element, used);
+}
+
+/// Every live DOM element some model node claimed during correlation,
+/// collected from the dom_ links (the same set CorrelateDom built). The
+/// root's own element (the document) lands in the set too; no direct
+/// child's subtree contains it, so it cannot mark a subtree as authored.
+void CollectClaimedDom(const UiNode& node, UsedDomElems& out)
+{
+    if (node.IsNestedDoc())
+        return; // projects onto the document, stands for no authored content
+    if (node.dom_)
+        out.insert(node.dom_);
+    for (const SharedPtr<UiNode>& child : node.children_)
+        CollectClaimedDom(*child, out);
+}
+
+/// True when any element of \a element's subtree was claimed by the model.
+bool SubtreeHasClaimedDom(Rml::Element* element, const UsedDomElems& claimed)
+{
+    if (claimed.find(element) != claimed.end())
+        return true;
+    const int count = element->GetNumChildren(false);
+    for (int i = 0; i < count; ++i)
+    {
+        Rml::Element* child = element->GetChild(i);
+        if (child && SubtreeHasClaimedDom(child, claimed))
+            return true;
+    }
+    return false;
+}
+
+/// Direct children of the live document whose subtree hosts no authored
+/// content: the chrome the nested template minted into this document
+/// (window frame, title bar, resize handles). The template's content
+/// container drops out naturally - correlation places the authored elements
+/// inside it, so its subtree is claimed.
+ea::vector<Rml::Element*> CollectNestedChrome(const UiNode& root, Rml::ElementDocument* document)
+{
+    UsedDomElems claimed;
+    CollectClaimedDom(root, claimed);
+
+    ea::vector<Rml::Element*> chrome;
+    const int count = document->GetNumChildren(false);
+    for (int i = 0; i < count; ++i)
+    {
+        Rml::Element* child = document->GetChild(i);
+        if (!child || child->GetTagName() == "#text")
+            continue;
+        if (!SubtreeHasClaimedDom(child, claimed))
+            chrome.push_back(child);
+    }
+    return chrome;
 }
 
 /// Generate standard RML for a wholly-new subtree (every node lacks a spine anchor). Used at
@@ -495,11 +553,16 @@ void ReconcileNode(const UiNode& node, const RmlTextModel& src, std::vector<RmlP
             ++i; // editor-added bare text under an anchored parent is not spliced here
             continue;
         }
+        if (child.IsNestedDoc())
+        {
+            ++i; // view-only virtual node; never serialized into the source
+            continue;
+        }
         std::string markup;
         while (i < count)
         {
             const UiNode& runNode = *node.children_[i];
-            if (runNode.srcNode_ >= 0 || runNode.IsText())
+            if (runNode.srcNode_ >= 0 || runNode.IsText() || runNode.IsNestedDoc())
                 break;
             if (!markup.empty())
                 markup += "\n";
@@ -683,7 +746,38 @@ bool UiDocumentModel::BuildFromText(const ea::string& sourceText, Rml::ElementDo
     // The ElementDocument corresponds to <body>: build the tree from the source spine and
     // attach the live preview DOM to dom_ only by structural correlation (best effort).
     root_ = BuildElement(source_, body);
+
+    // When the body instantiates a template (<body template="...">), the live
+    // document gains chrome (window frame, title bar, close button) minted
+    // from the nested .rml referenced by a <head> <link type="text/template">.
+    // Represent that whole region as one virtual child of the body so it can
+    // be selected as a unit and navigated to. View-only: it is never
+    // serialized into the emitted text. With several template links the first
+    // one wins (the Inspector's Nested Documents section still lists them all).
+    const std::string templateName = RawAttrValue(source_, body, "template");
+    if (!Trim(Ea(templateName)).empty())
+    {
+        const ea::vector<ea::string> links = GetTemplateLinks();
+        if (!links.empty())
+        {
+            auto nested = MakeShared<UiNode>();
+            nested->tag_ = "#nested-doc";
+            nested->nestedDocHref_ = links.front();
+            root_->children_.insert(root_->children_.begin(), nested);
+        }
+    }
+
     CorrelateDom(*root_, document);
+
+    // The virtual node projects onto the body element (so hit testing and
+    // the overlay gates treat it as live), while its outline covers only
+    // the chrome the nested template minted into the document - not the
+    // whole document canvas the body's own box would give.
+    if (UiNode* nested = GetNestedDoc())
+    {
+        nested->dom_ = root_->dom_;
+        nested->nestedChromeElems_ = CollectNestedChrome(*root_, document);
+    }
     return true;
 }
 
@@ -746,6 +840,43 @@ UiNode* UiDocumentModel::ResolvePath(const ea::vector<unsigned>& path) const
         node = node->children_[index];
     }
     return node;
+}
+
+ea::vector<ea::string> UiDocumentModel::GetTemplateLinks() const
+{
+    // Walk the spine's <head> (the editor tree starts at <body>, but the spine
+    // indexes the whole document). <head> is nested under <rml>, so locate it
+    // by pre-order search - the same way BuildFromText finds <body> - rather
+    // than as a direct child of the synthetic root.
+    ea::vector<ea::string> out;
+    const int head = source_.FindFirstElement("head");
+    if (head < 0)
+        return out;
+    for (int linkIdx : source_.Node(head).children)
+    {
+        const RmlNode& link = source_.Node(linkIdx);
+        if (link.kind != RmlNodeKind::Element || LowerStd(link.tag) != "link")
+            continue;
+        const std::string type = LowerStd(RawAttrValue(source_, linkIdx, "type"));
+        std::string href = RawAttrValue(source_, linkIdx, "href");
+        const size_t hb = href.find_first_not_of(" \t\r\n");
+        href = hb == std::string::npos ? std::string()
+            : href.substr(hb, href.find_last_not_of(" \t\r\n") - hb + 1);
+        if (type == "text/template" && !href.empty())
+            out.push_back(Ea(href));
+    }
+    return out;
+}
+
+UiNode* UiDocumentModel::GetNestedDoc() const
+{
+    if (root_ && !root_->children_.empty())
+    {
+        UiNode* first = root_->children_.front().Get();
+        if (first->IsNestedDoc())
+            return first;
+    }
+    return nullptr;
 }
 
 UiTransform ParseUiTransform(const ea::string& value)

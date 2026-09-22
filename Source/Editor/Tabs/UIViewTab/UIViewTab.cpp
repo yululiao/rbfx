@@ -6,7 +6,10 @@
 
 #include "UIViewTab.h"
 
+#include "../../Core/IniHelpers.h"
 #include "../../Project/Project.h"
+#include "../HierarchyBrowserTab.h"
+#include "../InspectorTab.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -35,6 +38,11 @@ namespace
 {
 // On-screen radius (in pixels) for grabbing a gizmo handle.
 constexpr float kHandleGrabPx = 7.0f;
+
+// How many UIViewTab instances have ever been created. Tab identity (ImGui
+// window id, ini section, Project tab registry) is keyed on the title, so
+// every instance takes a unique one: the plugin-bootstrapped "UI" tab and
+// then "UI (2)", "UI (3)", ... for editor tabs spawned per document.
 
 // Normalize native path separators to '/' (resource names are '/'-delimited).
 void NormalizePath(ea::string& s)
@@ -86,6 +94,89 @@ const PaletteEntry kPalette[] = {
     {ICON_FA_TOGGLE_ON "  button", "button"},
     {ICON_FA_FONT "  Text", "text"},
 };
+
+// Resolve an RmlUi href against the document's resource path, mirroring how
+// RmlUi's SystemInterface::JoinPath resolves document-relative references
+// (the same rule RmlFile uses when loading <link>/<template> targets).
+ea::string ResolveRelativeResourcePath(const ea::string& basePath, const ea::string& href)
+{
+    ea::string clean = Trim(href);
+    const size_t extra = clean.find_first_of("?#"); // Rml::URL strips query/anchor
+    if (extra != ea::string::npos)
+        clean.resize(extra);
+    if (clean.empty())
+        return ea::string();
+    if (clean.front() == '/') // absolute in RmlUi terms
+        return clean.substr(1);
+
+    ea::vector<ea::string> segments;
+    const size_t slash = basePath.find_last_of('/');
+    const ea::string dir = slash == ea::string::npos ? ea::string() : basePath.substr(0, slash);
+    size_t begin = 0;
+    while (begin < dir.length())
+    {
+        const size_t end = dir.find('/', begin);
+        const ea::string seg = dir.substr(begin, (end == ea::string::npos ? dir.length() : end) - begin);
+        if (!seg.empty())
+            segments.push_back(seg);
+        if (end == ea::string::npos)
+            break;
+        begin = end + 1;
+    }
+
+    begin = 0;
+    while (begin <= clean.length())
+    {
+        const size_t end = clean.find('/', begin);
+        const ea::string seg = clean.substr(begin, (end == ea::string::npos ? clean.length() : end) - begin);
+        if (seg == ".." )
+        {
+            if (!segments.empty())
+                segments.pop_back();
+        }
+        else if (!seg.empty() && seg != ".")
+            segments.push_back(seg);
+        if (end == ea::string::npos)
+            break;
+        begin = end + 1;
+    }
+
+    ea::string out;
+    for (const ea::string& seg : segments)
+    {
+        if (!out.empty())
+            out += '/';
+        out += seg;
+    }
+    return out;
+}
+
+// Whether a resource name can be read right now (registered in the cache, or
+// present under the project's Data folder). Cache lookup is in-memory; the
+// filesystem probe is one stat per open template link per frame.
+bool ResourceExists(Context* context, const ea::string& resourceName)
+{
+    auto* cache = context->GetSubsystem<ResourceCache>();
+    if (cache && !cache->GetResourceFileName(resourceName).empty())
+        return true;
+    auto* project = context->GetSubsystem<Project>();
+    auto* fs = context->GetSubsystem<FileSystem>();
+    return project && fs && fs->FileExists(project->GetDataPath() + resourceName);
+}
+
+// Open the nested document referenced by \a href (or, when revealOnly is set,
+// just locate and highlight it in the Resource Browser). ProcessRequest
+// defers the handling to the frame loop, so calling this from inside ImGui
+// rendering is safe.
+void OpenNestedDocumentFile(Context* context, UIViewDocument* doc, const ea::string& href, bool revealOnly)
+{
+    const ea::string resPath = ResolveRelativeResourcePath(doc->GetSourcePath(), href);
+    if (resPath.empty())
+        return;
+    auto* project = context->GetSubsystem<Project>();
+    if (project)
+        project->ProcessRequest(MakeShared<OpenResourceRequest>(context, resPath, revealOnly).Get());
+}
 } // namespace
 
 void Tabs_UIViewTab(Context* context, Project* project)
@@ -98,24 +189,21 @@ void Tabs_UIViewTab(Context* context, Project* project)
 // ---------------------------------------------------------------------------
 
 UIViewTab::UIViewTab(Context* context)
-    : ResourceEditorTab(context, ICON_FA_BEZIER_CURVE " UI", "8f2b1c9e-7d34-4a5b-9c10-ui0preview",
+    : ResourceEditorTab(context, "", "8f2b1c9e-7d34-4a5b-9c10-ui0preview",
         EditorTabFlags{}, EditorTabPlacement::DockCenter)
 {
-    document_ = MakeShared<UIViewDocument>(context_);
-    document_->OnModelEdited.Subscribe(this, &UIViewTab::OnModelEdited);
+    title_ = GetProject()->GetUniqTabName(this->GetTypeName(), "Ui");
+    guid_ = Format("8f2b1c9e-7d34-4a5b-9c10-uipreview{}", title_);
+    uniqueId_ = Format("{}###{}", title_, guid_);
+    // The first-ever instance is the persistent entry point: it keeps its
+    // "open/new document" empty state after its document closes, while
+    // instances spawned later close together with their document.
+    isPrimary_ = (GetProject()->GetTabsByTypeName(this->GetTypeName()).size() == 0);
 
-    // Route editing commands through the tab so ResourceEditorTab attributes
-    // each action to the active resource (per-document dirty tracking + undo
-    // focus). When no resource is open the pusher declines and the document
-    // falls back to the raw project undo manager, so edits stay undoable.
-    document_->SetUndoPusher([this](const SharedPtr<EditorAction>& action) -> bool
-    {
-        const ea::string& active = GetActiveResourceName();
-        if (!active.empty() && IsResourceOpen(active))
-            return PushAction(action).has_value();
-        return false;
-    });
-
+    // The document is created per resource in OnResourceLoaded: each open
+    // .rml owns its own UIViewDocument with its private preview context,
+    // and undo actions are routed through PushAction below so the base can
+    // attribute every action to this instance's resource.
     hierarchySource_ = MakeShared<UIViewHierarchy>(this);
     inspectorSource_ = MakeShared<UIViewInspector>(this);
 }
@@ -123,11 +211,76 @@ UIViewTab::UIViewTab(Context* context)
 UIViewTab::~UIViewTab()
 {
     selected_ = nullptr;
+    document_ = nullptr;
 }
 
-UIViewTab* UIViewTab::GetActive(Project* project)
+void UIViewTab::OpenInBestInstance(Project* project, const ea::string& resourceName)
 {
-    return project ? project->FindTab<UIViewTab>() : nullptr;
+    if (!project)
+        return;
+
+    // Already open: focus the instance editing it (idempotent under the
+    // request broadcast - later invocations end up here).
+    for (const SharedPtr<EditorTab>& tab : project->GetTabs())
+    {
+        auto* uiTab = dynamic_cast<UIViewTab*>(tab.Get());
+        if (uiTab && uiTab->IsResourceOpen(resourceName))
+        {
+            uiTab->OpenResource(resourceName);
+            uiTab->Focus();
+            // No OnResourceLoaded for an already-registered resource: take
+            // the shared panels back explicitly (see ConnectSharedPanels).
+            uiTab->ConnectSharedPanels();
+            return;
+        }
+    }
+
+    // An idle instance takes the document: the primary tab in its empty
+    // state, or a secondary instance whose document was closed (Focus
+    // reopens its window).
+    for (const SharedPtr<EditorTab>& tab : project->GetTabs())
+    {
+        auto* uiTab = dynamic_cast<UIViewTab*>(tab.Get());
+        if (uiTab && uiTab->GetActiveResourceName().empty())
+        {
+            uiTab->OpenResource(resourceName);
+            uiTab->Focus();
+            return;
+        }
+    }
+
+    // Every instance is busy: spawn a fresh editor tab for the document
+    // (one document per editor tab, VS Code style).
+    const auto newTab = MakeShared<UIViewTab>(project->GetContext());
+    project->AddTab(newTab);
+    newTab->ApplyPlugins(); // glue the shared Hierarchy/Inspector to this instance
+    newTab->OpenResource(resourceName);
+    newTab->Focus();
+}
+
+void UIViewTab::OnProjectRequest(ProjectRequest* request)
+{
+    const auto openResourceRequest = dynamic_cast<OpenResourceRequest*>(request);
+    if (!openResourceRequest || openResourceRequest->IsRevealOnly())
+    {
+        ResourceEditorTab::OnProjectRequest(request);
+        return;
+    }
+
+    const ResourceFileDescriptor& desc = openResourceRequest->GetResource();
+    if (desc.isDirectory_ || !CanOpenResource(desc))
+        return;
+
+    // One document per editor tab: route through the static arbiter instead
+    // of the base behavior (which would open the resource in every
+    // subscribed instance). Deferred to the frame loop, so calling this
+    // from inside ImGui rendering is safe.
+    Project* project = GetProject();
+    const ea::string resourceName = desc.resourceName_;
+    request->QueueProcessCallback([project, resourceName]()
+    {
+        OpenInBestInstance(project, resourceName);
+    });
 }
 
 ea::vector<unsigned> UIViewTab::NodePath(const UiNode* node) const
@@ -138,7 +291,7 @@ ea::vector<unsigned> UIViewTab::NodePath(const UiNode* node) const
     return path;
 }
 
-void UIViewTab::OnModelEdited()
+void UIViewTab::OnDocumentEdited()
 {
     if (!document_)
         return;
@@ -229,8 +382,38 @@ void UIViewTab::ResetViewToDocument()
     dragging_ = false;
 }
 
+void UIViewTab::ConnectSharedPanels()
+{
+    Project* project = GetProject();
+    if (auto hierarchyTab = project->FindTab<HierarchyBrowserTab>())
+        hierarchyTab->ConnectToSource(hierarchySource_.Get());
+    if (auto inspectorTab = project->FindTab<InspectorTab>())
+        inspectorTab->ConnectToSource(inspectorSource_.Get());
+}
+
 void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
 {
+    // One document per tab instance. The base has already registered the
+    // resource by the time this runs, so undo actions pushed below attribute
+    // to it correctly.
+    if (!document_)
+    {
+        document_ = MakeShared<UIViewDocument>(context_);
+        document_->OnModelEdited.Subscribe(this, &UIViewTab::OnDocumentEdited);
+        // Route editing commands through the tab so ResourceEditorTab
+        // attributes each action to this instance's resource (dirty tracking
+        // + undo focus). When no resource is open the pusher declines and
+        // the document falls back to the raw project undo manager, so edits
+        // stay undoable.
+        document_->SetUndoPusher([this](const SharedPtr<EditorAction>& action) -> bool
+        {
+            const ea::string& active = GetActiveResourceName();
+            if (!active.empty() && IsResourceOpen(active))
+                return PushAction(action).has_value();
+            return false;
+        });
+    }
+
     const ea::string contents = ReadResourceFile(resourceName);
     if (contents.empty())
     {
@@ -240,11 +423,17 @@ void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
 
     if (document_->LoadFromText(contents, resourceName))
     {
-        // Fresh open: start with the root selected.
-        resourcePath_ = resourceName;
+        // Fresh open: start with the root selected. Not gated on the active
+        // resource: at runtime the base activates the resource only after
+        // this callback returns, and a single-document instance hosts no
+        // other document this selection could belong to.
         ResetViewToDocument();
         if (hierarchySource_)
             hierarchySource_->ExpandAncestors(selPath_);
+        // The freshly loaded document is the active editing target: take the
+        // shared panels right away instead of waiting for a focus-driven
+        // rebind (covers ini restore, runtime open and spawned instances).
+        ConnectSharedPanels();
     }
     else
     {
@@ -254,34 +443,48 @@ void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
 
 void UIViewTab::OnResourceUnloaded(const ea::string& resourceName)
 {
-    // Single-document mode: dropping the active resource clears the view. The
-    // base unloads the outgoing document before loading the next one.
-    if (resourceName == resourcePath_)
-    {
-        resourcePath_.clear();
-        selected_ = nullptr;
-        selPath_.clear();
-        hoveredPath_.clear();
-        gizmoNode_ = nullptr;
-        dragging_ = false;
-    }
+    (void)resourceName; // single-document instance: at most one resource open
+    document_ = nullptr;
+    selected_ = nullptr;
+    selPath_.clear();
+    hoveredPath_.clear();
+    gizmoNode_ = nullptr;
+    dragging_ = false;
+
+    // Secondary instances exist only to host their document: when it closes,
+    // so does the editor tab. The primary instance stays around as the
+    // "new/open document" entry point (and is reused by OpenInBestInstance).
+    if (!isPrimary_)
+        Close();
 }
 
 void UIViewTab::OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName)
 {
-    // In single-resource mode a change of the active document is always
-    // bracketed by OnResourceLoaded/Unloaded, which already reseed selection.
-    // Keep it consistent if the two ever disagree.
-    if (resourcePath_ != newResourceName)
-        ResetViewToDocument();
+    (void)oldResourceName;
+    // A drag cannot span an activation change (the change re-opens the view).
+    dragging_ = false;
+    gizmoNode_ = nullptr;
+
+    // Single-document instance: an activation change can only happen around
+    // load/unload of this instance's one document. Attach the view when the
+    // document already exists; OnResourceLoaded resets it right after load.
+    if (newResourceName.empty() || !document_ || document_->GetSourcePath() != newResourceName)
+    {
+        document_ = nullptr;
+        selected_ = nullptr;
+        selPath_.clear();
+        hoveredPath_.clear();
+        return;
+    }
+    ResetViewToDocument();
 }
 
 void UIViewTab::OnResourceSaved(const ea::string& resourceName)
 {
+    // One document per instance: emit this instance's document.
     if (!document_ || !document_->GetRmlDocument())
         return;
-    const ea::string emitted = document_->EmitRml();
-    WriteResourceFile(resourceName, emitted);
+    WriteResourceFile(resourceName, document_->EmitRml());
     document_->MarkSaved();
 }
 
@@ -289,6 +492,62 @@ void UIViewTab::OnResourceShallowSaved(const ea::string& resourceName)
 {
     // No per-resource "shallow" data distinct from the emitted .rml text.
     (void)resourceName;
+}
+
+void UIViewTab::WriteIniSettings(ImGuiTextBuffer& output)
+{
+    ResourceEditorTab::WriteIniSettings(output);
+
+    // Only the primary instance persists the editor's document layout:
+    // the active document of every UIViewTab instance, in tab order, under
+    // the primary instance's own ini section. Secondary instances write
+    // nothing - after a restart they do not exist until this section
+    // re-creates them, so their sections would have no reader.
+    if (!isPrimary_)
+        return;
+
+    Project* project = GetProject();
+    if (!project)
+        return;
+
+    StringVector documents;
+    for (const SharedPtr<EditorTab>& tab : project->GetTabs())
+    {
+        auto* uiTab = dynamic_cast<UIViewTab*>(tab.Get());
+        if (!uiTab || uiTab == this)
+            continue;
+        const ea::string& name = uiTab->GetActiveResourceName();
+        if (!name.empty())
+            documents.push_back(name);
+    }
+    // This instance's own document comes last so the restored active tab
+    // (the primary instance) is the one the user last had focused.
+    if (!GetActiveResourceName().empty())
+        documents.push_back(GetActiveResourceName());
+
+    WriteStringToIni(output, "Documents", ea::string::joined(documents, "|"));
+}
+
+void UIViewTab::ReadIniSettings(const char* line)
+{
+    ResourceEditorTab::ReadIniSettings(line);
+
+    // Only the primary instance reads the shared document list: it re-creates
+    // the secondary instances (which have no ini section of their own) and
+    // then opens its own last document through the base's "ActiveResourceName".
+    if (!isPrimary_)
+        return;
+
+    if (const auto value = ReadStringFromIni(line, "Documents"))
+    {
+        Project* project = GetProject();
+        for (const ea::string& resourceName : value->split('|'))
+        {
+            if (resourceName.empty() || IsResourceOpen(resourceName))
+                continue;
+            OpenInBestInstance(project, resourceName);
+        }
+    }
 }
 
 void UIViewTab::NewDocument()
@@ -353,16 +612,28 @@ void UIViewTab::NewDocument()
     if (resourceName.empty())
         return;
 
-    if (!WriteResourceFile(resourceName, kTemplate))
+    // (Re)open so the freshly written file becomes the active, tracked
+    // document. An already-open document is only focused - closing it would
+    // discard its undo history and any unsaved edits.
+    if (!IsResourceOpen(resourceName)
+        && !WriteResourceFile(resourceName, kTemplate))
     {
         URHO3D_LOGERROR("UIViewTab: failed to create UI document '{}'", resourceName.c_str());
         return;
     }
 
-    // (Re)open so the freshly written file becomes the active, tracked document.
-    if (IsResourceOpen(resourceName))
-        CloseResource(resourceName);
-    OpenResource(resourceName);
+    // Route through the project request exactly like a double-click open
+    // (all instances arbitrate in OpenInBestInstance: idle ones take the
+    // document, a busy project spawns a fresh tab). This must not call
+    // OpenInBestInstance directly: we run inside a tab's Render here, and the
+    // spawn path's AddTab would land mid-iteration of the render loop, so
+    // the fresh tab is not rendered this frame - the frame-end
+    // CheckRemoveTab would then see it as closed (its window has never
+    // opened) and destroy it. ProcessRequest defers the routing to the
+    // beginning of the next frame, where AddTab happens before tabs are
+    // iterated.
+    auto request = MakeShared<OpenResourceRequest>(context_, resourceName, false);
+    GetProject()->ProcessRequest(request.Get());
 }
 
 // ---------------------------------------------------------------------------
@@ -378,11 +649,10 @@ void UIViewTab::RenderContent()
 
 void UIViewTab::RenderToolbar()
 {
-    // Read-only display of the document being edited (empty until one is opened). This
-    // replaces the old type-a-path field: double-clicking a .rml in the Resource Browser now
-    // opens it, and New pops a native Save As, so there is nothing left to type here.
+    // Read-only display of the document being edited (empty until one is opened).
+    const ea::string& activeResource = GetActiveResourceName();
     ui::AlignTextToFramePadding();
-    ui::TextDisabled("Editing: %s", resourcePath_.empty() ? "(no document open)" : resourcePath_.c_str());
+    ui::TextDisabled("Editing: %s", activeResource.empty() ? "(no document open)" : activeResource.c_str());
 
     if (ui::Button(ICON_FA_FILE_LINES " New"))
         NewDocument();
@@ -426,7 +696,8 @@ void UIViewTab::RenderToolbar()
         ui::EndCombo();
     }
     ui::SameLine();
-    const bool canEdit = selected_ && document_ && selected_ != document_->GetModel().root_.Get();
+    const bool canEdit = selected_ && document_ && selected_ != document_->GetModel().root_.Get()
+        && !selected_->IsNestedDoc();
     ui::BeginDisabled(!canEdit);
     if (ui::Button(ICON_FA_COPY " Copy"))
     {
@@ -443,12 +714,12 @@ void UIViewTab::RenderToolbar()
     if (ui::BeginPopup("##uiElemCtx"))
     {
         UiNode* node = selected_;
-        if (node && !node->IsText() && !node->IsMaterialized())
+        if (node && !node->IsText() && !node->IsNestedDoc() && !node->IsMaterialized())
         {
             if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
                 document_->MaterializeNode(node);
         }
-        if (node && document_ && node != document_->GetModel().root_.Get())
+        if (node && document_ && node != document_->GetModel().root_.Get() && !node->IsNestedDoc())
         {
             if (ui::MenuItem(ICON_FA_COPY " Copy"))
             {
@@ -556,6 +827,11 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
             }
         }
         SetSelectedNode(hover); // clicking empty space (hover==null) clears
+        // Double-click on the template chrome (the hover resolves to the
+        // nested-doc virtual node) opens the nested file, mirroring the
+        // hierarchy's double-click behavior.
+        if (hover && hover->IsNestedDoc() && ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            OpenNestedDocumentFile(context_, document_, hover->nestedDocHref_, /*revealOnly=*/false);
     }
 }
 
@@ -627,31 +903,37 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
 
     if (hover && hover != sel && hover->dom_ && !hover->IsText())
     {
-        UiBox box;
-        if (document_->TryGetDomBox(hover, box))
+        ea::vector<UiBox> boxes;
+        if (document_->TryGetDomBoxes(hover, boxes))
         {
-            ImVec2 c[4];
-            TransformedCorners(vp, box, c);
-            dl->AddPolyline(c, 4, kHoverColor, ImDrawFlags_Closed, 1.0f);
+            for (const UiBox& box : boxes)
+            {
+                ImVec2 c[4];
+                TransformedCorners(vp, box, c);
+                dl->AddPolyline(c, 4, kHoverColor, ImDrawFlags_Closed, 1.0f);
+            }
         }
     }
 
     if (sel && sel->dom_)
     {
-        UiBox box;
         const bool dragging = dragging_ && gizmoNode_ == sel;
+        ea::vector<UiBox> boxes;
         if (dragging)
         {
             // The live box is left/top-space; lift it into document space with
             // the frame origin captured at press.
-            box = gizmoLiveBox_;
+            UiBox box = gizmoLiveBox_;
             box.pos_ += gizmoBase_;
+            boxes.push_back(box);
         }
         else
-            document_->TryGetDomBox(sel, box);
+            document_->TryGetDomBoxes(sel, boxes);
 
-        if (box.size_.x_ > 0.0f && box.size_.y_ > 0.0f)
+        for (const UiBox& box : boxes)
         {
+            if (box.size_.x_ <= 0.0f || box.size_.y_ <= 0.0f)
+                continue;
             ImVec2 c[4];
             TransformedCorners(vp, box, c);
             dl->AddConvexPolyFilled(c, 4, kSelectFill);
@@ -659,10 +941,11 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
         }
 
         // The gizmo rect is the selection rect; handles are only offered when
-        // the node is materialized (or being dragged into shape).
+        // the node is materialized (or being dragged into shape). Regular
+        // nodes yield a single box, so front() is the selection rect.
         UiBox materializedBox;
-        if (dragging || TryGetMaterializedBox(*sel, materializedBox))
-            DrawGizmo(vp, box);
+        if (!boxes.empty() && (dragging || TryGetMaterializedBox(*sel, materializedBox)))
+            DrawGizmo(vp, boxes.front());
     }
 }
 
@@ -742,12 +1025,16 @@ bool UIViewHierarchy::PathIn(const ea::vector<ea::vector<unsigned>>& set, const 
 
 void UIViewHierarchy::ExpandAncestors(const ea::vector<unsigned>& path)
 {
-    // Open every prefix of the selected path so the tree reveals the selection.
+    // Open every prefix of the selected path so the tree reveals the
+    // selection. A manually collapsed prefix is re-opened: revealing the
+    // selection wins over the override, otherwise a collapsed ancestor
+    // would hide the very node that was just selected.
     ea::vector<unsigned> prefix;
     for (size_t i = 0; i <= path.size(); i++)
     {
         if (!PathIn(openedPaths_, prefix))
             openedPaths_.push_back(prefix);
+        closedPaths_.erase(std::remove(closedPaths_.begin(), closedPaths_.end(), prefix), closedPaths_.end());
         if (i < path.size())
             prefix.push_back(path[i]);
     }
@@ -797,14 +1084,28 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     if (!tab || !node)
         return;
 
-    ea::string label = node->IsText() ? ea::string("#text") : node->tag_;
-    if (!node->id_.empty())
-        label += "#" + node->id_;
-    if (!node->classes_.empty())
+    ea::string label;
+    if (node->IsNestedDoc())
     {
-        ea::string cls = node->classes_;
-        cls.replace(" ", ".");
-        label += "." + cls;
+        // The template-chrome virtual node reads as the file it comes from;
+        // the full resolved path lives in the Inspector panel.
+        ea::string name = node->nestedDocHref_;
+        const size_t slash = name.find_last_of('/');
+        if (slash != ea::string::npos)
+            name = name.substr(slash + 1);
+        label = ea::string(ICON_FA_CUBES) + " " + name;
+    }
+    else
+    {
+        label = node->IsText() ? ea::string("#text") : node->tag_;
+        if (!node->id_.empty())
+            label += "#" + node->id_;
+        if (!node->classes_.empty())
+        {
+            ea::string cls = node->classes_;
+            cls.replace(" ", ".");
+            label += "." + cls;
+        }
     }
 
     // Children that matter for the tree (a lone text child is folded into the
@@ -842,10 +1143,22 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
         contextMenuTargetPath_ = path;
         contextMenuTargetValid_ = true;
     }
-
-    if (hasElementChild && open && ui::IsItemToggledOpen())
+    // Double-click on the nested-doc node jumps straight into the nested file
+    // (opens alongside; multi-document keeps this document open).
+    if (node->IsNestedDoc() && ui::IsItemClicked(ImGuiMouseButton_Left)
+        && ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
     {
-        // Persist the manual toggle as an override.
+        if (UIViewDocument* doc = tab->GetDocument())
+            OpenNestedDocumentFile(tab->GetContext(), doc, node->nestedDocHref_, /*revealOnly=*/false);
+    }
+
+    if (hasElementChild && ui::IsItemToggledOpen())
+    {
+        // Persist the manual toggle as an override, in either direction:
+        // \a open is already the post-toggle state, so a node expanded by
+        // hand moves from closedPaths_ to openedPaths_ and one collapsed by
+        // hand moves the other way. IsOpen honors closedPaths_ first, which
+        // is what keeps the node folded on the next frame's SetNextItemOpen.
         auto& from = open ? closedPaths_ : openedPaths_;
         auto& to = open ? openedPaths_ : closedPaths_;
         from.erase(std::remove(from.begin(), from.end(), path), from.end());
@@ -884,6 +1197,16 @@ void UIViewHierarchy::RenderContextMenuItems()
     if (!target)
         return;
 
+    // The nested-doc virtual node offers navigation only; it has no editable
+    // payload in this document.
+    if (target->IsNestedDoc())
+    {
+        if (ui::MenuItem(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open Nested Document"))
+            OpenNestedDocumentFile(context_, doc, target->nestedDocHref_, /*revealOnly=*/false);
+        contextMenuTargetValid_ = false;
+        return;
+    }
+
     if (!target->IsText() && !target->IsMaterialized())
     {
         if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
@@ -920,16 +1243,30 @@ void UIViewInspector::RenderContent()
         return;
     }
 
+    // The nested-doc virtual node has no authored source in this document:
+    // show the navigation panel instead of the attribute/style editors.
+    if (node->IsNestedDoc())
+    {
+        RenderNestedDoc(node);
+        return;
+    }
+
     ea::string header = node->tag_;
     if (!node->id_.empty())
         header += "#" + node->id_;
     ui::Text(ICON_FA_HAND_POINTER " %s", header.c_str());
+    // The file this element's source lives in (matters with several documents
+    // open and for template-minted areas, whose source lives elsewhere).
+    if (UIViewDocument* doc = tab ? tab->GetDocument() : nullptr)
+        ui::TextDisabled(ICON_FA_FILE " %s", doc->GetSourcePath().c_str());
     ui::Separator();
 
     RenderTextContent(node);
     RenderAttributes(node);
     ui::Separator();
     RenderInlineStyle(node);
+    ui::Separator();
+    RenderTemplates(node);
     ui::Separator();
     RenderComputed(node);
 }
@@ -939,6 +1276,81 @@ void UIViewInspector::InvalidateCaches()
     // Whole-tree rebuilds (every command / undo) replace all nodes; the cached
     // inline-style text must be reseeded from the new node on the next render.
     styleSeedValid_ = false;
+}
+
+void UIViewInspector::RenderNestedDoc(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    UIViewDocument* doc = tab ? tab->GetDocument() : nullptr;
+    if (!doc)
+        return;
+
+    const ea::string resPath = ResolveRelativeResourcePath(doc->GetSourcePath(), node->nestedDocHref_);
+    const bool exists = !resPath.empty() && ResourceExists(context_, resPath);
+
+    ui::Text(ICON_FA_CUBES " Nested Document");
+    ui::TextDisabled(ICON_FA_FILE " %s", resPath.c_str());
+    ui::Separator();
+
+    ui::TextWrapped(
+        "The window frame of this document (title bar, close button, ...) is\n"
+        "minted from this template file. Open it to edit the frame itself.");
+    ui::Spacing();
+
+    ui::BeginDisabled(!exists);
+    if (ui::Button(ICON_FA_MAGNIFYING_GLASS " Reveal in Resource Browser"))
+        OpenNestedDocumentFile(context_, doc, node->nestedDocHref_, /*revealOnly=*/true);
+    ui::SameLine();
+    if (ui::Button(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open"))
+        OpenNestedDocumentFile(context_, doc, node->nestedDocHref_, /*revealOnly=*/false);
+    ui::EndDisabled();
+    if (!exists)
+        ui::TextDisabled("(nested file not found)");
+}
+
+void UIViewInspector::RenderTemplates(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    UIViewDocument* doc = tab ? tab->GetDocument() : nullptr;
+    if (!doc)
+        return;
+
+    // Template-minted elements (window frames, title bars, close buttons) have
+    // no source in THIS document - they are instantiated from the nested .rml
+    // files referenced by <head> <link type="text/template">. Surface those
+    // file paths here, with a jump-in button, so editing them is one click
+    // instead of a resource-browser hunt.
+    const ea::vector<ea::string> links = doc->GetModel().GetTemplateLinks();
+    if (links.empty())
+        return;
+
+    if (!ui::CollapsingHeader(ICON_FA_CUBES " Nested Documents", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    ui::TextDisabled(
+        "Elements minted by a template (window frame, title bar, close button)\n"
+        "live in the template file, not in this document.");
+
+    for (const ea::string& href : links)
+    {
+        const ea::string resPath = ResolveRelativeResourcePath(doc->GetSourcePath(), href);
+        const bool exists = !resPath.empty() && ResourceExists(context_, resPath);
+
+        ui::TextUnformatted(href.c_str());
+        ui::SameLine();
+        ui::TextDisabled("-> %s", resPath.c_str());
+        ui::SameLine();
+        ui::BeginDisabled(!exists);
+        if (ui::SmallButton(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open"))
+        {
+            // Multi-document: opens the template alongside this document
+            // (no graceful close of the current workspace).
+            auto* project = context_->GetSubsystem<Project>();
+            if (project)
+                project->ProcessRequest(MakeShared<OpenResourceRequest>(context_, resPath).Get());
+        }
+        ui::EndDisabled();
+    }
 }
 
 void UIViewInspector::RenderTextContent(UiNode* node)
