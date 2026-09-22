@@ -719,6 +719,11 @@ void UIViewTab::RenderToolbar()
             if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
                 document_->MaterializeNode(node);
         }
+        else if (node && !node->IsText() && !node->IsNestedDoc() && node->IsMaterialized())
+        {
+            if (ui::MenuItem(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
+                document_->DematerializeNode(node);
+        }
         if (node && document_ && node != document_->GetModel().root_.Get() && !node->IsNestedDoc())
         {
             if (ui::MenuItem(ICON_FA_COPY " Copy"))
@@ -1212,6 +1217,11 @@ void UIViewHierarchy::RenderContextMenuItems()
         if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
             doc->MaterializeNode(target);
     }
+    else if (!target->IsText() && target->IsMaterialized())
+    {
+        if (ui::MenuItem(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
+            doc->DematerializeNode(target);
+    }
     if (target != doc->GetModel().root_.Get())
     {
         if (ui::MenuItem(ICON_FA_TRASH " Delete"))
@@ -1522,6 +1532,11 @@ void UIViewInspector::RenderComputed(UiNode* node)
     if (node->IsMaterialized())
     {
         ui::TextDisabled("(explicit / editable)");
+        if (tab && tab->GetDocument())
+        {
+            if (ui::Button(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
+                tab->GetDocument()->DematerializeNode(node);
+        }
     }
     else if (!node->IsText() && tab && tab->GetDocument())
     {

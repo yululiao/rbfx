@@ -633,6 +633,26 @@ bool UIViewDocument::MaterializeNode(UiNode* node)
     return CommitAndReload(undoText, path, &path, absBefore);
 }
 
+bool UIViewDocument::DematerializeNode(UiNode* node)
+{
+    if (!node || node->IsNestedDoc() || !node->IsMaterialized())
+        return false;
+
+    // Drop only the pin - position + left/top. width/height/box-sizing and
+    // transform stay behind: they remain meaningful (and commonly authored)
+    // for the re-flowed element, e.g. a fixed-size button, so stripping them
+    // would silently discard intent that may predate the materialize.
+    // Routed through EditNodePayload, so this is one undoable, mergeable
+    // style edit like any hand edit in the Inspector.
+    UiNodePayload payload = SnapshotUiNodePayload(*node);
+    payload.style_.erase(std::remove_if(payload.style_.begin(), payload.style_.end(),
+        [](const UiStyleDecl& decl)
+        {
+            return decl.name_ == "position" || decl.name_ == "left" || decl.name_ == "top";
+        }), payload.style_.end());
+    return EditNodePayload(node, payload);
+}
+
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 {
     if (!node || node->IsNestedDoc())

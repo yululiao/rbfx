@@ -114,6 +114,9 @@ public:
     UiNode* DuplicateNode(UiNode* node);
     bool DeleteNode(UiNode* node);
     bool MaterializeNode(UiNode* node);
+    /// Drop the explicit absolute positioning (position/left/top) so the node
+    /// re-joins the document flow. Sizing stays behind - see the impl note.
+    bool DematerializeNode(UiNode* node);
     bool EditNodePayload(UiNode* node, const UiNodePayload& newData);
     /// Commit a solved gizmo box (drag release) as one recorded style edit.
     bool CommitBoxEdit(UiNode* node, const UiBox& box);
