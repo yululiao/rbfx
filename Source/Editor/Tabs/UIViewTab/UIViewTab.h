@@ -253,6 +253,15 @@ public:
     void InvalidateCaches();
 
 private:
+    /// Document-level "add head link" row. The links themselves are
+    /// #head-link nodes at the top of the Hierarchy; this is only the spigot
+    /// that appends one more <link> to <head>. Rendered above the per-node
+    /// editors because it applies with or without a selection.
+    void RenderHeadLinks();
+    /// Per-link panel for a #head-link node: type/href editing, navigation to
+    /// the linked file, removal. The generic attribute/style editors do not
+    /// apply - head bytes are edited through the text-level link commands.
+    void RenderHeadLink(UiNode* node);
     /// Navigation panel for the nested-doc virtual node (path + reveal/open).
     void RenderNestedDoc(UiNode* node);
     void RenderTextContent(UiNode* node);
@@ -265,6 +274,8 @@ private:
     char attributeKeyBuf_[128]{};
     char attributeValueBuf_[1024]{};
     char styleBuf_[2048]{};
+    /// Resource path being typed into the head-link field.
+    char headLinkHrefBuf_[256]{};
     // Cached inline-style text and the selection path it was seeded from, so
     // the multiline editor is only refreshed when the selection changes.
     ea::vector<unsigned> lastStylePath_;

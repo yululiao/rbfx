@@ -454,59 +454,75 @@ bool UIViewDocument::CommitAndReload(const ea::string& undoText, const ea::vecto
 // Undoable editing commands
 // ---------------------------------------------------------------------------
 
-UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
+UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec)
 {
-    if (!model_.root_ || !document_ || !tag)
+    if (!model_.root_ || !document_ || spec.tag_.empty())
         return nullptr;
-    if (!parent || parent->IsText() || parent->IsNestedDoc())
+    if (!parent || parent->IsText() || parent->IsNestedDoc() || parent->IsHeadLink())
         parent = model_.root_.Get();
 
     auto node = MakeShared<UiNode>();
-    const ea::string kind = tag;
-    if (kind == "text")
+    node->tag_ = spec.tag_;
+    if (!spec.attrName_.empty())
+        node->attributes_.emplace_back(spec.attrName_, spec.attrValue_);
+    // Default content: a single text child ("Button", "Text") or repeated
+    // child elements (a <select> is only usable once it has <option>s).
+    if (!spec.childText_.empty())
     {
-        // RmlUi has no standalone text element: text lives inside a block.
-        // Emit a plain <div> carrying a text node, styled as visible text
-        // (no fill box) so it reads as a label rather than an empty panel.
-        node->tag_ = "div";
         auto text = MakeShared<UiNode>();
         text->tag_ = "#text";
-        text->text_ = "Text";
+        text->text_ = spec.childText_;
         node->children_.push_back(text);
-        node->SetStyle("color", "#e8eef5");
     }
-    else
+    for (unsigned i = 0; i < spec.childElemCount_; i++)
     {
-        node->tag_ = kind;
-        if (kind == "button")
+        auto elem = MakeShared<UiNode>();
+        elem->tag_ = spec.childElemTag_;
+        if (!spec.childElemText_.empty())
         {
             auto text = MakeShared<UiNode>();
             text->tag_ = "#text";
-            text->text_ = "Button";
-            node->children_.push_back(text);
+            text->text_ = spec.childElemText_;
+            elem->children_.push_back(text);
         }
-        else if (kind == "img")
-        {
-            node->attributes_.emplace_back("src", "");
-        }
+        node->children_.push_back(elem);
+    }
+    switch (spec.stylePolicy_)
+    {
+    case UiWidgetStylePolicy::Panel:
         node->SetStyle("background-color", "#3a4656");
         node->SetStyle("border", "1px solid #6f86a6");
+        break;
+    case UiWidgetStylePolicy::Outline:
+        // Border only: shape without a fill, so the control's internal chrome
+        // (project-styled or not) stays untouched.
+        node->SetStyle("border", "1px solid #6f86a6");
+        break;
+    case UiWidgetStylePolicy::None:
+    default:
+        break;
     }
 
-    // Born materialized: 160x48 centered inside the parent's rendered box when
-    // it has one (else the preview viewport), so the widget lands in view and
-    // is draggable at once.
-    UiBox box;
-    box.size_ = Vector2{160.0f, 48.0f};
-    float cw = static_cast<float>(kPreviewWidth);
-    float ch = static_cast<float>(kPreviewHeight);
-    const Vector2 psz = parent->dom_ ? V2(parent->dom_->GetBox().GetSize(Rml::BoxArea::Border)) : Vector2::ZERO;
-    if (psz.x_ > box.size_.x_)
-        cw = psz.x_;
-    if (psz.y_ > box.size_.y_)
-        ch = psz.y_;
-    box.pos_ = Vector2{Max(cw - box.size_.x_, 0.0f) * 0.5f, Max(ch - box.size_.y_, 0.0f) * 0.5f};
-    WriteBoxToStyle(*node, box);
+    const Vector2 psz = parent->dom_
+        ? V2(parent->dom_->GetBox().GetSize(Rml::BoxArea::Border)) : Vector2::ZERO;
+
+    // Born materialized: explicitly sized, centered inside the parent's
+    // rendered box when it has one (else the preview viewport), so the widget
+    // lands in view and is draggable at once. Flow-born entries (text labels)
+    // skip the box and join the flow at the parent's end.
+    if (spec.materialize_)
+    {
+        UiBox box;
+        box.size_ = spec.size_;
+        float cw = static_cast<float>(kPreviewWidth);
+        float ch = static_cast<float>(kPreviewHeight);
+        if (psz.x_ > box.size_.x_)
+            cw = psz.x_;
+        if (psz.y_ > box.size_.y_)
+            ch = psz.y_;
+        box.pos_ = Vector2{Max(cw - box.size_.x_, 0.0f) * 0.5f, Max(ch - box.size_.y_, 0.0f) * 0.5f};
+        WriteBoxToStyle(*node, box);
+    }
 
     const ea::string undoText = model_.EmitRml();
     ea::vector<unsigned> parentPath;
@@ -520,14 +536,15 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 
     // Precise centering: where the widget should end up in absolute document
     // coordinates (centered inside the parent's own rendered box), used by the
-    // one-shot landing correction after the rebuild.
+    // one-shot landing correction after the rebuild. Flow widgets have no
+    // authored position - the flow decides - so they take no correction.
     Vector2 desiredAbs = Vector2::ZERO;
     bool haveDesired = false;
-    if (parent->dom_)
+    if (spec.materialize_ && parent->dom_)
     {
         const Vector2 pAbs = V2(parent->dom_->GetAbsoluteOffset(Rml::BoxArea::Border));
-        desiredAbs = pAbs + Vector2{Max(psz.x_ - box.size_.x_, 0.0f) * 0.5f,
-                                    Max(psz.y_ - box.size_.y_, 0.0f) * 0.5f};
+        desiredAbs = pAbs + Vector2{Max(psz.x_ - spec.size_.x_, 0.0f) * 0.5f,
+                                    Max(psz.y_ - spec.size_.y_, 0.0f) * 0.5f};
         haveDesired = true;
     }
 
@@ -538,7 +555,8 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 
 UiNode* UIViewDocument::DuplicateNode(UiNode* node)
 {
-    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc())
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+        || node->IsHeadLink())
         return nullptr;
     UiNode* parent = model_.FindParent(node);
     if (!parent)
@@ -582,8 +600,20 @@ UiNode* UIViewDocument::DuplicateNode(UiNode* node)
 
 bool UIViewDocument::DeleteNode(UiNode* node)
 {
-    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc())
+    if (!node || node == model_.root_.Get() || node->IsText())
         return false;
+    // Virtual nodes that stand for a <head> <link> line: removal is a
+    // text-level edit, not a tree operation. (The nested-doc node is the
+    // instantiated template link; deleting it removes the <link> line, so the
+    // chrome disappears with it - exactly what the user asked for.)
+    if (node->IsHeadLink() || node->IsNestedDoc())
+    {
+        const ea::string undoText = model_.EmitRml();
+        ea::string redoText;
+        if (!model_.RemoveHeadLinkAt(undoText, node->headLinkOrdinal_, redoText))
+            return false; // ordinal went stale (rebuilt with fewer links)
+        return CommitTextEdit(undoText, redoText);
+    }
     UiNode* parent = model_.FindParent(node);
     if (!parent)
         return false;
@@ -612,9 +642,11 @@ void ResetSpineAnchors(UiNode& node)
 
 UiNode* UIViewDocument::MoveNode(UiNode* node, UiNode* newParent, unsigned index)
 {
-    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc())
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+        || node->IsHeadLink())
         return nullptr;
-    if (!newParent || newParent->IsText() || newParent->IsNestedDoc() || newParent == node)
+    if (!newParent || newParent->IsText() || newParent->IsNestedDoc() || newParent->IsHeadLink()
+        || newParent == node)
         return nullptr;
     // Reparenting into the moved subtree would cut that subtree out of the
     // tree: reject when the new parent is the node itself or any descendant.
@@ -676,7 +708,8 @@ UiNode* UIViewDocument::MoveNode(UiNode* node, UiNode* newParent, unsigned index
 
 bool UIViewDocument::MaterializeNode(UiNode* node)
 {
-    if (!node || !node->dom_ || node->IsText() || node->IsNestedDoc() || node->IsMaterialized())
+    if (!node || !node->dom_ || node->IsText() || node->IsNestedDoc() || node->IsHeadLink()
+        || !node->IsMaterialized())
         return false;
 
     // Bake the computed border box into explicit px style, then let the reload
@@ -706,7 +739,7 @@ bool UIViewDocument::MaterializeNode(UiNode* node)
 
 bool UIViewDocument::DematerializeNode(UiNode* node)
 {
-    if (!node || node->IsNestedDoc() || !node->IsMaterialized())
+    if (!node || node->IsNestedDoc() || node->IsHeadLink() || !node->IsMaterialized())
         return false;
 
     // Drop only the pin - position + left/top. width/height/box-sizing and
@@ -726,7 +759,7 @@ bool UIViewDocument::DematerializeNode(UiNode* node)
 
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 {
-    if (!node || node->IsNestedDoc())
+    if (!node || node->IsNestedDoc() || node->IsHeadLink())
         return false;
     const ea::string undoText = model_.EmitRml();
     // Child-index path doubles as the merge key: consecutive payload edits of
@@ -740,7 +773,7 @@ bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 
 bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
 {
-    if (!node || node->IsNestedDoc())
+    if (!node || node->IsNestedDoc() || node->IsHeadLink())
         return false;
     const ea::string undoText = model_.EmitRml();
     ea::vector<unsigned> mergeKey;
@@ -750,6 +783,63 @@ bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
     // makes model, text and projection canonically identical again.
     WriteBoxToStyle(*node, box);
     return CommitAndReload(undoText, mergeKey);
+}
+
+bool UIViewDocument::CommitTextEdit(const ea::string& undoText, const ea::string& redoText)
+{
+    if (!ReloadFromText(redoText))
+    {
+        URHO3D_LOGERROR("UIViewDocument: projection reload failed; restoring the pre-edit document.");
+        ReloadFromText(undoText); // best effort: keep model and projection in sync
+        return false;
+    }
+    // One discrete undo step per link edit: consecutive link commands must
+    // not collapse into each other.
+    const ea::vector<unsigned> mergeKey;
+    PushUndoAction(MakeShared<UiDocumentSnapshotAction>(this, mergeKey, undoText, redoText));
+    dirty_ = true;
+    OnModelEdited(this);
+    return true;
+}
+
+bool UIViewDocument::AddHeadLink(const ea::string& type, const ea::string& href)
+{
+    if (!model_.root_ || !document_)
+        return false;
+    // <head> is not part of the editor tree (it starts at <body>), so the edit
+    // happens on the emitted text directly; the reload below then makes the
+    // new link canonical for both the spine and the live projection.
+    const ea::string undoText = model_.EmitRml();
+    ea::string redoText;
+    if (!model_.InsertHeadLink(undoText, type, href, redoText))
+    {
+        URHO3D_LOGERROR(
+            "UIViewDocument: cannot add head link '{}' (document has no <head>, or it is already linked).",
+            Trim(href).c_str());
+        return false;
+    }
+    return CommitTextEdit(undoText, redoText);
+}
+
+bool UIViewDocument::EditHeadLink(UiNode* node, const ea::string& type, const ea::string& href)
+{
+    if (!model_.root_ || !document_ || !node
+        || (!node->IsHeadLink() && !node->IsNestedDoc()))
+        return false;
+    const ea::string trimmedType = Trim(type);
+    const ea::string trimmedHref = Trim(href);
+    if (node->GetAttribute("type") == trimmedType && node->GetAttribute("href") == trimmedHref)
+        return true; // nothing changed; no reload, no undo noise
+    const ea::string undoText = model_.EmitRml();
+    ea::string redoText;
+    if (!model_.EditHeadLinkAt(undoText, node->headLinkOrdinal_, type, href, redoText))
+    {
+        URHO3D_LOGERROR(
+            "UIViewDocument: cannot edit head link '{}' (empty value, or the link was rebuilt away).",
+            trimmedHref.c_str());
+        return false;
+    }
+    return CommitTextEdit(undoText, redoText);
 }
 
 }

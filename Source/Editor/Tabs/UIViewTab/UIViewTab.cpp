@@ -82,18 +82,76 @@ Vector2 V2(const ImVec2& v) { return Vector2{v.x, v.y}; }
 ImVec2 IV2(const Vector2& v) { return ImVec2{v.x_, v.y_}; }
 
 // The widget palette is a data table so the toolbar renders and dispatches
-// without a chain of per-control branches.
+// without a chain of per-control branches. Entries also carry the widget
+// recipe the document layer turns into nodes. Styling policy is
+// honest-minimum: looks come from the project stylesheet; the editor only
+// authors what keeps the element usable before the project has rules for it.
 struct PaletteEntry
 {
     const char* label_;
+    const char* group_;
     const char* tag_;
+    const char* attrName_;      // single default attribute (type, src, ...), null = none
+    const char* attrValue_;
+    const char* childText_;     // default text child ("Button"), null = none
+    const char* childElemTag_;  // repeated child element (<option>), null = none
+    const char* childElemText_;
+    unsigned childElemCount_;
+    UiWidgetStylePolicy stylePolicy_;  // placeholder styling (see UiWidgetStylePolicy)
+    bool materialize_;          // born with a centered position box
+    float sizeX_;
+    float sizeY_;
 };
+// Styling honesty: looks live in the project stylesheet, but the document may
+// not link one with rules for these tags - a native control without rules is
+// fully invisible. Containers, img and unknown tags get the placeholder panel
+// (they are nothing without rules); native form controls get an outline-only
+// border (shape without a fill, so project-styled internal chrome - the
+// select's arrow, the progress's fill - is never covered); label and text
+// render their own content and get nothing. Text has no element of its own in
+// RmlUi (it lives inside a block), so the entry is an honest <div> with a
+// text child: no fake styling, no pinned position - it joins the flow.
 const PaletteEntry kPalette[] = {
-    {ICON_FA_SQUARE "  div", "div"},
-    {ICON_FA_IMAGE "  img", "img"},
-    {ICON_FA_TOGGLE_ON "  button", "button"},
-    {ICON_FA_FONT "  Text", "text"},
+    {ICON_FA_SQUARE "  div", "Structure", "div", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 160.0f, 48.0f},
+    {ICON_FA_TABLE_LIST "  form", "Structure", "form", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 240.0f, 96.0f},
+    {ICON_FA_IMAGE "  img", "Content", "img", "src", "", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 160.0f, 48.0f},
+    {ICON_FA_FONT "  Text (div)", "Content", "div", nullptr, nullptr, "Text", nullptr, nullptr, 0, UiWidgetStylePolicy::None, false, 0.0f, 0.0f},
+    {ICON_FA_TOGGLE_ON "  button", "Controls", "button", nullptr, nullptr, "Button", nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 48.0f},
+    {ICON_FA_KEYBOARD "  input (text)", "Controls", "input", "type", "text", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 28.0f},
+    {ICON_FA_SQUARE_CHECK "  input (checkbox)", "Controls", "input", "type", "checkbox", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 20.0f, 20.0f},
+    {ICON_FA_CIRCLE_DOT "  input (radio)", "Controls", "input", "type", "radio", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 20.0f, 20.0f},
+    {ICON_FA_SLIDERS "  input (range)", "Controls", "input", "type", "range", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 20.0f},
+    {ICON_FA_PAPER_PLANE "  input (submit)", "Controls", "input", "type", "submit", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 120.0f, 36.0f},
+    {ICON_FA_LIST "  select", "Controls", "select", nullptr, nullptr, nullptr, "option", "Option", 2, UiWidgetStylePolicy::Outline, true, 160.0f, 32.0f},
+    {ICON_FA_ALIGN_LEFT "  textarea", "Controls", "textarea", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 240.0f, 96.0f},
+    {ICON_FA_BARS_PROGRESS "  progress", "Controls", "progress", "value", "0.5", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 16.0f},
+    {ICON_FA_TAGS "  label", "Controls", "label", nullptr, nullptr, "Label", nullptr, nullptr, 0, UiWidgetStylePolicy::None, false, 0.0f, 0.0f},
 };
+
+// PaletteEntry stays POD (const char* fields) so the table needs no static
+// initializers; this converts one entry into the spec the document consumes.
+UiWidgetSpec MakeWidgetSpec(const PaletteEntry& entry)
+{
+    UiWidgetSpec spec;
+    spec.tag_ = entry.tag_;
+    if (entry.attrName_)
+    {
+        spec.attrName_ = entry.attrName_;
+        spec.attrValue_ = entry.attrValue_ ? entry.attrValue_ : "";
+    }
+    if (entry.childText_)
+        spec.childText_ = entry.childText_;
+    if (entry.childElemTag_)
+    {
+        spec.childElemTag_ = entry.childElemTag_;
+        spec.childElemText_ = entry.childElemText_ ? entry.childElemText_ : "";
+        spec.childElemCount_ = entry.childElemCount_;
+    }
+    spec.stylePolicy_ = entry.stylePolicy_;
+    spec.materialize_ = entry.materialize_;
+    spec.size_ = Vector2{entry.sizeX_, entry.sizeY_};
+    return spec;
+}
 
 // Row-scoped context menu popup (shared by every hierarchy row; the request
 // is recorded by RenderNode and opened at the end of RenderContent, see the
@@ -692,26 +750,72 @@ void UIViewTab::RenderToolbar()
     ui::BeginDisabled(!hasDoc);
     if (ui::BeginCombo(ICON_FA_PLUS " Add Widget", "Select..."))
     {
+        // Compare by content, not by pointer: identical string literals are
+        // only merged into one address when the compiler pools strings, so a
+        // pointer comparison would re-print the header before every entry on
+        // builds without pooling.
+        ea::string lastGroup;
         for (const PaletteEntry& entry : kPalette)
         {
+            if (lastGroup != entry.group_)
+            {
+                ui::SeparatorText(entry.group_);
+                lastGroup = entry.group_;
+            }
             if (ui::Selectable(entry.label_))
             {
-                if (UiNode* added = document_->AddWidget(selected_, entry.tag_))
+                if (UiNode* added = document_->AddWidget(selected_, MakeWidgetSpec(entry)))
                     SetSelectedNode(added);
             }
         }
+        // Any tag: RmlUi tag names are only stylesheet lookup keys, so any name
+        // the project styles is valid. The entry gets the generic placeholder
+        // look until the project's stylesheet defines it.
+        ui::SeparatorText("Arbitrary tag");
+        static char anyTag[32] = "";
+        const bool enterPressed = ui::InputText("##anyTag", anyTag, sizeof(anyTag),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        bool tagLooksValid = anyTag[0] != '\0';
+        for (const char* p = anyTag; *p; ++p)
+        {
+            if (!std::isalnum(static_cast<unsigned char>(*p)) && *p != '-' && *p != '_')
+            {
+                tagLooksValid = false;
+                break;
+            }
+        }
+        ui::SameLine();
+        ui::BeginDisabled(!tagLooksValid);
+        if (tagLooksValid && (enterPressed || ui::Button(ICON_FA_PLUS " Add")))
+        {
+            UiWidgetSpec spec;
+            spec.tag_ = anyTag;
+            spec.stylePolicy_ = UiWidgetStylePolicy::Panel;
+            if (UiNode* added = document_->AddWidget(selected_, spec))
+                SetSelectedNode(added);
+            anyTag[0] = '\0';
+        }
+        ui::EndDisabled();
         ui::EndCombo();
     }
     ui::SameLine();
-    const bool canEdit = selected_ && document_ && selected_ != document_->GetModel().root_.Get()
-        && !selected_->IsNestedDoc();
-    ui::BeginDisabled(!canEdit);
+    const bool isRealElement = selected_ && document_
+        && selected_ != document_->GetModel().root_.Get()
+        && !selected_->IsNestedDoc() && !selected_->IsHeadLink();
+    ui::BeginDisabled(!isRealElement);
     if (ui::Button(ICON_FA_COPY " Copy"))
     {
         if (UiNode* copy = document_->DuplicateNode(selected_))
             SetSelectedNode(copy);
     }
+    ui::EndDisabled();
+    // Delete also covers the virtual link nodes: deleting one removes its
+    // <link> line from <head> (text-level, undoable). Copy does not - a
+    // duplicated link line would be pointless noise.
+    const bool canDelete = selected_ && document_
+        && selected_ != document_->GetModel().root_.Get();
     ui::SameLine();
+    ui::BeginDisabled(!canDelete);
     if (ui::Button(ICON_FA_TRASH " Delete"))
         document_->DeleteNode(selected_); // OnModelEdited revalidates the selection
     ui::EndDisabled();
@@ -721,17 +825,20 @@ void UIViewTab::RenderToolbar()
     if (ui::BeginPopup("##uiElemCtx"))
     {
         UiNode* node = selected_;
-        if (node && !node->IsText() && !node->IsNestedDoc() && !node->IsMaterialized())
+        if (node && !node->IsText() && !node->IsNestedDoc() && !node->IsHeadLink()
+            && !node->IsMaterialized())
         {
             if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
                 document_->MaterializeNode(node);
         }
-        else if (node && !node->IsText() && !node->IsNestedDoc() && node->IsMaterialized())
+        else if (node && !node->IsText() && !node->IsNestedDoc() && !node->IsHeadLink()
+            && node->IsMaterialized())
         {
             if (ui::MenuItem(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
                 document_->DematerializeNode(node);
         }
-        if (node && document_ && node != document_->GetModel().root_.Get() && !node->IsNestedDoc())
+        if (node && document_ && node != document_->GetModel().root_.Get() && !node->IsNestedDoc()
+            && !node->IsHeadLink())
         {
             if (ui::MenuItem(ICON_FA_COPY " Copy"))
             {
@@ -1116,7 +1223,17 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
         return;
 
     ea::string label;
-    if (node->IsNestedDoc())
+    if (node->IsHeadLink())
+    {
+        // A head link reads as "kind + what it pulls in": the two kinds RmlUi
+        // supports differ in what the href points at (a .rcss look vs a .rml
+        // window template). The path is edited in the Inspector panel.
+        const ea::string type = node->GetAttribute("type");
+        const ea::string kind = type == "text/template" ? "rml"
+            : (type == "text/rcss" ? "css" : (type.empty() ? "link" : type));
+        label = ea::string(ICON_FA_LINK) + " " + kind + " " + node->GetAttribute("href");
+    }
+    else if (node->IsNestedDoc())
     {
         // The template-chrome virtual node reads as the file it comes from;
         // the full resolved path lives in the Inspector panel.
@@ -1187,12 +1304,22 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
         if (UIViewDocument* doc = tab->GetDocument())
             OpenNestedDocumentFile(tab->GetContext(), doc, node->nestedDocHref_, /*revealOnly=*/false);
     }
+    // Double-clicking a template link opens the linked .rml alongside, same
+    // as the nested-doc node (the link is that template's head declaration).
+    if (node->IsHeadLink() && node->GetAttribute("type") == "text/template"
+        && ui::IsItemClicked(ImGuiMouseButton_Left)
+        && ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+    {
+        if (UIViewDocument* doc = tab->GetDocument())
+            OpenNestedDocumentFile(tab->GetContext(), doc, node->GetAttribute("href"), /*revealOnly=*/false);
+    }
 
-    // Drag the row out of its container. Root and the template-chrome virtual
-    // node are not draggable: root IS the document, the virtual node has no
-    // authored source here to move.
+    // Drag the row out of its container. Root and the virtual nodes are not
+    // draggable: root IS the document, the nested-doc node has no authored
+    // source here to move, and head links are <head> constructs with a fixed
+    // place (their order is the stylesheet cascade order).
     if (node != tab->GetDocument()->GetModel().root_.Get() && !node->IsNestedDoc()
-        && ui::BeginDragDropSource())
+        && !node->IsHeadLink() && ui::BeginDragDropSource())
     {
         // Payload bytes must be contiguous; the local copy is swallowed
         // (copied) by SetDragDropPayload within the same frame.
@@ -1206,7 +1333,7 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     // at the end). MoveNode rejects the illegal cases (drop on oneself, on a
     // descendant, on the virtual node). Hover feedback: the row outlines as
     // the pending container while the payload is over it.
-    if (!node->IsNestedDoc() && !node->IsText() && ui::BeginDragDropTarget())
+    if (!node->IsNestedDoc() && !node->IsHeadLink() && !node->IsText() && ui::BeginDragDropTarget())
     {
         ui::GetWindowDrawList()->AddRect(ui::GetItemRectMin(), ui::GetItemRectMax(),
             kHoverColor, 0.0f, 0, 2.0f);
@@ -1269,12 +1396,35 @@ void UIViewHierarchy::RenderContextMenuItems()
     if (!target)
         return;
 
-    // The nested-doc virtual node offers navigation only; it has no editable
-    // payload in this document.
+    // The nested-doc node is the instantiated template link: navigation plus
+    // removal (the generic position/copy machinery does not apply to it).
     if (target->IsNestedDoc())
     {
         if (ui::MenuItem(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open Nested Document"))
             OpenNestedDocumentFile(context_, doc, target->nestedDocHref_, /*revealOnly=*/false);
+        if (ui::MenuItem(ICON_FA_TRASH " Delete Link"))
+        {
+            tab->SetSelectedNode(target);
+            doc->DeleteNode(target); // routed to the text-level head removal
+        }
+        contextMenuTargetValid_ = false;
+        return;
+    }
+
+    // A #head-link node stands for <head> bytes: the position/copy machinery
+    // does not apply, only navigation (template links) and removal do.
+    if (target->IsHeadLink())
+    {
+        if (target->GetAttribute("type") == "text/template")
+        {
+            if (ui::MenuItem(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open Linked Document"))
+                OpenNestedDocumentFile(context_, doc, target->GetAttribute("href"), /*revealOnly=*/false);
+        }
+        if (ui::MenuItem(ICON_FA_TRASH " Delete Link"))
+        {
+            tab->SetSelectedNode(target);
+            doc->DeleteNode(target); // routed to the text-level head removal
+        }
         contextMenuTargetValid_ = false;
         return;
     }
@@ -1313,6 +1463,12 @@ UIViewInspector::UIViewInspector(UIViewTab* owner)
 void UIViewInspector::RenderContent()
 {
     UIViewTab* tab = owner_;
+
+    // Document-level editing applies with or without a selection, so it sits
+    // above the per-node editors.
+    RenderHeadLinks();
+    ui::Separator();
+
     UiNode* node = tab ? tab->GetSelectedNode() : nullptr;
     if (!node)
     {
@@ -1325,6 +1481,14 @@ void UIViewInspector::RenderContent()
     if (node->IsNestedDoc())
     {
         RenderNestedDoc(node);
+        return;
+    }
+
+    // A #head-link node edits its <head> bytes through the text-level link
+    // commands; the generic attribute/style editors below do not apply.
+    if (node->IsHeadLink())
+    {
+        RenderHeadLink(node);
         return;
     }
 
@@ -1346,6 +1510,34 @@ void UIViewInspector::RenderContent()
     RenderTemplates(node);
     ui::Separator();
     RenderComputed(node);
+}
+
+void UIViewInspector::RenderHeadLinks()
+{
+    UIViewTab* tab = owner_;
+    UIViewDocument* doc = tab ? tab->GetDocument() : nullptr;
+
+    ui::SeparatorText(ICON_FA_LINK " Head Links");
+    if (!doc || !doc->GetRmlDocument())
+    {
+        ui::TextDisabled("(no document open)");
+        return;
+    }
+
+    // The links themselves are #head-link nodes at the top of the Hierarchy
+    // (edit each there); this row is only the spigot for one more <link>.
+    const bool committed = ui::InputTextWithHint("##headLinkHref", "/UI/default.rcss",
+        headLinkHrefBuf_, sizeof(headLinkHrefBuf_), ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool wantCss = committed || ui::Button(ICON_FA_PLUS " Stylesheet (.rcss)");
+    ui::SameLine();
+    const bool wantRml = ui::Button(ICON_FA_PLUS " Template (.rml)");
+    if (wantCss || wantRml)
+    {
+        // Enter in the field adds the common case: a stylesheet link.
+        const ea::string href = Trim(ea::string(headLinkHrefBuf_));
+        if (!href.empty() && doc->AddHeadLink(wantCss ? "text/rcss" : "text/template", href))
+            headLinkHrefBuf_[0] = '\0';
+    }
 }
 
 void UIViewInspector::InvalidateCaches()
@@ -1374,6 +1566,20 @@ void UIViewInspector::RenderNestedDoc(UiNode* node)
         "minted from this template file. Open it to edit the frame itself.");
     ui::Spacing();
 
+    // The <link type="text/template"> href this node stands for: editing it
+    // repoints the window frame at another template file.
+    char hrefBuf[512];
+    snprintf(hrefBuf, sizeof(hrefBuf), "%s", node->nestedDocHref_.c_str());
+    if (ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        const ea::string newHref = Trim(ea::string(hrefBuf));
+        if (!newHref.empty())
+        {
+            doc->EditHeadLink(node, "text/template", newHref);
+            return; // the model was rebuilt; re-render from the new node
+        }
+    }
+
     ui::BeginDisabled(!exists);
     if (ui::Button(ICON_FA_MAGNIFYING_GLASS " Reveal in Resource Browser"))
         OpenNestedDocumentFile(context_, doc, node->nestedDocHref_, /*revealOnly=*/true);
@@ -1383,6 +1589,103 @@ void UIViewInspector::RenderNestedDoc(UiNode* node)
     ui::EndDisabled();
     if (!exists)
         ui::TextDisabled("(nested file not found)");
+
+    ui::Spacing();
+    if (ui::Button(ICON_FA_TRASH " Delete Link"))
+    {
+        doc->DeleteNode(node); // routed to the text-level head removal
+        return; // the model was rebuilt
+    }
+}
+
+void UIViewInspector::RenderHeadLink(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    UIViewDocument* doc = tab ? tab->GetDocument() : nullptr;
+    if (!doc)
+        return;
+
+    const ea::string type = node->GetAttribute("type");
+    const ea::string href = node->GetAttribute("href");
+    const bool isTemplate = type == "text/template";
+
+    ui::Text(ICON_FA_LINK " %s", isTemplate ? "RML Template Link" : "Stylesheet Link");
+    ui::TextDisabled(ICON_FA_FILE " %s", doc->GetSourcePath().c_str());
+    ui::Separator();
+
+    const ea::string resPath = ResolveRelativeResourcePath(doc->GetSourcePath(), href);
+    const bool exists = !resPath.empty() && ResourceExists(context_, resPath);
+
+    // The two link kinds RmlUi supports differ in what the href points at: a
+    // stylesheet dresses the widgets, a template provides the window chrome
+    // that <body template="..."> instantiates. Switching rewrites the type
+    // attribute of the same <link> element.
+    static const char* kLinkTypes[] = {"text/rcss", "text/template"};
+    int current = -1;
+    if (type == "text/rcss")
+        current = 0;
+    else if (isTemplate)
+        current = 1;
+    int pendingType = -1;
+    if (ui::BeginCombo("type", current >= 0 ? kLinkTypes[current]
+        : (type.empty() ? "(no type)" : type.c_str())))
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            const bool isSelected = (current == i);
+            if (ui::Selectable(i == 0 ? "Stylesheet (.rcss)" : "RML Template (.rml)", isSelected)
+                && !isSelected)
+                pendingType = i;
+        }
+        ui::EndCombo();
+    }
+    if (pendingType >= 0)
+    {
+        doc->EditHeadLink(node, kLinkTypes[pendingType], href);
+        return; // the model was rebuilt; re-render from the new node
+    }
+
+    // Resource path, resolved like RmlUi resolves it (a leading '/' is
+    // rooted at the project's Data directory).
+    char hrefBuf[512];
+    snprintf(hrefBuf, sizeof(hrefBuf), "%s", href.c_str());
+    if (ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        const ea::string newHref = Trim(ea::string(hrefBuf));
+        if (!newHref.empty())
+        {
+            doc->EditHeadLink(node, type, newHref);
+            return; // the model was rebuilt; re-render from the new node
+        }
+    }
+
+    ui::Spacing();
+    if (isTemplate)
+        ui::TextWrapped("The window frame (title bar, close button, ...) is minted from "
+            "this template file when <body template=\"...\"> names it.");
+    else
+        ui::TextWrapped("The linked stylesheet provides the looks of this document's "
+            "widgets; rules authored below still override it.");
+
+    ui::BeginDisabled(!exists);
+    if (ui::Button(ICON_FA_MAGNIFYING_GLASS " Reveal in Resource Browser"))
+        OpenNestedDocumentFile(context_, doc, href, /*revealOnly=*/true);
+    if (isTemplate)
+    {
+        ui::SameLine();
+        if (ui::Button(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open"))
+            OpenNestedDocumentFile(context_, doc, href, /*revealOnly=*/false);
+    }
+    ui::EndDisabled();
+    if (!exists)
+        ui::TextDisabled("(linked file not found)");
+
+    ui::Spacing();
+    if (ui::Button(ICON_FA_TRASH " Delete Link"))
+    {
+        doc->DeleteNode(node); // routed to the text-level head removal
+        return; // the model was rebuilt
+    }
 }
 
 void UIViewInspector::RenderTemplates(UiNode* node)
