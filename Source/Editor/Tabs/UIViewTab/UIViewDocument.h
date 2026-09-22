@@ -113,6 +113,11 @@ public:
     UiNode* AddWidget(UiNode* parent, const char* tag);
     UiNode* DuplicateNode(UiNode* node);
     bool DeleteNode(UiNode* node);
+    /// Move a node (with its subtree) under \a newParent at \a index. Guards:
+    /// no text/nested-doc/root involved, and \a newParent must not live inside
+    /// the moved subtree (that would orphan it). Returns the moved node in the
+    /// rebuilt tree, or null when the move was rejected.
+    UiNode* MoveNode(UiNode* node, UiNode* newParent, unsigned index);
     bool MaterializeNode(UiNode* node);
     /// Drop the explicit absolute positioning (position/left/top) so the node
     /// re-joins the document flow. Sizing stays behind - see the impl note.

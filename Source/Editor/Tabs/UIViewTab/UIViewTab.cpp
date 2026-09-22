@@ -95,6 +95,13 @@ const PaletteEntry kPalette[] = {
     {ICON_FA_FONT "  Text", "text"},
 };
 
+// Row-scoped context menu popup (shared by every hierarchy row; the request
+// is recorded by RenderNode and opened at the end of RenderContent, see the
+// comments there).
+const char* const kUiNodePopupId = "##uiNodeCtx";
+// Drag-drop payload type carrying the source row's child-index path.
+const char* const kUiNodeDragType = "UIEDITOR_NODE_PATH";
+
 // Resolve an RmlUi href against the document's resource path, mirroring how
 // RmlUi's SystemInterface::JoinPath resolves document-relative references
 // (the same rule RmlFile uses when loading <link>/<template> targets).
@@ -1081,6 +1088,25 @@ void UIViewHierarchy::RenderContent()
 
     ui::Checkbox("Focus Path Only", &focusPathOnly_);
     RenderNode(tab->GetDocument()->GetModel().root_.Get(), ea::vector<unsigned>{});
+
+    // Row-scoped context menu. The menu itself is shared with the tab-level
+    // context: it resolves the recorded target path on every use, falling
+    // back to the selection. Opening is deferred to here, right before
+    // BeginPopup: ImGui hashes a named popup ID against the current ID-stack
+    // seed, and tree rows render below every expanded ancestor's PushID, so
+    // an OpenPopup issued inside a row would hash a different ID than this
+    // Begin site (window base stack) and the popup would sit orphaned on the
+    // stack. RenderNode only records the request.
+    if (openNodeMenuRequested_)
+    {
+        ui::OpenPopup(kUiNodePopupId);
+        openNodeMenuRequested_ = false;
+    }
+    if (ui::BeginPopup(kUiNodePopupId))
+    {
+        RenderContextMenuItems();
+        ui::EndPopup();
+    }
 }
 
 void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
@@ -1142,11 +1168,16 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
 
     if (ui::IsItemClicked(ImGuiMouseButton_Left) && !ui::IsItemToggledOpen())
         tab->SetSelectedNode(node);
-    if (ui::IsItemClicked(ImGuiMouseButton_Right))
+    // Row context menu. The target is recorded at release time: the press may
+    // have started on a different row, and ImGui opens the popup where the
+    // button is released. Store the path, not the pointer: commands rebuild
+    // the whole tree. The popup is opened at the end of RenderContent (see
+    // there for why the request is deferred instead of opened right here).
+    if (ui::IsItemHovered() && ui::IsMouseReleased(ImGuiMouseButton_Right))
     {
-        // Store the path, not the pointer: commands rebuild the whole tree.
         contextMenuTargetPath_ = path;
         contextMenuTargetValid_ = true;
+        openNodeMenuRequested_ = true;
     }
     // Double-click on the nested-doc node jumps straight into the nested file
     // (opens alongside; multi-document keeps this document open).
@@ -1155,6 +1186,42 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     {
         if (UIViewDocument* doc = tab->GetDocument())
             OpenNestedDocumentFile(tab->GetContext(), doc, node->nestedDocHref_, /*revealOnly=*/false);
+    }
+
+    // Drag the row out of its container. Root and the template-chrome virtual
+    // node are not draggable: root IS the document, the virtual node has no
+    // authored source here to move.
+    if (node != tab->GetDocument()->GetModel().root_.Get() && !node->IsNestedDoc()
+        && ui::BeginDragDropSource())
+    {
+        // Payload bytes must be contiguous; the local copy is swallowed
+        // (copied) by SetDragDropPayload within the same frame.
+        ea::vector<unsigned> dragPath = path;
+        ui::SetDragDropPayload(kUiNodeDragType, dragPath.data(),
+            dragPath.size() * sizeof(unsigned));
+        ui::TextUnformatted(label.c_str());
+        ui::EndDragDropSource();
+    }
+    // Drop on a row re-parents the dragged node into that container (appended
+    // at the end). MoveNode rejects the illegal cases (drop on oneself, on a
+    // descendant, on the virtual node). Hover feedback: the row outlines as
+    // the pending container while the payload is over it.
+    if (!node->IsNestedDoc() && !node->IsText() && ui::BeginDragDropTarget())
+    {
+        ui::GetWindowDrawList()->AddRect(ui::GetItemRectMin(), ui::GetItemRectMax(),
+            kHoverColor, 0.0f, 0, 2.0f);
+        if (const ImGuiPayload* payload = ui::AcceptDragDropPayload(kUiNodeDragType))
+        {
+            const unsigned* srcPath = static_cast<const unsigned*>(payload->Data);
+            ea::vector<unsigned> src(srcPath, srcPath + payload->DataSize / sizeof(unsigned));
+            UIViewDocument* doc = tab->GetDocument();
+            if (UiNode* moved = doc->MoveNode(doc->GetModel().ResolvePath(src), node,
+                static_cast<unsigned>(node->children_.size())))
+            {
+                tab->SetSelectedNode(moved);
+            }
+        }
+        ui::EndDragDropTarget();
     }
 
     if (hasElementChild && ui::IsItemToggledOpen())

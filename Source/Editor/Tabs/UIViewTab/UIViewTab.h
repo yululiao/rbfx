@@ -204,6 +204,9 @@ public:
     EditorTab* GetOwnerTab() override { return owner_; }
     void RenderContent() override;
     void RenderContextMenuItems() override;
+    /// The hierarchy issues undoable editing commands through the same
+    /// project-wide UndoManager as the owner tab.
+    bool IsUndoSupported() override { return true; }
     /// @}
 
     /// Expand the ancestor chain of the given node path (called on selection).
@@ -219,6 +222,10 @@ private:
     // whole-tree rebuilds that every editing command performs.
     ea::vector<unsigned> contextMenuTargetPath_;
     bool contextMenuTargetValid_ = false;
+    // Set by RenderNode on right-click, honored at the end of RenderContent:
+    // OpenPopup must run where BeginPopup runs (window base ID stack), see
+    // the comment there.
+    bool openNodeMenuRequested_ = false;
     ea::vector<ea::vector<unsigned>> openedPaths_;
     ea::vector<ea::vector<unsigned>> closedPaths_;
     bool focusPathOnly_ = false;
@@ -236,6 +243,9 @@ public:
     /// @{
     EditorTab* GetOwnerTab() override { return owner_; }
     void RenderContent() override;
+    /// Attribute and inline-style edits push onto the same project-wide
+    /// UndoManager as the owner tab.
+    bool IsUndoSupported() override { return true; }
     /// @}
 
     /// Drop cached per-node edit state (inline-style seed) so the next render

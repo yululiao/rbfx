@@ -603,6 +603,77 @@ bool UIViewDocument::DeleteNode(UiNode* node)
     return CommitAndReload(undoText, {});
 }
 
+void ResetSpineAnchors(UiNode& node)
+{
+    node.srcNode_ = -1;
+    for (const SharedPtr<UiNode>& child : node.children_)
+        ResetSpineAnchors(*child);
+}
+
+UiNode* UIViewDocument::MoveNode(UiNode* node, UiNode* newParent, unsigned index)
+{
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc())
+        return nullptr;
+    if (!newParent || newParent->IsText() || newParent->IsNestedDoc() || newParent == node)
+        return nullptr;
+    // Reparenting into the moved subtree would cut that subtree out of the
+    // tree: reject when the new parent is the node itself or any descendant.
+    for (UiNode* it = newParent; it; it = model_.FindParent(it))
+    {
+        if (it == node)
+            return nullptr;
+    }
+
+    UiNode* oldParent = model_.FindParent(node);
+    if (!oldParent)
+        return nullptr;
+
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<unsigned> newParentPath;
+    if (!model_.BuildPath(newParent, newParentPath))
+        return nullptr;
+
+    unsigned oldIndex = 0;
+    bool found = false;
+    for (unsigned i = 0; i < oldParent->children_.size(); i++)
+    {
+        if (oldParent->children_[i].Get() == node)
+        {
+            oldIndex = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        return nullptr;
+
+    // Keep the subtree alive across the erase, then splice it in. Moving
+    // within one container shifts the indices behind the removed slot.
+    SharedPtr<UiNode> held = oldParent->children_[oldIndex];
+    oldParent->children_.erase(oldParent->children_.begin() + oldIndex);
+    // The moved subtree no longer lives where the spine anchors it: a kept
+    // anchor would make emit diff both ends wrong - the old parent sees its
+    // source child unreferenced and patches the bytes away, while the new
+    // parent sees an anchored child and generates nothing in its place,
+    // net effect: the node vanishes from the document. Drop every spine
+    // anchor in the subtree: the old position is deleted as such, and the
+    // new one is whole-subtree generated (GenSubtree) like any editor-made
+    // widget. Rebuild re-anchors everything from the new text.
+    ResetSpineAnchors(*held);
+    if (oldParent == newParent && index > oldIndex)
+        --index;
+    index = Min(index, static_cast<unsigned>(newParent->children_.size()));
+    newParent->children_.insert(newParent->children_.begin() + index, held);
+
+    ea::vector<unsigned> newPath = newParentPath;
+    newPath.push_back(index);
+    // One undo step per move (empty merge key); the element is expected to
+    // land at its flow position, so no landing correction.
+    if (!CommitAndReload(undoText, {}))
+        return nullptr;
+    return model_.ResolvePath(newPath);
+}
+
 bool UIViewDocument::MaterializeNode(UiNode* node)
 {
     if (!node || !node->dom_ || node->IsText() || node->IsNestedDoc() || node->IsMaterialized())
