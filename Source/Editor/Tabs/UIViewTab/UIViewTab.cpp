@@ -114,6 +114,16 @@ struct PaletteEntry
 // stylesheet key - the default rml.rcss gives it the same display: block, so
 // the look and flow are identical while the tag keeps its meaning. No fake
 // styling, no pinned position - it joins the flow.
+// Buttons: the engine has no registered button control, and does not need one -
+// the shipped 107_HelloRmlUI sample spells all three button forms as "element +
+// text child", with behaviour coming from RCSS (:hover/:active, focus/nav via
+// CoreData/UI/layout.rcss, which also styles button[disabled]) and from either
+// onclick="event:|sound:" (Factory event listener instancer) or
+// data-event-click (data-model binding). <input type="submit"> never draws its
+// value attribute (InputTypeButton has no widget and no render path, unlike
+// InputTypeText which renders through its widget), but nothing strips child
+// nodes, so its label has to be a text child like everywhere else - hence the
+// child text on the submit row below.
 const PaletteEntry kPalette[] = {
     {ICON_FA_SQUARE "  div", "Structure", "div", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 160.0f, 48.0f},
     {ICON_FA_TABLE_LIST "  form", "Structure", "form", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Panel, true, 240.0f, 96.0f},
@@ -124,7 +134,7 @@ const PaletteEntry kPalette[] = {
     {ICON_FA_SQUARE_CHECK "  input (checkbox)", "Controls", "input", "type", "checkbox", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 20.0f, 20.0f},
     {ICON_FA_CIRCLE_DOT "  input (radio)", "Controls", "input", "type", "radio", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 20.0f, 20.0f},
     {ICON_FA_SLIDERS "  input (range)", "Controls", "input", "type", "range", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 20.0f},
-    {ICON_FA_PAPER_PLANE "  input (submit)", "Controls", "input", "type", "submit", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 120.0f, 36.0f},
+    {ICON_FA_PAPER_PLANE "  input (submit)", "Controls", "input", "type", "submit", "Submit", nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 120.0f, 36.0f},
     {ICON_FA_LIST "  select", "Controls", "select", nullptr, nullptr, nullptr, "option", "Option", 2, UiWidgetStylePolicy::Outline, true, 160.0f, 32.0f},
     {ICON_FA_ALIGN_LEFT "  textarea", "Controls", "textarea", nullptr, nullptr, nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 240.0f, 96.0f},
     {ICON_FA_BARS_PROGRESS "  progress", "Controls", "progress", "value", "0.5", nullptr, nullptr, nullptr, 0, UiWidgetStylePolicy::Outline, true, 160.0f, 16.0f},
