@@ -2734,6 +2734,107 @@ bool UIViewInspector::RenderAppearance(UiNode* node)
     for (const StyleRow& row : kAppearanceRows)
         RenderOneStyleRow(row, payload, structural);
 
+    // --- Background image: a single-value picker that authors the whole
+    // `decorator` shorthand as one image(...). RmlUi has no background-image;
+    // the decorator channel is what paints behind an element's content. Only
+    // the "one image, no siblings" shape is editable here - mixed decorators
+    // (image + gradient/box/tiled, or with an inner ')') render read-only so
+    // we never silently drop what we cannot represent. State variants
+    // (:hover/:active) need a .rcss selector, which inline style cannot carry;
+    // those stay raw too.
+    {
+        const int at = FindStyleIndexIn(payload.style_, "decorator");
+        const ea::string dec = at >= 0 ? Trim(payload.style_[at].value_) : ea::string();
+
+        ea::string display;
+        bool editable = true;
+        const ea::string pfx = "image(";
+        bool singleImage = false;
+        ea::string inner;
+        if (dec.size() >= pfx.size() + 2 && dec.compare(0, pfx.size(), pfx) == 0 && dec.back() == ')')
+        {
+            inner = Trim(dec.substr(pfx.size(), dec.size() - pfx.size() - 1));
+            if (inner.find(')') == ea::string::npos)
+                singleImage = true;
+        }
+        if (at >= 0 && !singleImage)
+        {
+            editable = false;
+            display = dec; // show the authored string verbatim so the row does not lie
+        }
+        else if (singleImage)
+        {
+            if (inner.size() >= 2 && inner.front() == '"' && inner.back() == '"')
+                display = inner.substr(1, inner.size() - 2);
+            else
+                display = inner;
+        }
+        // else: no decorator authored at all -> empty editable field
+
+        ui::TextUnformatted("Background image");
+        if (ui::IsItemHovered())
+        {
+            if (editable)
+                ui::SetTooltip("Paints a single image(...) behind this element's content via the\n"
+                    "decorator channel (RmlUi has no background-image). Type a '/'-rooted path\n"
+                    "under Data/ or a sprite name, or use the folder button. For image-fit,\n"
+                    "mixed decorators, or :hover/:active variants, use Inline Style raw or a\n"
+                    ".rcss rule (inline style carries no selectors).");
+            else
+                ui::SetTooltip("This element's decorator is not a single image(...) - it is\n"
+                    "layered with something else. Edit it in Inline Style raw so the\n"
+                    "other decorators survive.");
+        }
+        ui::SameLine();
+        ui::PushItemWidth(-40.0f);
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "%s", display.c_str());
+        const char* hint = editable ? "path or sprite name" : "(mixed - edit in raw)";
+        const bool submit = ui::InputTextWithHint("##bgimg", hint, buf, sizeof(buf),
+            ImGuiInputTextFlags_EnterReturnsTrue
+                | (editable ? 0 : ImGuiInputTextFlags_ReadOnly));
+        ui::PopItemWidth();
+        ea::optional<ea::string> picked;
+        ui::BeginDisabled(!editable);
+        picked = ResourceBrowseWidget("##browse", context_, display, kImageFilter);
+        ui::EndDisabled();
+        if (editable && (submit || picked))
+        {
+            const ea::string next = picked ? *picked : Trim(buf);
+            if (next.empty())
+            {
+                if (at >= 0)
+                {
+                    DropPayloadStyle(payload, "decorator");
+                    structural = true;
+                }
+            }
+            else
+            {
+                // Quote paths so '/' '.' '\\' don't confuse the unquoted parser;
+                // leave bare sprite tokens (and sprite+orientation pairs like
+                // 'arrow-down flip-vertical') as the sample theme writes them.
+                bool needsQuote = false;
+                for (char c : next)
+                {
+                    if (c == '/' || c == '\\' || c == '.')
+                    {
+                        needsQuote = true;
+                        break;
+                    }
+                }
+                const ea::string write = needsQuote
+                    ? ("image(\"" + next + "\")")
+                    : ("image(" + next + ")");
+                if (at < 0 || write != dec)
+                {
+                    SetPayloadStyle(payload, "decorator", write);
+                    structural = true;
+                }
+            }
+        }
+    }
+
     if (structural && tab && tab->GetDocument())
     {
         // A structured commit changes style_; force the raw editor below to
