@@ -2660,6 +2660,69 @@ void LayoutSizeField(UiNodePayload& payload, bool& structural, const char* label
     ui::PopID();
 }
 
+// Which edge(s) an absolutely-positioned element measures from, on one axis.
+// The anchor grid is the cross product of a horizontal and a vertical mode, so
+// the highlighted cell always matches the authored top/right/bottom/left +
+// width/height exactly - there is no "custom" state it could misreport.
+enum AnchorAxis
+{
+    AnchorNear,    // pinned to the leading edge (top / left); size as authored
+    AnchorStretch, // both edges pinned and size auto: resizes with the container
+    AnchorFar,     // pinned to the trailing edge (bottom / right)
+};
+
+// The size declaration counts as "authored" only if present and not auto.
+bool IsSizedAxis(const UiNodePayload& payload, const char* name)
+{
+    const int at = FindStyleIndexIn(payload.style_, name);
+    return at >= 0 && Trim(payload.style_[at].value_) != "auto";
+}
+
+bool HasInset(const UiNodePayload& payload, const char* name)
+{
+    return FindStyleIndexIn(payload.style_, name) >= 0;
+}
+
+void ResolveAnchorAxes(const UiNodePayload& payload, AnchorAxis& horiz, AnchorAxis& vert)
+{
+    const bool l = HasInset(payload, "left"), r = HasInset(payload, "right");
+    const bool t = HasInset(payload, "top"), b = HasInset(payload, "bottom");
+    horiz = (l && r && !IsSizedAxis(payload, "width")) ? AnchorStretch : (!l && r ? AnchorFar : AnchorNear);
+    vert = (t && b && !IsSizedAxis(payload, "height")) ? AnchorStretch : (!t && b ? AnchorFar : AnchorNear);
+}
+
+// Pin an edge, seeding a flush 0 when it had no authored value yet (the offset
+// field sits right there to nudge).
+void PinAnchorEdge(UiNodePayload& payload, const char* inset)
+{
+    if (!HasInset(payload, inset))
+        SetPayloadStyle(payload, inset, "0px");
+}
+
+// Rewrite one axis to match the chosen mode. Only insets and an auto size are
+// authored - never margin or transform - so anchoring keeps a single code path
+// and the grid, not the gizmo, owns non-top/left placement.
+void ApplyAnchorAxis(UiNodePayload& payload, AnchorAxis axis,
+    const char* nearEdge, const char* farEdge, const char* size)
+{
+    switch (axis)
+    {
+    case AnchorNear:
+        PinAnchorEdge(payload, nearEdge);
+        DropPayloadStyle(payload, farEdge);
+        break;
+    case AnchorFar:
+        PinAnchorEdge(payload, farEdge);
+        DropPayloadStyle(payload, nearEdge);
+        break;
+    case AnchorStretch:
+        PinAnchorEdge(payload, nearEdge);
+        PinAnchorEdge(payload, farEdge);
+        DropPayloadStyle(payload, size); // auto size is what makes it stretch
+        break;
+    }
+}
+
 bool UIViewInspector::RenderAppearance(UiNode* node)
 {
     UIViewTab* tab = owner_;
@@ -2743,6 +2806,54 @@ bool UIViewInspector::RenderLayout(UiNode* node)
             ui::SetTooltip("In flow: laid out by its container. Anchor: stays in flow but is the\n"
                 "reference for absolutely-positioned descendants. Free: out of flow, draggable\n"
                 "in the preview against the nearest Anchor/Free ancestor.");
+    }
+
+    // --- Anchor (absolutely-positioned elements only): pick which edges this box
+    // pins to and whether it stretches with its container. The 3x3 grid is the
+    // cross product of the two per-axis modes, so a cell is always highlighted to
+    // match the authored insets + size. The gizmo only ever writes top/left, so
+    // re-pick a cell after dragging to re-seat on another edge. ---
+    if (LowerCopy(cur("position")) == "absolute")
+    {
+        AnchorAxis h = AnchorNear, v = AnchorNear;
+        ResolveAnchorAxes(payload, h, v);
+
+        ui::Text("Anchor");
+        const char* cellTip[3][3] = {
+            { "top-left corner", "top edge, stretch across", "top-right corner" },
+            { "left edge, stretch down", "fill the container", "right edge, stretch down" },
+            { "bottom-left corner", "bottom edge, stretch across", "bottom-right corner" },
+        };
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int col = 0; col < 3; ++col)
+            {
+                const AnchorAxis ch = col == 0 ? AnchorNear : col == 1 ? AnchorStretch : AnchorFar;
+                const AnchorAxis cv = row == 0 ? AnchorNear : row == 1 ? AnchorStretch : AnchorFar;
+                ui::PushID(row * 3 + col);
+                if (ui::RadioButton("##a", h == ch && v == cv))
+                {
+                    ApplyAnchorAxis(payload, ch, "left", "right", "width");
+                    ApplyAnchorAxis(payload, cv, "top", "bottom", "height");
+                    structural = true;
+                }
+                if (ui::IsItemHovered())
+                    ui::SetTooltip("%s", cellTip[row][col]);
+                ui::PopID();
+                if (col < 2)
+                    ui::SameLine(0.0f, 24.0f);
+            }
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Middle row / column stretch the box on that axis (size becomes\n"
+                "auto). Centering a small element on both axes is left to a flex parent\n"
+                "(Align) or raw margin:auto.");
+
+        ui::TextDisabled("Insets (offset from each pinned edge; px or %)");
+        LayoutSizeField(payload, structural, "Top", "top", "auto");
+        LayoutSizeField(payload, structural, "Right", "right", "auto");
+        LayoutSizeField(payload, structural, "Bottom", "bottom", "auto");
+        LayoutSizeField(payload, structural, "Left", "left", "auto");
     }
 
     // --- Direction: picking Row/Column makes this a flex container (display:
