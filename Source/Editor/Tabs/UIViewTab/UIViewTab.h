@@ -130,12 +130,16 @@ private:
 
     /// Create a fresh .rml from the built-in template via a native "Save As" dialog rooted at
     /// the project Data folder, then open it (a new document must live on disk to be a resource).
+    /// Leaves a document file at exactly the path the user picked, or says why it could not.
     void NewDocument();
 
     /// Raw resource-path <-> text helpers shared by load/save/new.
     /// @{
     ea::string ReadResourceFile(const ea::string& resourceName) const;
     bool WriteResourceFile(const ea::string& resourceName, const ea::string& text);
+    /// Write to an absolute disk path, creating missing parent dirs, then confirm the
+    /// file really is there. Used where the path itself is the contract (New).
+    bool WriteFileAt(const ea::string& absPath, const ea::string& text);
     /// @}
 
     /// Drop selection/gizmo state so it starts fresh against a (re)loaded doc.

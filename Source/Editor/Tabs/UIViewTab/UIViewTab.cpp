@@ -450,6 +450,37 @@ bool UIViewTab::WriteResourceFile(const ea::string& resourceName, const ea::stri
     return true;
 }
 
+bool UIViewTab::WriteFileAt(const ea::string& absPath, const ea::string& text)
+{
+    auto* fs = GetSubsystem<FileSystem>();
+
+    // File never creates intermediate directories, and the save dialog happily
+    // accepts a path whose folders do not exist yet.
+    const size_t sep = absPath.find_last_of("/\\");
+    if (sep != ea::string::npos)
+        fs->CreateDirsRecursive(absPath.substr(0, sep));
+
+    {
+        File file(context_, absPath, FILE_WRITE);
+        if (!file.IsOpen())
+        {
+            URHO3D_LOGERROR("UIViewTab: cannot open '{}' for writing.", absPath.c_str());
+            return false;
+        }
+        file.Write(text.data(), text.size());
+    }
+
+    // Close-and-reopen is the only honest confirmation the bytes landed: a path
+    // that merely *looks* writable (read-only folder, wrong volume, antivirus)
+    // would otherwise report success and leave the user staring at an empty folder.
+    if (!fs->FileExists(absPath.c_str()))
+    {
+        URHO3D_LOGERROR("UIViewTab: '{}' was written but is not visible on disk", absPath.c_str());
+        return false;
+    }
+    return true;
+}
+
 void UIViewTab::ResetViewToDocument()
 {
     selected_ = document_ ? document_->GetModel().root_.Get() : nullptr;
@@ -646,6 +677,7 @@ void UIViewTab::NewDocument()
     auto* project = GetProject();
     if (!project)
         return;
+    auto* fs = GetSubsystem<FileSystem>();
 
     // Native "Save As" rooted at the project's Data folder. UI documents must live under
     // Data to be loadable resources (and to appear in the Resource Browser), so a path that
@@ -659,9 +691,13 @@ void UIViewTab::NewDocument()
     filterItem.name = "RmlUi document";
     filterItem.spec = "rml";
 
+    // The shell aborts the dialog with NFD_ERROR when handed a starting directory
+    // that does not exist, so only seed it with a folder that really is there.
+    const char* initialDir = !dataDir.empty() && fs->DirExists(dataDir) ? dataDir.c_str() : nullptr;
+
     nfdu8char_t* outPath = nullptr;
     const nfdresult_t res = NFD_SaveDialogU8(&outPath, &filterItem, 1,
-        dataDir.empty() ? nullptr : dataDir.c_str(), "NewDocument.rml");
+        initialDir, "NewDocument.rml");
     if (res == NFD_ERROR)
     {
         URHO3D_LOGERROR("UIViewTab: save dialog failed: {}", NFD_GetError());
@@ -673,6 +709,11 @@ void UIViewTab::NewDocument()
     ea::string chosen = outPath;
     NFD_FreePathU8(outPath);
     NormalizePath(chosen);
+    if (chosen.empty())
+    {
+        URHO3D_LOGERROR("UIViewTab: the save dialog returned an empty path");
+        return;
+    }
     if (chosen.size() < 4 || LowerCopy(chosen).compare(chosen.size() - 4, 4, ".rml") != 0)
         chosen += ".rml";
 
@@ -685,19 +726,39 @@ void UIViewTab::NewDocument()
             dataDir.c_str(), chosen.c_str());
         return;
     }
-    const ea::string resourceName = chosen.substr(dataDir.length());
+    ea::string resourceName = chosen.substr(dataDir.length());
     if (resourceName.empty())
-        return;
-
-    // (Re)open so the freshly written file becomes the active, tracked
-    // document. An already-open document is only focused - closing it would
-    // discard its undo history and any unsaved edits.
-    if (!IsResourceOpen(resourceName)
-        && !WriteResourceFile(resourceName, kTemplate))
     {
-        URHO3D_LOGERROR("UIViewTab: failed to create UI document '{}'", resourceName.c_str());
+        URHO3D_LOGERROR("UIViewTab: cannot derive a resource name from '{}' against Data path '{}'",
+            chosen.c_str(), dataDir.c_str());
         return;
     }
+
+    // "New" owes the user a file at exactly the path they picked (the dialog already
+    // asked before replacing anything). The old rule skipped the write whenever this
+    // instance merely *tracked* the name - which also skipped it when that file had
+    // been deleted on disk or had never landed, so New silently produced no file and
+    // no error, just an empty folder.
+    const bool onDisk = fs->FileExists(chosen);
+    if (!onDisk || !IsResourceOpen(resourceName))
+    {
+        // Write through the absolute path: the dialog resolved where the bytes go,
+        // so re-deriving it from the resource name only adds ways to miss - and a
+        // mismatch would drop the file in a folder the user is not looking at.
+        if (!WriteFileAt(chosen, kTemplate))
+        {
+            URHO3D_LOGERROR("UIViewTab: failed to create UI document '{}' at '{}'",
+                resourceName.c_str(), chosen.c_str());
+            return;
+        }
+        // Forget a cached copy of a replaced file so the load below sees fresh bytes;
+        // a brand-new name has nothing cached and releasing it would only log noise.
+        auto* cache = GetSubsystem<ResourceCache>();
+        if (onDisk || !cache->GetResourceFileName(resourceName).empty())
+            cache->ReleaseResource(resourceName, true);
+    }
+
+    URHO3D_LOGINFO("UIViewTab: UI document '{}' ready at '{}'", resourceName.c_str(), chosen.c_str());
 
     // Route through the project request exactly like a double-click open
     // (all instances arbitrate in OpenInBestInstance: idle ones take the
@@ -708,7 +769,10 @@ void UIViewTab::NewDocument()
     // CheckRemoveTab would then see it as closed (its window has never
     // opened) and destroy it. ProcessRequest defers the routing to the
     // beginning of the next frame, where AddTab happens before tabs are
-    // iterated.
+    // iterated. A document that is already open is merely focused (closing it
+    // would discard its undo history and unsaved edits), and a name that the
+    // resource index has not picked up yet still resolves, because the request
+    // is built from the name and the load falls back to the project Data path.
     auto request = MakeShared<OpenResourceRequest>(context_, resourceName, false);
     GetProject()->ProcessRequest(request.Get());
 }
