@@ -2808,6 +2808,15 @@ bool UIViewInspector::RenderLayout(UiNode* node)
                 "in the preview against the nearest Anchor/Free ancestor.");
     }
 
+    // --- Z-order: stacking within a positioned context. Always visible (a common
+    // HUD/overlay/modal need), not gated on position. Empty = auto (drops the
+    // declaration); a number - positive or negative - is written verbatim.
+    LayoutSizeField(payload, structural, "Z-order", "z-index", "auto");
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Stacking order among siblings in the same context. CSS honours it\n"
+            "only once the element is positioned: leave it empty for the document default,\n"
+            "or set Position to Anchor (relative) / Free (absolute) for it to take effect.");
+
     // --- Anchor (absolutely-positioned elements only): pick which edges this box
     // pins to and whether it stretches with its container. The 3x3 grid is the
     // cross product of the two per-axis modes, so a cell is always highlighted to
