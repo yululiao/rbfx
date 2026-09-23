@@ -7,6 +7,7 @@
 #include "UIViewTab.h"
 
 #include "../../Core/IniHelpers.h"
+#include "../../Core/WidgetHelpers.h"
 #include "../../Project/Project.h"
 #include "../HierarchyBrowserTab.h"
 #include "../InspectorTab.h"
@@ -240,6 +241,78 @@ bool ResourceExists(Context* context, const ea::string& resourceName)
     auto* project = context->GetSubsystem<Project>();
     auto* fs = context->GetSubsystem<FileSystem>();
     return project && fs && fs->FileExists(project->GetDataPath() + resourceName);
+}
+
+// Pick a file under the project's Data folder and hand it back as a '/'-rooted
+// resource path ("/Textures/foo.png") - the one spelling that resolves the same
+// however far the editing document sits from the target (ResolveRelativeResource
+// Path treats a leading '/' as Data-rooted, exactly like RmlUi). Cancelling, or
+// choosing something outside Data, yields nullopt: RmlUi can only load files
+// that live under Data, so writing an outside path would plant a reference that
+// silently never resolves. 'current' seeds the starting folder from the field's
+// present value so fixing a reference opens where it already points.
+ea::optional<ea::string> PickDataResource(Context* context, const ea::string& current,
+    const char* filter)
+{
+    auto* project = context->GetSubsystem<Project>();
+    auto* fs = context->GetSubsystem<FileSystem>();
+    if (!project || !fs)
+        return ea::nullopt;
+
+    ea::string dataDir = project->GetDataPath().c_str();
+    NormalizePath(dataDir);
+    if (!dataDir.empty() && dataDir.back() != '/')
+        dataDir += '/';
+
+    ea::string seed = dataDir;
+    if (!current.empty())
+    {
+        ea::string rel = current;
+        if (rel.front() == '/')
+            rel = rel.substr(1);
+        const ea::string abs = dataDir + rel;
+        if (fs->FileExists(abs) || fs->DirExists(abs))
+            seed = abs; // PickNativePath opens the folder that holds it
+    }
+
+    const auto picked = PickNativePath(false, filter ? ea::string(filter) : ea::string(), seed);
+    if (!picked)
+        return ea::nullopt; // cancelled, or the dialog failed (already logged)
+
+    ea::string chosen = *picked;
+    NormalizePath(chosen);
+    if (dataDir.empty())
+        return ea::nullopt;
+    const ea::string lowerChosen = LowerCopy(chosen);
+    const ea::string lowerData = LowerCopy(dataDir);
+    if (lowerChosen.compare(0, lowerData.size(), lowerData) != 0)
+    {
+        URHO3D_LOGWARNING("UIViewTab: '{}' is outside the project Data folder '{}'; RmlUi cannot load it.",
+            chosen.c_str(), dataDir.c_str());
+        return ea::nullopt;
+    }
+    const ea::string rel = chosen.substr(dataDir.length());
+    if (rel.empty())
+        return ea::nullopt;
+    return ea::optional<ea::string>(ea::string("/") + rel);
+}
+
+// A folder-open button parked on the line after a resource-path field. On a
+// pick it returns the new '/'-rooted path; a cancel returns nullopt, so the
+// caller can tell "nothing happened" from "repoint at this file". 'id' keeps
+// the button's ImGui identity distinct from its field.
+ea::optional<ea::string> ResourceBrowseWidget(const char* id, Context* context,
+    const ea::string& current, const char* filter)
+{
+    ui::SameLine();
+    ui::PushID(id);
+    const bool clicked = ui::SmallButton(ICON_FA_FOLDER_OPEN);
+    ui::PopID();
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Browse...");
+    if (!clicked)
+        return ea::nullopt;
+    return PickDataResource(context, current, filter);
 }
 
 // Open the nested document referenced by \a href (or, when revealOnly is set,
@@ -1332,6 +1405,16 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     else
     {
         label = node->IsText() ? ea::string("#text") : node->tag_;
+        // An <input> is a whole family of controls behind one tag name; the
+        // tree labels it by its type so a stack of them is legible at a glance
+        // (checkbox vs radio vs range all render as a bare "input" otherwise).
+        // This is display text only - tag_ and the type attribute in the
+        // document are untouched. An absent type means the engine's default.
+        if (node->tag_ == "input")
+        {
+            const ea::string type = node->GetAttribute("type");
+            label += "(" + (type.empty() ? ea::string("text") : LowerCopy(type)) + ")";
+        }
         if (!node->id_.empty())
             label += "#" + node->id_;
         if (!node->classes_.empty())
@@ -1627,8 +1710,14 @@ void UIViewInspector::RenderHeadLinks()
 
     // The links themselves are #head-link nodes at the top of the Hierarchy
     // (edit each there); this row is only the spigot for one more <link>.
+    ui::PushItemWidth(-40.0f);
     const bool committed = ui::InputTextWithHint("##headLinkHref", "/UI/default.rcss",
         headLinkHrefBuf_, sizeof(headLinkHrefBuf_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::PopItemWidth();
+    // Pick an existing file instead of typing its path; either kind can be
+    // chosen, so the filter lists both and the + buttons below record which.
+    if (auto picked = ResourceBrowseWidget("##browse", context_, "", "rcss,rml"))
+        snprintf(headLinkHrefBuf_, sizeof(headLinkHrefBuf_), "%s", picked->c_str());
     const bool wantCss = committed || ui::Button(ICON_FA_PLUS " Stylesheet (.rcss)");
     ui::SameLine();
     const bool wantRml = ui::Button(ICON_FA_PLUS " Template (.rml)");
@@ -1671,9 +1760,14 @@ void UIViewInspector::RenderNestedDoc(UiNode* node)
     // repoints the window frame at another template file.
     char hrefBuf[512];
     snprintf(hrefBuf, sizeof(hrefBuf), "%s", node->nestedDocHref_.c_str());
-    if (ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue))
+    ui::PushItemWidth(-40.0f);
+    const bool hrefEdited = ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::PopItemWidth();
+    // This link always names a template, so the picker lists .rml only.
+    const auto pickedHref = ResourceBrowseWidget("##browse", context_, node->nestedDocHref_, "rml");
+    if (hrefEdited || pickedHref)
     {
-        const ea::string newHref = Trim(ea::string(hrefBuf));
+        const ea::string newHref = hrefEdited ? Trim(ea::string(hrefBuf)) : *pickedHref;
         if (!newHref.empty())
         {
             doc->EditHeadLink(node, "text/template", newHref);
@@ -1750,9 +1844,15 @@ void UIViewInspector::RenderHeadLink(UiNode* node)
     // rooted at the project's Data directory).
     char hrefBuf[512];
     snprintf(hrefBuf, sizeof(hrefBuf), "%s", href.c_str());
-    if (ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue))
+    ui::PushItemWidth(-40.0f);
+    const bool hrefEdited = ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::PopItemWidth();
+    // A picker offers the same Data-rooted spelling the loader expects,
+    // narrowed to the kind this link claims to be (stylesheet vs template).
+    const auto pickedHref = ResourceBrowseWidget("##browse", context_, href, isTemplate ? "rml" : "rcss");
+    if (hrefEdited || pickedHref)
     {
-        const ea::string newHref = Trim(ea::string(hrefBuf));
+        const ea::string newHref = hrefEdited ? Trim(ea::string(hrefBuf)) : *pickedHref;
         if (!newHref.empty())
         {
             doc->EditHeadLink(node, type, newHref);
@@ -1872,6 +1972,169 @@ bool UIViewInspector::RenderTextContent(UiNode* node)
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Element attributes the engine itself reads
+// ---------------------------------------------------------------------------
+// The Inspector renders these as fixed rows, visible whether or not the
+// document happens to carry them: an attribute that exists but has no row is
+// invisible, and an invented attribute with an engine-looking name reads as a
+// control that silently does nothing. Every row below is backed by the source
+// line that reads it (RmlUi Source/Core/Elements/*).
+//
+// Deliberately absent - things this RmlUi build does not read: input
+// placeholder/size/focus/autofocus (placeholder does not exist in the library
+// at all), form action/method/enctype (ElementForm reads no attribute
+// whatsoever), button disabled/name (it is not a control: CoreData/UI/
+// layout.rcss styles button[disabled] but the engine never tests it), and the
+// img width/height attributes, which would fight the style declarations of the
+// same name. Also absent: data-* and on* - those are the binding and event
+// surfaces and get designed as a unit elsewhere.
+enum class AttrKind
+{
+    Text, ///< free-form string
+    Decimal, ///< number; the engine clamps, this is only a typed-input filter
+    Flag, ///< presence-only: ticked writes the attribute, unticked removes it
+    Enum, ///< one of a fixed keyword set
+    IdRef, ///< one of the ids present in the document (label's for)
+};
+
+struct AttrRow
+{
+    const char* tag;
+    const char* type; ///< input only: the type it applies to; null = any type
+    const char* name;
+    AttrKind kind;
+    const char* const* keywords; ///< Enum only, null-terminated
+    const char* browseFilter; ///< non-null: file-picker button narrowed by this NFD spec ("png,jpg")
+};
+
+// Raster formats RmlUi's image decoder can load through the engine's Image.
+const char* const kImageFilter = "png,jpg,jpeg,tga,bmp,webp,gif,dds";
+
+const char* const kInputTypes[] = { "text", "password", "checkbox", "radio", "range", "submit", "button", nullptr };
+const char* const kTextAreaWrap[] = { "normal", "free", nullptr };
+const char* const kProgressDirections[] = { "left", "up", nullptr };
+
+const AttrRow kAttrRows[] = {
+    // src is a file under Data, so it gets a picker. sprite is NOT a path: the
+    // engine resolves it as a name against sprites declared in loaded RCSS
+    // (style_sheet->GetSprite), and rect is four numbers - neither is a file.
+    { "img", nullptr, "src", AttrKind::Text, nullptr, kImageFilter },
+    { "img", nullptr, "sprite", AttrKind::Text, nullptr },
+    { "img", nullptr, "rect", AttrKind::Text, nullptr },
+
+    { "input", nullptr, "type", AttrKind::Enum, kInputTypes },
+    { "input", "text", "value", AttrKind::Text, nullptr },
+    { "input", "text", "name", AttrKind::Text, nullptr },
+    { "input", "text", "disabled", AttrKind::Flag, nullptr },
+    { "input", "password", "value", AttrKind::Text, nullptr },
+    { "input", "password", "name", AttrKind::Text, nullptr },
+    { "input", "password", "disabled", AttrKind::Flag, nullptr },
+    // checked is presence-only in the engine (InputTypeCheckbox tests
+    // HasAttribute), so a hand-written checked="false" means CHECKED. That is
+    // why this row is a tick box and never writes a literal true/false.
+    { "input", "checkbox", "checked", AttrKind::Flag, nullptr },
+    { "input", "checkbox", "value", AttrKind::Text, nullptr },
+    { "input", "checkbox", "name", AttrKind::Text, nullptr },
+    { "input", "checkbox", "disabled", AttrKind::Flag, nullptr },
+    // name is what groups radios; without it each one stands alone.
+    { "input", "radio", "checked", AttrKind::Flag, nullptr },
+    { "input", "radio", "name", AttrKind::Text, nullptr },
+    { "input", "radio", "value", AttrKind::Text, nullptr },
+    { "input", "radio", "disabled", AttrKind::Flag, nullptr },
+    { "input", "range", "value", AttrKind::Decimal, nullptr },
+    { "input", "range", "min", AttrKind::Decimal, nullptr },
+    { "input", "range", "max", AttrKind::Decimal, nullptr },
+    { "input", "range", "step", AttrKind::Decimal, nullptr },
+    { "input", "range", "disabled", AttrKind::Flag, nullptr },
+    // submit/button: value is submitted with the form but never drawn (an
+    // input of these types has no render path) - the visible label is a text
+    // child, which the Text Content section edits.
+    { "input", "submit", "name", AttrKind::Text, nullptr },
+    { "input", "submit", "value", AttrKind::Text, nullptr },
+    { "input", "submit", "disabled", AttrKind::Flag, nullptr },
+    { "input", "button", "name", AttrKind::Text, nullptr },
+    { "input", "button", "value", AttrKind::Text, nullptr },
+    { "input", "button", "disabled", AttrKind::Flag, nullptr },
+
+    { "select", nullptr, "value", AttrKind::Text, nullptr },
+    { "select", nullptr, "name", AttrKind::Text, nullptr },
+    { "select", nullptr, "disabled", AttrKind::Flag, nullptr },
+
+    { "textarea", nullptr, "value", AttrKind::Text, nullptr },
+    { "textarea", nullptr, "rows", AttrKind::Decimal, nullptr },
+    { "textarea", nullptr, "cols", AttrKind::Decimal, nullptr },
+    { "textarea", nullptr, "wrap", AttrKind::Enum, kTextAreaWrap },
+    { "textarea", nullptr, "maxlength", AttrKind::Decimal, nullptr },
+    { "textarea", nullptr, "name", AttrKind::Text, nullptr },
+    { "textarea", nullptr, "disabled", AttrKind::Flag, nullptr },
+
+    { "progress", nullptr, "value", AttrKind::Decimal, nullptr },
+    { "progress", nullptr, "max", AttrKind::Decimal, nullptr },
+    { "progress", nullptr, "direction", AttrKind::Enum, kProgressDirections },
+
+    { "label", nullptr, "for", AttrKind::IdRef, nullptr },
+};
+
+constexpr size_t kNoAttr = static_cast<size_t>(-1);
+
+size_t FindAttrIndex(const ea::vector<ea::pair<ea::string, ea::string>>& attributes, const ea::string& name)
+{
+    for (size_t i = 0; i < attributes.size(); ++i)
+    {
+        if (attributes[i].first == name)
+            return i;
+    }
+    return kNoAttr;
+}
+
+void SetPayloadAttr(UiNodePayload& payload, const char* name, const ea::string& value)
+{
+    for (auto& attribute : payload.attributes_)
+    {
+        if (attribute.first == name)
+        {
+            attribute.second = value;
+            return;
+        }
+    }
+    payload.attributes_.emplace_back(name, value);
+    // Keep the model's documented invariant (attributes sorted by name); this
+    // only orders the payload vector, never the source text - a new attribute
+    // is patched onto the element's own open tag wherever it sorts.
+    ea::sort(payload.attributes_.begin(), payload.attributes_.end(),
+        [](const ea::pair<ea::string, ea::string>& a, const ea::pair<ea::string, ea::string>& b)
+        { return a.first < b.first; });
+}
+
+void DropPayloadAttr(UiNodePayload& payload, const ea::string& name)
+{
+    const size_t at = FindAttrIndex(payload.attributes_, name);
+    if (at != kNoAttr)
+        payload.attributes_.erase(payload.attributes_.begin() + at);
+}
+
+// The type an <input> presents to the engine: an absent attribute means text.
+ea::string InputTypeOf(const UiNode& node)
+{
+    if (node.tag_ != "input")
+        return ea::string();
+    const size_t at = FindAttrIndex(node.attributes_, "type");
+    const ea::string type = at != kNoAttr ? node.attributes_[at].second : ea::string("text");
+    return LowerCopy(type);
+}
+
+void CollectIds(const UiNode& node, ea::vector<ea::string>& out)
+{
+    if (!node.id_.empty())
+        out.push_back(node.id_);
+    for (const SharedPtr<UiNode>& child : node.children_)
+    {
+        if (child)
+            CollectIds(*child, out);
+    }
+}
+
 bool UIViewInspector::RenderAttributes(UiNode* node)
 {
     UIViewTab* tab = owner_;
@@ -1912,74 +2175,192 @@ bool UIViewInspector::RenderAttributes(UiNode* node)
         structural = true;
     }
 
-    const size_t count = node->attributes_.size();
-    for (size_t i = 0; i < count; i++)
+    // Structured rows the engine understands for this element, rendered whether
+    // or not the document carries them: an attribute that exists but has no row
+    // is invisible, and a row that only appears once the attribute exists makes
+    // the affordance depend on how the element was born. Typing a value writes
+    // the attribute and clearing the field drops it, so panel and text stay in
+    // step whichever was edited first. A presence flag (checked/disabled) is a
+    // tick box: the engine only tests that the attribute is there, so it is
+    // written bare ("") and never as ="true"/"false" - the latter would flip a
+    // checkbox's meaning, since checked="false" still counts as present.
+    const ea::string inputType = InputTypeOf(*node);
+    ea::vector<ea::string> rootIds;
+    if (tab && tab->GetDocument() && tab->GetDocument()->GetModel().root_)
+        CollectIds(*tab->GetDocument()->GetModel().root_, rootIds);
+
+    ea::vector<ea::string> covered;
+    for (const AttrRow& row : kAttrRows)
+    {
+        if (node->tag_ != row.tag || (row.type && inputType != row.type))
+            continue;
+        covered.push_back(row.name);
+
+        const size_t at = FindAttrIndex(payload.attributes_, row.name);
+        const bool present = at != kNoAttr;
+        const ea::string value = present ? payload.attributes_[at].second : ea::string();
+
+        ui::PushID(row.name);
+        ui::Text("%s", row.name);
+        ui::SameLine();
+        switch (row.kind)
+        {
+        case AttrKind::Flag:
+        {
+            bool on = present; // presence is the entire state
+            if (ui::Checkbox("##flag", &on))
+            {
+                if (on)
+                    SetPayloadAttr(payload, row.name, ea::string());
+                else
+                    DropPayloadAttr(payload, row.name);
+                structural = true;
+            }
+            break;
+        }
+
+        case AttrKind::Enum:
+        case AttrKind::IdRef:
+        {
+            // Slot 0 lets the engine's own default stand by dropping the
+            // attribute; the rest are the fixed keywords, or every id in the
+            // document for a reference (label's for).
+            ea::vector<ea::string> items;
+            items.push_back(row.kind == AttrKind::IdRef ? ea::string("(none)") : ea::string("(default)"));
+            if (row.kind == AttrKind::Enum)
+            {
+                for (const char* const* kw = row.keywords; kw && *kw; ++kw)
+                    items.push_back(ea::string(*kw));
+            }
+            else
+            {
+                for (const ea::string& id : rootIds)
+                    items.push_back(id);
+            }
+            int current = 0;
+            if (present)
+            {
+                for (int i = 1; i < static_cast<int>(items.size()); ++i)
+                {
+                    if (items[i] == value)
+                    {
+                        current = i;
+                        break;
+                    }
+                }
+            }
+            // A hand-written value outside the list still previews verbatim, so
+            // the row never lies about what the text carries.
+            const ea::string preview = present ? value : items[0];
+            ui::PushItemWidth(-40.0f);
+            if (ui::BeginCombo("##value", preview.c_str()))
+            {
+                for (int i = 0; i < static_cast<int>(items.size()); ++i)
+                {
+                    if (ui::Selectable(items[i].c_str(), i == current))
+                    {
+                        if (i == 0)
+                        {
+                            if (present)
+                                DropPayloadAttr(payload, row.name);
+                        }
+                        else
+                        {
+                            SetPayloadAttr(payload, row.name, items[i]);
+                        }
+                        structural = true;
+                    }
+                }
+                ui::EndCombo();
+            }
+            ui::PopItemWidth();
+            break;
+        }
+
+        default: // Text / Decimal: a free field, Decimal filtered to numbers
+        {
+            char valBuf[1024];
+            snprintf(valBuf, sizeof(valBuf), "%s", value.c_str());
+            const ImGuiInputTextFlags extra =
+                row.kind == AttrKind::Decimal ? ImGuiInputTextFlags_CharsDecimal : static_cast<ImGuiInputTextFlags>(0);
+            ui::PushItemWidth(-40.0f);
+            if (ui::InputText("##value", valBuf, sizeof(valBuf), extra | ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                const ea::string next = Trim(valBuf);
+                if (next.empty())
+                {
+                    if (present)
+                    {
+                        DropPayloadAttr(payload, row.name);
+                        structural = true;
+                    }
+                }
+                else if (!present || next != value)
+                {
+                    SetPayloadAttr(payload, row.name, next);
+                    structural = true;
+                }
+            }
+            ui::PopItemWidth();
+            // A resource-path row gets a picker beside the free field. A pick
+            // commits at once - it names a file that is really there, which a
+            // half-typed path is not.
+            if (row.browseFilter)
+            {
+                if (auto picked = ResourceBrowseWidget("##browse", context_, value, row.browseFilter))
+                {
+                    SetPayloadAttr(payload, row.name, *picked);
+                    structural = true;
+                }
+            }
+            break;
+        }
+        }
+        ui::PopID();
+    }
+
+    // Attributes no structured row claims (data-*, on*, or anything a tag
+    // carries outside kAttrRows): still editable and removable, so the panel
+    // never silently drops text it does not understand. Located by name rather
+    // than index, because the rows above may have reordered the payload.
+    for (size_t i = 0; i < node->attributes_.size(); ++i)
     {
         const ea::string name = node->attributes_[i].first;
+        bool handled = false;
+        for (const ea::string& c : covered)
+        {
+            if (c == name)
+            {
+                handled = true;
+                break;
+            }
+        }
+        if (handled)
+            continue;
+        const size_t at = FindAttrIndex(payload.attributes_, name);
+        if (at == kNoAttr)
+            continue; // dropped earlier this frame
         char valBuf[1024];
-        snprintf(valBuf, sizeof(valBuf), "%s", node->attributes_[i].second.c_str());
+        snprintf(valBuf, sizeof(valBuf), "%s", payload.attributes_[at].second.c_str());
         ui::PushID(name.c_str());
         ui::Text("%s", name.c_str());
         ui::SameLine();
         ui::PushItemWidth(-40.0f);
         if (ui::InputText("##value", valBuf, sizeof(valBuf), ImGuiInputTextFlags_EnterReturnsTrue))
         {
-            payload.attributes_[i].second = valBuf;
+            payload.attributes_[at].second = valBuf;
             structural = true;
         }
         ui::PopItemWidth();
         ui::SameLine();
         if (ui::SmallButton(ICON_FA_TRASH))
         {
-            payload.attributes_.erase(payload.attributes_.begin() + i);
+            DropPayloadAttr(payload, name);
             structural = true;
             ui::PopID();
             break; // re-snapshot next frame
         }
         ui::PopID();
-    }
-
-    // Natural attributes of the tag (img -> src): always visible, even when
-    // the element never carried one (documents from before the palette
-    // recipes, or arbitrary-tag creations), so the affordance does not depend
-    // on how the element was born. Typing a value adds the attribute; an
-    // empty input adds nothing.
-    struct NaturalAttr
-    {
-        const char* tag;
-        const char* name;
-    };
-    static const NaturalAttr kNaturalAttrs[] = {{"img", "src"}};
-    for (const NaturalAttr& natural : kNaturalAttrs)
-    {
-        if (node->tag_ != natural.tag)
-            continue;
-        bool present = false;
-        for (const auto& attr : node->attributes_)
-        {
-            if (attr.first == natural.name)
-            {
-                present = true;
-                break;
-            }
-        }
-        if (present)
-            continue;
-        char valBuf[1024] = "";
-        ui::PushID(natural.name);
-        ui::Text("%s", natural.name);
-        ui::SameLine();
-        ui::PushItemWidth(-40.0f);
-        const bool enter = ui::InputText("##value", valBuf, sizeof(valBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue);
-        ui::PopItemWidth();
-        ui::PopID();
-        const ea::string value = Trim(valBuf);
-        if (enter && !value.empty())
-        {
-            payload.attributes_.emplace_back(natural.name, value);
-            structural = true;
-        }
     }
 
     // Add-new row.
