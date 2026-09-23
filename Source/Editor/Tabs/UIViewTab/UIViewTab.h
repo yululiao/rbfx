@@ -268,13 +268,14 @@ private:
     void RenderHeadLink(UiNode* node);
     /// Navigation panel for the nested-doc virtual node (path + reveal/open).
     void RenderNestedDoc(UiNode* node);
-    /// The three sections below return true when they committed an edit: any
+    /// The four sections below return true when they committed an edit: any
     /// commit rebuilds the whole model tree, which invalidates every UiNode
     /// pointer - including the caller's. On true, RenderContent stops rendering
     /// for this frame and re-renders from the rebuilt model on the next one
     /// (the commit-then-return pattern the link panels already use).
     bool RenderTextContent(UiNode* node);
     bool RenderAttributes(UiNode* node);
+    bool RenderStyle(UiNode* node);
     bool RenderInlineStyle(UiNode* node);
     /// Read-only sections: they never commit, so the node stays valid.
     void RenderTemplates(UiNode* node);
@@ -290,6 +291,10 @@ private:
     // the multiline editor is only refreshed when the selection changes.
     ea::vector<unsigned> lastStylePath_;
     bool styleSeedValid_ = false;
+    /// Opt out of the Style rows' type/dependency filtering: when set, every
+    /// registered row is shown regardless of how relevant it is to the
+    /// selection. The safety valve behind the filtering (nothing is lost).
+    bool showAllStyle_ = false;
 };
 
 }

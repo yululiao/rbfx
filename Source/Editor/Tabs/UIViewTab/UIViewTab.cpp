@@ -984,18 +984,6 @@ void UIViewTab::RenderToolbar()
     if (ui::BeginPopup("##uiElemCtx"))
     {
         UiNode* node = selected_;
-        if (node && !node->IsText() && !node->IsNestedDoc() && !node->IsHeadLink()
-            && !node->IsMaterialized())
-        {
-            if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
-                document_->MaterializeNode(node);
-        }
-        else if (node && !node->IsText() && !node->IsNestedDoc() && !node->IsHeadLink()
-            && node->IsMaterialized())
-        {
-            if (ui::MenuItem(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
-                document_->DematerializeNode(node);
-        }
         if (node && document_ && node != document_->GetModel().root_.Get() && !node->IsNestedDoc()
             && !node->IsHeadLink())
         {
@@ -1090,13 +1078,13 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
     if (ui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         // A gizmo handle on the current selection wins over re-picking. The
-        // materialized box is left/top-space; shift the absolute mouse point
-        // into that frame before picking.
+        // drag box is left/top-space; shift the absolute mouse point into that
+        // frame before picking.
         UiBox box;
-        if (selected_ && selected_->dom_ && TryGetMaterializedBox(*selected_, box))
+        Vector2 base;
+        if (document_ && document_->TryGetDragBox(selected_, box, base))
         {
             const float grab = kHandleGrabPx / vp.scale_;
-            const Vector2 base = document_->GetInlineStyleBase(selected_);
             const GizmoHandle handle = PickGizmoHandle(box, doc - base, grab);
             if (handle.op_ != GizmoOp::None)
             {
@@ -1118,10 +1106,10 @@ void UIViewTab::BeginDrag(const GizmoHandle& handle, UiNode* node, const DocView
     gizmoNode_ = node;
     gizmoDrag_ = handle;
     gizmoStartBox_ = UiBox{};
-    TryGetMaterializedBox(*node, gizmoStartBox_);
-    // Capture the left/top frame origin once: the live box and the element
-    // itself both move through this base during the drag.
-    gizmoBase_ = document_->GetInlineStyleBase(node);
+    // Seed the box and its frame origin together (authored px, else the
+    // rendered box against the containing block) so a freshly-positioned
+    // element drags from where it already is.
+    document_->TryGetDragBox(node, gizmoStartBox_, gizmoBase_);
     gizmoPressDoc_ = gizmoCurDoc_ = vp.ToDoc(V2(ui::GetIO().MousePos));
     gizmoLiveBox_ = gizmoStartBox_;
     dragging_ = true;
@@ -1218,11 +1206,11 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
             dl->AddPolyline(c, 4, kSelectColor, ImDrawFlags_Closed, 2.0f);
         }
 
-        // The gizmo rect is the selection rect; handles are only offered when
-        // the node is materialized (or being dragged into shape). Regular
-        // nodes yield a single box, so front() is the selection rect.
-        UiBox materializedBox;
-        if (!boxes.empty() && (dragging || TryGetMaterializedBox(*sel, materializedBox)))
+        // The gizmo rect is the selection rect (regular nodes yield a single
+        // box, so front() is it). Handles are offered only for an absolutely
+        // positioned node - the same rule that gates picking/dragging - or
+        // while a drag is live.
+        if (!boxes.empty() && (dragging || sel->GetStyle("position") == "absolute"))
             DrawGizmo(vp, boxes.front());
     }
 }
@@ -1598,16 +1586,6 @@ void UIViewHierarchy::RenderContextMenuItems()
         return;
     }
 
-    if (!target->IsText() && !target->IsMaterialized())
-    {
-        if (ui::MenuItem(ICON_FA_LOCATION_PIN " Add Explicit Position"))
-            doc->MaterializeNode(target);
-    }
-    else if (!target->IsText() && target->IsMaterialized())
-    {
-        if (ui::MenuItem(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
-            doc->DematerializeNode(target);
-    }
     if (target != doc->GetModel().root_.Get())
     {
         if (ui::MenuItem(ICON_FA_TRASH " Delete"))
@@ -1688,6 +1666,8 @@ void UIViewInspector::RenderContent()
     if (RenderAttributes(node))
         return;
     ui::Separator();
+    if (RenderStyle(node))
+        return;
     if (RenderInlineStyle(node))
         return;
     ui::Separator();
@@ -2391,11 +2371,387 @@ bool UIViewInspector::RenderAttributes(UiNode* node)
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Inline style (RCSS) declarations the engine recognises
+// ---------------------------------------------------------------------------
+// Same discipline as kAttrRows, but this writes the style="..." channel
+// (node->style_), never element attributes - the two do not cross (a src:
+// typed here is a declaration for which RCSS has no property, and the engine
+// drops it in silence). Every row is a property actually registered in RmlUi's
+// StyleSheetSpecification, carrying its real default (shown as the field
+// placeholder, never written down) and its inheritance flag. Values a row
+// cannot represent - !important, or functional values like transform /
+// decorator / animation, which get no row at all - are left to the raw editor
+// below; a structured row only ever adds or removes the one declaration it
+// edits, never disturbing the authored order or its siblings.
+enum class StyleKind
+{
+    Keyword, ///< one of a fixed keyword set -> combo
+    Length,  ///< <length>/<percentage> (or auto/none) -> free field
+    Number,  ///< bare number -> number-filtered field
+    Color,   ///< <color> -> free field
+    Text,    ///< free string (font-family, cursor) -> free field
+};
+
+// A row is only meaningful in certain contexts; showing it always is what made
+// the panel feel like a wall of knobs. Each row carries a guard that ties it to
+// the situation where the engine would actually honor it, so a row appears only
+// when it can change something (and always when Show all is ticked).
+enum class StyleGuard
+{
+    None,          ///< always relevant to the selected element
+    Positioned,    ///< only when position != static (offsets, z-index)
+    FlexContainer, ///< only when this element's own display is flex/inline-flex
+    FlexChild,     ///< only when the parent's display is flex/inline-flex
+    ImageOnly,     ///< only for <img> (paint of a replaced element)
+};
+
+struct StyleRow
+{
+    const char* group;
+    const char* name;
+    const char* def;      ///< engine default: the placeholder; "" = no default text
+    bool inherited;       ///< cascades to descendants
+    StyleKind kind;
+    const char* keywords; ///< Keyword only: ", "-separated, exactly as registered
+    StyleGuard guard = StyleGuard::None; ///< relevance gate (default: always shown)
+};
+
+const StyleRow kStyleRows[] = {
+    // --- Own placement: how THIS element sits inside its parent (self-facing). ---
+    // Everything here answers "where am I among my siblings / in my container";
+    // flex-grow/shrink/basis/align-self are the item half of flexbox (they read
+    // the PARENT's display), margin is self-spacing (margin:auto centers oneself).
+    { "Own placement (self in parent)", "position", "static", false, StyleKind::Keyword, "static, relative, absolute, fixed" },
+    { "Own placement (self in parent)", "top", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
+    { "Own placement (self in parent)", "right", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
+    { "Own placement (self in parent)", "bottom", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
+    { "Own placement (self in parent)", "left", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
+    { "Own placement (self in parent)", "z-index", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
+    { "Own placement (self in parent)", "margin-top", "0px", false, StyleKind::Length, nullptr },
+    { "Own placement (self in parent)", "margin-right", "0px", false, StyleKind::Length, nullptr },
+    { "Own placement (self in parent)", "margin-bottom", "0px", false, StyleKind::Length, nullptr },
+    { "Own placement (self in parent)", "margin-left", "0px", false, StyleKind::Length, nullptr },
+    { "Own placement (self in parent)", "float", "none", false, StyleKind::Keyword, "none, left, right" },
+    { "Own placement (self in parent)", "clear", "none", false, StyleKind::Keyword, "none, left, right, both" },
+    { "Own placement (self in parent)", "flex-grow", "0", false, StyleKind::Number, nullptr, StyleGuard::FlexChild },
+    { "Own placement (self in parent)", "flex-shrink", "1", false, StyleKind::Number, nullptr, StyleGuard::FlexChild },
+    { "Own placement (self in parent)", "flex-basis", "auto", false, StyleKind::Length, nullptr, StyleGuard::FlexChild },
+    { "Own placement (self in parent)", "align-self", "auto", false, StyleKind::Keyword, "auto, flex-start, flex-end, center, baseline, stretch", StyleGuard::FlexChild },
+
+    // --- Children layout: how THIS element arranges its own contents ---
+    // The parent half of flexbox: display switches on the mode, the flex/gap rows
+    // then lay out the DIRECT children (they read THIS element's own display).
+    // overflow is here too: it governs what happens to the content that spills.
+    { "Children layout (contents)", "display", "inline", false, StyleKind::Keyword, "none, block, inline, inline-block, flow-root, flex, inline-flex, table, inline-table, table-row, table-row-group, table-column, table-column-group, table-cell" },
+    { "Children layout (contents)", "flex-direction", "row", false, StyleKind::Keyword, "row, row-reverse, column, column-reverse", StyleGuard::FlexContainer },
+    { "Children layout (contents)", "flex-wrap", "nowrap", false, StyleKind::Keyword, "nowrap, wrap, wrap-reverse", StyleGuard::FlexContainer },
+    { "Children layout (contents)", "justify-content", "flex-start", false, StyleKind::Keyword, "flex-start, flex-end, center, space-between, space-around", StyleGuard::FlexContainer },
+    { "Children layout (contents)", "align-items", "stretch", false, StyleKind::Keyword, "flex-start, flex-end, center, baseline, stretch", StyleGuard::FlexContainer },
+    { "Children layout (contents)", "align-content", "stretch", false, StyleKind::Keyword, "flex-start, flex-end, center, space-between, space-around, stretch", StyleGuard::FlexContainer },
+    { "Children layout (contents)", "row-gap", "0px", false, StyleKind::Length, nullptr, StyleGuard::FlexContainer },
+    { "Children layout (contents)", "column-gap", "0px", false, StyleKind::Length, nullptr, StyleGuard::FlexContainer },
+    { "Children layout (contents)", "overflow-x", "visible", false, StyleKind::Keyword, "visible, hidden, auto, scroll" },
+    { "Children layout (contents)", "overflow-y", "visible", false, StyleKind::Keyword, "visible, hidden, auto, scroll" },
+
+    // --- Box: the box model - the element's own size and inner padding ---
+    { "Box", "box-sizing", "content-box", false, StyleKind::Keyword, "content-box, border-box" },
+    { "Box", "width", "auto", false, StyleKind::Length, nullptr },
+    { "Box", "min-width", "0px", false, StyleKind::Length, nullptr },
+    { "Box", "max-width", "none", false, StyleKind::Length, nullptr },
+    { "Box", "height", "auto", false, StyleKind::Length, nullptr },
+    { "Box", "min-height", "0px", false, StyleKind::Length, nullptr },
+    { "Box", "max-height", "none", false, StyleKind::Length, nullptr },
+    { "Box", "padding-top", "0px", false, StyleKind::Length, nullptr },
+    { "Box", "padding-right", "0px", false, StyleKind::Length, nullptr },
+    { "Box", "padding-bottom", "0px", false, StyleKind::Length, nullptr },
+    { "Box", "padding-left", "0px", false, StyleKind::Length, nullptr },
+
+    // --- Typography: text look (most of these cascade to descendants) ---
+    { "Typography", "color", "white", true, StyleKind::Color, nullptr },
+    { "Typography", "font-family", "", true, StyleKind::Text, nullptr },
+    { "Typography", "font-style", "normal", true, StyleKind::Keyword, "normal, italic" },
+    { "Typography", "font-weight", "normal", true, StyleKind::Keyword, "normal, bold" },
+    { "Typography", "font-size", "12px", true, StyleKind::Length, nullptr },
+    { "Typography", "line-height", "1.2", true, StyleKind::Length, nullptr },
+    { "Typography", "letter-spacing", "normal", true, StyleKind::Length, nullptr },
+    { "Typography", "text-align", "left", true, StyleKind::Keyword, "left, right, center, justify" },
+    { "Typography", "text-decoration", "none", true, StyleKind::Keyword, "none, underline, overline, line-through" },
+    { "Typography", "text-transform", "none", true, StyleKind::Keyword, "none, capitalize, uppercase, lowercase" },
+    { "Typography", "white-space", "normal", true, StyleKind::Keyword, "normal, pre, nowrap, pre-wrap, pre-line" },
+    { "Typography", "word-break", "normal", true, StyleKind::Keyword, "normal, break-all, break-word" },
+    { "Typography", "vertical-align", "baseline", false, StyleKind::Keyword, "baseline, middle, sub, super, text-top, text-bottom, top, center, bottom" },
+    { "Typography", "caret-color", "auto", true, StyleKind::Color, nullptr },
+
+    // --- Appearance: paint (background, border, visibility, interaction) ---
+    { "Appearance", "background-color", "transparent", false, StyleKind::Color, nullptr },
+    { "Appearance", "opacity", "1", true, StyleKind::Number, nullptr },
+    { "Appearance", "visibility", "visible", false, StyleKind::Keyword, "visible, hidden" },
+    { "Appearance", "border-top-width", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-right-width", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-bottom-width", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-left-width", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-top-color", "black", false, StyleKind::Color, nullptr },
+    { "Appearance", "border-right-color", "black", false, StyleKind::Color, nullptr },
+    { "Appearance", "border-bottom-color", "black", false, StyleKind::Color, nullptr },
+    { "Appearance", "border-left-color", "black", false, StyleKind::Color, nullptr },
+    { "Appearance", "border-top-left-radius", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-top-right-radius", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-bottom-right-radius", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "border-bottom-left-radius", "0px", false, StyleKind::Length, nullptr },
+    { "Appearance", "image-color", "white", false, StyleKind::Color, nullptr, StyleGuard::ImageOnly },
+    { "Appearance", "cursor", "", true, StyleKind::Text, nullptr },
+    { "Appearance", "pointer-events", "auto", true, StyleKind::Keyword, "none, auto" },
+    { "Appearance", "focus", "auto", true, StyleKind::Keyword, "none, auto" },
+    { "Appearance", "tab-index", "none", false, StyleKind::Keyword, "none, auto" },
+    { "Appearance", "drag", "none", false, StyleKind::Keyword, "none, drag, drag-drop, block, clone" },
+    { "Appearance", "overscroll-behavior", "auto", false, StyleKind::Keyword, "auto, contain" },
+};
+
+int FindStyleIndexIn(const ea::vector<UiStyleDecl>& decls, const ea::string& name)
+{
+    for (int i = 0; i < static_cast<int>(decls.size()); ++i)
+    {
+        if (decls[i].name_ == name)
+            return i;
+    }
+    return -1;
+}
+
+// Order-preserving, single-declaration edits (mirror UiNode::SetStyle/
+// RemoveStyle but on the payload copy), so a structured row never disturbs the
+// authored order or the declarations it does not own.
+void SetPayloadStyle(UiNodePayload& payload, const ea::string& name, const ea::string& value)
+{
+    const int at = FindStyleIndexIn(payload.style_, name);
+    if (at >= 0)
+        payload.style_[at].value_ = value;
+    else
+        payload.style_.push_back(UiStyleDecl{name, value});
+}
+
+void DropPayloadStyle(UiNodePayload& payload, const ea::string& name)
+{
+    const int at = FindStyleIndexIn(payload.style_, name);
+    if (at >= 0)
+        payload.style_.erase(payload.style_.begin() + at);
+}
+
+// Split a registered keyword list (", "-separated, straight from the source)
+// into trimmed items. Hand-rolled rather than via a split() so it depends on
+// nothing but find/substr.
+void SplitKeywords(const char* text, ea::vector<ea::string>& out)
+{
+    const ea::string s(text);
+    size_t begin = 0;
+    while (begin <= s.length())
+    {
+        const size_t comma = s.find(',', begin);
+        size_t b = begin;
+        size_t e = comma == ea::string::npos ? s.length() : comma;
+        while (b < e && (s[b] == ' ' || s[b] == '\t'))
+            ++b;
+        while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t'))
+            --e;
+        if (e > b)
+            out.push_back(s.substr(b, e - b));
+        if (comma == ea::string::npos)
+            break;
+        begin = comma + 1;
+    }
+}
+
+// display value that turns an element into a flex container / makes its children
+// flex items (compared against an already lowercased, trimmed string).
+bool IsFlexValue(const ea::string& display)
+{
+    return display == "flex" || display == "inline-flex";
+}
+
+bool UIViewInspector::RenderStyle(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    if (!ui::CollapsingHeader(ICON_FA_SLIDERS " Style", ImGuiTreeNodeFlags_DefaultOpen))
+        return false;
+
+    // Type/dependency filtering keeps the panel honest about what can actually
+    // affect this element. Show all reverts to the flat, complete registry for
+    // the rare case where a value is authored out of band (a class set display
+    // to flex) and the dependent rows would otherwise stay hidden.
+    ui::Checkbox("Show all style properties", &showAllStyle_);
+    if (!showAllStyle_)
+        ui::TextDisabled("Only rows that can affect this element are shown; tick "
+            "'Show all' for the full list. Nothing hidden is lost - the raw editor "
+            "below still carries every declaration verbatim.");
+
+    // Effective context for the relevance guards, read straight off this node's
+    // (and its parent's) authored style. Class-driven values are invisible here,
+    // which is exactly what Show all is for.
+    const bool isImage = node->tag_ == "img";
+    const ea::string position = LowerCopy(Trim(node->GetStyle("position")));
+    const bool positioned = !position.empty() && position != "static";
+    const bool isFlexContainer = IsFlexValue(LowerCopy(Trim(node->GetStyle("display"))));
+    bool isFlexChild = false;
+    if (tab && tab->GetDocument())
+    {
+        if (const UiNode* parent = tab->GetDocument()->GetModel().FindParent(node))
+            isFlexChild = IsFlexValue(LowerCopy(Trim(parent->GetStyle("display"))));
+    }
+    auto guardPasses = [&](StyleGuard guard)
+    {
+        switch (guard)
+        {
+        case StyleGuard::Positioned:
+            return positioned;
+        case StyleGuard::FlexContainer:
+            return isFlexContainer;
+        case StyleGuard::FlexChild:
+            return isFlexChild;
+        case StyleGuard::ImageOnly:
+            return isImage;
+        default:
+            return true;
+        }
+    };
+
+    // Accumulate into a payload copy and commit once, like the attribute rows:
+    // touching the model inside the group headers would dangle `node`.
+    UiNodePayload payload = SnapshotUiNodePayload(*node);
+    bool structural = false;
+
+    ea::string curGroup;
+    int groupOrdinal = -1;
+    bool groupOpen = false;
+    for (const StyleRow& row : kStyleRows)
+    {
+        const ea::string group(row.group);
+        if (group != curGroup)
+        {
+            curGroup = group;
+            ++groupOrdinal;
+            // An <img> carries no text, so the whole Typography group is
+            // meaningless on it (its paint knob is image-color); hide the group.
+            if (isImage && !showAllStyle_ && group == "Typography")
+                groupOpen = false;
+            else
+                // Greet the user with the sizing knobs; the rest stay collapsed
+                // until asked for.
+                groupOpen = ui::CollapsingHeader(row.group,
+                    groupOrdinal == 0 ? ImGuiTreeNodeFlags_DefaultOpen : static_cast<ImGuiTreeNodeFlags>(0));
+        }
+        if (!groupOpen)
+            continue;
+
+        // Drop rows this element cannot honor in its current context.
+        if (!showAllStyle_ && !guardPasses(row.guard))
+            continue;
+
+        const int at = FindStyleIndexIn(payload.style_, row.name);
+        const bool present = at >= 0;
+        const ea::string value = present ? payload.style_[at].value_ : ea::string();
+
+        ui::PushID(row.name);
+        // Surface inheritance: a color or font on a container is the engine
+        // feeding its whole subtree, not a per-node quirk.
+        ui::Text("%s%s", row.name, row.inherited ? "  *" : "");
+        if (row.inherited && ui::IsItemHovered())
+            ui::SetTooltip("Inherited: descendants take this value unless they override it.");
+        ui::SameLine();
+
+        if (row.kind == StyleKind::Keyword)
+        {
+            ea::vector<ea::string> items;
+            items.push_back("(default)"); // drops the declaration, engine default stands
+            SplitKeywords(row.keywords, items);
+            int current = 0;
+            if (present)
+            {
+                for (int i = 1; i < static_cast<int>(items.size()); ++i)
+                {
+                    if (items[i] == Trim(value))
+                    {
+                        current = i;
+                        break;
+                    }
+                }
+            }
+            // No declaration shows the effective default; a hand-written value
+            // outside the list still previews verbatim so the row never lies.
+            const ea::string preview = present ? value
+                : (row.def[0] != '\0' ? ea::string(row.def) : ea::string("(default)"));
+            ui::PushItemWidth(-8.0f);
+            if (ui::BeginCombo("##v", preview.c_str()))
+            {
+                for (int i = 0; i < static_cast<int>(items.size()); ++i)
+                {
+                    if (ui::Selectable(items[i].c_str(), i == current))
+                    {
+                        if (i == 0)
+                        {
+                            if (present)
+                                DropPayloadStyle(payload, row.name);
+                        }
+                        else
+                        {
+                            SetPayloadStyle(payload, row.name, items[i]);
+                        }
+                        structural = true;
+                    }
+                }
+                ui::EndCombo();
+            }
+            ui::PopItemWidth();
+        }
+        else
+        {
+            char valBuf[256];
+            snprintf(valBuf, sizeof(valBuf), "%s", value.c_str());
+            const ImGuiInputTextFlags extra =
+                row.kind == StyleKind::Number ? ImGuiInputTextFlags_CharsDecimal : static_cast<ImGuiInputTextFlags>(0);
+            ui::PushItemWidth(-8.0f);
+            if (ui::InputTextWithHint("##v", row.def[0] != '\0' ? row.def : "(none)",
+                    valBuf, sizeof(valBuf), extra | ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                const ea::string next = Trim(valBuf);
+                if (next.empty())
+                {
+                    if (present)
+                    {
+                        DropPayloadStyle(payload, row.name);
+                        structural = true;
+                    }
+                }
+                else if (!present || next != value)
+                {
+                    SetPayloadStyle(payload, row.name, next);
+                    structural = true;
+                }
+            }
+            ui::PopItemWidth();
+        }
+        ui::PopID();
+    }
+
+    if (structural && tab && tab->GetDocument())
+    {
+        // A structured commit changes style_; force the raw editor below to
+        // reseed from the rebuilt model instead of showing its stale buffer.
+        styleSeedValid_ = false;
+        tab->GetDocument()->EditNodePayload(node, payload);
+        return true; // the model was rebuilt; the node is dangling now
+    }
+    return false;
+}
+
 bool UIViewInspector::RenderInlineStyle(UiNode* node)
 {
     UIViewTab* tab = owner_;
-    if (!ui::CollapsingHeader(ICON_FA_PAINTBRUSH " Inline Style", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!ui::CollapsingHeader(ICON_FA_CODE " Inline Style (raw)", ImGuiTreeNodeFlags_DefaultOpen))
         return false;
+
+    ui::TextDisabled("The full style=\"...\" list, verbatim. Use it for values the "
+        "structured Style rows above cannot express (transform, decorator, "
+        "animation, !important). Applying this replaces every declaration it lists.");
 
     const ea::vector<unsigned> curPath = tab ? tab->GetSelectedPath() : ea::vector<unsigned>{};
     if (!styleSeedValid_ || curPath != lastStylePath_)
@@ -2431,7 +2787,6 @@ bool UIViewInspector::RenderInlineStyle(UiNode* node)
 
 void UIViewInspector::RenderComputed(UiNode* node)
 {
-    UIViewTab* tab = owner_;
     if (!ui::CollapsingHeader(ICON_FA_CALCULATOR " Computed", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
@@ -2443,20 +2798,10 @@ void UIViewInspector::RenderComputed(UiNode* node)
         ui::Text("width %s  height %s", FormatPx(size.x_).c_str(), FormatPx(size.y_).c_str());
     }
 
-    if (node->IsMaterialized())
-    {
-        ui::TextDisabled("(explicit / editable)");
-        if (tab && tab->GetDocument())
-        {
-            if (ui::Button(ICON_FA_ARROWS_TO_DOT " Remove Explicit Position"))
-                tab->GetDocument()->DematerializeNode(node);
-        }
-    }
-    else if (!node->IsText() && tab && tab->GetDocument())
-    {
-        if (ui::Button(ICON_FA_LOCATION_PIN " Add Explicit Position"))
-            tab->GetDocument()->MaterializeNode(node);
-    }
+    // The gizmo now keys off the position declaration alone, so surface that
+    // here: an absolutely positioned node can be dragged/resized in the preview.
+    if (node->GetStyle("position") == "absolute")
+        ui::TextDisabled("(absolutely positioned - drag the handles in the preview to move or resize)");
 }
 
 }

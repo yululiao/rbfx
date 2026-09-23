@@ -367,6 +367,32 @@ Vector2 UIViewDocument::GetInlineStyleBase(const UiNode* node) const
     return node ? InlineStyleBase(node->dom_, node) : Vector2::ZERO;
 }
 
+bool UIViewDocument::TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base) const
+{
+    base = Vector2::ZERO;
+    // The gizmo is offered purely on the position declaration: only an
+    // absolutely positioned box is dragged (dragging writes position:absolute +
+    // left/top/width/height, so relative/fixed/none must not trigger it).
+    if (!node || !node->dom_ || node->GetStyle("position") != "absolute")
+        return false;
+    // Authored geometry wins: exact, and it is the frame WriteBoxToStyle keeps.
+    if (TryGetMaterializedBox(*node, out))
+    {
+        base = InlineStyleBase(node->dom_, node);
+        return true;
+    }
+    // Positioned but not yet sized/offset (position freshly set from the Style
+    // panel): seed the box from the rendered border box against its containing
+    // block, so the element is immediately draggable from where it already is.
+    Rml::Element* el = node->dom_;
+    Rml::Element* containing = el->GetOffsetParent();
+    base = containing ? V2(containing->GetAbsoluteOffset(Rml::BoxArea::Border)) : Vector2::ZERO;
+    out.pos_ = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border)) - base;
+    out.size_ = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
+    out.xform_ = ParseUiTransform(node->GetStyle("transform"));
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Undo plumbing
 // ---------------------------------------------------------------------------
@@ -704,57 +730,6 @@ UiNode* UIViewDocument::MoveNode(UiNode* node, UiNode* newParent, unsigned index
     if (!CommitAndReload(undoText, {}))
         return nullptr;
     return model_.ResolvePath(newPath);
-}
-
-bool UIViewDocument::MaterializeNode(UiNode* node)
-{
-    if (!node || !node->dom_ || node->IsText() || node->IsNestedDoc() || node->IsHeadLink()
-        || !node->IsMaterialized())
-        return false;
-
-    // Bake the computed border box into explicit px style, then let the reload
-    // below land the element where the authored box says. CommitAndReload's
-    // landing correction fixes any containing-block offset afterwards, so
-    // nothing visibly moves (regardless of the containing block's padding or
-    // border).
-    const ea::string undoText = model_.EmitRml();
-    ea::vector<unsigned> path;
-    if (!model_.BuildPath(node, path))
-        return false;
-
-    Rml::Element* el = node->dom_;
-    const Vector2 absBefore = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-    const Vector2 size = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
-    Rml::Element* parent = el->GetOffsetParent();
-    const Vector2 base = parent ? V2(parent->GetAbsoluteOffset(Rml::BoxArea::Border)) : Vector2::ZERO;
-
-    UiBox box;
-    box.pos_ = absBefore - base;
-    box.size_ = size;
-    box.xform_ = ParseUiTransform(node->GetStyle("transform"));
-    WriteBoxToStyle(*node, box);
-
-    return CommitAndReload(undoText, path, &path, absBefore);
-}
-
-bool UIViewDocument::DematerializeNode(UiNode* node)
-{
-    if (!node || node->IsNestedDoc() || node->IsHeadLink() || !node->IsMaterialized())
-        return false;
-
-    // Drop only the pin - position + left/top. width/height/box-sizing and
-    // transform stay behind: they remain meaningful (and commonly authored)
-    // for the re-flowed element, e.g. a fixed-size button, so stripping them
-    // would silently discard intent that may predate the materialize.
-    // Routed through EditNodePayload, so this is one undoable, mergeable
-    // style edit like any hand edit in the Inspector.
-    UiNodePayload payload = SnapshotUiNodePayload(*node);
-    payload.style_.erase(std::remove_if(payload.style_.begin(), payload.style_.end(),
-        [](const UiStyleDecl& decl)
-        {
-            return decl.name_ == "position" || decl.name_ == "left" || decl.name_ == "top";
-        }), payload.style_.end());
-    return EditNodePayload(node, payload);
 }
 
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)

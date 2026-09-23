@@ -81,7 +81,7 @@ struct UiWidgetSpec
 /// UIViewTab so the tab keeps only ImGui drawing and input routing.
 ///
 /// Editing goes through the undoable commands (AddWidget / DuplicateNode /
-/// DeleteNode / MaterializeNode / EditNodePayload / CommitBoxEdit). Each
+/// DeleteNode / EditNodePayload / CommitBoxEdit). Each
 /// command mutates the in-memory model, re-emits the whole document and then
 /// rebuilds the model and the live projection from the emitted text - the
 /// exact path a hand-edited file takes when it is (re)opened - so the preview
@@ -151,6 +151,13 @@ public:
     /// document's own contribution instead of the whole canvas.
     bool TryGetDomBoxes(const UiNode* node, ea::vector<UiBox>& out) const;
     Vector2 GetInlineStyleBase(const UiNode* node) const;
+    /// The gizmo box for an absolutely positioned node (position: absolute) in
+    /// the left/top frame its authored offsets resolve against, plus that
+    /// frame's origin (written to \a base). Prefers authored px; when the node
+    /// is positioned but not yet sized/offset it seeds from the rendered box
+    /// against the containing block, so a freshly-positioned element is
+    /// draggable at once. False when the node is not absolutely positioned.
+    bool TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base) const;
     /// @}
 
     /// Undoable editing commands. Each mutates the model, rebuilds the whole
@@ -167,10 +174,6 @@ public:
     /// the moved subtree (that would orphan it). Returns the moved node in the
     /// rebuilt tree, or null when the move was rejected.
     UiNode* MoveNode(UiNode* node, UiNode* newParent, unsigned index);
-    bool MaterializeNode(UiNode* node);
-    /// Drop the explicit absolute positioning (position/left/top) so the node
-    /// re-joins the document flow. Sizing stays behind - see the impl note.
-    bool DematerializeNode(UiNode* node);
     bool EditNodePayload(UiNode* node, const UiNodePayload& newData);
     /// Commit a solved gizmo box (drag release) as one recorded style edit.
     bool CommitBoxEdit(UiNode* node, const UiBox& box);
