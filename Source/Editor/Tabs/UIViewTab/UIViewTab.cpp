@@ -366,10 +366,19 @@ void UIViewTab::OnDocumentEdited()
     const UiDocumentModel& model = document_->GetModel();
     // Every command (and every undo/redo) rebuilds the whole model tree from
     // text, so no node pointer survives an edit; re-resolve the selection
-    // from its stable child-index path, falling back to the root.
+    // from its stable child-index path.
     selected_ = model.ResolvePath(selPath_);
-    if (!selected_)
-        selected_ = model.root_.Get();
+    if (!selected_ && !selPath_.empty())
+    {
+        // The node is gone (deleted, or an undo removed it): fall back to its
+        // parent so the panel keeps some context. Never snap silently to the
+        // root - the <body> panel looks like any element panel, and an edit
+        // meant for the vanished node would land on the document root and
+        // corrupt it instead (seen in the wild: class="image" appended to
+        // <body> while the user believed they were editing an <img>).
+        selPath_.pop_back();
+        selected_ = model.ResolvePath(selPath_);
+    }
     model.BuildPath(selected_, selPath_);
     if (inspectorSource_)
         inspectorSource_->InvalidateCaches();
@@ -1498,17 +1507,32 @@ void UIViewInspector::RenderContent()
     ea::string header = node->tag_;
     if (!node->id_.empty())
         header += "#" + node->id_;
-    ui::Text(ICON_FA_HAND_POINTER " %s", header.c_str());
+    UIViewDocument* doc = tab ? tab->GetDocument() : nullptr;
+    if (doc && node == doc->GetModel().root_.Get())
+    {
+        // The document root is a real element (inline style on <body> is worth
+        // editing), but it must never read as just another widget panel: edits
+        // meant for a selected widget have landed on <body> unnoticed.
+        ui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
+            ICON_FA_TRIANGLE_EXCLAMATION " Document Root (%s)", header.c_str());
+    }
+    else
+        ui::Text(ICON_FA_HAND_POINTER " %s", header.c_str());
     // The file this element's source lives in (matters with several documents
     // open and for template-minted areas, whose source lives elsewhere).
-    if (UIViewDocument* doc = tab ? tab->GetDocument() : nullptr)
+    if (doc)
         ui::TextDisabled(ICON_FA_FILE " %s", doc->GetSourcePath().c_str());
     ui::Separator();
 
-    RenderTextContent(node);
-    RenderAttributes(node);
+    // A committed edit rebuilds the model tree and dangles `node`; stop
+    // rendering for this frame instead of touching freed memory below.
+    if (RenderTextContent(node))
+        return;
+    if (RenderAttributes(node))
+        return;
     ui::Separator();
-    RenderInlineStyle(node);
+    if (RenderInlineStyle(node))
+        return;
     ui::Separator();
     RenderTemplates(node);
     ui::Separator();
@@ -1736,11 +1760,11 @@ void UIViewInspector::RenderTemplates(UiNode* node)
     }
 }
 
-void UIViewInspector::RenderTextContent(UiNode* node)
+bool UIViewInspector::RenderTextContent(UiNode* node)
 {
     UIViewTab* tab = owner_;
     if (!tab || !tab->GetDocument())
-        return;
+        return false;
 
     // The visible text of a label/button lives on a #text model node. Expose a
     // single editable field when the selection is itself a text node, or an
@@ -1752,10 +1776,10 @@ void UIViewInspector::RenderTextContent(UiNode* node)
     else if (node->children_.size() == 1 && node->children_[0]->IsText())
         textNode = node->children_[0].Get();
     if (!textNode)
-        return;
+        return false;
 
     if (!ui::CollapsingHeader(ICON_FA_FONT " Content", ImGuiTreeNodeFlags_DefaultOpen))
-        return;
+        return false;
 
     // Same seed-per-frame + commit-on-deactivate model as the id/class rows:
     // ImGui keeps its own edit buffer while focused, so re-seeding is safe.
@@ -1769,14 +1793,16 @@ void UIViewInspector::RenderTextContent(UiNode* node)
         UiNodePayload payload = SnapshotUiNodePayload(*textNode);
         payload.text_ = ea::string(textBuf);
         tab->GetDocument()->EditNodePayload(textNode, payload);
+        return true; // the model was rebuilt; the node is dangling now
     }
+    return false;
 }
 
-void UIViewInspector::RenderAttributes(UiNode* node)
+bool UIViewInspector::RenderAttributes(UiNode* node)
 {
     UIViewTab* tab = owner_;
     if (!ui::CollapsingHeader(ICON_FA_LIST " Attributes", ImGuiTreeNodeFlags_DefaultOpen))
-        return;
+        return false;
 
     // Edits accumulate into a payload COPY; the model node is only touched by
     // the undoable command, which snapshots the pristine "old" state itself.
@@ -1784,9 +1810,16 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     bool structural = false;
 
     // id / class are dedicated fields; editing them is structural (emitted).
+    // Same row layout as the attribute rows below (name left, input right):
+    // a bare InputText("id") would put ImGui's label after the field and the
+    // section would read as two misaligned tables.
     char idBuf[256];
     snprintf(idBuf, sizeof(idBuf), "%s", node->id_.c_str());
-    ui::InputText("id", idBuf, sizeof(idBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::Text("id");
+    ui::SameLine();
+    ui::PushItemWidth(-40.0f);
+    ui::InputText("##id", idBuf, sizeof(idBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::PopItemWidth();
     if (ui::IsItemDeactivatedAfterEdit())
     {
         payload.id_ = Trim(idBuf);
@@ -1794,7 +1827,11 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     }
     char classBuf[256];
     snprintf(classBuf, sizeof(classBuf), "%s", node->classes_.c_str());
-    ui::InputText("class", classBuf, sizeof(classBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::Text("class");
+    ui::SameLine();
+    ui::PushItemWidth(-40.0f);
+    ui::InputText("##class", classBuf, sizeof(classBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ui::PopItemWidth();
     if (ui::IsItemDeactivatedAfterEdit())
     {
         payload.classes_ = Trim(classBuf);
@@ -1828,6 +1865,49 @@ void UIViewInspector::RenderAttributes(UiNode* node)
         ui::PopID();
     }
 
+    // Natural attributes of the tag (img -> src): always visible, even when
+    // the element never carried one (documents from before the palette
+    // recipes, or arbitrary-tag creations), so the affordance does not depend
+    // on how the element was born. Typing a value adds the attribute; an
+    // empty input adds nothing.
+    struct NaturalAttr
+    {
+        const char* tag;
+        const char* name;
+    };
+    static const NaturalAttr kNaturalAttrs[] = {{"img", "src"}};
+    for (const NaturalAttr& natural : kNaturalAttrs)
+    {
+        if (node->tag_ != natural.tag)
+            continue;
+        bool present = false;
+        for (const auto& attr : node->attributes_)
+        {
+            if (attr.first == natural.name)
+            {
+                present = true;
+                break;
+            }
+        }
+        if (present)
+            continue;
+        char valBuf[1024] = "";
+        ui::PushID(natural.name);
+        ui::Text("%s", natural.name);
+        ui::SameLine();
+        ui::PushItemWidth(-40.0f);
+        const bool enter = ui::InputText("##value", valBuf, sizeof(valBuf),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        ui::PopItemWidth();
+        ui::PopID();
+        const ea::string value = Trim(valBuf);
+        if (enter && !value.empty())
+        {
+            payload.attributes_.emplace_back(natural.name, value);
+            structural = true;
+        }
+    }
+
     // Add-new row.
     ui::PushID("__new__");
     ui::InputText("name##newAttrName", attributeKeyBuf_, sizeof(attributeKeyBuf_));
@@ -1849,14 +1929,18 @@ void UIViewInspector::RenderAttributes(UiNode* node)
     ui::PopID();
 
     if (structural && tab && tab->GetDocument())
+    {
         tab->GetDocument()->EditNodePayload(node, payload);
+        return true; // the model was rebuilt; the node is dangling now
+    }
+    return false;
 }
 
-void UIViewInspector::RenderInlineStyle(UiNode* node)
+bool UIViewInspector::RenderInlineStyle(UiNode* node)
 {
     UIViewTab* tab = owner_;
     if (!ui::CollapsingHeader(ICON_FA_PAINTBRUSH " Inline Style", ImGuiTreeNodeFlags_DefaultOpen))
-        return;
+        return false;
 
     const ea::vector<unsigned> curPath = tab ? tab->GetSelectedPath() : ea::vector<unsigned>{};
     if (!styleSeedValid_ || curPath != lastStylePath_)
@@ -1884,8 +1968,10 @@ void UIViewInspector::RenderInlineStyle(UiNode* node)
             UiNodePayload payload = SnapshotUiNodePayload(*node);
             payload.style_ = ea::move(parsed);
             tab->GetDocument()->EditNodePayload(node, payload);
+            return true; // the model was rebuilt; the node is dangling now
         }
     }
+    return false;
 }
 
 void UIViewInspector::RenderComputed(UiNode* node)
