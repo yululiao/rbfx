@@ -1666,7 +1666,9 @@ void UIViewInspector::RenderContent()
     if (RenderAttributes(node))
         return;
     ui::Separator();
-    if (RenderStyle(node))
+    if (RenderLayout(node))
+        return;
+    if (RenderAppearance(node))
         return;
     if (RenderInlineStyle(node))
         return;
@@ -2393,119 +2395,27 @@ enum class StyleKind
     Text,    ///< free string (font-family, cursor) -> free field
 };
 
-// A row is only meaningful in certain contexts; showing it always is what made
-// the panel feel like a wall of knobs. Each row carries a guard that ties it to
-// the situation where the engine would actually honor it, so a row appears only
-// when it can change something (and always when Show all is ticked).
-enum class StyleGuard
-{
-    None,          ///< always relevant to the selected element
-    Positioned,    ///< only when position != static (offsets, z-index)
-    FlexContainer, ///< only when this element's own display is flex/inline-flex
-    FlexChild,     ///< only when the parent's display is flex/inline-flex
-    ImageOnly,     ///< only for <img> (paint of a replaced element)
-};
-
+// The structured panel is an opinionated subset, not a CSS browser: only the
+// few look properties worth a knob on every element get a row here (the layout
+// kit has its own bespoke controls, see RenderLayout). Everything else RmlUi
+// registers - borders, radius, the long tail of typography, box sizing, min/max,
+// the rest of flex, ... - is left to the raw editor below; a structured row only
+// ever adds or removes the one declaration it edits, never disturbing the
+// authored order or its siblings.
 struct StyleRow
 {
-    const char* group;
     const char* name;
     const char* def;      ///< engine default: the placeholder; "" = no default text
     bool inherited;       ///< cascades to descendants
     StyleKind kind;
     const char* keywords; ///< Keyword only: ", "-separated, exactly as registered
-    StyleGuard guard = StyleGuard::None; ///< relevance gate (default: always shown)
 };
 
-const StyleRow kStyleRows[] = {
-    // --- Own placement: how THIS element sits inside its parent (self-facing). ---
-    // Everything here answers "where am I among my siblings / in my container";
-    // flex-grow/shrink/basis/align-self are the item half of flexbox (they read
-    // the PARENT's display), margin is self-spacing (margin:auto centers oneself).
-    { "Own placement (self in parent)", "position", "static", false, StyleKind::Keyword, "static, relative, absolute, fixed" },
-    { "Own placement (self in parent)", "top", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
-    { "Own placement (self in parent)", "right", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
-    { "Own placement (self in parent)", "bottom", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
-    { "Own placement (self in parent)", "left", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
-    { "Own placement (self in parent)", "z-index", "auto", false, StyleKind::Length, nullptr, StyleGuard::Positioned },
-    { "Own placement (self in parent)", "margin-top", "0px", false, StyleKind::Length, nullptr },
-    { "Own placement (self in parent)", "margin-right", "0px", false, StyleKind::Length, nullptr },
-    { "Own placement (self in parent)", "margin-bottom", "0px", false, StyleKind::Length, nullptr },
-    { "Own placement (self in parent)", "margin-left", "0px", false, StyleKind::Length, nullptr },
-    { "Own placement (self in parent)", "float", "none", false, StyleKind::Keyword, "none, left, right" },
-    { "Own placement (self in parent)", "clear", "none", false, StyleKind::Keyword, "none, left, right, both" },
-    { "Own placement (self in parent)", "flex-grow", "0", false, StyleKind::Number, nullptr, StyleGuard::FlexChild },
-    { "Own placement (self in parent)", "flex-shrink", "1", false, StyleKind::Number, nullptr, StyleGuard::FlexChild },
-    { "Own placement (self in parent)", "flex-basis", "auto", false, StyleKind::Length, nullptr, StyleGuard::FlexChild },
-    { "Own placement (self in parent)", "align-self", "auto", false, StyleKind::Keyword, "auto, flex-start, flex-end, center, baseline, stretch", StyleGuard::FlexChild },
-
-    // --- Children layout: how THIS element arranges its own contents ---
-    // The parent half of flexbox: display switches on the mode, the flex/gap rows
-    // then lay out the DIRECT children (they read THIS element's own display).
-    // overflow is here too: it governs what happens to the content that spills.
-    { "Children layout (contents)", "display", "inline", false, StyleKind::Keyword, "none, block, inline, inline-block, flow-root, flex, inline-flex, table, inline-table, table-row, table-row-group, table-column, table-column-group, table-cell" },
-    { "Children layout (contents)", "flex-direction", "row", false, StyleKind::Keyword, "row, row-reverse, column, column-reverse", StyleGuard::FlexContainer },
-    { "Children layout (contents)", "flex-wrap", "nowrap", false, StyleKind::Keyword, "nowrap, wrap, wrap-reverse", StyleGuard::FlexContainer },
-    { "Children layout (contents)", "justify-content", "flex-start", false, StyleKind::Keyword, "flex-start, flex-end, center, space-between, space-around", StyleGuard::FlexContainer },
-    { "Children layout (contents)", "align-items", "stretch", false, StyleKind::Keyword, "flex-start, flex-end, center, baseline, stretch", StyleGuard::FlexContainer },
-    { "Children layout (contents)", "align-content", "stretch", false, StyleKind::Keyword, "flex-start, flex-end, center, space-between, space-around, stretch", StyleGuard::FlexContainer },
-    { "Children layout (contents)", "row-gap", "0px", false, StyleKind::Length, nullptr, StyleGuard::FlexContainer },
-    { "Children layout (contents)", "column-gap", "0px", false, StyleKind::Length, nullptr, StyleGuard::FlexContainer },
-    { "Children layout (contents)", "overflow-x", "visible", false, StyleKind::Keyword, "visible, hidden, auto, scroll" },
-    { "Children layout (contents)", "overflow-y", "visible", false, StyleKind::Keyword, "visible, hidden, auto, scroll" },
-
-    // --- Box: the box model - the element's own size and inner padding ---
-    { "Box", "box-sizing", "content-box", false, StyleKind::Keyword, "content-box, border-box" },
-    { "Box", "width", "auto", false, StyleKind::Length, nullptr },
-    { "Box", "min-width", "0px", false, StyleKind::Length, nullptr },
-    { "Box", "max-width", "none", false, StyleKind::Length, nullptr },
-    { "Box", "height", "auto", false, StyleKind::Length, nullptr },
-    { "Box", "min-height", "0px", false, StyleKind::Length, nullptr },
-    { "Box", "max-height", "none", false, StyleKind::Length, nullptr },
-    { "Box", "padding-top", "0px", false, StyleKind::Length, nullptr },
-    { "Box", "padding-right", "0px", false, StyleKind::Length, nullptr },
-    { "Box", "padding-bottom", "0px", false, StyleKind::Length, nullptr },
-    { "Box", "padding-left", "0px", false, StyleKind::Length, nullptr },
-
-    // --- Typography: text look (most of these cascade to descendants) ---
-    { "Typography", "color", "white", true, StyleKind::Color, nullptr },
-    { "Typography", "font-family", "", true, StyleKind::Text, nullptr },
-    { "Typography", "font-style", "normal", true, StyleKind::Keyword, "normal, italic" },
-    { "Typography", "font-weight", "normal", true, StyleKind::Keyword, "normal, bold" },
-    { "Typography", "font-size", "12px", true, StyleKind::Length, nullptr },
-    { "Typography", "line-height", "1.2", true, StyleKind::Length, nullptr },
-    { "Typography", "letter-spacing", "normal", true, StyleKind::Length, nullptr },
-    { "Typography", "text-align", "left", true, StyleKind::Keyword, "left, right, center, justify" },
-    { "Typography", "text-decoration", "none", true, StyleKind::Keyword, "none, underline, overline, line-through" },
-    { "Typography", "text-transform", "none", true, StyleKind::Keyword, "none, capitalize, uppercase, lowercase" },
-    { "Typography", "white-space", "normal", true, StyleKind::Keyword, "normal, pre, nowrap, pre-wrap, pre-line" },
-    { "Typography", "word-break", "normal", true, StyleKind::Keyword, "normal, break-all, break-word" },
-    { "Typography", "vertical-align", "baseline", false, StyleKind::Keyword, "baseline, middle, sub, super, text-top, text-bottom, top, center, bottom" },
-    { "Typography", "caret-color", "auto", true, StyleKind::Color, nullptr },
-
-    // --- Appearance: paint (background, border, visibility, interaction) ---
-    { "Appearance", "background-color", "transparent", false, StyleKind::Color, nullptr },
-    { "Appearance", "opacity", "1", true, StyleKind::Number, nullptr },
-    { "Appearance", "visibility", "visible", false, StyleKind::Keyword, "visible, hidden" },
-    { "Appearance", "border-top-width", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-right-width", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-bottom-width", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-left-width", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-top-color", "black", false, StyleKind::Color, nullptr },
-    { "Appearance", "border-right-color", "black", false, StyleKind::Color, nullptr },
-    { "Appearance", "border-bottom-color", "black", false, StyleKind::Color, nullptr },
-    { "Appearance", "border-left-color", "black", false, StyleKind::Color, nullptr },
-    { "Appearance", "border-top-left-radius", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-top-right-radius", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-bottom-right-radius", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "border-bottom-left-radius", "0px", false, StyleKind::Length, nullptr },
-    { "Appearance", "image-color", "white", false, StyleKind::Color, nullptr, StyleGuard::ImageOnly },
-    { "Appearance", "cursor", "", true, StyleKind::Text, nullptr },
-    { "Appearance", "pointer-events", "auto", true, StyleKind::Keyword, "none, auto" },
-    { "Appearance", "focus", "auto", true, StyleKind::Keyword, "none, auto" },
-    { "Appearance", "tab-index", "none", false, StyleKind::Keyword, "none, auto" },
-    { "Appearance", "drag", "none", false, StyleKind::Keyword, "none, drag, drag-drop, block, clone" },
-    { "Appearance", "overscroll-behavior", "auto", false, StyleKind::Keyword, "auto, contain" },
+const StyleRow kAppearanceRows[] = {
+    { "background-color", "transparent", false, StyleKind::Color, nullptr },
+    { "opacity", "1", true, StyleKind::Number, nullptr },
+    { "color", "white", true, StyleKind::Color, nullptr },
+    { "font-size", "12px", true, StyleKind::Length, nullptr },
 };
 
 int FindStyleIndexIn(const ea::vector<UiStyleDecl>& decls, const ea::string& name)
@@ -2568,169 +2478,463 @@ bool IsFlexValue(const ea::string& display)
     return display == "flex" || display == "inline-flex";
 }
 
-bool UIViewInspector::RenderStyle(UiNode* node)
+// Render one structured style row (label + its control) against the payload
+// copy. Keyword rows offer "(default)" as slot 0, which drops the declaration
+// so the engine default stands; a hand-written value outside the list still
+// previews verbatim so the row never lies. Length/Number/Color/Text rows are
+// free fields (Number is digit-filtered); clearing one drops its declaration
+// rather than writing the default. Nothing commits here - callers accumulate
+// into one payload and EditNodePayload once (commit-then-return).
+void RenderOneStyleRow(const StyleRow& row, UiNodePayload& payload, bool& structural)
 {
-    UIViewTab* tab = owner_;
-    if (!ui::CollapsingHeader(ICON_FA_SLIDERS " Style", ImGuiTreeNodeFlags_DefaultOpen))
-        return false;
+    const int at = FindStyleIndexIn(payload.style_, row.name);
+    const bool present = at >= 0;
+    const ea::string value = present ? payload.style_[at].value_ : ea::string();
 
-    // Type/dependency filtering keeps the panel honest about what can actually
-    // affect this element. Show all reverts to the flat, complete registry for
-    // the rare case where a value is authored out of band (a class set display
-    // to flex) and the dependent rows would otherwise stay hidden.
-    ui::Checkbox("Show all style properties", &showAllStyle_);
-    if (!showAllStyle_)
-        ui::TextDisabled("Only rows that can affect this element are shown; tick "
-            "'Show all' for the full list. Nothing hidden is lost - the raw editor "
-            "below still carries every declaration verbatim.");
+    ui::PushID(row.name);
+    // Surface inheritance: a color or font on a container is the engine feeding
+    // its whole subtree, not a per-node quirk.
+    ui::Text("%s%s", row.name, row.inherited ? "  *" : "");
+    if (row.inherited && ui::IsItemHovered())
+        ui::SetTooltip("Inherited: descendants take this value unless they override it.");
+    ui::SameLine();
 
-    // Effective context for the relevance guards, read straight off this node's
-    // (and its parent's) authored style. Class-driven values are invisible here,
-    // which is exactly what Show all is for.
-    const bool isImage = node->tag_ == "img";
-    const ea::string position = LowerCopy(Trim(node->GetStyle("position")));
-    const bool positioned = !position.empty() && position != "static";
-    const bool isFlexContainer = IsFlexValue(LowerCopy(Trim(node->GetStyle("display"))));
-    bool isFlexChild = false;
-    if (tab && tab->GetDocument())
+    if (row.kind == StyleKind::Keyword)
     {
-        if (const UiNode* parent = tab->GetDocument()->GetModel().FindParent(node))
-            isFlexChild = IsFlexValue(LowerCopy(Trim(parent->GetStyle("display"))));
-    }
-    auto guardPasses = [&](StyleGuard guard)
-    {
-        switch (guard)
+        ea::vector<ea::string> items;
+        items.push_back("(default)"); // drops the declaration, engine default stands
+        SplitKeywords(row.keywords, items);
+        int current = 0;
+        if (present)
         {
-        case StyleGuard::Positioned:
-            return positioned;
-        case StyleGuard::FlexContainer:
-            return isFlexContainer;
-        case StyleGuard::FlexChild:
-            return isFlexChild;
-        case StyleGuard::ImageOnly:
-            return isImage;
-        default:
-            return true;
-        }
-    };
-
-    // Accumulate into a payload copy and commit once, like the attribute rows:
-    // touching the model inside the group headers would dangle `node`.
-    UiNodePayload payload = SnapshotUiNodePayload(*node);
-    bool structural = false;
-
-    ea::string curGroup;
-    int groupOrdinal = -1;
-    bool groupOpen = false;
-    for (const StyleRow& row : kStyleRows)
-    {
-        const ea::string group(row.group);
-        if (group != curGroup)
-        {
-            curGroup = group;
-            ++groupOrdinal;
-            // An <img> carries no text, so the whole Typography group is
-            // meaningless on it (its paint knob is image-color); hide the group.
-            if (isImage && !showAllStyle_ && group == "Typography")
-                groupOpen = false;
-            else
-                // Greet the user with the sizing knobs; the rest stay collapsed
-                // until asked for.
-                groupOpen = ui::CollapsingHeader(row.group,
-                    groupOrdinal == 0 ? ImGuiTreeNodeFlags_DefaultOpen : static_cast<ImGuiTreeNodeFlags>(0));
-        }
-        if (!groupOpen)
-            continue;
-
-        // Drop rows this element cannot honor in its current context.
-        if (!showAllStyle_ && !guardPasses(row.guard))
-            continue;
-
-        const int at = FindStyleIndexIn(payload.style_, row.name);
-        const bool present = at >= 0;
-        const ea::string value = present ? payload.style_[at].value_ : ea::string();
-
-        ui::PushID(row.name);
-        // Surface inheritance: a color or font on a container is the engine
-        // feeding its whole subtree, not a per-node quirk.
-        ui::Text("%s%s", row.name, row.inherited ? "  *" : "");
-        if (row.inherited && ui::IsItemHovered())
-            ui::SetTooltip("Inherited: descendants take this value unless they override it.");
-        ui::SameLine();
-
-        if (row.kind == StyleKind::Keyword)
-        {
-            ea::vector<ea::string> items;
-            items.push_back("(default)"); // drops the declaration, engine default stands
-            SplitKeywords(row.keywords, items);
-            int current = 0;
-            if (present)
+            for (int i = 1; i < static_cast<int>(items.size()); ++i)
             {
-                for (int i = 1; i < static_cast<int>(items.size()); ++i)
+                if (items[i] == Trim(value))
                 {
-                    if (items[i] == Trim(value))
-                    {
-                        current = i;
-                        break;
-                    }
+                    current = i;
+                    break;
                 }
             }
-            // No declaration shows the effective default; a hand-written value
-            // outside the list still previews verbatim so the row never lies.
-            const ea::string preview = present ? value
-                : (row.def[0] != '\0' ? ea::string(row.def) : ea::string("(default)"));
-            ui::PushItemWidth(-8.0f);
-            if (ui::BeginCombo("##v", preview.c_str()))
-            {
-                for (int i = 0; i < static_cast<int>(items.size()); ++i)
-                {
-                    if (ui::Selectable(items[i].c_str(), i == current))
-                    {
-                        if (i == 0)
-                        {
-                            if (present)
-                                DropPayloadStyle(payload, row.name);
-                        }
-                        else
-                        {
-                            SetPayloadStyle(payload, row.name, items[i]);
-                        }
-                        structural = true;
-                    }
-                }
-                ui::EndCombo();
-            }
-            ui::PopItemWidth();
         }
-        else
+        const ea::string preview = present ? value
+            : (row.def[0] != '\0' ? ea::string(row.def) : ea::string("(default)"));
+        ui::PushItemWidth(-8.0f);
+        if (ui::BeginCombo("##v", preview.c_str()))
         {
-            char valBuf[256];
-            snprintf(valBuf, sizeof(valBuf), "%s", value.c_str());
-            const ImGuiInputTextFlags extra =
-                row.kind == StyleKind::Number ? ImGuiInputTextFlags_CharsDecimal : static_cast<ImGuiInputTextFlags>(0);
-            ui::PushItemWidth(-8.0f);
-            if (ui::InputTextWithHint("##v", row.def[0] != '\0' ? row.def : "(none)",
-                    valBuf, sizeof(valBuf), extra | ImGuiInputTextFlags_EnterReturnsTrue))
+            for (int i = 0; i < static_cast<int>(items.size()); ++i)
             {
-                const ea::string next = Trim(valBuf);
-                if (next.empty())
+                if (ui::Selectable(items[i].c_str(), i == current))
                 {
-                    if (present)
+                    if (i == 0)
                     {
-                        DropPayloadStyle(payload, row.name);
-                        structural = true;
+                        if (present)
+                            DropPayloadStyle(payload, row.name);
                     }
-                }
-                else if (!present || next != value)
-                {
-                    SetPayloadStyle(payload, row.name, next);
+                    else
+                    {
+                        SetPayloadStyle(payload, row.name, items[i]);
+                    }
                     structural = true;
                 }
             }
+            ui::EndCombo();
+        }
+        ui::PopItemWidth();
+    }
+    else
+    {
+        char valBuf[256];
+        snprintf(valBuf, sizeof(valBuf), "%s", value.c_str());
+        const ImGuiInputTextFlags extra =
+            row.kind == StyleKind::Number ? ImGuiInputTextFlags_CharsDecimal : static_cast<ImGuiInputTextFlags>(0);
+        ui::PushItemWidth(-8.0f);
+        if (ui::InputTextWithHint("##v", row.def[0] != '\0' ? row.def : "(none)",
+                valBuf, sizeof(valBuf), extra | ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            const ea::string next = Trim(valBuf);
+            if (next.empty())
+            {
+                if (present)
+                {
+                    DropPayloadStyle(payload, row.name);
+                    structural = true;
+                }
+            }
+            else if (!present || next != value)
+            {
+                SetPayloadStyle(payload, row.name, next);
+                structural = true;
+            }
+        }
+        ui::PopItemWidth();
+    }
+    ui::PopID();
+}
+
+// A combo bound to a single style property whose raw CSS values are mapped to
+// friendlier display labels (the auto-layout kit's align pickers). Slot 0 is
+// "(default)": choosing it drops the declaration so the engine default stands.
+void LayoutCombo(UiNodePayload& payload, bool& structural, const char* label,
+    const char* name, const char* const* displayLabels, const char* const* cssValues,
+    int count, const char* defaultText)
+{
+    const int at = FindStyleIndexIn(payload.style_, name);
+    const bool present = at >= 0;
+    const ea::string value = present ? Trim(payload.style_[at].value_) : ea::string();
+
+    int current = 0; // 0 == (default); n+1 == cssValues[n]
+    if (present)
+    {
+        current = -1;
+        for (int i = 0; i < count; ++i)
+        {
+            if (value == cssValues[i])
+            {
+                current = i + 1;
+                break;
+            }
+        }
+    }
+    const ea::string preview = present ? value
+        : (defaultText && defaultText[0] ? ea::string(defaultText) : ea::string("(default)"));
+
+    ui::PushID(label);
+    ui::TextUnformatted(label);
+    ui::SameLine();
+    ui::PushItemWidth(-8.0f);
+    if (ui::BeginCombo("##v", preview.c_str()))
+    {
+        if (ui::Selectable("(default)", current == 0))
+        {
+            if (present)
+                DropPayloadStyle(payload, name);
+            structural = true;
+        }
+        for (int i = 0; i < count; ++i)
+        {
+            if (ui::Selectable(displayLabels[i], current == i + 1))
+            {
+                SetPayloadStyle(payload, name, cssValues[i]);
+                structural = true;
+            }
+        }
+        ui::EndCombo();
+    }
+    ui::PopItemWidth();
+    ui::PopID();
+}
+
+// One free length/keyword field (width / height). Text form, so "200px", "50%",
+// "auto" all pass through untouched; clearing it drops the declaration.
+void LayoutSizeField(UiNodePayload& payload, bool& structural, const char* label,
+    const char* name, const char* defaultText)
+{
+    const int at = FindStyleIndexIn(payload.style_, name);
+    const bool present = at >= 0;
+    const ea::string value = present ? payload.style_[at].value_ : ea::string();
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s", value.c_str());
+    ui::PushID(label);
+    ui::TextUnformatted(label);
+    ui::SameLine();
+    ui::PushItemWidth(-8.0f);
+    if (ui::InputTextWithHint("##v", defaultText, buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        const ea::string next = Trim(buf);
+        if (next.empty())
+        {
+            if (present)
+            {
+                DropPayloadStyle(payload, name);
+                structural = true;
+            }
+        }
+        else if (!present || next != value)
+        {
+            SetPayloadStyle(payload, name, next);
+            structural = true;
+        }
+    }
+    ui::PopItemWidth();
+    ui::PopID();
+}
+
+bool UIViewInspector::RenderAppearance(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    if (!ui::CollapsingHeader(ICON_FA_PAINT_ROLLER " Appearance", ImGuiTreeNodeFlags_DefaultOpen))
+        return false;
+
+    UiNodePayload payload = SnapshotUiNodePayload(*node);
+    bool structural = false;
+    for (const StyleRow& row : kAppearanceRows)
+        RenderOneStyleRow(row, payload, structural);
+
+    if (structural && tab && tab->GetDocument())
+    {
+        // A structured commit changes style_; force the raw editor below to
+        // reseed from the rebuilt model instead of showing its stale buffer.
+        styleSeedValid_ = false;
+        tab->GetDocument()->EditNodePayload(node, payload);
+        return true; // the model was rebuilt; the node is dangling now
+    }
+    return false;
+}
+
+// The auto-layout kit: one opinionated, intent-named set of controls that each
+// write the correct cluster of standard style declarations (a control can set or
+// drop several). Everything is read back off the authored style_, so the panel
+// never carries state the document does not. Long-tail properties are left raw.
+bool UIViewInspector::RenderLayout(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    if (!ui::CollapsingHeader(ICON_FA_TABLE_CELLS " Layout", ImGuiTreeNodeFlags_DefaultOpen))
+        return false;
+
+    UiNodePayload payload = SnapshotUiNodePayload(*node);
+    bool structural = false;
+
+    // Read current authored values off the payload copy so the controls reflect
+    // what is set, independent of the model about to be rebuilt.
+    auto cur = [&](const char* name) -> ea::string
+    {
+        const int at = FindStyleIndexIn(payload.style_, name);
+        return at >= 0 ? Trim(payload.style_[at].value_) : ea::string();
+    };
+
+    // --- Positioning: per-element, written as the standard `position`
+    // declaration. The gizmo keys off absolute; relative makes this the anchor
+    // for absolutely-positioned descendants without leaving the flow. ---
+    {
+        const ea::string pos = LowerCopy(cur("position"));
+        int mode = (pos == "absolute") ? 2 : (pos == "relative") ? 1 : 0;
+        const char* modes[] = { "In flow", "Anchor", "Free (absolute)" };
+        ui::Text(ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT " Position");
+        ui::SameLine();
+        ui::PushItemWidth(-8.0f);
+        if (ui::BeginCombo("##pos", modes[mode]))
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                if (ui::Selectable(modes[i], i == mode))
+                {
+                    if (i == 0)
+                    {
+                        // Back to flow: pull the positioning nail and its
+                        // offsets, but keep the authored size (deliberate).
+                        DropPayloadStyle(payload, "position");
+                        DropPayloadStyle(payload, "top");
+                        DropPayloadStyle(payload, "right");
+                        DropPayloadStyle(payload, "bottom");
+                        DropPayloadStyle(payload, "left");
+                    }
+                    else
+                    {
+                        SetPayloadStyle(payload, "position", i == 1 ? "relative" : "absolute");
+                    }
+                    structural = true;
+                }
+            }
+            ui::EndCombo();
+        }
+        ui::PopItemWidth();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("In flow: laid out by its container. Anchor: stays in flow but is the\n"
+                "reference for absolutely-positioned descendants. Free: out of flow, draggable\n"
+                "in the preview against the nearest Anchor/Free ancestor.");
+    }
+
+    // --- Direction: picking Row/Column makes this a flex container (display:
+    // flex), which also blocks-ifies its children so the inline-div trap cannot
+    // bite. The container knobs below only apply once this is flex. ---
+    {
+        const bool flex = IsFlexValue(LowerCopy(cur("display")));
+        const ea::string dir = LowerCopy(cur("flex-direction"));
+        int d = flex ? ((dir == "column") ? 1 : 0) : -1;
+        const char* dirs[] = { "(plain box)", "Row", "Column" };
+        ui::Text(ICON_FA_UP_DOWN " Direction");
+        ui::SameLine();
+        ui::PushItemWidth(-8.0f);
+        if (ui::BeginCombo("##dir", dirs[d < 0 ? 0 : d + 1]))
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                if (ui::Selectable(dirs[i], i == (d < 0 ? 0 : d + 1)))
+                {
+                    if (i == 0)
+                    {
+                        DropPayloadStyle(payload, "display");
+                        DropPayloadStyle(payload, "flex-direction");
+                    }
+                    else
+                    {
+                        SetPayloadStyle(payload, "display", "flex");
+                        SetPayloadStyle(payload, "flex-direction", i == 1 ? "row" : "column");
+                    }
+                    structural = true;
+                }
+            }
+            ui::EndCombo();
+        }
+        ui::PopItemWidth();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Row / Column arranges this element's children. (plain box) leaves the\n"
+                "display to the engine default (edit it or the -reverse variants via raw).");
+    }
+
+    // The flex container knobs and child sizing stay visible but are disabled
+    // outside their context, so the panel does not reshuffle as you edit.
+    const bool isFlex = IsFlexValue(LowerCopy(cur("display")));
+    bool isFlexItem = false;
+    if (tab && tab->GetDocument())
+    {
+        if (const UiNode* parent = tab->GetDocument()->GetModel().FindParent(node))
+            isFlexItem = IsFlexValue(LowerCopy(Trim(parent->GetStyle("display"))));
+    }
+
+    ui::BeginDisabled(!isFlex);
+    {
+        // Gap: one field writes both axes (a single-axis stack ignores the other).
+        {
+            const ea::string gv = cur("row-gap");
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s", gv.c_str());
+            ui::Text("Gap");
+            ui::SameLine();
+            ui::PushItemWidth(-8.0f);
+            if (ui::InputTextWithHint("##gap", "0px", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                const ea::string next = Trim(buf);
+                if (next.empty())
+                {
+                    DropPayloadStyle(payload, "row-gap");
+                    DropPayloadStyle(payload, "column-gap");
+                }
+                else
+                {
+                    SetPayloadStyle(payload, "row-gap", next);
+                    SetPayloadStyle(payload, "column-gap", next);
+                }
+                structural = true;
+            }
             ui::PopItemWidth();
         }
-        ui::PopID();
+
+        static const char* const jl[] = { "Start", "Center", "End", "Between", "Around" };
+        static const char* const jv[] = { "flex-start", "center", "flex-end", "space-between", "space-around" };
+        LayoutCombo(payload, structural, "Align (main axis)", "justify-content", jl, jv, 5, "flex-start");
+
+        static const char* const al[] = { "Start", "Center", "End", "Stretch" };
+        static const char* const av[] = { "flex-start", "center", "flex-end", "stretch" };
+        LayoutCombo(payload, structural, "Align (cross axis)", "align-items", al, av, 4, "stretch");
     }
+    ui::EndDisabled();
+
+    // Scroll: one checkbox = overflow-y:auto + overflow-x:hidden. Deliberately
+    // outside the flex gate - the engine's own #content scrolls a plain block box
+    // (block + fixed height + overflow), the more reliable path. Flex is only
+    // wanted for Gap/alignment; a simple list does not need it.
+    {
+        bool on = LowerCopy(cur("overflow-y")) == "auto";
+        ui::Text("Scroll");
+        ui::SameLine();
+        if (ui::Checkbox(" vertically##scroll", &on))
+        {
+            if (on)
+            {
+                SetPayloadStyle(payload, "overflow-y", "auto");
+                SetPayloadStyle(payload, "overflow-x", "hidden");
+            }
+            else
+            {
+                DropPayloadStyle(payload, "overflow-y");
+                DropPayloadStyle(payload, "overflow-x");
+            }
+            structural = true;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Give the box a fixed Height and the rows a real size so their total\n"
+                "exceeds it and scrolls. In a plain block box that is all that is needed; in a\n"
+                "Row/Column container also pin the rows with Hug/Fill (flex-shrink:0) so they\n"
+                "are not squeezed to fit.");
+    }
+
+    // Padding: one field writes all four sides (four-way tuning lives in raw).
+    {
+        const ea::string pv = cur("padding-top");
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s", pv.c_str());
+        ui::Text("Padding");
+        ui::SameLine();
+        ui::PushItemWidth(-8.0f);
+        if (ui::InputTextWithHint("##pad", "0px", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            const ea::string next = Trim(buf);
+            if (next.empty())
+            {
+                DropPayloadStyle(payload, "padding-top");
+                DropPayloadStyle(payload, "padding-right");
+                DropPayloadStyle(payload, "padding-bottom");
+                DropPayloadStyle(payload, "padding-left");
+            }
+            else
+            {
+                SetPayloadStyle(payload, "padding-top", next);
+                SetPayloadStyle(payload, "padding-right", next);
+                SetPayloadStyle(payload, "padding-bottom", next);
+                SetPayloadStyle(payload, "padding-left", next);
+            }
+            structural = true;
+        }
+        ui::PopItemWidth();
+    }
+
+    LayoutSizeField(payload, structural, "Width", "width", "auto");
+    LayoutSizeField(payload, structural, "Height", "height", "auto");
+
+    // Child sizing: meaningful only when this element is itself a flex item.
+    ui::BeginDisabled(!isFlexItem);
+    {
+        const ea::string grow = cur("flex-grow");
+        int s = -1; // 0 hug, 1 fill
+        if (grow == "0")
+            s = 0;
+        else if (grow == "1")
+            s = 1;
+        const char* sl[] = { "(auto)", "Hug (content)", "Fill (parent)" };
+        ui::Text("Size in parent");
+        ui::SameLine();
+        ui::PushItemWidth(-8.0f);
+        if (ui::BeginCombo("##sizing", sl[s < 0 ? 0 : s + 1]))
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                if (ui::Selectable(sl[i], i == (s < 0 ? 0 : s + 1)))
+                {
+                    if (i == 0)
+                    {
+                        DropPayloadStyle(payload, "flex-grow");
+                        DropPayloadStyle(payload, "flex-shrink");
+                        DropPayloadStyle(payload, "flex-basis");
+                    }
+                    else
+                    {
+                        // Both pin flex-shrink:0 - the flex trap that otherwise
+                        // squeezes rows to fit and kills scrolling.
+                        SetPayloadStyle(payload, "flex-grow", i == 1 ? "0" : "1");
+                        SetPayloadStyle(payload, "flex-shrink", "0");
+                    }
+                    structural = true;
+                }
+            }
+            ui::EndCombo();
+        }
+        ui::PopItemWidth();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Available when this element's parent is a Row/Column container.");
+    }
+    ui::EndDisabled();
 
     if (structural && tab && tab->GetDocument())
     {

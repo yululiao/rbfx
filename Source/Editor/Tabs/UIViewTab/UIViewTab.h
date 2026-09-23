@@ -275,7 +275,8 @@ private:
     /// (the commit-then-return pattern the link panels already use).
     bool RenderTextContent(UiNode* node);
     bool RenderAttributes(UiNode* node);
-    bool RenderStyle(UiNode* node);
+    bool RenderLayout(UiNode* node);
+    bool RenderAppearance(UiNode* node);
     bool RenderInlineStyle(UiNode* node);
     /// Read-only sections: they never commit, so the node stays valid.
     void RenderTemplates(UiNode* node);
@@ -291,10 +292,6 @@ private:
     // the multiline editor is only refreshed when the selection changes.
     ea::vector<unsigned> lastStylePath_;
     bool styleSeedValid_ = false;
-    /// Opt out of the Style rows' type/dependency filtering: when set, every
-    /// registered row is shown regardless of how relevant it is to the
-    /// selection. The safety valve behind the filtering (nothing is lost).
-    bool showAllStyle_ = false;
 };
 
 }
