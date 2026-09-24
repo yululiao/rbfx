@@ -26,6 +26,8 @@
 #include "../Project/AssetManager.h"
 
 #include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/Scene/Node.h>
+#include <Urho3D/Scene/PrefabResource.h>
 
 #include <EASTL/sort.h>
 #include <EASTL/tuple.h>
@@ -1006,20 +1008,115 @@ void ResourceBrowserTab::DropPayloadToFolder(const FileSystemEntry& entry)
     auto project = GetProject();
 
     const ResourceRoot& root = GetRoot(entry);
-    auto payload = dynamic_cast<ResourceDragDropPayload*>(DragDropPayload::Get());
-    if (payload && IsPayloadMovable(*payload))
+    if (auto payload = dynamic_cast<ResourceDragDropPayload*>(DragDropPayload::Get()))
     {
-        if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str()))
+        if (IsPayloadMovable(*payload))
         {
-            const char* separator = entry.resourceName_.empty() ? "" : "/";
-            for (const ResourceFileDescriptor& desc : payload->resources_)
+            if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str()))
             {
-                const ea::string newResourceName = Format("{}{}{}", entry.resourceName_, separator, desc.localName_);
-                const ea::string newFileName = Format("{}{}", root.activeDirectory_, newResourceName);
-                RenameOrMove(desc.fileName_, newFileName, desc.resourceName_, newResourceName);
+                const char* separator = entry.resourceName_.empty() ? "" : "/";
+                for (const ResourceFileDescriptor& desc : payload->resources_)
+                {
+                    const ea::string newResourceName = Format("{}{}{}", entry.resourceName_, separator, desc.localName_);
+                    const ea::string newFileName = Format("{}{}", root.activeDirectory_, newResourceName);
+                    RenameOrMove(desc.fileName_, newFileName, desc.resourceName_, newResourceName);
+                }
             }
         }
     }
+    else if (auto nodePayload = dynamic_cast<NodeComponentDragDropPayload*>(DragDropPayload::Get()))
+    {
+        // Save dropped scene nodes as prefabs in this directory
+        if (!nodePayload->nodes_.empty() && !IsEntryFromCache(entry))
+        {
+            if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str()))
+                SaveDroppedNodesAsPrefabs(*nodePayload, entry);
+        }
+    }
+}
+
+void ResourceBrowserTab::SaveDroppedNodesAsPrefabs(const NodeComponentDragDropPayload& payload,
+    const FileSystemEntry& directory)
+{
+    for (Node* node : payload.nodes_)
+    {
+        if (!node)
+            continue;
+
+        // Don't create duplicate prefabs for nodes that are children of other dropped nodes
+        const bool isChildOfOtherNode = ea::any_of(payload.nodes_.begin(), payload.nodes_.end(),
+            [node](const WeakPtr<Node>& otherNode) { return otherNode && node->IsChildOf(otherNode); });
+        if (!isChildOfOtherNode)
+            SaveNodeAsPrefab(node, directory);
+    }
+}
+
+void ResourceBrowserTab::SaveNodeAsPrefab(Node* node, const FileSystemEntry& directory)
+{
+    if (!node || node == node->GetScene())
+        return;
+
+    auto fs = GetSubsystem<FileSystem>();
+    const ResourceRoot& root = GetRoot(directory);
+
+    const ea::string baseDirectory = directory.absolutePath_.empty()
+        ? root.activeDirectory_
+        : directory.absolutePath_ + "/";
+
+    ea::string prefabName = GetSanitizedName(node->GetName()).trimmed();
+    if (prefabName.empty())
+        prefabName = "Prefab";
+
+    const auto getAvailableFileName = [&](const ea::string& prefabName) -> ea::optional<ea::string>
+    {
+        const ea::string fileName = baseDirectory + prefabName + ".prefab";
+        if (fs->FileExists(fileName) || fs->DirExists(fileName))
+            return ea::nullopt;
+
+        return fileName;
+    };
+
+    ea::string fileName;
+    if (const auto availableFileName = getAvailableFileName(prefabName))
+        fileName = *availableFileName;
+    else
+    {
+        const int maxAttempts = 100;
+        for (int i = 1; i < maxAttempts; ++i)
+        {
+            if (const auto availableFileName = getAvailableFileName(Format("{}_{}", prefabName, i)))
+            {
+                fileName = *availableFileName;
+                break;
+            }
+        }
+    }
+
+    if (fileName.empty())
+    {
+        URHO3D_LOGERROR("Cannot find available file name for prefab from node '{}'", node->GetName());
+        return;
+    }
+
+    NodePrefab nodePrefab = node->GeneratePrefab();
+
+    // Discard enabled flag, position, rotation and name of the root node.
+    // Keep the scale and the rest.
+    auto& nodeAttributes = nodePrefab.GetMutableNode().GetMutableAttributes();
+    ea::erase_if(nodeAttributes,
+        [](const AttributePrefab& attribute)
+    {
+        const StringHash nameHash = attribute.GetNameHash();
+        return nameHash == StringHash("Is Enabled") || nameHash == StringHash("Position")
+            || nameHash == StringHash("Rotation") || nameHash == StringHash("Name");
+    });
+
+    auto prefab = MakeShared<PrefabResource>(context_);
+    prefab->GetMutableNodePrefab() = ea::move(nodePrefab);
+    prefab->NormalizeIds();
+
+    if (prefab->SaveFile(fileName))
+        URHO3D_LOGINFO("Node '{}' saved as prefab '{}'", node->GetName(), fileName);
 }
 
 const char* ResourceBrowserTab::GetDisplayName(const FileSystemEntry& entry, bool isCompositeFile) const

@@ -158,6 +158,8 @@ private:
     void BeginEntryDrag(const FileSystemEntry& entry);
     void BeginRightSelectionDrag();
     void DropPayloadToFolder(const FileSystemEntry& entry);
+    void SaveDroppedNodesAsPrefabs(const NodeComponentDragDropPayload& payload, const FileSystemEntry& directory);
+    void SaveNodeAsPrefab(Node* node, const FileSystemEntry& directory);
     /// @}
 
     /// Utility functions
