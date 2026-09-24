@@ -437,6 +437,42 @@ void ReconcileSelf(const UiNode& node, int srcIdx, const RmlTextModel& src, std:
     // Inline style: patch changed/new declarations, remove dropped ones. The spine keeps
     // authored order; new properties append, which is still valid CSS.
     const RmlAttribute* style = src.FindAttribute(srcIdx, "style");
+
+    // Two or more dropped declarations make per-declaration removal spans OVERLAP: adjacent
+    // CSS declarations share one ';' separator and each removal reaches for an adjacent ';'
+    // (the trailing one, or the leading one for the last declaration). ApplyPatches splices
+    // against the already-shifted text assuming disjoint spans, so the earlier removal's
+    // stale length over-deletes and eats the style attribute's closing quote and the tag
+    // terminator (turning `..."/>` into `...>` and truncating the document on reload). When
+    // 2+ declarations are dropped, coalesce every style mutation into a single whole-value
+    // rewrite. A lone removal (or pure add/change) stays on the surgical byte-preserving path.
+    if (style)
+    {
+        size_t removals = 0;
+        for (const RmlStyleDecl& d : style->styleDecls)
+        {
+            bool kept = false;
+            for (const UiStyleDecl& decl : node.style_)
+            {
+                if (LowerStd(Std(decl.name_)) == LowerStd(d.property))
+                {
+                    kept = true;
+                    break;
+                }
+            }
+            if (!kept)
+                ++removals;
+        }
+        if (removals >= 2)
+        {
+            RmlPatch p;
+            p.span = style->valueSpan;
+            p.replacement = Std(FormatStyleDeclarations(node.style_));
+            out.push_back(p);
+            return; // id/class/attributes already queued above; style fully handled here
+        }
+    }
+
     for (const UiStyleDecl& decl : node.style_)
     {
         const std::string name = Std(decl.name_);

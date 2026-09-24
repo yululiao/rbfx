@@ -517,12 +517,15 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec)
     {
     case UiWidgetStylePolicy::Panel:
         node->SetStyle("background-color", "#3a4656");
-        node->SetStyle("border", "1px solid #6f86a6");
+        // RmlUi's `border` shorthand maps to width + color only; it has no
+        // border-style property, so a CSS `solid` keyword here fails the whole
+        // declaration parse (and the placeholder border never renders).
+        node->SetStyle("border", "1px #6f86a6");
         break;
     case UiWidgetStylePolicy::Outline:
         // Border only: shape without a fill, so the control's internal chrome
         // (project-styled or not) stays untouched.
-        node->SetStyle("border", "1px solid #6f86a6");
+        node->SetStyle("border", "1px #6f86a6");
         break;
     case UiWidgetStylePolicy::None:
     default:
