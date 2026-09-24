@@ -1698,7 +1698,7 @@ void UIViewInspector::RenderHeadLinks()
     ui::PopItemWidth();
     // Pick an existing file instead of typing its path; either kind can be
     // chosen, so the filter lists both and the + buttons below record which.
-    if (auto picked = ResourceBrowseWidget("##browse", context_, "", "rcss,rml"))
+    if (auto picked = ResourceBrowseWidget("##hlAddBrowse", context_, "", "rcss,rml"))
         snprintf(headLinkHrefBuf_, sizeof(headLinkHrefBuf_), "%s", picked->c_str());
     const bool wantCss = committed || ui::Button(ICON_FA_PLUS " Stylesheet (.rcss)");
     ui::SameLine();
@@ -1746,7 +1746,7 @@ void UIViewInspector::RenderNestedDoc(UiNode* node)
     const bool hrefEdited = ui::InputText("href", hrefBuf, sizeof(hrefBuf), ImGuiInputTextFlags_EnterReturnsTrue);
     ui::PopItemWidth();
     // This link always names a template, so the picker lists .rml only.
-    const auto pickedHref = ResourceBrowseWidget("##browse", context_, node->nestedDocHref_, "rml");
+    const auto pickedHref = ResourceBrowseWidget("##nestedBrowse", context_, node->nestedDocHref_, "rml");
     if (hrefEdited || pickedHref)
     {
         const ea::string newHref = hrefEdited ? Trim(ea::string(hrefBuf)) : *pickedHref;
@@ -1831,7 +1831,7 @@ void UIViewInspector::RenderHeadLink(UiNode* node)
     ui::PopItemWidth();
     // A picker offers the same Data-rooted spelling the loader expects,
     // narrowed to the kind this link claims to be (stylesheet vs template).
-    const auto pickedHref = ResourceBrowseWidget("##browse", context_, href, isTemplate ? "rml" : "rcss");
+    const auto pickedHref = ResourceBrowseWidget("##hlEditBrowse", context_, href, isTemplate ? "rml" : "rcss");
     if (hrefEdited || pickedHref)
     {
         const ea::string newHref = hrefEdited ? Trim(ea::string(hrefBuf)) : *pickedHref;
@@ -2289,7 +2289,7 @@ bool UIViewInspector::RenderAttributes(UiNode* node)
             // half-typed path is not.
             if (row.browseFilter)
             {
-                if (auto picked = ResourceBrowseWidget("##browse", context_, value, row.browseFilter))
+                if (auto picked = ResourceBrowseWidget((ea::string("##browse_") + row.name).c_str(), context_, value, row.browseFilter))
                 {
                     SetPayloadAttr(payload, row.name, *picked);
                     structural = true;
@@ -2764,7 +2764,7 @@ bool UIViewInspector::RenderAppearance(UiNode* node)
         }
         else if (singleImage)
         {
-            if (inner.size() >= 2 && inner.front() == '"' && inner.back() == '"')
+            if (inner.size() >= 2 && (inner.front() == '"' || inner.front() == '\'') && inner.front() == inner.back())
                 display = inner.substr(1, inner.size() - 2);
             else
                 display = inner;
@@ -2796,7 +2796,7 @@ bool UIViewInspector::RenderAppearance(UiNode* node)
         ui::PopItemWidth();
         ea::optional<ea::string> picked;
         ui::BeginDisabled(!editable);
-        picked = ResourceBrowseWidget("##browse", context_, display, kImageFilter);
+        picked = ResourceBrowseWidget("##bgBrowse", context_, display, kImageFilter);
         ui::EndDisabled();
         if (editable && (submit || picked))
         {
@@ -2811,21 +2811,17 @@ bool UIViewInspector::RenderAppearance(UiNode* node)
             }
             else
             {
-                // Quote paths so '/' '.' '\\' don't confuse the unquoted parser;
-                // leave bare sprite tokens (and sprite+orientation pairs like
-                // 'arrow-down flip-vertical') as the sample theme writes them.
-                bool needsQuote = false;
-                for (char c : next)
-                {
-                    if (c == '/' || c == '\\' || c == '.')
-                    {
-                        needsQuote = true;
-                        break;
-                    }
-                }
-                const ea::string write = needsQuote
-                    ? ("image(\"" + next + "\")")
-                    : ("image(" + next + ")");
+                // Author the argument UNQUOTED, exactly as RmlUi's own theme does
+                // (image(arrow-down), src: /Textures/x.png). Two reasons:
+                //  * The decorator tokenizer keeps any quote chars inside image(...)
+                //    verbatim as part of the name, so a quoted src never resolves to a
+                //    texture/sprite. Bare is the only form that actually renders.
+                //  * The whole style value sits in a double-quoted style="..." attribute,
+                //    so emitting a double quote would close that attribute early and
+                //    corrupt the document (and our own byte-span re-parse of it).
+                // The parenthesis state protects whitespace and commas from splitting, so
+                // '/'-paths and sprite+orientation pairs are all fine written bare.
+                const ea::string write = "image(" + next + ")";
                 if (at < 0 || write != dec)
                 {
                     SetPayloadStyle(payload, "decorator", write);
