@@ -48,8 +48,32 @@ struct UiNode : public RefCounted
     Rml::Element* dom_ = nullptr; ///< Runtime projection; rebuilt with the model on reload
     int srcNode_ = -1; ///< Index into UiDocumentModel::source_ this node was built from (-1 if editor-created)
 
+    /// Virtual node standing for the nested .rml whose template mints the
+    /// window chrome into the preview ("#nested-doc"). Exists only in the
+    /// editor tree - it is never serialized into the document text.
+    bool IsNestedDoc() const { return tag_ == "#nested-doc"; }
+    /// Virtual node standing for one <link> element of <head> ("#head-link").
+    /// Like the nested-doc node it exists only in the editor tree - never
+    /// serialized, never DOM-correlated (no preview box to draw). Its type
+    /// and href live as plain attributes so per-node editors can read them;
+    /// edits route through the text-level head commands.
+    bool IsHeadLink() const { return tag_ == "#head-link"; }
+    /// Position of this link among <head>'s <link> elements in authored
+    /// order; routes text-level edits to the right spine element.
+    unsigned headLinkOrdinal_ = 0;
+    /// Raw href of the <head> <link> this node stands for (as authored).
+    ea::string nestedDocHref_;
+    /// Direct children of the live document minted by the nested template
+    /// (every direct child that does not host authored content: title bar,
+    /// resize handles, and the content container itself is excluded). The
+    /// selection outline is the union of their boxes. Runtime projection
+    /// only, rebuilt together with the dom_ links on every reload.
+    ea::vector<Rml::Element*> nestedChromeElems_;
+
     int FindStyle(const ea::string& name) const;
     ea::string GetStyle(const ea::string& name) const;
+    /// Value of a plain attribute ("" when absent).
+    ea::string GetAttribute(const ea::string& name) const;
     void SetStyle(const ea::string& name, const ea::string& value); ///< Replaces in place or appends
     void RemoveStyle(const ea::string& name);
     bool IsText() const { return tag_ == "#text"; }
@@ -103,6 +127,40 @@ struct UiDocumentModel
     /// Child-index path from the root to \a node. Returns false if not found.
     bool BuildPath(const UiNode* node, ea::vector<unsigned>& path) const;
     UiNode* ResolvePath(const ea::vector<unsigned>& path) const;
+
+    /// hrefs of the <link type="text/template"> entries in <head>, in authored
+    /// order. These reference the nested .rml files whose elements (window
+    /// frames, close buttons) are minted into the live document but are not
+    /// part of this document's own source. Callers resolve each href against
+    /// the document's resource path (RmlUi's document-relative JoinPath).
+    ea::vector<ea::string> GetTemplateLinks() const;
+
+    /// Text-level edits of <head>'s <link> elements. <head> lives in the
+    /// spine's untouched bytes (the editor tree starts at <body>), so unlike
+    /// the tree commands these parse \a text into a THROWAWAY RmlTextModel -
+    /// the live spine is never re-parsed or mutated here, that would
+    /// invalidate every srcNode_ anchor - and return the edited document text
+    /// via \a out.
+    /// @{
+    /// Insert <link type=\a type href=\a href> right after the last existing
+    /// link (the authored order of the others stays put - rcss cascade order
+    /// matters; in a link-less head it becomes the first child, so an inline
+    /// <style> still loads after it and can override the sheet). False when
+    /// the document has no <head>, or the (type, href) pair is empty/dup.
+    bool InsertHeadLink(const ea::string& text, const ea::string& type,
+        const ea::string& href, ea::string& out);
+    /// Overwrite the type/href attributes of the \a ordinal'th link (in
+    /// authored order). False when the ordinal is stale (fewer links exist).
+    bool EditHeadLinkAt(const ea::string& text, unsigned ordinal, const ea::string& type,
+        const ea::string& href, ea::string& out);
+    /// Remove the \a ordinal'th link: the whole authored line, indent and
+    /// newline included. False when the ordinal is stale.
+    bool RemoveHeadLinkAt(const ea::string& text, unsigned ordinal, ea::string& out);
+    /// @}
+
+    /// The template-chrome virtual node (see UiNode::IsNestedDoc), or null
+    /// when the document does not instantiate a nested template.
+    UiNode* GetNestedDoc() const;
 };
 
 /// Trim leading/trailing whitespace.

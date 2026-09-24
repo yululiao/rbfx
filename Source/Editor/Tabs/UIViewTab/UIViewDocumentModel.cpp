@@ -230,6 +230,10 @@ void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
     int cursor = 0;
     for (const SharedPtr<UiNode>& child : node.children_)
     {
+        if (child->IsNestedDoc())
+            continue; // view-only virtual node; gets the body element below
+        if (child->IsHeadLink())
+            continue; // head construct; no preview DOM to correlate
         if (child->IsText())
             continue; // no live-element link for text nodes (see note above)
         Rml::Element* match = nullptr;
@@ -259,7 +263,7 @@ void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
     // double-book it and results stay deterministic.
     for (const SharedPtr<UiNode>& child : node.children_)
     {
-        if (child->IsText() || child->dom_)
+        if (child->IsText() || child->IsNestedDoc() || child->IsHeadLink() || child->dom_)
             continue;
         const SubtreeMatch found = FindFreeMatch(element, *child, used);
         if (found.element)
@@ -270,13 +274,69 @@ void CorrelateDomRec(UiNode& node, Rml::Element* element, UsedDomElems& used)
     }
 
     for (const SharedPtr<UiNode>& child : node.children_)
+    {
+        if (child->IsNestedDoc() || child->IsHeadLink())
+            continue;
         CorrelateDomRec(*child, child->dom_, used);
+    }
 }
 
 void CorrelateDom(UiNode& node, Rml::Element* element)
 {
     UsedDomElems used;
     CorrelateDomRec(node, element, used);
+}
+
+/// Every live DOM element some model node claimed during correlation,
+/// collected from the dom_ links (the same set CorrelateDom built). The
+/// root's own element (the document) lands in the set too; no direct
+/// child's subtree contains it, so it cannot mark a subtree as authored.
+void CollectClaimedDom(const UiNode& node, UsedDomElems& out)
+{
+    if (node.IsNestedDoc() || node.IsHeadLink())
+        return; // view-only virtual nodes stand for no authored content
+    if (node.dom_)
+        out.insert(node.dom_);
+    for (const SharedPtr<UiNode>& child : node.children_)
+        CollectClaimedDom(*child, out);
+}
+
+/// True when any element of \a element's subtree was claimed by the model.
+bool SubtreeHasClaimedDom(Rml::Element* element, const UsedDomElems& claimed)
+{
+    if (claimed.find(element) != claimed.end())
+        return true;
+    const int count = element->GetNumChildren(false);
+    for (int i = 0; i < count; ++i)
+    {
+        Rml::Element* child = element->GetChild(i);
+        if (child && SubtreeHasClaimedDom(child, claimed))
+            return true;
+    }
+    return false;
+}
+
+/// Direct children of the live document whose subtree hosts no authored
+/// content: the chrome the nested template minted into this document
+/// (window frame, title bar, resize handles). The template's content
+/// container drops out naturally - correlation places the authored elements
+/// inside it, so its subtree is claimed.
+ea::vector<Rml::Element*> CollectNestedChrome(const UiNode& root, Rml::ElementDocument* document)
+{
+    UsedDomElems claimed;
+    CollectClaimedDom(root, claimed);
+
+    ea::vector<Rml::Element*> chrome;
+    const int count = document->GetNumChildren(false);
+    for (int i = 0; i < count; ++i)
+    {
+        Rml::Element* child = document->GetChild(i);
+        if (!child || child->GetTagName() == "#text")
+            continue;
+        if (!SubtreeHasClaimedDom(child, claimed))
+            chrome.push_back(child);
+    }
+    return chrome;
 }
 
 /// Generate standard RML for a wholly-new subtree (every node lacks a spine anchor). Used at
@@ -374,32 +434,25 @@ void ReconcileSelf(const UiNode& node, int srcIdx, const RmlTextModel& src, std:
         }
     }
 
-    // Inline style: patch changed/new declarations, remove dropped ones. The spine keeps
-    // authored order; new properties append, which is still valid CSS.
+    // Inline style. The spine keeps authored order. Any MULTI-change style edit is
+    // coalesced into a single patch by construction; per-declaration patches for such
+    // batches collide (two creations insert whole style attributes at the same offset
+    // and mint `style="a" style="b"`; two appends into an empty style="" merge
+    // without a ';' separator; adjacent removals share one ';'). Only value changes
+    // plus at most ONE structural add or remove stay on the surgical byte-preserving path.
     const RmlAttribute* style = src.FindAttribute(srcIdx, "style");
-    for (const UiStyleDecl& decl : node.style_)
+
+    // Self-heal documents saved by older builds: duplicate style attributes are
+    // invalid RML, born from that same-offset double insert. Any whole rewrite keeps
+    // the FIRST attribute (rewritten to carry the model's declarations) and drops the rest.
+    int styleAttrCount = 0;
+    for (const RmlAttribute& a : sn.attributes)
     {
-        const std::string name = Std(decl.name_);
-        const std::string want = Std(decl.value_);
-        const RmlStyleDecl* cur = nullptr;
-        if (style)
-        {
-            for (const RmlStyleDecl& d : style->styleDecls)
-            {
-                if (LowerStd(d.property) == LowerStd(name))
-                {
-                    cur = &d;
-                    break;
-                }
-            }
-        }
-        if (!cur || cur->value != want)
-        {
-            RmlPatch p;
-            if (src.ComputeStylePropertyPatch(srcIdx, name, want, p))
-                out.push_back(p);
-        }
+        if (LowerStd(a.name) == "style")
+            ++styleAttrCount;
     }
+
+    size_t adds = 0, removals = 0;
     if (style)
     {
         for (const RmlStyleDecl& d : style->styleDecls)
@@ -414,10 +467,112 @@ void ReconcileSelf(const UiNode& node, int srcIdx, const RmlTextModel& src, std:
                 }
             }
             if (!kept)
+                ++removals;
+        }
+        for (const UiStyleDecl& decl : node.style_)
+        {
+            bool present = false;
+            for (const RmlStyleDecl& d : style->styleDecls)
+            {
+                if (LowerStd(d.property) == LowerStd(Std(decl.name_)))
+                {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present)
+                ++adds;
+        }
+    }
+
+    if (!style && !node.style_.empty())
+    {
+        // Create the whole style attribute in ONE patch, never one per declaration.
+        RmlPatch p;
+        if (src.ComputeStyleDeclarationPatch(srcIdx, Std(FormatStyleDeclarations(node.style_)), p))
+            out.push_back(p);
+    }
+    else if (style && node.style_.empty())
+    {
+        // No inline style left: drop every style attribute outright instead of
+        // leaving a style="" husk (which re-seeded the no-separator merge bug
+        // on the next multi-add). Each removal claims its own leading space.
+        for (const RmlAttribute& a : sn.attributes)
+        {
+            if (LowerStd(a.name) != "style")
+                continue;
+            RmlPatch p;
+            if (src.ComputeAttributeRemovalPatch(a, p))
+                out.push_back(p);
+        }
+    }
+    else if (styleAttrCount > 1 || adds + removals >= 2)
+    {
+        // One whole-value rewrite covers every add/change/remove at once, so the
+        // batch can never mint duplicate attributes or separator-less merges.
+        RmlPatch p;
+        if (src.ComputeStyleDeclarationPatch(srcIdx, Std(FormatStyleDeclarations(node.style_)), p))
+            out.push_back(p);
+        bool firstSeen = false;
+        for (const RmlAttribute& a : sn.attributes)
+        {
+            if (LowerStd(a.name) != "style")
+                continue;
+            if (!firstSeen)
+            {
+                firstSeen = true;
+                continue;
+            }
+            RmlPatch extra;
+            if (src.ComputeAttributeRemovalPatch(a, extra))
+                out.push_back(extra);
+        }
+    }
+    else
+    {
+        // Surgical: any number of value changes plus at most one add or one remove.
+        for (const UiStyleDecl& decl : node.style_)
+        {
+            const std::string name = Std(decl.name_);
+            const std::string want = Std(decl.value_);
+            const RmlStyleDecl* cur = nullptr;
+            if (style)
+            {
+                for (const RmlStyleDecl& d : style->styleDecls)
+                {
+                    if (LowerStd(d.property) == LowerStd(name))
+                    {
+                        cur = &d;
+                        break;
+                    }
+                }
+            }
+            if (!cur || cur->value != want)
             {
                 RmlPatch p;
-                if (src.ComputeStyleRemovePatch(srcIdx, d.property, p))
+                if (src.ComputeStylePropertyPatch(srcIdx, name, want, p))
                     out.push_back(p);
+            }
+        }
+        if (style)
+        {
+            for (const RmlStyleDecl& d : style->styleDecls)
+            {
+                bool kept = false;
+                for (const UiStyleDecl& decl : node.style_)
+                {
+                    if (LowerStd(Std(decl.name_)) == LowerStd(d.property))
+                    {
+                        kept = true;
+                        break;
+                    }
+                }
+                if (!kept)
+                {
+                    RmlPatch p;
+                    if (src.ComputeStyleRemovePatch(srcIdx, d.property, p))
+                        out.push_back(p);
+                }
             }
         }
     }
@@ -495,11 +650,17 @@ void ReconcileNode(const UiNode& node, const RmlTextModel& src, std::vector<RmlP
             ++i; // editor-added bare text under an anchored parent is not spliced here
             continue;
         }
+        if (child.IsNestedDoc() || child.IsHeadLink())
+        {
+            ++i; // view-only virtual nodes; never serialized into the source
+            continue;
+        }
         std::string markup;
         while (i < count)
         {
             const UiNode& runNode = *node.children_[i];
-            if (runNode.srcNode_ >= 0 || runNode.IsText())
+            if (runNode.srcNode_ >= 0 || runNode.IsText() || runNode.IsNestedDoc()
+                || runNode.IsHeadLink())
                 break;
             if (!markup.empty())
                 markup += "\n";
@@ -564,6 +725,16 @@ ea::string UiNode::GetStyle(const ea::string& name) const
 {
     const int index = FindStyle(name);
     return index >= 0 ? style_[index].value_ : ea::string();
+}
+
+ea::string UiNode::GetAttribute(const ea::string& name) const
+{
+    for (const auto& attribute : attributes_)
+    {
+        if (attribute.first == name)
+            return attribute.second;
+    }
+    return ea::string();
 }
 
 void UiNode::SetStyle(const ea::string& name, const ea::string& value)
@@ -669,6 +840,47 @@ ea::string FormatStyleDeclarations(const ea::vector<UiStyleDecl>& decls)
     return style;
 }
 
+namespace
+{
+
+/// One <link> element of <head> as (spine node index, trimmed type, trimmed
+/// href), in document order. \a headIdx receives the <head> node index, or
+/// -1 when the document has none.
+struct HeadLinkEntry
+{
+    int nodeIdx_ = -1;
+    ea::string type_;
+    ea::string href_;
+};
+
+ea::vector<HeadLinkEntry> CollectHeadLinks(const RmlTextModel& spine, int& headIdx)
+{
+    headIdx = spine.FindFirstElement("head");
+    ea::vector<HeadLinkEntry> out;
+    if (headIdx < 0)
+        return out;
+    for (int linkIdx : spine.Node(headIdx).children)
+    {
+        const RmlNode& link = spine.Node(linkIdx);
+        if (link.kind != RmlNodeKind::Element || LowerStd(link.tag) != "link")
+            continue;
+        HeadLinkEntry entry;
+        entry.nodeIdx_ = linkIdx;
+        const std::string type = RawAttrValue(spine, linkIdx, "type");
+        const std::string href = RawAttrValue(spine, linkIdx, "href");
+        const size_t tb = type.find_first_not_of(" \t\r\n");
+        entry.type_ = Ea(tb == std::string::npos ? std::string()
+            : type.substr(tb, type.find_last_not_of(" \t\r\n") - tb + 1));
+        const size_t hb = href.find_first_not_of(" \t\r\n");
+        entry.href_ = Ea(hb == std::string::npos ? std::string()
+            : href.substr(hb, href.find_last_not_of(" \t\r\n") - hb + 1));
+        out.push_back(entry);
+    }
+    return out;
+}
+
+}
+
 bool UiDocumentModel::BuildFromText(const ea::string& sourceText, Rml::ElementDocument* document)
 {
     root_.Reset();
@@ -683,7 +895,51 @@ bool UiDocumentModel::BuildFromText(const ea::string& sourceText, Rml::ElementDo
     // The ElementDocument corresponds to <body>: build the tree from the source spine and
     // attach the live preview DOM to dom_ only by structural correlation (best effort).
     root_ = BuildElement(source_, body);
+
+    // Every <link> of <head> becomes exactly ONE virtual child ahead of the
+    // body content, in authored order. A plain link is a #head-link node -
+    // except the template link <body template="..."> instantiates: that one
+    // is represented by the #nested-doc node, which carries its chrome
+    // projection, navigation and per-link editing together (a link must never
+    // appear as two nodes). With several template links the first one is the
+    // instantiated one; the rest stay #head-link. Like all virtual nodes they
+    // are view-only: never serialized, never DOM-correlated; edits go through
+    // the text-level head commands.
+    int headIdx = -1;
+    const ea::vector<HeadLinkEntry> headLinks = CollectHeadLinks(source_, headIdx);
+    const std::string templateName = RawAttrValue(source_, body, "template");
+    const bool hasInstantiatedTemplate = !Trim(Ea(templateName)).empty();
+    bool templateTaken = false;
+    ea::vector<SharedPtr<UiNode>> headNodes;
+    for (const HeadLinkEntry& entry : headLinks)
+    {
+        auto node = MakeShared<UiNode>();
+        if (hasInstantiatedTemplate && entry.type_ == "text/template" && !templateTaken)
+        {
+            templateTaken = true;
+            node->tag_ = "#nested-doc";
+            node->nestedDocHref_ = entry.href_;
+        }
+        else
+            node->tag_ = "#head-link";
+        node->headLinkOrdinal_ = static_cast<unsigned>(headNodes.size());
+        node->attributes_.emplace_back("type", entry.type_);
+        node->attributes_.emplace_back("href", entry.href_);
+        headNodes.push_back(node);
+    }
+    root_->children_.insert(root_->children_.begin(), headNodes.begin(), headNodes.end());
+
     CorrelateDom(*root_, document);
+
+    // The virtual node projects onto the body element (so hit testing and
+    // the overlay gates treat it as live), while its outline covers only
+    // the chrome the nested template minted into the document - not the
+    // whole document canvas the body's own box would give.
+    if (UiNode* nested = GetNestedDoc())
+    {
+        nested->dom_ = root_->dom_;
+        nested->nestedChromeElems_ = CollectNestedChrome(*root_, document);
+    }
     return true;
 }
 
@@ -746,6 +1002,164 @@ UiNode* UiDocumentModel::ResolvePath(const ea::vector<unsigned>& path) const
         node = node->children_[index];
     }
     return node;
+}
+
+ea::vector<ea::string> UiDocumentModel::GetTemplateLinks() const
+{
+    // Walk the spine's <head> (the editor tree starts at <body>, but the spine
+    // indexes the whole document). <head> is nested under <rml>, so locate it
+    // by pre-order search - the same way BuildFromText finds <body> - rather
+    // than as a direct child of the synthetic root.
+    ea::vector<ea::string> out;
+    const int head = source_.FindFirstElement("head");
+    if (head < 0)
+        return out;
+    for (int linkIdx : source_.Node(head).children)
+    {
+        const RmlNode& link = source_.Node(linkIdx);
+        if (link.kind != RmlNodeKind::Element || LowerStd(link.tag) != "link")
+            continue;
+        const std::string type = LowerStd(RawAttrValue(source_, linkIdx, "type"));
+        std::string href = RawAttrValue(source_, linkIdx, "href");
+        const size_t hb = href.find_first_not_of(" \t\r\n");
+        href = hb == std::string::npos ? std::string()
+            : href.substr(hb, href.find_last_not_of(" \t\r\n") - hb + 1);
+        if (type == "text/template" && !href.empty())
+            out.push_back(Ea(href));
+    }
+    return out;
+}
+
+bool UiDocumentModel::InsertHeadLink(const ea::string& text, const ea::string& type,
+    const ea::string& href, ea::string& out)
+{
+    out = text;
+    const ea::string trimmedType = Trim(type);
+    const ea::string trimmedHref = Trim(href);
+    if (trimmedType.empty() || trimmedHref.empty())
+        return false;
+
+    // The live spine (source_) must never be re-parsed or mutated from here:
+    // every tree node's srcNode_ anchor indexes its node list, and anchors are
+    // only rebuilt by a full ReloadFromText. So edit a throwaway parse of the
+    // emitted text; the reload makes the edit canonical for the real spine.
+    RmlTextModel spine;
+    if (!spine.Load(Std(text)))
+        return false;
+
+    int headIdx = -1;
+    const auto existing = CollectHeadLinks(spine, headIdx);
+    if (headIdx < 0)
+        return false; // no <head> to host the link; growing one is out of scope
+    const std::string loweredType = LowerStd(Std(trimmedType));
+    for (const HeadLinkEntry& entry : existing)
+    {
+        if (LowerStd(Std(entry.type_)) == loweredType && entry.href_ == trimmedHref)
+            return false; // already linked: keep the head duplicate-free
+    }
+
+    const std::string markup = "<link type=\"" + Std(trimmedType) + "\" href=\""
+        + Std(EscapeRmlText(trimmedHref)) + "\"/>";
+    // Right after the last existing link, so the authored order of the other
+    // links stays put (rcss cascade order matters: a later sheet overrides an
+    // earlier one at equal specificity). In a link-less head the new link
+    // becomes the first child, so an inline <style> still loads after it and
+    // can override the sheet.
+    int childOrdinal = 0;
+    if (!existing.empty())
+    {
+        int ordinal = 0;
+        for (int child : spine.Node(headIdx).children)
+        {
+            if (child == existing.back().nodeIdx_)
+                break;
+            if (spine.Node(child).kind == RmlNodeKind::Element)
+                ++ordinal;
+        }
+        childOrdinal = ordinal + 1;
+    }
+    if (spine.InsertElement(headIdx, childOrdinal, markup) < 0)
+        return false;
+    out = Ea(spine.GetText());
+    return true;
+}
+
+bool UiDocumentModel::EditHeadLinkAt(const ea::string& text, unsigned ordinal,
+    const ea::string& type, const ea::string& href, ea::string& out)
+{
+    out = text;
+    const ea::string trimmedType = Trim(type);
+    const ea::string trimmedHref = Trim(href);
+    if (trimmedType.empty() || trimmedHref.empty())
+        return false;
+
+    RmlTextModel spine;
+    if (!spine.Load(Std(text)))
+        return false;
+
+    int headIdx = -1;
+    const auto links = CollectHeadLinks(spine, headIdx);
+    if (ordinal >= links.size())
+        return false; // stale ordinal: the document was rebuilt with fewer links
+    const int target = links[ordinal].nodeIdx_;
+
+    // Both attribute patches are computed against the one stable parse and
+    // applied in a single descending batch. A missing attribute is added in
+    // place (ComputeAttributePatch inserts right after the tag name).
+    RmlPatch typePatch;
+    if (!spine.ComputeAttributePatch(target, "type", Std(trimmedType), typePatch))
+        return false;
+    RmlPatch hrefPatch;
+    if (!spine.ComputeAttributePatch(target, "href", Std(EscapeRmlText(trimmedHref)), hrefPatch))
+        return false;
+    spine.ApplyPatches({typePatch, hrefPatch});
+    out = Ea(spine.GetText());
+    return true;
+}
+
+bool UiDocumentModel::RemoveHeadLinkAt(const ea::string& text, unsigned ordinal, ea::string& out)
+{
+    out = text;
+    RmlTextModel spine;
+    if (!spine.Load(Std(text)))
+        return false;
+
+    int headIdx = -1;
+    const auto links = CollectHeadLinks(spine, headIdx);
+    if (ordinal >= links.size())
+        return false; // stale ordinal: the document was rebuilt with fewer links
+
+    // Remove the whole authored line - leading indent and trailing newline
+    // included - not just the element bytes: a bare element removal would
+    // leave an empty line behind in the head.
+    const std::string& buf = spine.GetText();
+    const RmlNode& link = spine.Node(links[ordinal].nodeIdx_);
+    int begin = link.whole.offset;
+    while (begin > 0 && (buf[begin - 1] == ' ' || buf[begin - 1] == '\t'))
+        --begin;
+    int end = link.whole.End();
+    while (end < static_cast<int>(buf.size())
+        && (buf[end] == ' ' || buf[end] == '\t'))
+        ++end;
+    if (end < static_cast<int>(buf.size()) && buf[end] == '\r')
+        ++end;
+    if (end < static_cast<int>(buf.size()) && buf[end] == '\n')
+        ++end;
+
+    spine.ApplyPatches({RmlPatch{RmlSpan{begin, end - begin}, std::string()}});
+    out = Ea(spine.GetText());
+    return true;
+}
+
+UiNode* UiDocumentModel::GetNestedDoc() const
+{
+    if (root_ && !root_->children_.empty())
+    {
+        UiNode* first = root_->children_.front().Get();
+        if (first->IsNestedDoc())
+            return first;
+    }
+    return nullptr;
 }
 
 UiTransform ParseUiTransform(const ea::string& value)

@@ -173,6 +173,8 @@ public:
     /// Return position of the window content in absolute coordinates. Should be called only during content rendering.
     IntVector2 GetContentPosition() const;
     /// @}
+    virtual bool CloseShouldRemove() { return false; }
+    bool IsClosed() { return !open_; }
 
 protected:
     /// Return whether the document is modified and prompt to save should be shown.
@@ -183,16 +185,16 @@ protected:
 
     /// Helper for building menu
     SeparatorHelper contextMenuSeparator_;
-
-private:
+   
+protected:
     void RenderWindow();
     void RenderContextMenu();
     void Undo();
     void Redo();
 
-    const ea::string title_;
-    const ea::string guid_;
-    const ea::string uniqueId_;
+    ea::string title_;
+    ea::string guid_;
+    ea::string uniqueId_;
     const EditorTabFlags flags_;
     const EditorTabPlacement placement_;
 

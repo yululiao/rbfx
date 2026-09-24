@@ -50,8 +50,61 @@ Vector2 InlineStyleBase(Rml::Element* el, const UiNode* node)
     return Vector2::ZERO;
 }
 
+// Fit the element's full accumulated transform (own + ancestors + their
+// perspectives) as a layout->window affine. Element::Project runs the exact
+// math RmlUi uses for event picking, so probe it at three window points, fit
+// window->layout, and store the inverse. Exact for translate/rotate/scale/
+// skew chains; under `perspective` a second pass anchored at the element keeps
+// the fit locally accurate. Identity (window == layout) when the projection is
+// unavailable or the fit turns singular.
+void CaptureWindowMap(Rml::Element* element, UiBox& out)
+{
+    out.winBasisX_ = Vector2(1, 0);
+    out.winBasisY_ = Vector2(0, 1);
+    out.winOrigin_ = Vector2::ZERO;
+    if (!element)
+        return;
+
+    const auto fit = [element](const Vector2& at, float d, Vector2& basisX, Vector2& basisY, Vector2& offset) {
+        Rml::Vector2f p0{at.x_, at.y_};
+        Rml::Vector2f p1{at.x_ + d, at.y_};
+        Rml::Vector2f p2{at.x_, at.y_ + d};
+        if (!element->Project(p0) || !element->Project(p1) || !element->Project(p2))
+            return false;
+        basisX = (Vector2(p1.x, p1.y) - Vector2(p0.x, p0.y)) * (1.0f / d);
+        basisY = (Vector2(p2.x, p2.y) - Vector2(p0.x, p0.y)) * (1.0f / d);
+        // p0 = M*at + b: the stored model is `layout = M*window + offset`, so the
+        // probe must return the pure translation b = p0 - M*at. Returning p0
+        // alone folds M*at into the offset for any probe away from the origin,
+        // shifting the captured map by -at and drifting every overlay box toward
+        // the top-left by its own center - even on documents with no transforms.
+        offset = Vector2(p0.x, p0.y) - (at.x_ * basisX + at.y_ * basisY);
+        return true;
+    };
+    // layout = M * window + offset, M's columns are basisX/basisY; store the inverse.
+    const auto store = [&out](const Vector2& basisX, const Vector2& basisY, const Vector2& offset) {
+        const float det = basisX.x_ * basisY.y_ - basisY.x_ * basisX.y_;
+        if (det < 1e-9f && det > -1e-9f)
+            return false; // singular: keep the previous fit
+        const float inv = 1.0f / det;
+        out.winBasisX_ = Vector2(basisY.y_, -basisX.y_) * inv;
+        out.winBasisY_ = Vector2(-basisY.x_, basisX.x_) * inv;
+        out.winOrigin_ = Vector2(basisY.x_ * offset.y_ - basisY.y_ * offset.x_,
+            basisX.y_ * offset.x_ - basisX.x_ * offset.y_) * inv;
+        return true;
+    };
+
+    Vector2 basisX, basisY, offset;
+    if (!fit(Vector2::ZERO, 64.0f, basisX, basisY, offset) || !store(basisX, basisY, offset))
+        return;
+    // Refine at the element itself so perspective-heavy chains stay accurate.
+    const Vector2 centerWin = out.MapToWindow(out.Center());
+    if (fit(centerWin, 32.0f, basisX, basisY, offset))
+        store(basisX, basisY, offset);
+}
+
 // The border box (document space) of a live DOM element, plus the node's own
-// emitted transform.
+// emitted transform and the element's full layout->window transform map.
 bool TryGetDomBox(Rml::Element* element, const UiNode* node, UiBox& out)
 {
     if (!element)
@@ -59,6 +112,10 @@ bool TryGetDomBox(Rml::Element* element, const UiNode* node, UiBox& out)
     out.pos_ = V2(element->GetAbsoluteOffset(Rml::BoxArea::Border));
     out.size_ = V2(element->GetBox().GetSize(Rml::BoxArea::Border));
     out.xform_ = node ? ParseUiTransform(node->GetStyle("transform")) : UiTransform{};
+    // GetAbsoluteOffset is pure layout math and ignores the transform chain
+    // entirely; without the captured map the overlay drifts off the rendered
+    // element under any ancestor transform (e.g. a scaled parent).
+    CaptureWindowMap(element, out);
     return out.size_.x_ > 0.0f && out.size_.y_ > 0.0f;
 }
 
@@ -79,8 +136,9 @@ bool HasAuthoredText(const UiNode& node)
 // Deepest element whose box contains the point, children first in reverse
 // paint order. Template-minted elements (window frames, close buttons) have no
 // model node of their own - they are not part of the authored source - so a
-// hit on them bubbles to the nearest ancestor that has one: clicking the frame
-// selects the body that minted it instead of selecting nothing.
+// hit on them bubbles to the nearest ancestor that has one. A bubble that can
+// only reach the body is a hit on the nested document's chrome: it selects the
+// nested-doc virtual node as a whole instead of the body.
 UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, const Vector2& point)
 {
     const int n = element->GetNumChildren(false);
@@ -97,13 +155,27 @@ UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, cons
     UiBox box;
     if (!TryGetDomBox(element, node, box))
         return nullptr;
-    const Vector2 local = InverseMapPoint(point, box);
-    if (local.x_ < box.pos_.x_ || local.x_ > box.pos_.x_ + box.size_.x_ ||
-        local.y_ < box.pos_.y_ || local.y_ > box.pos_.y_ + box.size_.y_)
+    // Pick through the element's FULL transform chain (own + ancestors +
+    // perspective): Project maps the doc-space point into the untransformed
+    // layout frame exactly the way RmlUi's own event dispatch does. A singular
+    // chain leaves the element unpickable, mirroring Event::StopPropagation.
+    Rml::Vector2f local{point.x_, point.y_};
+    if (!element->Project(local))
+        return nullptr;
+    if (local.x < box.pos_.x_ || local.x > box.pos_.x_ + box.size_.x_ ||
+        local.y < box.pos_.y_ || local.y > box.pos_.y_ + box.size_.y_)
         return nullptr;
 
     for (Rml::Element* ancestor = element; !node && ancestor; ancestor = ancestor->GetParentNode())
+    {
         node = model->FindByDom(ancestor);
+        if (node == model->root_.Get())
+        {
+            if (UiNode* nested = model->GetNestedDoc())
+                node = nested;
+            break;
+        }
+    }
     return node;
 }
 
@@ -114,8 +186,12 @@ UIViewDocument::UIViewDocument(Context* context)
 {
     // Private RmlUi context that renders the document under edit into a dynamic
     // texture. Deliberately not the master RmlUI subsystem so editing does not
-    // leak into the running game view.
-    previewUI_ = new RmlUI(context_, "UIViewPreview");
+    // leak into the running game view. Rml::CreateContext fails on duplicate
+    // names, and several documents can be open at once, so give each instance
+    // its own context name.
+    static unsigned instanceCounter = 0;
+    const ea::string contextName = Format("UIViewPreview-{}", ++instanceCounter);
+    previewUI_ = new RmlUI(context_, contextName.c_str());
     // Input isolation: drop RmlUI's global input subscriptions so the preview
     // cannot steal editor focus. SetBlockEvents() must NOT be used - it blocks
     // E_POSTUPDATE too, stalling Context::Update so the document never renders.
@@ -170,7 +246,7 @@ void UIViewDocument::HandleBeginRendering(StringHash, VariantMap&)
     // Layout was already updated on E_POSTUPDATE (CPU-side); here, at the start
     // of the graphics frame, it is safe to issue GPU draws into the offscreen
     // surface. The preview widget samples the resulting texture later this frame.
-    if (previewUI_)
+    if (previewUI_ && previewActive_)
         previewUI_->Render();
 }
 
@@ -324,14 +400,88 @@ UiNode* UIViewDocument::HitTest(const Vector2& docPos) const
     return HitTestRecurse(document_, &model_, docPos);
 }
 
-bool UIViewDocument::TryGetDomBox(const UiNode* node, UiBox& out) const
+bool UIViewDocument::TryGetDomBoxes(const UiNode* node, ea::vector<UiBox>& out) const
 {
-    return node ? Urho3D::TryGetDomBox(node->dom_, node, out) : false;
+    out.clear();
+    if (!node)
+        return false;
+    // The nested-doc virtual node outlines the chrome elements themselves
+    // (one rect each) rather than the body its dom_ points at: the body's
+    // box is the whole canvas and would read as "the entire outer document".
+    if (node->IsNestedDoc())
+    {
+        for (Rml::Element* chrome : node->nestedChromeElems_)
+        {
+            UiBox box;
+            if (Urho3D::TryGetDomBox(chrome, nullptr, box))
+                out.push_back(box);
+        }
+        return !out.empty();
+    }
+    UiBox box;
+    if (!Urho3D::TryGetDomBox(node->dom_, node, box))
+        return false;
+    out.push_back(box);
+    return true;
 }
 
 Vector2 UIViewDocument::GetInlineStyleBase(const UiNode* node) const
 {
     return node ? InlineStyleBase(node->dom_, node) : Vector2::ZERO;
+}
+
+bool UIViewDocument::TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base) const
+{
+    base = Vector2::ZERO;
+    // The gizmo is offered purely on the position declaration: only an
+    // absolutely positioned box is dragged (dragging writes position:absolute +
+    // left/top/width/height, so relative/fixed/none must not trigger it).
+    if (!node || !node->dom_ || node->GetStyle("position") != "absolute")
+        return false;
+    // Authored geometry wins: exact, and it is the frame WriteBoxToStyle keeps.
+    if (TryGetMaterializedBox(*node, out))
+    {
+        base = InlineStyleBase(node->dom_, node);
+        CaptureWindowMap(node->dom_, out);
+        return true;
+    }
+    // Positioned but not yet sized/offset (position freshly set from the Style
+    // panel): seed the box from the rendered border box against its containing
+    // block, so the element is immediately draggable from where it already is.
+    Rml::Element* el = node->dom_;
+    Rml::Element* containing = el->GetOffsetParent();
+    base = containing ? V2(containing->GetAbsoluteOffset(Rml::BoxArea::Border)) : Vector2::ZERO;
+    out.pos_ = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border)) - base;
+    out.size_ = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
+    out.xform_ = ParseUiTransform(node->GetStyle("transform"));
+    CaptureWindowMap(el, out);
+    return true;
+}
+
+void UIViewDocument::RefreshWindowMap(const UiNode* node, UiBox& box) const
+{
+    if (node && node->dom_ && !node->IsNestedDoc())
+        CaptureWindowMap(node->dom_, box);
+}
+
+Vector2 UIViewDocument::DocToGizmoFrame(const UiNode* node, const Vector2& base, const Vector2& docPoint) const
+{
+    if (node && node->dom_ && !node->IsNestedDoc())
+    {
+        // Project unwinds the element's FULL transform chain (ancestors + own +
+        // perspective) into untransformed layout space - the same math RmlUi's
+        // event dispatch uses. ForwardMapPoint then re-applies the node's own
+        // authored transform from the live DOM box (whose pivot matches
+        // Project's), so the net effect strips ONLY the ancestor chain.
+        UiBox box;
+        if (Urho3D::TryGetDomBox(node->dom_, node, box))
+        {
+            Rml::Vector2f p{docPoint.x_, docPoint.y_};
+            if (node->dom_->Project(p))
+                return ForwardMapPoint(Vector2(p.x, p.y), box) - base;
+        }
+    }
+    return docPoint - base;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,59 +571,78 @@ bool UIViewDocument::CommitAndReload(const ea::string& undoText, const ea::vecto
 // Undoable editing commands
 // ---------------------------------------------------------------------------
 
-UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
+UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec)
 {
-    if (!model_.root_ || !document_ || !tag)
+    if (!model_.root_ || !document_ || spec.tag_.empty())
         return nullptr;
-    if (!parent || parent->IsText())
+    if (!parent || parent->IsText() || parent->IsNestedDoc() || parent->IsHeadLink())
         parent = model_.root_.Get();
 
     auto node = MakeShared<UiNode>();
-    const ea::string kind = tag;
-    if (kind == "text")
+    node->tag_ = spec.tag_;
+    if (!spec.attrName_.empty())
+        node->attributes_.emplace_back(spec.attrName_, spec.attrValue_);
+    // Default content: a single text child ("Button", "Text") or repeated
+    // child elements (a <select> is only usable once it has <option>s).
+    if (!spec.childText_.empty())
     {
-        // RmlUi has no standalone text element: text lives inside a block.
-        // Emit a plain <div> carrying a text node, styled as visible text
-        // (no fill box) so it reads as a label rather than an empty panel.
-        node->tag_ = "div";
         auto text = MakeShared<UiNode>();
         text->tag_ = "#text";
-        text->text_ = "Text";
+        text->text_ = spec.childText_;
         node->children_.push_back(text);
-        node->SetStyle("color", "#e8eef5");
     }
-    else
+    for (unsigned i = 0; i < spec.childElemCount_; i++)
     {
-        node->tag_ = kind;
-        if (kind == "button")
+        auto elem = MakeShared<UiNode>();
+        elem->tag_ = spec.childElemTag_;
+        if (!spec.childElemText_.empty())
         {
             auto text = MakeShared<UiNode>();
             text->tag_ = "#text";
-            text->text_ = "Button";
-            node->children_.push_back(text);
+            text->text_ = spec.childElemText_;
+            elem->children_.push_back(text);
         }
-        else if (kind == "img")
-        {
-            node->attributes_.emplace_back("src", "");
-        }
+        node->children_.push_back(elem);
+    }
+    switch (spec.stylePolicy_)
+    {
+    case UiWidgetStylePolicy::Panel:
         node->SetStyle("background-color", "#3a4656");
-        node->SetStyle("border", "1px solid #6f86a6");
+        // RmlUi's `border` shorthand maps to width + color only; it has no
+        // border-style property, so a CSS `solid` keyword here fails the whole
+        // declaration parse (and the placeholder border never renders).
+        node->SetStyle("border", "1px #6f86a6");
+        break;
+    case UiWidgetStylePolicy::Outline:
+        // Border only: shape without a fill, so the control's internal chrome
+        // (project-styled or not) stays untouched.
+        node->SetStyle("border", "1px #6f86a6");
+        break;
+    case UiWidgetStylePolicy::None:
+    default:
+        break;
     }
 
-    // Born materialized: 160x48 centered inside the parent's rendered box when
-    // it has one (else the preview viewport), so the widget lands in view and
-    // is draggable at once.
-    UiBox box;
-    box.size_ = Vector2{160.0f, 48.0f};
-    float cw = static_cast<float>(kPreviewWidth);
-    float ch = static_cast<float>(kPreviewHeight);
-    const Vector2 psz = parent->dom_ ? V2(parent->dom_->GetBox().GetSize(Rml::BoxArea::Border)) : Vector2::ZERO;
-    if (psz.x_ > box.size_.x_)
-        cw = psz.x_;
-    if (psz.y_ > box.size_.y_)
-        ch = psz.y_;
-    box.pos_ = Vector2{Max(cw - box.size_.x_, 0.0f) * 0.5f, Max(ch - box.size_.y_, 0.0f) * 0.5f};
-    WriteBoxToStyle(*node, box);
+    const Vector2 psz = parent->dom_
+        ? V2(parent->dom_->GetBox().GetSize(Rml::BoxArea::Border)) : Vector2::ZERO;
+
+    // Born materialized: explicitly sized, centered inside the parent's
+    // rendered box when it has one (else the preview viewport), so the widget
+    // lands in view and is draggable at once. Flow-born entries (text labels)
+    // skip the box and join the flow at the parent's end.
+    if (spec.materialize_)
+    {
+        UiBox box;
+        box.size_ = spec.size_;
+        float cw = static_cast<float>(kPreviewWidth);
+        float ch = static_cast<float>(kPreviewHeight);
+        if (psz.x_ > box.size_.x_)
+            cw = psz.x_;
+        if (psz.y_ > box.size_.y_)
+            ch = psz.y_;
+        box.pos_ = Vector2{Max(cw - box.size_.x_, 0.0f) * 0.5f, Max(ch - box.size_.y_, 0.0f) * 0.5f};
+        WriteBoxToStyle(*node, box);
+    }
 
     const ea::string undoText = model_.EmitRml();
     ea::vector<unsigned> parentPath;
@@ -487,14 +656,15 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 
     // Precise centering: where the widget should end up in absolute document
     // coordinates (centered inside the parent's own rendered box), used by the
-    // one-shot landing correction after the rebuild.
+    // one-shot landing correction after the rebuild. Flow widgets have no
+    // authored position - the flow decides - so they take no correction.
     Vector2 desiredAbs = Vector2::ZERO;
     bool haveDesired = false;
-    if (parent->dom_)
+    if (spec.materialize_ && parent->dom_)
     {
         const Vector2 pAbs = V2(parent->dom_->GetAbsoluteOffset(Rml::BoxArea::Border));
-        desiredAbs = pAbs + Vector2{Max(psz.x_ - box.size_.x_, 0.0f) * 0.5f,
-                                    Max(psz.y_ - box.size_.y_, 0.0f) * 0.5f};
+        desiredAbs = pAbs + Vector2{Max(psz.x_ - spec.size_.x_, 0.0f) * 0.5f,
+                                    Max(psz.y_ - spec.size_.y_, 0.0f) * 0.5f};
         haveDesired = true;
     }
 
@@ -505,7 +675,8 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const char* tag)
 
 UiNode* UIViewDocument::DuplicateNode(UiNode* node)
 {
-    if (!node || node == model_.root_.Get() || node->IsText())
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+        || node->IsHeadLink())
         return nullptr;
     UiNode* parent = model_.FindParent(node);
     if (!parent)
@@ -551,6 +722,18 @@ bool UIViewDocument::DeleteNode(UiNode* node)
 {
     if (!node || node == model_.root_.Get() || node->IsText())
         return false;
+    // Virtual nodes that stand for a <head> <link> line: removal is a
+    // text-level edit, not a tree operation. (The nested-doc node is the
+    // instantiated template link; deleting it removes the <link> line, so the
+    // chrome disappears with it - exactly what the user asked for.)
+    if (node->IsHeadLink() || node->IsNestedDoc())
+    {
+        const ea::string undoText = model_.EmitRml();
+        ea::string redoText;
+        if (!model_.RemoveHeadLinkAt(undoText, node->headLinkOrdinal_, redoText))
+            return false; // ordinal went stale (rebuilt with fewer links)
+        return CommitTextEdit(undoText, redoText);
+    }
     UiNode* parent = model_.FindParent(node);
     if (!parent)
         return false;
@@ -570,39 +753,82 @@ bool UIViewDocument::DeleteNode(UiNode* node)
     return CommitAndReload(undoText, {});
 }
 
-bool UIViewDocument::MaterializeNode(UiNode* node)
+void ResetSpineAnchors(UiNode& node)
 {
-    if (!node || !node->dom_ || node->IsText() || node->IsMaterialized())
-        return false;
+    node.srcNode_ = -1;
+    for (const SharedPtr<UiNode>& child : node.children_)
+        ResetSpineAnchors(*child);
+}
 
-    // Bake the computed border box into explicit px style, then let the reload
-    // below land the element where the authored box says. CommitAndReload's
-    // landing correction fixes any containing-block offset afterwards, so
-    // nothing visibly moves (regardless of the containing block's padding or
-    // border).
+UiNode* UIViewDocument::MoveNode(UiNode* node, UiNode* newParent, unsigned index)
+{
+    if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+        || node->IsHeadLink())
+        return nullptr;
+    if (!newParent || newParent->IsText() || newParent->IsNestedDoc() || newParent->IsHeadLink()
+        || newParent == node)
+        return nullptr;
+    // Reparenting into the moved subtree would cut that subtree out of the
+    // tree: reject when the new parent is the node itself or any descendant.
+    for (UiNode* it = newParent; it; it = model_.FindParent(it))
+    {
+        if (it == node)
+            return nullptr;
+    }
+
+    UiNode* oldParent = model_.FindParent(node);
+    if (!oldParent)
+        return nullptr;
+
     const ea::string undoText = model_.EmitRml();
-    ea::vector<unsigned> path;
-    if (!model_.BuildPath(node, path))
-        return false;
+    ea::vector<unsigned> newParentPath;
+    if (!model_.BuildPath(newParent, newParentPath))
+        return nullptr;
 
-    Rml::Element* el = node->dom_;
-    const Vector2 absBefore = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
-    const Vector2 size = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
-    Rml::Element* parent = el->GetOffsetParent();
-    const Vector2 base = parent ? V2(parent->GetAbsoluteOffset(Rml::BoxArea::Border)) : Vector2::ZERO;
+    unsigned oldIndex = 0;
+    bool found = false;
+    for (unsigned i = 0; i < oldParent->children_.size(); i++)
+    {
+        if (oldParent->children_[i].Get() == node)
+        {
+            oldIndex = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        return nullptr;
 
-    UiBox box;
-    box.pos_ = absBefore - base;
-    box.size_ = size;
-    box.xform_ = ParseUiTransform(node->GetStyle("transform"));
-    WriteBoxToStyle(*node, box);
+    // Keep the subtree alive across the erase, then splice it in. Moving
+    // within one container shifts the indices behind the removed slot.
+    SharedPtr<UiNode> held = oldParent->children_[oldIndex];
+    oldParent->children_.erase(oldParent->children_.begin() + oldIndex);
+    // The moved subtree no longer lives where the spine anchors it: a kept
+    // anchor would make emit diff both ends wrong - the old parent sees its
+    // source child unreferenced and patches the bytes away, while the new
+    // parent sees an anchored child and generates nothing in its place,
+    // net effect: the node vanishes from the document. Drop every spine
+    // anchor in the subtree: the old position is deleted as such, and the
+    // new one is whole-subtree generated (GenSubtree) like any editor-made
+    // widget. Rebuild re-anchors everything from the new text.
+    ResetSpineAnchors(*held);
+    if (oldParent == newParent && index > oldIndex)
+        --index;
+    index = Min(index, static_cast<unsigned>(newParent->children_.size()));
+    newParent->children_.insert(newParent->children_.begin() + index, held);
 
-    return CommitAndReload(undoText, path, &path, absBefore);
+    ea::vector<unsigned> newPath = newParentPath;
+    newPath.push_back(index);
+    // One undo step per move (empty merge key); the element is expected to
+    // land at its flow position, so no landing correction.
+    if (!CommitAndReload(undoText, {}))
+        return nullptr;
+    return model_.ResolvePath(newPath);
 }
 
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 {
-    if (!node)
+    if (!node || node->IsNestedDoc() || node->IsHeadLink())
         return false;
     const ea::string undoText = model_.EmitRml();
     // Child-index path doubles as the merge key: consecutive payload edits of
@@ -616,7 +842,7 @@ bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 
 bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
 {
-    if (!node)
+    if (!node || node->IsNestedDoc() || node->IsHeadLink())
         return false;
     const ea::string undoText = model_.EmitRml();
     ea::vector<unsigned> mergeKey;
@@ -626,6 +852,63 @@ bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
     // makes model, text and projection canonically identical again.
     WriteBoxToStyle(*node, box);
     return CommitAndReload(undoText, mergeKey);
+}
+
+bool UIViewDocument::CommitTextEdit(const ea::string& undoText, const ea::string& redoText)
+{
+    if (!ReloadFromText(redoText))
+    {
+        URHO3D_LOGERROR("UIViewDocument: projection reload failed; restoring the pre-edit document.");
+        ReloadFromText(undoText); // best effort: keep model and projection in sync
+        return false;
+    }
+    // One discrete undo step per link edit: consecutive link commands must
+    // not collapse into each other.
+    const ea::vector<unsigned> mergeKey;
+    PushUndoAction(MakeShared<UiDocumentSnapshotAction>(this, mergeKey, undoText, redoText));
+    dirty_ = true;
+    OnModelEdited(this);
+    return true;
+}
+
+bool UIViewDocument::AddHeadLink(const ea::string& type, const ea::string& href)
+{
+    if (!model_.root_ || !document_)
+        return false;
+    // <head> is not part of the editor tree (it starts at <body>), so the edit
+    // happens on the emitted text directly; the reload below then makes the
+    // new link canonical for both the spine and the live projection.
+    const ea::string undoText = model_.EmitRml();
+    ea::string redoText;
+    if (!model_.InsertHeadLink(undoText, type, href, redoText))
+    {
+        URHO3D_LOGERROR(
+            "UIViewDocument: cannot add head link '{}' (document has no <head>, or it is already linked).",
+            Trim(href).c_str());
+        return false;
+    }
+    return CommitTextEdit(undoText, redoText);
+}
+
+bool UIViewDocument::EditHeadLink(UiNode* node, const ea::string& type, const ea::string& href)
+{
+    if (!model_.root_ || !document_ || !node
+        || (!node->IsHeadLink() && !node->IsNestedDoc()))
+        return false;
+    const ea::string trimmedType = Trim(type);
+    const ea::string trimmedHref = Trim(href);
+    if (node->GetAttribute("type") == trimmedType && node->GetAttribute("href") == trimmedHref)
+        return true; // nothing changed; no reload, no undo noise
+    const ea::string undoText = model_.EmitRml();
+    ea::string redoText;
+    if (!model_.EditHeadLinkAt(undoText, node->headLinkOrdinal_, type, href, redoText))
+    {
+        URHO3D_LOGERROR(
+            "UIViewDocument: cannot edit head link '{}' (empty value, or the link was rebuilt away).",
+            trimmedHref.c_str());
+        return false;
+    }
+    return CommitTextEdit(undoText, redoText);
 }
 
 }

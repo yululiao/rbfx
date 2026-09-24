@@ -44,6 +44,11 @@ ResourceEditorTab::ResourceEditorTab(Context* context, const ea::string& title, 
 {
     auto project = GetProject();
     project->OnInitialized.Subscribe(this, &ResourceEditorTab::OnProjectInitialized);
+    // OnInitialized is one-shot: an instance created after startup (e.g. a
+    // UIViewTab spawned to host a second document) never receives it, and
+    // its resources would silently never load. Such instances load eagerly.
+    if (project->IsInitialized())
+        loadResources_ = true;
     project->OnRequest.Subscribe(this, &ResourceEditorTab::OnProjectRequest);
 
     BindHotkey(Hotkey_SaveDocument, &ResourceEditorTab::SaveCurrentResource);

@@ -45,6 +45,11 @@ public:
     virtual void RenderMenu() {}
     /// Apply hotkeys when the hierarchy browser tab is focused.
     virtual void ApplyHotkeys(HotkeyManager* hotkeyManager) {}
+    /// Return whether the source is connected to the undo stack. Mirrors
+    /// InspectorSource::IsUndoSupported: the hosting tab's Ctrl+Z/Ctrl+Y gate
+    /// on this, so editing commands issued from the hierarchy (delete, drag
+    /// reparenting) must not strand their undo steps behind a closed gate.
+    virtual bool IsUndoSupported() { return false; }
 };
 
 }

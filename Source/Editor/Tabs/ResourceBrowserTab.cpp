@@ -623,6 +623,12 @@ void ResourceBrowserTab::RenderDirectoryContentEntry(const FileSystemEntry& entr
 
     if (ui::IsItemClicked(MOUSEB_LEFT) && ui::IsMouseDoubleClicked(MOUSEB_LEFT))
     {
+        // Swallow the release ending this double-click: it would run the
+        // single-click select below and send an InspectResourceRequest AFTER
+        // the file was already opened in its editor, letting the placeholder
+        // inspector (a .rml has no dedicated one) steal the shared Inspector
+        // panel from the freshly opened document.
+        ignoreNextMouseRelease_ = true;
         if (isNormalDirectory)
         {
             SelectLeftPanel(entry.resourceName_);

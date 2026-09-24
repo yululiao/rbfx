@@ -124,6 +124,11 @@ public:
     Signal<void(ProjectRequest*)> OnRequest;
     Signal<void(const ea::string& command, const ea::string& args, bool& processed)> OnCommand;
 
+    /// Return whether the one-shot OnInitialized signal has already fired.
+    /// Tabs created at runtime (after startup finished) cannot receive the
+    /// signal and must consult this instead.
+    bool IsInitialized() const { return initialized_; }
+
     Project(Context* context, const ea::string& projectPath, const ea::string& settingsJsonPath, ProjectFlags flags);
     ~Project() override;
     void SerializeInBlock(Archive& archive) override;
@@ -170,8 +175,15 @@ public:
     bool IsFileNameIgnored(const ea::string& fileName) const;
     /// Add new tab. Avoid calling it in realtime.
     void AddTab(SharedPtr<EditorTab> tab);
+    void CheckRemoveTab();
     /// Find first tab of matching type.
     template <class T> T* FindTab() const;
+    /// All registered tabs, in registration order. For editors that keep
+    /// several instances of the same tab type alive and need to walk them
+    /// (e.g. UIViewTab's per-document instances).
+    const ea::vector<SharedPtr<EditorTab>>& GetTabs() const { return tabs_; }
+    const ea::vector<SharedPtr<EditorTab>> GetTabsByTypeName(const ea::string& typeName);
+    ea::string GetUniqTabName(const ea::string& typeName, const ea::string& tabNmaePre);
     /// Set whether the global hotkeys are enabled.
     void SetGlobalHotkeysEnabled(bool enabled);
     /// Set whether the UI highlight is enabled.

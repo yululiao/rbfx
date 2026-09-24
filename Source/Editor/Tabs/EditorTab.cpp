@@ -84,11 +84,15 @@ void EditorTab::Render()
 
     if (focusPending_ || openPending_)
         open_ = true;
-
     if (open_)
         RenderWindow();
 
-    focusPending_ = false;
+    // Keep the focus request pending while a mouse button is held: hovered
+    // tabs refocus themselves on held frames (see RenderWindow), so a
+    // programmatic focus issued by a double-click would be defeated until
+    // the user releases the button.
+    if (focusPending_ && !ui::IsAnyMouseDown())
+        focusPending_ = false;
     openPending_ = false;
 }
 
@@ -113,7 +117,7 @@ void EditorTab::RenderWindow()
 
     if (focusPending_)
         ui::SetNextWindowFocus();
-
+    
     ui::Begin(uniqueId_.c_str(), &open_, windowFlags_);
 
     if (noContentPadding)

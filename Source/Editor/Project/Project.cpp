@@ -537,6 +537,73 @@ void Project::AddTab(SharedPtr<EditorTab> tab)
     tabs_.push_back(tab);
     sortedTabs_[tab->GetTitle()] = tab;
 }
+//UiViewTab is dynamic tab,close should remove
+void Project::CheckRemoveTab()
+{
+    ea::map<ea::string,ea::vector<SharedPtr<EditorTab>>> type_tabs;
+    for (auto iter = tabs_.begin(); iter != tabs_.end();iter++)
+    {
+        type_tabs[(*iter)->GetTypeName()].push_back(*iter);
+    }
+    for (auto iter = tabs_.begin(); iter != tabs_.end();)
+    {
+        auto tab = (*iter);
+        if (tab->CloseShouldRemove() && tab->IsClosed() && type_tabs[tab->GetTypeName()].size() >1)
+        {
+            iter = tabs_.erase(iter);
+            auto sortIter = sortedTabs_.find(tab->GetTitle());
+            sortedTabs_.erase(sortIter);
+        }
+        else
+        {
+            ++iter;
+        }
+    }
+}
+
+const ea::vector<SharedPtr<EditorTab>> Project::GetTabsByTypeName(const ea::string& typeName)
+{
+    ea::vector<SharedPtr<EditorTab>> tabs;
+    for (auto& tab : tabs_)
+    {
+        if (tab->GetTypeName() == typeName)
+        {
+            tabs.push_back(tab);
+        }
+    }
+    return tabs;
+}
+
+ea::string Project::GetUniqTabName(const ea::string& typeName, const ea::string& tabNmaePre)
+{
+    auto allTabs = GetTabsByTypeName(typeName);
+    if (allTabs.size() == 0)
+        return tabNmaePre;
+    ea::set<ea::string> allTabNames;
+    for (auto& tab : allTabs)
+    {
+        if (!tab->GetTitle().empty())
+        {
+            allTabNames.insert(tab->GetTitle());
+        }
+        
+    }
+    if (!allTabNames.count(tabNmaePre))
+        return tabNmaePre;
+    ea::string uniqName = "";
+    int id = 2;
+    while (uniqName.empty())
+    {
+        ea::string curName = Format("{}{}", tabNmaePre,id);
+        if (!allTabNames.count(curName))
+        {
+            uniqName = curName;
+        }
+        ++id;
+    }
+
+    return uniqName;
+}
 
 void Project::SetGlobalHotkeysEnabled(bool enabled)
 {
@@ -858,6 +925,7 @@ void Project::Render()
                     tab->Focus(true);
             }
         }
+        CheckRemoveTab();
     }
 
     ProcessDelayedSaves();
@@ -1112,10 +1180,13 @@ void Project::ReadIniSettings(const char* entry, const char* line)
             currentLaunchConfiguration_ = *value;
     }
 
-    for (EditorTab* tab : tabs_)
+    // Iterate by index: ReadIniSettings may register tabs on the fly
+    // (UIViewTab's restore spawns secondary editor instances), which would
+    // invalidate range-for iterators mid-loop.
+    for (size_t i = 0; i < tabs_.size(); ++i)
     {
-        if (entry == tab->GetIniEntry())
-            tab->ReadIniSettings(line);
+        if (entry == tabs_[i]->GetIniEntry())
+            tabs_[i]->ReadIniSettings(line);
     }
 }
 

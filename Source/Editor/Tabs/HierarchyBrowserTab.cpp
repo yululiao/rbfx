@@ -50,6 +50,12 @@ void HierarchyBrowserTab::RenderMenu()
 
 void HierarchyBrowserTab::ApplyHotkeys(HotkeyManager* hotkeyManager)
 {
+    // Invoke this tab's own bindings first (Global.Undo/Redo are bound to the
+    // tab in the EditorTab ctor), then let the source add its own. Mirrors
+    // InspectorTab::ApplyHotkeys: without the InvokeFor the tab-bound hotkeys
+    // never fire when this tab is focused, which strands undo steps of the
+    // editing commands issued from the hierarchy (gated on IsUndoSupported).
+    EditorTab::ApplyHotkeys(hotkeyManager);
     if (source_)
         sourceInterface_->ApplyHotkeys(hotkeyManager);
 }

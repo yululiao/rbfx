@@ -131,6 +131,14 @@ public:
     bool ComputeAttributeRemovalPatch(int node, const std::string& name, RmlPatch& out) const;
     bool ComputeStylePropertyPatch(int node, const std::string& property, const std::string& value, RmlPatch& out) const;
     bool ComputeStyleRemovePatch(int node, const std::string& property, RmlPatch& out) const;
+    /// Patch replacing the element's entire inline style with `declarations`
+    /// (pre-formatted "a: b; c: d"): rewrites the existing style value, or creates
+    /// the whole style attribute when absent. Single patch by construction, so a
+    /// batch of style edits can never mint duplicate style attributes.
+    bool ComputeStyleDeclarationPatch(int node, const std::string& declarations, RmlPatch& out) const;
+    /// Removal patch for one specific attribute instance; duplicate attribute
+    /// names (invalid but historically saveable) are legal input.
+    bool ComputeAttributeRemovalPatch(const RmlAttribute& attribute, RmlPatch& out) const;
     bool ComputeTextPatch(int node, const std::string& newText, RmlPatch& out) const;
     bool ComputeElementRemovalPatch(int node, RmlPatch& out) const;
     bool ComputeInsertPatch(int parent, int childOrdinal, const std::string& markup, RmlPatch& out) const;

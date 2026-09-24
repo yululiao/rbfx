@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <functional>
+#include <limits>
 #include <utility>
 
 namespace
@@ -648,19 +650,7 @@ bool RmlTextModel::ComputeAttributeRemovalPatch(int node, const std::string& nam
     for (const RmlAttribute& a : nodes_[node].attributes)
     {
         if (a.name == name)
-        {
-            RmlSpan s = a.whole;
-            int o = s.offset;
-            if (o > 0 && text_[o - 1] == ' ')
-            {
-                --o;
-                s.offset = o;
-                s.length += 1;
-            }
-            out.span = s;
-            out.replacement = "";
-            return true;
-        }
+            return ComputeAttributeRemovalPatch(a, out);
     }
     return false;
 }
@@ -737,6 +727,41 @@ bool RmlTextModel::ComputeStyleRemovePatch(int node, const std::string& property
         }
     }
     return false;
+}
+
+bool RmlTextModel::ComputeStyleDeclarationPatch(int node, const std::string& declarations, RmlPatch& out) const
+{
+    if (node < 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+        return false;
+    const RmlAttribute* style = FindAttribute(node, "style");
+    const std::string q(1, detectedQuote_);
+    if (style)
+    {
+        out.span = style->valueSpan;
+        out.replacement = declarations;
+    }
+    else
+    {
+        out.span.offset = nodes_[node].nameSpan.End();
+        out.span.length = 0;
+        out.replacement = " style=" + q + declarations + q;
+    }
+    return true;
+}
+
+bool RmlTextModel::ComputeAttributeRemovalPatch(const RmlAttribute& attribute, RmlPatch& out) const
+{
+    // Claim the attribute's whole span plus a single leading space when present;
+    // adjacent attributes each claim their own space, so their spans never overlap.
+    RmlSpan s = attribute.whole;
+    if (s.offset > 0 && text_[s.offset - 1] == ' ')
+    {
+        --s.offset;
+        s.length += 1;
+    }
+    out.span = s;
+    out.replacement = "";
+    return true;
 }
 
 bool RmlTextModel::ComputeTextPatch(int node, const std::string& newText, RmlPatch& out) const
@@ -824,10 +849,28 @@ void RmlTextModel::ApplyPatches(const std::vector<RmlPatch>& patches)
                 return a.first > b.first;
             return a.second > b.second;
         });
+    // Patches are computed independently against the SAME pre-edit text and are required to be
+    // disjoint. Splicing in descending-offset order only stays correct while that holds: if a
+    // later (lower-offset) patch's span reaches into a region an earlier splice already consumed,
+    // its stale length over-deletes and eats the following tag bytes (this previously turned
+    // `..."/>` into `...>` and truncated the whole document on reload). Skip any such overrun so
+    // the worst case is a leftover declaration instead of a corrupt file. Zero-width inserts
+    // consume no bytes and are never skipped.
+    int consumedLeft = (std::numeric_limits<int>::max)();
     for (const std::pair<int, size_t>& o : order)
     {
         const RmlPatch& p = patches[o.second];
+        const int end = p.span.offset + static_cast<int>(p.span.length);
+        if (p.span.length > 0 && end > consumedLeft)
+        {
+            std::fprintf(stderr,
+                "[RmlTextModel] overlapping patch at offset %d skipped to keep the document valid\n",
+                p.span.offset);
+            continue;
+        }
         text_.replace(p.span.offset, p.span.length, p.replacement);
+        if (p.span.length > 0)
+            consumedLeft = p.span.offset;
     }
     std::string snapshot = text_;
     Load(snapshot);

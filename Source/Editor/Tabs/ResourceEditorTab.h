@@ -113,6 +113,12 @@ protected:
     /// Called when shallow data for resource is saved.
     virtual void OnResourceShallowSaved(const ea::string& resourceName) = 0;
 
+    /// Handle project requests. Virtual so resource editors can customize
+    /// the routing of OpenResourceRequest (e.g. multi-instance editors
+    /// arbitrate which instance opens the resource instead of every
+    /// subscribed instance opening it).
+    virtual void OnProjectRequest(ProjectRequest* request);
+
 private:
     struct ResourceData
     {
@@ -124,7 +130,6 @@ private:
 
     StringVector GetResourceNames() const;
     void OnProjectInitialized();
-    void OnProjectRequest(ProjectRequest* request);
     void DoSaveResource(const ea::string& resourceName, ResourceData& data);
 
     bool loadResources_{};
