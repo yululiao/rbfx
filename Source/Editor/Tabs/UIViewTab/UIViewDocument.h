@@ -158,6 +158,17 @@ public:
     /// against the containing block, so a freshly-positioned element is
     /// draggable at once. False when the node is not absolutely positioned.
     bool TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base) const;
+    /// Re-fit \a box's layout->window map from the node's live DOM element;
+    /// called every frame a gizmo drag is live so the overlay keeps tracking
+    /// transform changes made during the gesture.
+    void RefreshWindowMap(const UiNode* node, UiBox& box) const;
+    /// Map a mouse point (doc px) into the gizmo frame of \a node (left/top
+    /// layout space relative to \a base) with the ancestor transform chain
+    /// stripped: Project unwinds the full chain exactly as RmlUi's own event
+    /// picking does, then the node's own transform is re-applied. Falls back
+    /// to the raw point minus \a base when there is no (or a singular)
+    /// transform chain.
+    Vector2 DocToGizmoFrame(const UiNode* node, const Vector2& base, const Vector2& docPoint) const;
     /// @}
 
     /// Undoable editing commands. Each mutates the model, rebuilds the whole

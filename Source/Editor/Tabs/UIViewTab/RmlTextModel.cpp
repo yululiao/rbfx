@@ -650,19 +650,7 @@ bool RmlTextModel::ComputeAttributeRemovalPatch(int node, const std::string& nam
     for (const RmlAttribute& a : nodes_[node].attributes)
     {
         if (a.name == name)
-        {
-            RmlSpan s = a.whole;
-            int o = s.offset;
-            if (o > 0 && text_[o - 1] == ' ')
-            {
-                --o;
-                s.offset = o;
-                s.length += 1;
-            }
-            out.span = s;
-            out.replacement = "";
-            return true;
-        }
+            return ComputeAttributeRemovalPatch(a, out);
     }
     return false;
 }
@@ -739,6 +727,41 @@ bool RmlTextModel::ComputeStyleRemovePatch(int node, const std::string& property
         }
     }
     return false;
+}
+
+bool RmlTextModel::ComputeStyleDeclarationPatch(int node, const std::string& declarations, RmlPatch& out) const
+{
+    if (node < 0 || node >= static_cast<int>(nodes_.size()) || nodes_[node].kind != RmlNodeKind::Element)
+        return false;
+    const RmlAttribute* style = FindAttribute(node, "style");
+    const std::string q(1, detectedQuote_);
+    if (style)
+    {
+        out.span = style->valueSpan;
+        out.replacement = declarations;
+    }
+    else
+    {
+        out.span.offset = nodes_[node].nameSpan.End();
+        out.span.length = 0;
+        out.replacement = " style=" + q + declarations + q;
+    }
+    return true;
+}
+
+bool RmlTextModel::ComputeAttributeRemovalPatch(const RmlAttribute& attribute, RmlPatch& out) const
+{
+    // Claim the attribute's whole span plus a single leading space when present;
+    // adjacent attributes each claim their own space, so their spans never overlap.
+    RmlSpan s = attribute.whole;
+    if (s.offset > 0 && text_[s.offset - 1] == ' ')
+    {
+        --s.offset;
+        s.length += 1;
+    }
+    out.span = s;
+    out.replacement = "";
+    return true;
 }
 
 bool RmlTextModel::ComputeTextPatch(int node, const std::string& newText, RmlPatch& out) const

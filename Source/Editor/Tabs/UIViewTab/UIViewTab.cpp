@@ -1078,14 +1078,17 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
     if (ui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         // A gizmo handle on the current selection wins over re-picking. The
-        // drag box is left/top-space; shift the absolute mouse point into that
-        // frame before picking.
+        // drag box is left/top-space; DocToGizmoFrame shifts the mouse point
+        // into that frame with the ancestor transform chain stripped.
         UiBox box;
         Vector2 base;
         if (document_ && document_->TryGetDragBox(selected_, box, base))
         {
-            const float grab = kHandleGrabPx / vp.scale_;
-            const GizmoHandle handle = PickGizmoHandle(box, doc - base, grab);
+            // Constant on-screen grab radius: undo both the preview zoom and any
+            // ancestor transform scale captured on the box.
+            const float grab = kHandleGrabPx / (vp.scale_ * box.WindowScale());
+            const GizmoHandle handle =
+                PickGizmoHandle(box, document_->DocToGizmoFrame(selected_, base, doc), grab);
             if (handle.op_ != GizmoOp::None)
             {
                 BeginDrag(handle, selected_, vp);
@@ -1110,14 +1113,15 @@ void UIViewTab::BeginDrag(const GizmoHandle& handle, UiNode* node, const DocView
     // rendered box against the containing block) so a freshly-positioned
     // element drags from where it already is.
     document_->TryGetDragBox(node, gizmoStartBox_, gizmoBase_);
-    gizmoPressDoc_ = gizmoCurDoc_ = vp.ToDoc(V2(ui::GetIO().MousePos));
+    gizmoPressDoc_ = gizmoCurDoc_ =
+        document_->DocToGizmoFrame(node, gizmoBase_, vp.ToDoc(V2(ui::GetIO().MousePos)));
     gizmoLiveBox_ = gizmoStartBox_;
     dragging_ = true;
 }
 
 void UIViewTab::UpdateDrag(const DocViewport& vp)
 {
-    gizmoCurDoc_ = vp.ToDoc(V2(ui::GetIO().MousePos));
+    gizmoCurDoc_ = document_->DocToGizmoFrame(gizmoNode_, gizmoBase_, vp.ToDoc(V2(ui::GetIO().MousePos)));
     const UiBox solved = SolveDrag(gizmoStartBox_, gizmoDrag_, gizmoPressDoc_, gizmoCurDoc_);
     gizmoLiveBox_ = solved;
 
@@ -1148,8 +1152,10 @@ void TransformedCorners(const DocViewport& vp, const UiBox& box, ImVec2 out[4])
         Vector2{box.pos_.x_ + box.size_.x_, box.pos_.y_ + box.size_.y_},
         Vector2{box.pos_.x_, box.pos_.y_ + box.size_.y_},
     };
+    // MapToWindow runs the point through the element's FULL accumulated
+    // transform (own + ancestors), captured from the live DOM.
     for (int i = 0; i < 4; i++)
-        out[i] = IV2(vp.ToScreen(ForwardMapPoint(corners[i], box)));
+        out[i] = IV2(vp.ToScreen(box.MapToWindow(corners[i])));
 }
 
 void DrawHandleSquare(ImDrawList* dl, const ImVec2& center, ImU32 fill)
@@ -1191,6 +1197,9 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
             // the frame origin captured at press.
             UiBox box = gizmoLiveBox_;
             box.pos_ += gizmoBase_;
+            // Keep the layout->window map live: rotate/scale gestures change
+            // the element's own transform mid-drag and the overlay must follow.
+            document_->RefreshWindowMap(gizmoNode_, box);
             boxes.push_back(box);
         }
         else
@@ -1222,8 +1231,8 @@ void UIViewTab::DrawGizmo(const DocViewport& vp, const UiBox& box)
     TransformedCorners(vp, box, c);
 
     auto anchorScreen = [&vp, &box](const GizmoHandle& h) {
-        return IV2(vp.ToScreen(ForwardMapPoint(
-            Vector2{box.pos_.x_ + h.u_ * box.size_.x_, box.pos_.y_ + h.v_ * box.size_.y_}, box)));
+        return IV2(vp.ToScreen(box.MapToWindow(
+            Vector2{box.pos_.x_ + h.u_ * box.size_.x_, box.pos_.y_ + h.v_ * box.size_.y_})));
     };
 
     // Connector to the rotate handle, drawn behind the squares.

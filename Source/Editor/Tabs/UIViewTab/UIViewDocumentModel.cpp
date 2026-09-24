@@ -434,21 +434,27 @@ void ReconcileSelf(const UiNode& node, int srcIdx, const RmlTextModel& src, std:
         }
     }
 
-    // Inline style: patch changed/new declarations, remove dropped ones. The spine keeps
-    // authored order; new properties append, which is still valid CSS.
+    // Inline style. The spine keeps authored order. Any MULTI-change style edit is
+    // coalesced into a single patch by construction; per-declaration patches for such
+    // batches collide (two creations insert whole style attributes at the same offset
+    // and mint `style="a" style="b"`; two appends into an empty style="" merge
+    // without a ';' separator; adjacent removals share one ';'). Only value changes
+    // plus at most ONE structural add or remove stay on the surgical byte-preserving path.
     const RmlAttribute* style = src.FindAttribute(srcIdx, "style");
 
-    // Two or more dropped declarations make per-declaration removal spans OVERLAP: adjacent
-    // CSS declarations share one ';' separator and each removal reaches for an adjacent ';'
-    // (the trailing one, or the leading one for the last declaration). ApplyPatches splices
-    // against the already-shifted text assuming disjoint spans, so the earlier removal's
-    // stale length over-deletes and eats the style attribute's closing quote and the tag
-    // terminator (turning `..."/>` into `...>` and truncating the document on reload). When
-    // 2+ declarations are dropped, coalesce every style mutation into a single whole-value
-    // rewrite. A lone removal (or pure add/change) stays on the surgical byte-preserving path.
+    // Self-heal documents saved by older builds: duplicate style attributes are
+    // invalid RML, born from that same-offset double insert. Any whole rewrite keeps
+    // the FIRST attribute (rewritten to carry the model's declarations) and drops the rest.
+    int styleAttrCount = 0;
+    for (const RmlAttribute& a : sn.attributes)
+    {
+        if (LowerStd(a.name) == "style")
+            ++styleAttrCount;
+    }
+
+    size_t adds = 0, removals = 0;
     if (style)
     {
-        size_t removals = 0;
         for (const RmlStyleDecl& d : style->styleDecls)
         {
             bool kept = false;
@@ -463,57 +469,110 @@ void ReconcileSelf(const UiNode& node, int srcIdx, const RmlTextModel& src, std:
             if (!kept)
                 ++removals;
         }
-        if (removals >= 2)
+        for (const UiStyleDecl& decl : node.style_)
         {
-            RmlPatch p;
-            p.span = style->valueSpan;
-            p.replacement = Std(FormatStyleDeclarations(node.style_));
-            out.push_back(p);
-            return; // id/class/attributes already queued above; style fully handled here
+            bool present = false;
+            for (const RmlStyleDecl& d : style->styleDecls)
+            {
+                if (LowerStd(d.property) == LowerStd(Std(decl.name_)))
+                {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present)
+                ++adds;
         }
     }
 
-    for (const UiStyleDecl& decl : node.style_)
+    if (!style && !node.style_.empty())
     {
-        const std::string name = Std(decl.name_);
-        const std::string want = Std(decl.value_);
-        const RmlStyleDecl* cur = nullptr;
+        // Create the whole style attribute in ONE patch, never one per declaration.
+        RmlPatch p;
+        if (src.ComputeStyleDeclarationPatch(srcIdx, Std(FormatStyleDeclarations(node.style_)), p))
+            out.push_back(p);
+    }
+    else if (style && node.style_.empty())
+    {
+        // No inline style left: drop every style attribute outright instead of
+        // leaving a style="" husk (which re-seeded the no-separator merge bug
+        // on the next multi-add). Each removal claims its own leading space.
+        for (const RmlAttribute& a : sn.attributes)
+        {
+            if (LowerStd(a.name) != "style")
+                continue;
+            RmlPatch p;
+            if (src.ComputeAttributeRemovalPatch(a, p))
+                out.push_back(p);
+        }
+    }
+    else if (styleAttrCount > 1 || adds + removals >= 2)
+    {
+        // One whole-value rewrite covers every add/change/remove at once, so the
+        // batch can never mint duplicate attributes or separator-less merges.
+        RmlPatch p;
+        if (src.ComputeStyleDeclarationPatch(srcIdx, Std(FormatStyleDeclarations(node.style_)), p))
+            out.push_back(p);
+        bool firstSeen = false;
+        for (const RmlAttribute& a : sn.attributes)
+        {
+            if (LowerStd(a.name) != "style")
+                continue;
+            if (!firstSeen)
+            {
+                firstSeen = true;
+                continue;
+            }
+            RmlPatch extra;
+            if (src.ComputeAttributeRemovalPatch(a, extra))
+                out.push_back(extra);
+        }
+    }
+    else
+    {
+        // Surgical: any number of value changes plus at most one add or one remove.
+        for (const UiStyleDecl& decl : node.style_)
+        {
+            const std::string name = Std(decl.name_);
+            const std::string want = Std(decl.value_);
+            const RmlStyleDecl* cur = nullptr;
+            if (style)
+            {
+                for (const RmlStyleDecl& d : style->styleDecls)
+                {
+                    if (LowerStd(d.property) == LowerStd(name))
+                    {
+                        cur = &d;
+                        break;
+                    }
+                }
+            }
+            if (!cur || cur->value != want)
+            {
+                RmlPatch p;
+                if (src.ComputeStylePropertyPatch(srcIdx, name, want, p))
+                    out.push_back(p);
+            }
+        }
         if (style)
         {
             for (const RmlStyleDecl& d : style->styleDecls)
             {
-                if (LowerStd(d.property) == LowerStd(name))
+                bool kept = false;
+                for (const UiStyleDecl& decl : node.style_)
                 {
-                    cur = &d;
-                    break;
+                    if (LowerStd(Std(decl.name_)) == LowerStd(d.property))
+                    {
+                        kept = true;
+                        break;
+                    }
                 }
-            }
-        }
-        if (!cur || cur->value != want)
-        {
-            RmlPatch p;
-            if (src.ComputeStylePropertyPatch(srcIdx, name, want, p))
-                out.push_back(p);
-        }
-    }
-    if (style)
-    {
-        for (const RmlStyleDecl& d : style->styleDecls)
-        {
-            bool kept = false;
-            for (const UiStyleDecl& decl : node.style_)
-            {
-                if (LowerStd(Std(decl.name_)) == LowerStd(d.property))
+                if (!kept)
                 {
-                    kept = true;
-                    break;
+                    RmlPatch p;
+                    if (src.ComputeStyleRemovePatch(srcIdx, d.property, p))
+                        out.push_back(p);
                 }
-            }
-            if (!kept)
-            {
-                RmlPatch p;
-                if (src.ComputeStyleRemovePatch(srcIdx, d.property, p))
-                    out.push_back(p);
             }
         }
     }

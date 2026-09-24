@@ -10,6 +10,8 @@
 
 #include <Urho3D/Math/Vector2.h>
 
+#include <math.h>
+
 namespace Urho3D
 {
 
@@ -47,7 +49,25 @@ struct UiBox
     Vector2 size_;
     UiTransform xform_;
 
+    /// Layout->window affine through the element's FULL accumulated transform
+    /// (own + ancestors + their perspectives), captured from the live DOM by
+    /// CaptureWindowMap(). Identity unless some transform is in play. The gizmo
+    /// math below still works purely in layout space; only the overlay
+    /// projection and grab radii consume this.
+    Vector2 winBasisX_{Vector2(1, 0)};
+    Vector2 winBasisY_{Vector2(0, 1)};
+    Vector2 winOrigin_{Vector2::ZERO};
+
     Vector2 Center() const { return pos_ + size_ * 0.5f; }
+    /// Map an untransformed layout-space point into window (doc) pixels.
+    Vector2 MapToWindow(const Vector2& p) const { return winOrigin_ + p.x_ * winBasisX_ + p.y_ * winBasisY_; }
+    /// Window pixels per layout unit locally (>= 0); keeps gizmo grab radii a
+    /// constant size on screen under scaled/rotated ancestors.
+    float WindowScale() const
+    {
+        const float det = winBasisX_.x_ * winBasisY_.y_ - winBasisX_.y_ * winBasisY_.x_;
+        return sqrtf(det < 0.0f ? -det : det);
+    }
 };
 
 /// Screen<->document mapping for the scaled preview image. Screen coordinates

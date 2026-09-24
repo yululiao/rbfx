@@ -50,8 +50,61 @@ Vector2 InlineStyleBase(Rml::Element* el, const UiNode* node)
     return Vector2::ZERO;
 }
 
+// Fit the element's full accumulated transform (own + ancestors + their
+// perspectives) as a layout->window affine. Element::Project runs the exact
+// math RmlUi uses for event picking, so probe it at three window points, fit
+// window->layout, and store the inverse. Exact for translate/rotate/scale/
+// skew chains; under `perspective` a second pass anchored at the element keeps
+// the fit locally accurate. Identity (window == layout) when the projection is
+// unavailable or the fit turns singular.
+void CaptureWindowMap(Rml::Element* element, UiBox& out)
+{
+    out.winBasisX_ = Vector2(1, 0);
+    out.winBasisY_ = Vector2(0, 1);
+    out.winOrigin_ = Vector2::ZERO;
+    if (!element)
+        return;
+
+    const auto fit = [element](const Vector2& at, float d, Vector2& basisX, Vector2& basisY, Vector2& offset) {
+        Rml::Vector2f p0{at.x_, at.y_};
+        Rml::Vector2f p1{at.x_ + d, at.y_};
+        Rml::Vector2f p2{at.x_, at.y_ + d};
+        if (!element->Project(p0) || !element->Project(p1) || !element->Project(p2))
+            return false;
+        basisX = (Vector2(p1.x, p1.y) - Vector2(p0.x, p0.y)) * (1.0f / d);
+        basisY = (Vector2(p2.x, p2.y) - Vector2(p0.x, p0.y)) * (1.0f / d);
+        // p0 = M*at + b: the stored model is `layout = M*window + offset`, so the
+        // probe must return the pure translation b = p0 - M*at. Returning p0
+        // alone folds M*at into the offset for any probe away from the origin,
+        // shifting the captured map by -at and drifting every overlay box toward
+        // the top-left by its own center - even on documents with no transforms.
+        offset = Vector2(p0.x, p0.y) - (at.x_ * basisX + at.y_ * basisY);
+        return true;
+    };
+    // layout = M * window + offset, M's columns are basisX/basisY; store the inverse.
+    const auto store = [&out](const Vector2& basisX, const Vector2& basisY, const Vector2& offset) {
+        const float det = basisX.x_ * basisY.y_ - basisY.x_ * basisX.y_;
+        if (det < 1e-9f && det > -1e-9f)
+            return false; // singular: keep the previous fit
+        const float inv = 1.0f / det;
+        out.winBasisX_ = Vector2(basisY.y_, -basisX.y_) * inv;
+        out.winBasisY_ = Vector2(-basisY.x_, basisX.x_) * inv;
+        out.winOrigin_ = Vector2(basisY.x_ * offset.y_ - basisY.y_ * offset.x_,
+            basisX.y_ * offset.x_ - basisX.x_ * offset.y_) * inv;
+        return true;
+    };
+
+    Vector2 basisX, basisY, offset;
+    if (!fit(Vector2::ZERO, 64.0f, basisX, basisY, offset) || !store(basisX, basisY, offset))
+        return;
+    // Refine at the element itself so perspective-heavy chains stay accurate.
+    const Vector2 centerWin = out.MapToWindow(out.Center());
+    if (fit(centerWin, 32.0f, basisX, basisY, offset))
+        store(basisX, basisY, offset);
+}
+
 // The border box (document space) of a live DOM element, plus the node's own
-// emitted transform.
+// emitted transform and the element's full layout->window transform map.
 bool TryGetDomBox(Rml::Element* element, const UiNode* node, UiBox& out)
 {
     if (!element)
@@ -59,6 +112,10 @@ bool TryGetDomBox(Rml::Element* element, const UiNode* node, UiBox& out)
     out.pos_ = V2(element->GetAbsoluteOffset(Rml::BoxArea::Border));
     out.size_ = V2(element->GetBox().GetSize(Rml::BoxArea::Border));
     out.xform_ = node ? ParseUiTransform(node->GetStyle("transform")) : UiTransform{};
+    // GetAbsoluteOffset is pure layout math and ignores the transform chain
+    // entirely; without the captured map the overlay drifts off the rendered
+    // element under any ancestor transform (e.g. a scaled parent).
+    CaptureWindowMap(element, out);
     return out.size_.x_ > 0.0f && out.size_.y_ > 0.0f;
 }
 
@@ -98,9 +155,15 @@ UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, cons
     UiBox box;
     if (!TryGetDomBox(element, node, box))
         return nullptr;
-    const Vector2 local = InverseMapPoint(point, box);
-    if (local.x_ < box.pos_.x_ || local.x_ > box.pos_.x_ + box.size_.x_ ||
-        local.y_ < box.pos_.y_ || local.y_ > box.pos_.y_ + box.size_.y_)
+    // Pick through the element's FULL transform chain (own + ancestors +
+    // perspective): Project maps the doc-space point into the untransformed
+    // layout frame exactly the way RmlUi's own event dispatch does. A singular
+    // chain leaves the element unpickable, mirroring Event::StopPropagation.
+    Rml::Vector2f local{point.x_, point.y_};
+    if (!element->Project(local))
+        return nullptr;
+    if (local.x < box.pos_.x_ || local.x > box.pos_.x_ + box.size_.x_ ||
+        local.y < box.pos_.y_ || local.y > box.pos_.y_ + box.size_.y_)
         return nullptr;
 
     for (Rml::Element* ancestor = element; !node && ancestor; ancestor = ancestor->GetParentNode())
@@ -379,6 +442,7 @@ bool UIViewDocument::TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base
     if (TryGetMaterializedBox(*node, out))
     {
         base = InlineStyleBase(node->dom_, node);
+        CaptureWindowMap(node->dom_, out);
         return true;
     }
     // Positioned but not yet sized/offset (position freshly set from the Style
@@ -390,7 +454,34 @@ bool UIViewDocument::TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base
     out.pos_ = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border)) - base;
     out.size_ = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
     out.xform_ = ParseUiTransform(node->GetStyle("transform"));
+    CaptureWindowMap(el, out);
     return true;
+}
+
+void UIViewDocument::RefreshWindowMap(const UiNode* node, UiBox& box) const
+{
+    if (node && node->dom_ && !node->IsNestedDoc())
+        CaptureWindowMap(node->dom_, box);
+}
+
+Vector2 UIViewDocument::DocToGizmoFrame(const UiNode* node, const Vector2& base, const Vector2& docPoint) const
+{
+    if (node && node->dom_ && !node->IsNestedDoc())
+    {
+        // Project unwinds the element's FULL transform chain (ancestors + own +
+        // perspective) into untransformed layout space - the same math RmlUi's
+        // event dispatch uses. ForwardMapPoint then re-applies the node's own
+        // authored transform from the live DOM box (whose pivot matches
+        // Project's), so the net effect strips ONLY the ancestor chain.
+        UiBox box;
+        if (Urho3D::TryGetDomBox(node->dom_, node, box))
+        {
+            Rml::Vector2f p{docPoint.x_, docPoint.y_};
+            if (node->dom_->Project(p))
+                return ForwardMapPoint(Vector2(p.x, p.y), box) - base;
+        }
+    }
+    return docPoint - base;
 }
 
 // ---------------------------------------------------------------------------
