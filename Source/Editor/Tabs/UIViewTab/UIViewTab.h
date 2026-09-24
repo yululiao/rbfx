@@ -79,7 +79,36 @@ public:
     const ea::vector<unsigned>& GetSelectedPath() const { return selPath_; }
     /// Select from the preview or the hierarchy; keeps selPath_ and the
     /// hierarchy expand state in sync. Passing null clears the selection.
+    /// Single-select: it replaces the whole selection with this one node.
     void SetSelectedNode(UiNode* node);
+
+    /// Multi-selection. The source of truth is the ordered set of child-index
+    /// paths (see selPaths_); the LAST entry is the primary/anchor that the
+    /// Inspector edits and the gizmo drags (== GetSelectedNode()). Raw node
+    /// pointers are only valid within the current model generation and are
+    /// re-resolved from their paths on every OnModelEdited.
+    /// @{
+    /// Number of live selected nodes.
+    int GetSelectedCount() const { return static_cast<int>(sels_.size()); }
+    /// Live selected nodes in selection order (primary last).
+    ea::vector<UiNode*> GetSelectedNodes() const;
+    /// Top-most selected real elements: drops any node whose ancestor is also
+    /// selected, so batch delete / duplicate / move never double-applies to a
+    /// subtree (a child rides along with its parent).
+    ea::vector<UiNode*> GetTopLevelSelectedNodes() const;
+    /// Whether the given child-index path is part of the selection.
+    bool IsSelected(const ea::vector<unsigned>& path) const;
+    /// Add / remove a node from the selection without disturbing the rest
+    /// (ctrl-click). A null node clears everything.
+    void ToggleSelectNode(UiNode* node);
+    /// Replace the whole selection with \\a nodes; the last becomes primary.
+    void SetSelection(const ea::vector<UiNode*>& nodes);
+    /// Batch editing entry points shared by the toolbar, the preview context
+    /// menu and the hierarchy context menu. They act on the top-level
+    /// selection as a single undo step.
+    void CopySelection();
+    void DeleteSelection();
+    /// @}
 
     /// Hierarchy/Inspector data sources hosted by this tab. The Glue binds
     /// the shared HierarchyBrowserTab / InspectorTab to these on focus.
@@ -155,6 +184,8 @@ private:
 
     // --- selection helpers ---------------------------------------------------
     ea::vector<unsigned> NodePath(const UiNode* node) const;
+    /// Re-point selected_ / selPath_ at the last live selection entry.
+    void SyncPrimary();
     /// Revalidate the selection after a model mutation. Only the active
     /// document emits OnModelEdited (see UIViewDocument) - the UI edits the
     /// active document and undo/redo re-focuses before restoring.
@@ -167,6 +198,10 @@ private:
     void BeginDrag(const GizmoHandle& handle, UiNode* node, const DocViewport& vp);
     void UpdateDrag(const DocViewport& vp);
     void CommitDrag();
+    /// Rubber-band (marquee) selection: draw the live band and resolve it into
+    /// a selection on release (a sub-threshold band degrades to a click-select).
+    void DrawMarquee(const DocViewport& vp);
+    void FinishMarquee(const DocViewport& vp);
 
     /// The document (model + live DOM projection + undo commands) edited by
     /// this instance. One instance edits at most one resource; the base
@@ -176,6 +211,21 @@ private:
     UiNode* selected_ = nullptr;
     ea::vector<unsigned> selPath_;
     ea::vector<unsigned> hoveredPath_;
+    /// Multi-selection source of truth: ordered child-index paths, the LAST
+    /// being the primary/anchor (mirrored into selected_ / selPath_).
+    ea::vector<ea::vector<unsigned>> selPaths_;
+    /// Live node pointers parallel to selPaths_, re-resolved on model edits.
+    ea::vector<UiNode*> sels_;
+
+    // --- rubber-band (marquee) selection state ------------------------------
+    bool marqueeActive_ = false;
+    bool marqueeAdditive_ = false;
+    Vector2 marqueeStartDoc_;
+    Vector2 marqueeCurDoc_;
+
+    // --- multi-node move drag (extras tracked beside the primary gizmo) -----
+    ea::vector<UiNode*> extraDragNodes_;
+    ea::vector<UiBox> extraDragStarts_;
 
     /// First-ever instance (plugin-bootstrapped): the persistent "new/open
     /// document" entry point; stays open when its document closes.

@@ -179,6 +179,29 @@ UiNode* HitTestRecurse(Rml::Element* element, const UiDocumentModel* model, cons
     return node;
 }
 
+// Collect every real element node (no text/virtual) whose rendered border box
+// lies fully inside the document-space rect [lo,hi], in model pre-order. Root
+// is never a candidate (its box is the whole canvas). Backs marquee selection.
+void CollectInRectRecurse(UiNode* node, const Vector2& lo, const Vector2& hi, ea::vector<UiNode*>& out)
+{
+    for (const SharedPtr<UiNode>& child : node->children_)
+    {
+        if (child->IsText() || child->IsNestedDoc() || child->IsHeadLink())
+            continue;
+        if (Rml::Element* el = child->dom_)
+        {
+            const Vector2 pos = V2(el->GetAbsoluteOffset(Rml::BoxArea::Border));
+            const Vector2 size = V2(el->GetBox().GetSize(Rml::BoxArea::Border));
+            if (size.x_ > 0.0f && size.y_ > 0.0f && pos.x_ >= lo.x_ && pos.y_ >= lo.y_
+                && pos.x_ + size.x_ <= hi.x_ && pos.y_ + size.y_ <= hi.y_)
+            {
+                out.push_back(child.Get());
+            }
+        }
+        CollectInRectRecurse(child.Get(), lo, hi, out);
+    }
+}
+
 } // namespace
 
 UIViewDocument::UIViewDocument(Context* context)
@@ -484,6 +507,17 @@ Vector2 UIViewDocument::DocToGizmoFrame(const UiNode* node, const Vector2& base,
     return docPoint - base;
 }
 
+ea::vector<UiNode*> UIViewDocument::CollectNodesInRect(const Vector2& a, const Vector2& b) const
+{
+    ea::vector<UiNode*> out;
+    if (!model_.root_)
+        return out;
+    const Vector2 lo(Min(a.x_, b.x_), Min(a.y_, b.y_));
+    const Vector2 hi(Max(a.x_, b.x_), Max(a.y_, b.y_));
+    CollectInRectRecurse(model_.root_.Get(), lo, hi, out);
+    return out;
+}
+
 // ---------------------------------------------------------------------------
 // Undo plumbing
 // ---------------------------------------------------------------------------
@@ -718,6 +752,58 @@ UiNode* UIViewDocument::DuplicateNode(UiNode* node)
     return model_.ResolvePath(copyPath);
 }
 
+ea::vector<UiNode*> UIViewDocument::DuplicateNodes(const ea::vector<UiNode*>& nodes)
+{
+    ea::vector<UiNode*> results;
+    if (!model_.root_ || !document_)
+        return results;
+
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<ea::vector<unsigned>> copyPaths;
+    // Clone each top-level selection and append it to its own parent. Appending
+    // never reallocates another selected node's heap object (each is held by a
+    // SharedPtr), so every raw pointer stays valid until the single reload below.
+    for (UiNode* node : nodes)
+    {
+        if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+            || node->IsHeadLink())
+            continue;
+        UiNode* parent = model_.FindParent(node);
+        if (!parent)
+            continue;
+
+        SharedPtr<UiNode> copy = DeepCloneUiNode(*node);
+        if (!copy->id_.empty())
+            copy->id_ += "-2";
+        UiBox b;
+        if (TryGetMaterializedBox(*copy, b))
+        {
+            b.pos_ += Vector2{16.0f, 16.0f};
+            WriteBoxToStyle(*copy, b);
+        }
+        const unsigned indexInParent = static_cast<unsigned>(parent->children_.size());
+        parent->children_.push_back(copy);
+
+        ea::vector<unsigned> parentPath;
+        if (model_.BuildPath(parent, parentPath))
+        {
+            parentPath.push_back(indexInParent);
+            copyPaths.push_back(parentPath);
+        }
+    }
+
+    if (copyPaths.empty())
+        return results;
+    if (!CommitAndReload(undoText, {}))
+        return results;
+    for (const ea::vector<unsigned>& path : copyPaths)
+    {
+        if (UiNode* r = model_.ResolvePath(path))
+            results.push_back(r);
+    }
+    return results;
+}
+
 bool UIViewDocument::DeleteNode(UiNode* node)
 {
     if (!node || node == model_.root_.Get() || node->IsText())
@@ -750,6 +836,39 @@ bool UIViewDocument::DeleteNode(UiNode* node)
 
     const ea::string undoText = model_.EmitRml();
     parent->children_.erase(parent->children_.begin() + indexInParent);
+    return CommitAndReload(undoText, {});
+}
+
+bool UIViewDocument::DeleteNodes(const ea::vector<UiNode*>& nodes)
+{
+    if (!model_.root_ || nodes.empty())
+        return false;
+
+    const ea::string undoText = model_.EmitRml();
+    bool changed = false;
+    // Callers guarantee no node is a descendant of another, so erasing one
+    // never frees another's SharedPtr; every raw pointer stays live until the
+    // single rebuild.
+    for (UiNode* node : nodes)
+    {
+        if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+            || node->IsHeadLink())
+            continue;
+        UiNode* parent = model_.FindParent(node);
+        if (!parent)
+            continue;
+        for (size_t i = 0; i < parent->children_.size(); i++)
+        {
+            if (parent->children_[i].Get() == node)
+            {
+                parent->children_.erase(parent->children_.begin() + i);
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (!changed)
+        return false;
     return CommitAndReload(undoText, {});
 }
 
@@ -852,6 +971,28 @@ bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
     // makes model, text and projection canonically identical again.
     WriteBoxToStyle(*node, box);
     return CommitAndReload(undoText, mergeKey);
+}
+
+bool UIViewDocument::CommitBoxEdits(const ea::vector<ea::pair<UiNode*, UiBox>>& edits)
+{
+    if (!model_.root_ || edits.empty())
+        return false;
+    const ea::string undoText = model_.EmitRml();
+    // Write every box into the model first (all node pointers are live), then
+    // do the one rebuild - so a multi-selection drag is a single undo step.
+    bool changed = false;
+    for (const ea::pair<UiNode*, UiBox>& edit : edits)
+    {
+        UiNode* node = edit.first;
+        if (!node || node->IsNestedDoc() || node->IsHeadLink())
+            continue;
+        WriteBoxToStyle(*node, edit.second);
+        changed = true;
+    }
+    if (!changed)
+        return false;
+    // Empty merge key: a drag gesture is one discrete step regardless of count.
+    return CommitAndReload(undoText, {});
 }
 
 bool UIViewDocument::CommitTextEdit(const ea::string& undoText, const ea::string& redoText)

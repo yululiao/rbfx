@@ -158,6 +158,10 @@ public:
     /// against the containing block, so a freshly-positioned element is
     /// draggable at once. False when the node is not absolutely positioned.
     bool TryGetDragBox(const UiNode* node, UiBox& out, Vector2& base) const;
+    /// Every real element node whose rendered border box lies fully inside the
+    /// document-space rectangle [a,b] (corners need not be ordered). Used by
+    /// rubber-band (marquee) selection; returns nodes in model pre-order.
+    ea::vector<UiNode*> CollectNodesInRect(const Vector2& a, const Vector2& b) const;
     /// Re-fit \a box's layout->window map from the node's live DOM element;
     /// called every frame a gizmo drag is live so the overlay keeps tracking
     /// transform changes made during the gesture.
@@ -180,6 +184,15 @@ public:
     UiNode* AddWidget(UiNode* parent, const UiWidgetSpec& spec);
     UiNode* DuplicateNode(UiNode* node);
     bool DeleteNode(UiNode* node);
+    /// Batch variants for multi-selection: every change is applied to the
+    /// model first, then committed as ONE whole-document rebuild so the whole
+    /// gesture is a single undo step. Callers must pass only real element
+    /// nodes (no root/text/virtual) and a set where no node is a descendant of
+    /// another (deleting an ancestor already removes its descendants).
+    /// @{
+    bool DeleteNodes(const ea::vector<UiNode*>& nodes);
+    ea::vector<UiNode*> DuplicateNodes(const ea::vector<UiNode*>& nodes);
+    /// @}
     /// Move a node (with its subtree) under \a newParent at \a index. Guards:
     /// no text/nested-doc/root involved, and \a newParent must not live inside
     /// the moved subtree (that would orphan it). Returns the moved node in the
@@ -188,6 +201,10 @@ public:
     bool EditNodePayload(UiNode* node, const UiNodePayload& newData);
     /// Commit a solved gizmo box (drag release) as one recorded style edit.
     bool CommitBoxEdit(UiNode* node, const UiBox& box);
+    /// Commit solved gizmo boxes for several nodes as ONE recorded style edit
+    /// (one undo step for a multi-selection drag). Applies every write to the
+    /// model first, then a single rebuild, so all pointers stay live.
+    bool CommitBoxEdits(const ea::vector<ea::pair<UiNode*, UiBox>>& edits);
     /// Add one <link> to the document <head> (\a type is "text/rcss" or
     /// "text/template"). <head> is spine territory (untouched by the tree
     /// commands above), so this is a text-level edit: emit, splice the link

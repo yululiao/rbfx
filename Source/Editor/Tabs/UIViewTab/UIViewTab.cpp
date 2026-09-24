@@ -77,6 +77,8 @@ constexpr ImU32 kGizmoText = IM_COL32(255, 255, 255, 255);
 constexpr ImU32 kMoveColor = IM_COL32(255, 220, 90, 255);
 constexpr ImU32 kRotateColor = IM_COL32(255, 150, 60, 255);
 constexpr ImU32 kScaleColor = IM_COL32(90, 200, 255, 255);
+constexpr ImU32 kMarqueeColor = IM_COL32(120, 180, 255, 220);
+constexpr ImU32 kMarqueeFill = IM_COL32(120, 180, 255, 28);
 
 Vector2 V2(const Rml::Vector2f& v) { return Vector2{v.x, v.y}; }
 Vector2 V2(const ImVec2& v) { return Vector2{v.x, v.y}; }
@@ -362,6 +364,8 @@ UIViewTab::UIViewTab(Context* context)
 UIViewTab::~UIViewTab()
 {
     selected_ = nullptr;
+    selPaths_.clear();
+    sels_.clear();
     document_ = nullptr;
 }
 
@@ -442,26 +446,51 @@ ea::vector<unsigned> UIViewTab::NodePath(const UiNode* node) const
     return path;
 }
 
+void UIViewTab::SyncPrimary()
+{
+    selected_ = sels_.empty() ? nullptr : sels_.back();
+    selPath_ = selPaths_.empty() ? ea::vector<unsigned>() : selPaths_.back();
+}
+
 void UIViewTab::OnDocumentEdited()
 {
     if (!document_)
         return;
     const UiDocumentModel& model = document_->GetModel();
     // Every command (and every undo/redo) rebuilds the whole model tree from
-    // text, so no node pointer survives an edit; re-resolve the selection
-    // from its stable child-index path.
-    selected_ = model.ResolvePath(selPath_);
-    if (!selected_ && !selPath_.empty())
+    // text, so no node pointer survives an edit; re-resolve every selected
+    // path from its stable child-index path and drop the vanished ones.
+    ea::vector<ea::vector<unsigned>> keptPaths;
+    ea::vector<UiNode*> kept;
+    for (size_t i = 0; i < selPaths_.size(); i++)
     {
-        // The node is gone (deleted, or an undo removed it): fall back to its
-        // parent so the panel keeps some context. Never snap silently to the
-        // root - the <body> panel looks like any element panel, and an edit
-        // meant for the vanished node would land on the document root and
-        // corrupt it instead (seen in the wild: class="image" appended to
-        // <body> while the user believed they were editing an <img>).
-        selPath_.pop_back();
-        selected_ = model.ResolvePath(selPath_);
+        if (UiNode* n = model.ResolvePath(selPaths_[i]))
+        {
+            keptPaths.push_back(selPaths_[i]);
+            kept.push_back(n);
+        }
     }
+    // The primary (last) path may have been dropped while earlier ones lived:
+    // remember the pre-edit primary so a total loss can fall back to its parent.
+    const ea::vector<unsigned> prevPrimary = selPath_;
+    selPaths_ = ea::move(keptPaths);
+    sels_ = ea::move(kept);
+
+    if (sels_.empty() && !prevPrimary.empty())
+    {
+        // Nothing survived (deleted, or an undo removed it): fall back to the
+        // old primary's parent so the panel keeps context. Never snap silently
+        // to the root - an edit meant for a vanished node would otherwise land
+        // on the document root and corrupt it.
+        ea::vector<unsigned> fallback = prevPrimary;
+        fallback.pop_back();
+        if (UiNode* n = model.ResolvePath(fallback))
+        {
+            selPaths_.push_back(fallback);
+            sels_.push_back(n);
+        }
+    }
+    SyncPrimary();
     model.BuildPath(selected_, selPath_);
     if (inspectorSource_)
         inspectorSource_->InvalidateCaches();
@@ -469,11 +498,152 @@ void UIViewTab::OnDocumentEdited()
 
 void UIViewTab::SetSelectedNode(UiNode* node)
 {
-    selected_ = node;
-    if (document_)
-        document_->GetModel().BuildPath(node, selPath_);
+    // Single-select: replace the whole selection with this one node.
+    selPaths_.clear();
+    sels_.clear();
+    if (node)
+    {
+        selPaths_.push_back(NodePath(node));
+        sels_.push_back(node);
+    }
+    SyncPrimary();
     if (hierarchySource_)
         hierarchySource_->ExpandAncestors(selPath_);
+}
+
+void UIViewTab::SetSelection(const ea::vector<UiNode*>& nodes)
+{
+    selPaths_.clear();
+    sels_.clear();
+    if (document_)
+    {
+        const UiDocumentModel& model = document_->GetModel();
+        for (UiNode* node : nodes)
+        {
+            ea::vector<unsigned> path;
+            if (node && model.BuildPath(node, path))
+            {
+                selPaths_.push_back(path);
+                sels_.push_back(node);
+            }
+        }
+    }
+    SyncPrimary();
+    if (!sels_.empty() && hierarchySource_)
+        hierarchySource_->ExpandAncestors(selPath_);
+}
+
+void UIViewTab::ToggleSelectNode(UiNode* node)
+{
+    if (!document_)
+        return;
+    if (!node)
+    {
+        selPaths_.clear();
+        sels_.clear();
+        SyncPrimary();
+        return;
+    }
+    const ea::vector<unsigned> path = NodePath(node);
+    for (size_t i = 0; i < selPaths_.size(); i++)
+    {
+        if (selPaths_[i] == path)
+        {
+            selPaths_.erase(selPaths_.begin() + i);
+            sels_.erase(sels_.begin() + i);
+            SyncPrimary();
+            return;
+        }
+    }
+    selPaths_.push_back(path);
+    sels_.push_back(node);
+    SyncPrimary();
+    if (hierarchySource_)
+        hierarchySource_->ExpandAncestors(path);
+}
+
+bool UIViewTab::IsSelected(const ea::vector<unsigned>& path) const
+{
+    for (const ea::vector<unsigned>& p : selPaths_)
+    {
+        if (p == path)
+            return true;
+    }
+    return false;
+}
+
+ea::vector<UiNode*> UIViewTab::GetSelectedNodes() const
+{
+    return sels_;
+}
+
+ea::vector<UiNode*> UIViewTab::GetTopLevelSelectedNodes() const
+{
+    ea::vector<UiNode*> out;
+    if (!document_)
+        return out;
+    const UiDocumentModel& model = document_->GetModel();
+    UiNode* root = model.root_.Get();
+    for (UiNode* node : sels_)
+    {
+        if (!node || node == root || node->IsText() || node->IsNestedDoc() || node->IsHeadLink())
+            continue;
+        // Skip a node whose selected ancestor already covers it: the batch
+        // operation on the ancestor carries this subtree along, so applying it
+        // here too would double-move / duplicate.
+        bool covered = false;
+        for (UiNode* p = model.FindParent(node); p && p != root; p = model.FindParent(p))
+        {
+            for (UiNode* s : sels_)
+            {
+                if (s == p)
+                {
+                    covered = true;
+                    break;
+                }
+            }
+            if (covered)
+                break;
+        }
+        if (!covered)
+            out.push_back(node);
+    }
+    return out;
+}
+
+void UIViewTab::CopySelection()
+{
+    if (!document_)
+        return;
+    const ea::vector<UiNode*> targets = GetTopLevelSelectedNodes();
+    if (targets.empty())
+        return; // copy does not apply to a virtual / root-only selection
+    if (targets.size() == 1)
+    {
+        if (UiNode* copy = document_->DuplicateNode(targets[0]))
+            SetSelectedNode(copy);
+        return;
+    }
+    const ea::vector<UiNode*> copies = document_->DuplicateNodes(targets);
+    if (!copies.empty())
+        SetSelection(copies);
+}
+
+void UIViewTab::DeleteSelection()
+{
+    if (!document_)
+        return;
+    const ea::vector<UiNode*> targets = GetTopLevelSelectedNodes();
+    if (!targets.empty())
+    {
+        document_->DeleteNodes(targets); // one undo step for the whole batch
+        SetSelectedNode(document_->GetModel().root_.Get());
+        return;
+    }
+    // Only virtual (head-link / nested-doc) or root selected: route through the
+    // single-node command, which handles the text-level link removal.
+    if (selected_)
+        document_->DeleteNode(selected_); // OnDocumentEdited revalidates
 }
 
 // ---------------------------------------------------------------------------
@@ -566,11 +736,24 @@ bool UIViewTab::WriteFileAt(const ea::string& absPath, const ea::string& text)
 
 void UIViewTab::ResetViewToDocument()
 {
-    selected_ = document_ ? document_->GetModel().root_.Get() : nullptr;
+    UiNode* root = document_ ? document_->GetModel().root_.Get() : nullptr;
+    selected_ = root;
     selPath_.clear();
+    // Seed the multi-selection set with the root (its path is the empty path)
+    // so the batch APIs see a consistent single selection right after (re)load.
+    selPaths_.clear();
+    sels_.clear();
+    if (root)
+    {
+        selPaths_.push_back(selPath_);
+        sels_.push_back(root);
+    }
     hoveredPath_.clear();
     gizmoNode_ = nullptr;
     dragging_ = false;
+    marqueeActive_ = false;
+    extraDragNodes_.clear();
+    extraDragStarts_.clear();
 }
 
 void UIViewTab::ConnectSharedPanels()
@@ -638,9 +821,14 @@ void UIViewTab::OnResourceUnloaded(const ea::string& resourceName)
     document_ = nullptr;
     selected_ = nullptr;
     selPath_.clear();
+    selPaths_.clear();
+    sels_.clear();
     hoveredPath_.clear();
     gizmoNode_ = nullptr;
     dragging_ = false;
+    marqueeActive_ = false;
+    extraDragNodes_.clear();
+    extraDragStarts_.clear();
 
     // Secondary instances exist only to host their document: when it closes,
     // so does the editor tab. The primary instance stays around as the
@@ -958,15 +1146,15 @@ void UIViewTab::RenderToolbar()
         ui::EndCombo();
     }
     ui::SameLine();
-    const bool isRealElement = selected_ && document_
-        && selected_ != document_->GetModel().root_.Get()
-        && !selected_->IsNestedDoc() && !selected_->IsHeadLink();
-    ui::BeginDisabled(!isRealElement);
-    if (ui::Button(ICON_FA_COPY " Copy"))
+    const int selCount = static_cast<int>(GetTopLevelSelectedNodes().size());
+    ui::BeginDisabled(selCount == 0);
+    if (selCount > 1)
     {
-        if (UiNode* copy = document_->DuplicateNode(selected_))
-            SetSelectedNode(copy);
+        if (ui::Button(Format(ICON_FA_COPY " Copy (%d)", selCount).c_str()))
+            CopySelection();
     }
+    else if (ui::Button(ICON_FA_COPY " Copy"))
+        CopySelection();
     ui::EndDisabled();
     // Delete also covers the virtual link nodes: deleting one removes its
     // <link> line from <head> (text-level, undoable). Copy does not - a
@@ -975,25 +1163,44 @@ void UIViewTab::RenderToolbar()
         && selected_ != document_->GetModel().root_.Get();
     ui::SameLine();
     ui::BeginDisabled(!canDelete);
-    if (ui::Button(ICON_FA_TRASH " Delete"))
-        document_->DeleteNode(selected_); // OnModelEdited revalidates the selection
+    if (selCount > 1)
+    {
+        if (ui::Button(Format(ICON_FA_TRASH " Delete (%d)", selCount).c_str()))
+            DeleteSelection();
+    }
+    else if (ui::Button(ICON_FA_TRASH " Delete"))
+        DeleteSelection(); // single real / virtual: DeleteSelection routes both
     ui::EndDisabled();
     ui::EndDisabled();
 
-    // Element context menu (opened by a right-click on the preview).
+    // Element context menu (opened by a right-click on the preview). The right-
+    // click handler already collapsed the selection to the picked node unless it
+    // was part of a multi-selection, so acting on the whole selection is correct.
     if (ui::BeginPopup("##uiElemCtx"))
     {
         UiNode* node = selected_;
-        if (node && document_ && node != document_->GetModel().root_.Get() && !node->IsNestedDoc()
-            && !node->IsHeadLink())
+        const int ctxCount = static_cast<int>(GetTopLevelSelectedNodes().size());
+        const bool real = node && document_ && node != document_->GetModel().root_.Get();
+        if (ctxCount > 1)
+        {
+            if (ui::MenuItem(Format(ICON_FA_COPY " Copy %d Items", ctxCount).c_str()))
+                CopySelection();
+            if (ui::MenuItem(Format(ICON_FA_TRASH " Delete %d Items", ctxCount).c_str()))
+                DeleteSelection();
+        }
+        else if (real && !node->IsNestedDoc() && !node->IsHeadLink())
         {
             if (ui::MenuItem(ICON_FA_COPY " Copy"))
-            {
-                if (UiNode* copy = document_->DuplicateNode(node))
-                    SetSelectedNode(copy);
-            }
+                CopySelection();
             if (ui::MenuItem(ICON_FA_TRASH " Delete"))
-                document_->DeleteNode(node); // OnModelEdited revalidates the selection
+                DeleteSelection();
+        }
+        else if (real)
+        {
+            // Virtual link / nested-doc node: delete routes to the text-level
+            // head removal; copy does not apply.
+            if (ui::MenuItem(ICON_FA_TRASH " Delete"))
+                DeleteSelection();
         }
         ui::EndPopup();
     }
@@ -1053,6 +1260,16 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
         return;
     }
 
+    // A rubber-band selection is live: track the cursor and finish on release.
+    // (Drawing happens in DrawOverlay -> DrawMarquee.)
+    if (marqueeActive_)
+    {
+        marqueeCurDoc_ = doc;
+        if (ui::IsMouseReleased(ImGuiMouseButton_Left))
+            FinishMarquee(vp);
+        return;
+    }
+
     // "Our tab window is the front-most one under the cursor" is the correct
     // in-editor gate. The usual !io.WantCaptureMouse guard is useless here: the
     // whole rbfx editor is ImGui, so hovering any window (this docked tab) makes
@@ -1069,7 +1286,10 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
 
     if (ui::IsMouseClicked(ImGuiMouseButton_Right))
     {
-        if (hover)
+        // A right-click keeps an existing multi-selection when it lands on one
+        // of its members; otherwise it collapses the selection to the picked
+        // node (so the context menu acts on what the user just pointed at).
+        if (hover && !IsSelected(NodePath(hover)))
             SetSelectedNode(hover);
         ui::OpenPopup("##uiElemCtx");
         return;
@@ -1077,8 +1297,8 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
 
     if (ui::IsMouseClicked(ImGuiMouseButton_Left))
     {
-        // A gizmo handle on the current selection wins over re-picking. The
-        // drag box is left/top-space; DocToGizmoFrame shifts the mouse point
+        // A gizmo handle on the current primary selection wins over re-picking.
+        // The drag box is left/top-space; DocToGizmoFrame shifts the mouse point
         // into that frame with the ancestor transform chain stripped.
         UiBox box;
         Vector2 base;
@@ -1095,12 +1315,65 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
                 return;
             }
         }
-        SetSelectedNode(hover); // clicking empty space (hover==null) clears
-        // Double-click on the template chrome (the hover resolves to the
-        // nested-doc virtual node) opens the nested file, mirroring the
-        // hierarchy's double-click behavior.
+        // Otherwise begin a rubber-band selection from this point. Ctrl makes it
+        // additive; a sub-threshold band degrades to a click in FinishMarquee
+        // (toggle under Ctrl, plain select / clear otherwise).
+        marqueeActive_ = true;
+        marqueeAdditive_ = io.KeyCtrl;
+        marqueeStartDoc_ = marqueeCurDoc_ = doc;
+    }
+}
+
+void UIViewTab::FinishMarquee(const DocViewport& vp)
+{
+    ImGuiIO& io = ui::GetIO();
+    marqueeActive_ = false;
+
+    // Decide click vs band from the on-screen extent of the drag.
+    const Vector2 a = vp.ToScreen(marqueeStartDoc_);
+    const Vector2 b = vp.ToScreen(marqueeCurDoc_);
+    const bool isBand = fabsf(b.x_ - a.x_) > 4.0f || fabsf(b.y_ - a.y_) > 4.0f;
+
+    if (!isBand)
+    {
+        // A click: resolve the node under the release point.
+        UiNode* hover = document_->HitTest(vp.ToDoc(V2(io.MousePos)));
+        if (marqueeAdditive_)
+            ToggleSelectNode(hover);
+        else if (hover)
+            SetSelectedNode(hover);
+        else
+            SetSelectedNode(nullptr); // empty click clears
+        // Double-click on the template chrome opens the nested file.
         if (hover && hover->IsNestedDoc() && ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             OpenNestedDocumentFile(context_, document_, hover->nestedDocHref_, /*revealOnly=*/false);
+        return;
+    }
+
+    // Band: every real element fully enclosed by the rectangle.
+    const ea::vector<UiNode*> inside = document_->CollectNodesInRect(marqueeStartDoc_, marqueeCurDoc_);
+    if (marqueeAdditive_)
+    {
+        ea::vector<UiNode*> merged = sels_;
+        for (UiNode* n : inside)
+        {
+            bool dup = false;
+            for (UiNode* m : merged)
+            {
+                if (m == n)
+                {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup)
+                merged.push_back(n);
+        }
+        SetSelection(merged);
+    }
+    else
+    {
+        SetSelection(inside); // an empty band clears the selection
     }
 }
 
@@ -1117,6 +1390,27 @@ void UIViewTab::BeginDrag(const GizmoHandle& handle, UiNode* node, const DocView
         document_->DocToGizmoFrame(node, gizmoBase_, vp.ToDoc(V2(ui::GetIO().MousePos)));
     gizmoLiveBox_ = gizmoStartBox_;
     dragging_ = true;
+
+    // Multi-move: capture every other top-level selected node's start box so the
+    // same drag delta can be previewed live and committed in one undo step.
+    // Only Move propagates; resize / rotate / scale act on the primary alone.
+    extraDragNodes_.clear();
+    extraDragStarts_.clear();
+    if (handle.op_ == GizmoOp::Move)
+    {
+        for (UiNode* n : GetTopLevelSelectedNodes())
+        {
+            if (n == node)
+                continue;
+            UiBox b;
+            Vector2 b2;
+            if (document_->TryGetDragBox(n, b, b2))
+            {
+                extraDragNodes_.push_back(n);
+                extraDragStarts_.push_back(b);
+            }
+        }
+    }
 }
 
 void UIViewTab::UpdateDrag(const DocViewport& vp)
@@ -1128,14 +1422,48 @@ void UIViewTab::UpdateDrag(const DocViewport& vp)
     // Live preview into the DOM projection; the model is only touched on
     // release. Layout re-flows next E_POSTUPDATE (Context::Update).
     document_->SetLiveBox(gizmoNode_, solved);
+
+    if (gizmoDrag_.op_ == GizmoOp::Move && !extraDragNodes_.empty())
+    {
+        // Same layout-space translation as the primary (its base cancels out of
+        // pos_-pos_, so this is exact for siblings sharing a containing block).
+        const Vector2 delta = solved.pos_ - gizmoStartBox_.pos_;
+        for (size_t i = 0; i < extraDragNodes_.size(); i++)
+        {
+            UiBox b = extraDragStarts_[i];
+            b.pos_ += delta;
+            document_->SetLiveBox(extraDragNodes_[i], b);
+        }
+    }
 }
 
 void UIViewTab::CommitDrag()
 {
     if (gizmoNode_)
-        document_->CommitBoxEdit(gizmoNode_, SolveDrag(gizmoStartBox_, gizmoDrag_, gizmoPressDoc_, gizmoCurDoc_));
+    {
+        const UiBox solved = SolveDrag(gizmoStartBox_, gizmoDrag_, gizmoPressDoc_, gizmoCurDoc_);
+        if (gizmoDrag_.op_ == GizmoOp::Move && !extraDragNodes_.empty())
+        {
+            const Vector2 delta = solved.pos_ - gizmoStartBox_.pos_;
+            ea::vector<ea::pair<UiNode*, UiBox>> edits;
+            edits.push_back(ea::make_pair(gizmoNode_, solved));
+            for (size_t i = 0; i < extraDragNodes_.size(); i++)
+            {
+                UiBox b = extraDragStarts_[i];
+                b.pos_ += delta;
+                edits.push_back(ea::make_pair(extraDragNodes_[i], b));
+            }
+            document_->CommitBoxEdits(edits); // one undo step for the whole group
+        }
+        else
+        {
+            document_->CommitBoxEdit(gizmoNode_, solved);
+        }
+    }
     dragging_ = false;
     gizmoNode_ = nullptr;
+    extraDragNodes_.clear();
+    extraDragStarts_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,6 +1515,27 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
         }
     }
 
+    // Non-primary selected nodes: outline each one so a multi-selection reads
+    // as a set. The primary (last) gets the full-weight outline + gizmo below.
+    for (UiNode* n : sels_)
+    {
+        if (!n || n == sel || !n->dom_)
+            continue;
+        ea::vector<UiBox> boxes;
+        if (document_->TryGetDomBoxes(n, boxes))
+        {
+            for (const UiBox& box : boxes)
+            {
+                if (box.size_.x_ <= 0.0f || box.size_.y_ <= 0.0f)
+                    continue;
+                ImVec2 c[4];
+                TransformedCorners(vp, box, c);
+                dl->AddConvexPolyFilled(c, 4, kSelectFill);
+                dl->AddPolyline(c, 4, kSelectColor, ImDrawFlags_Closed, 1.5f);
+            }
+        }
+    }
+
     if (sel && sel->dom_)
     {
         const bool dragging = dragging_ && gizmoNode_ == sel;
@@ -1222,6 +1571,19 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
         if (!boxes.empty() && (dragging || sel->GetStyle("position") == "absolute"))
             DrawGizmo(vp, boxes.front());
     }
+
+    DrawMarquee(vp);
+}
+
+void UIViewTab::DrawMarquee(const DocViewport& vp)
+{
+    if (!marqueeActive_)
+        return;
+    ImDrawList* dl = ui::GetWindowDrawList();
+    const ImVec2 a = IV2(vp.ToScreen(marqueeStartDoc_));
+    const ImVec2 b = IV2(vp.ToScreen(marqueeCurDoc_));
+    dl->AddRectFilled(a, b, kMarqueeFill);
+    dl->AddRect(a, b, kMarqueeColor, 0.0f, ImDrawFlags_None, 1.0f);
 }
 
 void UIViewTab::DrawGizmo(const DocViewport& vp, const UiBox& box)
@@ -1434,7 +1796,7 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
         }
     }
 
-    const bool selected = tab->GetSelectedNode() == node;
+    const bool selected = tab->IsSelected(path);
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
     if (hasElementChild)
     {
@@ -1450,7 +1812,14 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     const bool open = ui::TreeNodeEx(node, flags, "%s", label.c_str());
 
     if (ui::IsItemClicked(ImGuiMouseButton_Left) && !ui::IsItemToggledOpen())
-        tab->SetSelectedNode(node);
+    {
+        // Ctrl-click toggles membership so several rows can be selected at once;
+        // a plain click replaces the selection with this single row.
+        if (ui::GetIO().KeyCtrl)
+            tab->ToggleSelectNode(node);
+        else
+            tab->SetSelectedNode(node);
+    }
     // Row context menu. The target is recorded at release time: the press may
     // have started on a different row, and ImGui opens the popup where the
     // button is released. Store the path, not the pointer: commands rebuild
@@ -1458,6 +1827,10 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
     // there for why the request is deferred instead of opened right here).
     if (ui::IsItemHovered() && ui::IsMouseReleased(ImGuiMouseButton_Right))
     {
+        // Keep a multi-selection when the click lands on one of its members;
+        // otherwise collapse the selection to the right-clicked row.
+        if (!tab->IsSelected(path))
+            tab->SetSelectedNode(node);
         contextMenuTargetPath_ = path;
         contextMenuTargetValid_ = true;
         openNodeMenuRequested_ = true;
@@ -1597,10 +1970,26 @@ void UIViewHierarchy::RenderContextMenuItems()
 
     if (target != doc->GetModel().root_.Get())
     {
-        if (ui::MenuItem(ICON_FA_TRASH " Delete"))
+        const int count = static_cast<int>(tab->GetTopLevelSelectedNodes().size());
+        if (count > 1)
         {
-            tab->SetSelectedNode(target);
-            doc->DeleteNode(target);
+            if (ui::MenuItem(Format(ICON_FA_COPY " Copy %d Items", count).c_str()))
+                tab->CopySelection();
+            if (ui::MenuItem(Format(ICON_FA_TRASH " Delete %d Items", count).c_str()))
+                tab->DeleteSelection();
+        }
+        else
+        {
+            if (ui::MenuItem(ICON_FA_COPY " Copy"))
+            {
+                tab->SetSelectedNode(target);
+                tab->CopySelection();
+            }
+            if (ui::MenuItem(ICON_FA_TRASH " Delete"))
+            {
+                tab->SetSelectedNode(target);
+                tab->DeleteSelection();
+            }
         }
     }
     contextMenuTargetValid_ = false;
