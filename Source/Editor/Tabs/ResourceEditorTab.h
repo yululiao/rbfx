@@ -77,8 +77,9 @@ public:
     bool CloseAllResourcesGracefully(ea::function<void()> onAllClosed = []{});
     /// Close all opened resources gracefully. Open other resource if requested.
     bool CloseAllResourcesGracefully(const ea::string& pendingOpenResourceName);
-    /// Save specific opened resource.
-    void SaveResource(const ea::string& resourceName, bool forced = false);
+    /// Save specific opened resource. Returns false if the save was cancelled
+    /// by CanSaveResource (nothing was written; the tab owns the follow-up).
+    bool SaveResource(const ea::string& resourceName, bool forced = false);
     /// Save all resources.
     void SaveAllResources(bool forced = false);
     /// Save all shallow data.
@@ -110,6 +111,10 @@ protected:
     virtual void OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName) = 0;
     /// Called when resource should be saved.
     virtual void OnResourceSaved(const ea::string& resourceName) = 0;
+    /// Called before a resource is written to disk: returning false cancels
+    /// this save. Tabs veto or defer here (e.g. ask the user before
+    /// overwriting a file that was changed outside the editor).
+    virtual bool CanSaveResource(const ea::string& resourceName) { return true; }
     /// Called when shallow data for resource is saved.
     virtual void OnResourceShallowSaved(const ea::string& resourceName) = 0;
 

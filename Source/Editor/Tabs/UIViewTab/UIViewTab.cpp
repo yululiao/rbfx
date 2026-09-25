@@ -11,8 +11,10 @@
 #include "../../Core/IniHelpers.h"
 #include "../../Core/WidgetHelpers.h"
 #include "../../Project/Project.h"
+#include "../GameViewTab.h"
 #include "../HierarchyBrowserTab.h"
 #include "../InspectorTab.h"
+#include "../SceneViewTab.h"
 
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -197,6 +199,9 @@ UiWidgetSpec MakeWidgetSpec(const PaletteEntry& entry)
 // is recorded by RenderNode and opened at the end of RenderContent, see the
 // comments there).
 const char* const kUiNodePopupId = "##uiNodeCtx";
+// Modal of the save guard (CanSaveResource): the file changed on disk while
+// the document was open and a save wanted to write over it.
+const char* const kUiDiskChangePopupId = "File changed on disk###uiViewDiskChange";
 // Drag-drop payload type carrying the source row's child-index path.
 const char* const kUiNodeDragType = "UIEDITOR_NODE_PATH";
 
@@ -945,6 +950,31 @@ bool UIViewTab::WriteFileAt(const ea::string& absPath, const ea::string& text)
     return true;
 }
 
+bool UIViewTab::CanSaveResource(const ea::string& resourceName)
+{
+    // One-shot approval from the overwrite modal. Consume it either way: a
+    // stale approval must never auto-pass a later save.
+    const bool approved = !overwriteApproved_.empty() && overwriteApproved_ == resourceName;
+    overwriteApproved_.clear();
+    if (approved)
+        return true;
+
+    // No baseline (nothing loaded or written through this instance yet):
+    // there is no write this guard could protect.
+    if (resourceName.empty() || diskTextName_ != resourceName)
+        return true;
+
+    // Bytes different from what this instance last loaded or wrote mean
+    // someone else touched the file while it was open. The check reads the
+    // disk directly, so it does not depend on any cache refresh.
+    if (ReadResourceFile(resourceName) == diskText_)
+        return true;
+
+    // Never clobber silently: record the decision and let the modal ask.
+    pendingExternalOverwrite_ = resourceName;
+    return false;
+}
+
 void UIViewTab::ResetViewToDocument()
 {
     UiNode* root = document_ ? document_->GetModel().root_.Get() : nullptr;
@@ -1018,6 +1048,10 @@ void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
 
     if (document_->LoadFromText(contents, resourceName))
     {
+        // Baseline for the save guard: the bytes this instance and the disk
+        // agree on at load time.
+        diskText_ = contents;
+        diskTextName_ = resourceName;
         // The canvas size is an editor-wide view preference (restored from the
         // ini), applied to the fresh surface so the document lays out against
         // exactly the canvas the user last authored against; the toolbar
@@ -1039,6 +1073,10 @@ void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
     }
     else
     {
+        // No trustworthy baseline after a failed load; the guard passes this
+        // resource until a load or save re-establishes one.
+        diskText_.clear();
+        diskTextName_.clear();
         URHO3D_LOGERROR("UIViewTab: failed to parse UI document '{}'", resourceName.c_str());
     }
 }
@@ -1058,6 +1096,13 @@ void UIViewTab::OnResourceUnloaded(const ea::string& resourceName)
     CancelStructDrag();
     extraDragNodes_.clear();
     extraDragStarts_.clear();
+
+    // The save-guard state dies with the document: a fresh baseline is taken
+    // on the next load, and a pending overwrite decision no longer applies.
+    diskText_.clear();
+    diskTextName_.clear();
+    pendingExternalOverwrite_.clear();
+    overwriteApproved_.clear();
 
     // Secondary instances exist only to host their document: when it closes,
     // so does the editor tab. The primary instance stays around as the
@@ -1093,7 +1138,14 @@ void UIViewTab::OnResourceSaved(const ea::string& resourceName)
     // One document per instance: emit this instance's document.
     if (!document_ || !document_->GetRmlDocument())
         return;
-    WriteResourceFile(resourceName, document_->EmitRml());
+    const ea::string text = document_->EmitRml();
+    if (WriteResourceFile(resourceName, text))
+    {
+        // New save-guard baseline: the editor and the disk agree on these
+        // bytes as of this write.
+        diskText_ = text;
+        diskTextName_ = resourceName;
+    }
     document_->MarkSaved();
 }
 
@@ -1309,6 +1361,118 @@ void UIViewTab::RenderContent()
     RenderToolbar();
     ui::Separator();
     RenderPreview();
+    RenderExternalChangeDialog();
+}
+
+void UIViewTab::RenderExternalChangeDialog()
+{
+    if (!externalDialogOpen_)
+    {
+        if (pendingExternalOverwrite_.empty())
+            return;
+        externalDialogOpen_ = true;
+        ui::OpenPopup(kUiDiskChangePopupId);
+    }
+
+    if (ui::BeginPopupModal(kUiDiskChangePopupId, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (pendingExternalOverwrite_.empty())
+        {
+            // The document was closed while the modal was open: nothing left
+            // to decide.
+            ui::CloseCurrentPopup();
+        }
+        else
+        {
+            const ea::string name = pendingExternalOverwrite_;
+            ui::Text("'%s' was modified outside the editor.", name.c_str());
+            ui::Text("Overwriting discards the external changes.");
+            ui::Separator();
+
+            if (ui::Button(ICON_FA_FLOPPY_DISK " Overwrite"))
+            {
+                externalDialogOpen_ = false;
+                overwriteApproved_ = name;
+                pendingExternalOverwrite_.clear();
+                ui::CloseCurrentPopup();
+                // Re-run the interrupted save: CanSaveResource consumes the
+                // approval and the write goes through.
+                SaveResource(name, true);
+            }
+            ui::SameLine();
+            if (ui::Button(ICON_FA_BAN " Cancel") || ui::IsKeyPressed(KEY_ESCAPE))
+            {
+                externalDialogOpen_ = false;
+                pendingExternalOverwrite_.clear();
+                ui::CloseCurrentPopup();
+            }
+        }
+        ui::EndPopup();
+    }
+    else if (externalDialogOpen_)
+    {
+        // Dismissed without a choice (Esc closes the modal): same as Cancel.
+        // The document stays unsaved and the next save asks again.
+        externalDialogOpen_ = false;
+        pendingExternalOverwrite_.clear();
+    }
+}
+
+void UIViewTab::ToggleRunInGameView()
+{
+    const ea::string document = GetActiveResourceName();
+    if (document.empty())
+        return;
+
+    auto* gameViewTab = GetProject()->FindTab<GameViewTab>();
+    if (!gameViewTab)
+        return;
+
+    // Toggle off while this document is the active preview. Every stop path
+    // runs the session bookkeeping (focus, Game View open/close) through the
+    // OnSimulationStopped subscriber in ProjectGlue.
+    if (gameViewTab->IsPlaying() && gameViewTab->GetActiveUiPreviewDocument() == document)
+    {
+        gameViewTab->Stop();
+        return;
+    }
+
+    // The session loads the document from disk, so persist it first. A vetoed
+    // save (the overwrite guard modal - its dialog is on screen already)
+    // aborts the run.
+    if (!SaveResource(document))
+        return;
+
+    // Session start, focus and Game View visibility are owned by ProjectGlue,
+    // which runs the Launch pipeline for this request. A running session of
+    // any kind (a different document, or a plain Launch) is superseded there.
+    Project* project = GetProject();
+    project->OnRequestUiPreview(project, this, document);
+}
+
+bool UIViewTab::IsPreviewingInGameView() const
+{
+    const ea::string& document = GetActiveResourceName();
+    auto* gameViewTab = GetProject()->FindTab<GameViewTab>();
+    return !document.empty() && gameViewTab && gameViewTab->IsPlaying()
+        && gameViewTab->GetActiveUiPreviewDocument() == document;
+}
+
+ea::string UIViewTab::RunInGameViewUnavailableReason() const
+{
+    // Stop stays enabled while this document is being previewed.
+    if (IsPreviewingInGameView())
+        return {};
+
+    if (GetActiveResourceName().empty())
+        return "Open or create a document to preview in the game";
+
+    auto* sceneViewTab = GetProject()->FindTab<SceneViewTab>();
+    Scene* scene = sceneViewTab ? sceneViewTab->GetActivePage()->scene_.Get() : nullptr;
+    if (!scene)
+        return "Open a scene in the Scene View first";
+
+    return {};
 }
 
 void UIViewTab::RenderToolbar()
@@ -1344,6 +1508,27 @@ void UIViewTab::RenderToolbar()
         ui::SameLine();
         ui::TextDisabled("(unsaved)");
     }
+
+    // Runtime preview: Run plays the edited scene plus this document in the
+    // Game View (see ToggleRunInGameView); while that session previews this
+    // document the button turns into Stop. A disabled button carries its
+    // reason in the tooltip.
+    ui::SameLine();
+    const bool previewingInGameView = IsPreviewingInGameView();
+    const ea::string runUnavailableReason = RunInGameViewUnavailableReason();
+    ui::BeginDisabled(!runUnavailableReason.empty());
+    if (ui::Button(previewingInGameView ? ICON_FA_STOP " Stop" : ICON_FA_PLAY " Run"))
+        ToggleRunInGameView();
+    if (ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    {
+        if (previewingInGameView)
+            ui::SetTooltip("Stop the Game View session previewing this document");
+        else if (!runUnavailableReason.empty())
+            ui::SetTooltip("%s", runUnavailableReason.c_str());
+        else
+            ui::SetTooltip("Play the edited scene and this document in the Game View");
+    }
+    ui::EndDisabled();
 
     // Second row: structural editing, driven by the palette table.
     ui::BeginDisabled(!hasDoc);

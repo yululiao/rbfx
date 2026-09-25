@@ -51,6 +51,7 @@
 
 #if URHO3D_RMLUI
     #include <Urho3D/RmlUI/RmlUI.h>
+    #include <RmlUi/Core/DataModelHandle.h>
 #endif
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
@@ -75,7 +76,8 @@ class GameViewTab::PlayState : public Object
     URHO3D_OBJECT(PlayState, Object);
 
 public:
-    PlayState(Context* context, CustomBackbufferTexture* backbuffer, Scene* editorScene)
+    PlayState(Context* context, CustomBackbufferTexture* backbuffer, Scene* editorScene,
+        const ea::string& uiPreviewDocument)
         : Object(context)
         , engine_(GetSubsystem<Engine>())
         , renderer_(GetSubsystem<Renderer>())
@@ -90,6 +92,7 @@ public:
         , project_(GetSubsystem<Project>())
         , backbuffer_(backbuffer)
         , editorScene_(editorScene)
+        , uiPreviewDocument_(uiPreviewDocument)
     {
         engine_->SetParameter(Param_IsRunningInEditor, true);
 
@@ -127,6 +130,11 @@ public:
             pluginManager_->StartApplication();
 #endif
         UpdatePreferredMouseSetup();
+
+        // Load the editor-requested document last: the game's own UI is in
+        // place by now, so the preview document sits on top of it.
+        if (!uiPreviewDocument_.empty())
+            LoadUiPreviewDocument();
     }
 
     void GrabInput()
@@ -210,6 +218,9 @@ public:
         legacyUI_->GetRootModalElement()->RemoveAllChildren();
 
 #if URHO3D_RMLUI
+        // Close the editor-loaded document while its render target is still
+        // attached: nothing this session loaded may leak into the editor frame.
+        CloseUiPreviewDocument();
         rmlUI_->SetRenderTarget(nullptr);
 #endif
 
@@ -254,6 +265,76 @@ private:
 #endif
     }
 
+    /// Load the editor-requested .rml into the master RmlUI context. A load
+    /// failure only degrades the session (warning), never interrupts the game.
+    void LoadUiPreviewDocument()
+    {
+#if URHO3D_RMLUI
+        Rml::Context* context = rmlUI_ ? rmlUI_->GetRmlContext() : nullptr;
+        if (!context)
+            return;
+
+        // Same-source dedup: when the game loaded this document already, keep
+        // its instance - a second copy of the same document must not appear.
+        for (int i = 0; i < context->GetNumDocuments(); ++i)
+        {
+            Rml::ElementDocument* document = context->GetDocument(i);
+            if (document && uiPreviewDocument_ == document->GetSourceURL())
+                return;
+        }
+
+        // Documents bound to the design-time token "{{__data_model_id}}" need
+        // an empty placeholder model under the name LoadDocument substitutes
+        // for the token. Mirrors the editor preview (UIViewDocument) so the
+        // bound regions resolve instead of erroring. An empty constructor
+        // from GetDataModel means the name is free; a leftover model (the
+        // allocator recycled our address) is reused as-is.
+        const ea::string modelName = Format("{}", static_cast<void*>(this));
+        Rml::DataModelConstructor existingModel = context->GetDataModel(modelName);
+        if (!existingModel)
+        {
+            Rml::DataModelConstructor modelConstructor = context->CreateDataModel(modelName, nullptr);
+            (void)modelConstructor.GetModelHandle();
+        }
+
+        Rml::ElementDocument* document = rmlUI_->LoadDocument(uiPreviewDocument_, this);
+        if (!document)
+        {
+            URHO3D_LOGWARNING("UI preview document '{}' could not be loaded", uiPreviewDocument_);
+            return;
+        }
+        document->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
+        uiPreviewLoaded_ = true;
+#endif
+    }
+
+    /// Remove the document this session loaded, matched by source URL: the
+    /// auto-reload on file change replaces the instance mid-session, so a
+    /// stored document pointer would go stale. Documents of the game itself
+    /// are managed by the game and are left alone.
+    void CloseUiPreviewDocument()
+    {
+#if URHO3D_RMLUI
+        if (!uiPreviewLoaded_)
+            return;
+        uiPreviewLoaded_ = false;
+
+        Rml::Context* context = rmlUI_ ? rmlUI_->GetRmlContext() : nullptr;
+        if (!context)
+            return;
+
+        ea::vector<Rml::ElementDocument*> documentsToClose;
+        for (int i = 0; i < context->GetNumDocuments(); ++i)
+        {
+            Rml::ElementDocument* document = context->GetDocument(i);
+            if (document && uiPreviewDocument_ == document->GetSourceURL())
+                documentsToClose.push_back(document);
+        }
+        for (Rml::ElementDocument* document : documentsToClose)
+            document->Close();
+#endif
+    }
+
     Engine* engine_{};
     Renderer* renderer_{};
     PluginManager* pluginManager_{};
@@ -271,6 +352,10 @@ private:
     WeakPtr<Scene> editorScene_;
     /// Scene state as it was before Play started; restored on Stop.
     PackedSceneData sceneSnapshot_;
+    /// Editor-requested .rml document of this session (empty when none).
+    ea::string uiPreviewDocument_;
+    /// Whether that document (or its auto-reloaded replacement) is loaded.
+    bool uiPreviewLoaded_{};
 #ifdef URHO3D_LUA
     /// Lua play session; null when the plugin play mode is used.
     SharedPtr<LuaGameRunner> luaRunner_;
@@ -313,6 +398,10 @@ void GameViewTab::Play()
     if (state_)
         Stop();
 
+    // One-shot payload: a UI preview request belongs to exactly one session.
+    const ea::string uiPreviewDocument = pendingUiPreview_;
+    pendingUiPreview_.clear();
+
     // Use the editor's current scene for the play session.
     auto* sceneViewTab = GetProject()->FindTab<SceneViewTab>();
     Scene* editorScene = sceneViewTab ? sceneViewTab->GetActivePage()->scene_.Get() : nullptr;
@@ -328,7 +417,8 @@ void GameViewTab::Play()
         sceneViewTab->SaveResource(sceneViewTab->GetActiveResourceName());
 
     editorScene->SetUpdateEnabled(true);
-    state_ = ea::make_unique<PlayState>(context_, backbuffer_, editorScene);
+    state_ = ea::make_unique<PlayState>(context_, backbuffer_, editorScene, uiPreviewDocument);
+    activeUiPreview_ = uiPreviewDocument;
     OnSimulationStarted(this);
 }
 
@@ -338,6 +428,7 @@ void GameViewTab::Stop()
         return;
 
     state_ = nullptr;
+    activeUiPreview_.clear();
     OnSimulationStopped(this);
 }
 

@@ -49,6 +49,13 @@ public:
     bool IsPlaying() const { return !!state_; }
     bool IsInputGrabbed() const;
 
+    /// Runtime UI preview: when a document is pending, the next Play session
+    /// loads it into the running game (editor-requested, on top of game UI).
+    /// @{
+    void SetPendingUiPreview(const ea::string& resourceName) { pendingUiPreview_ = resourceName; }
+    const ea::string& GetActiveUiPreviewDocument() const { return activeUiPreview_; }
+    /// @}
+
     /// Commands
     /// @{
     void Stop();
@@ -75,6 +82,10 @@ private:
     SharedPtr<CustomBackbufferTexture> backbuffer_;
 
     ea::unique_ptr<PlayState> state_;
+    /// .rml document requested for the next Play session (one-shot payload).
+    ea::string pendingUiPreview_;
+    /// .rml document loaded by the running session as a UI preview.
+    ea::string activeUiPreview_;
     bool hudVisible_{};
     /// Flush unsaved scene changes to disk when Play starts.
     bool autoSaveOnPlay_{true};

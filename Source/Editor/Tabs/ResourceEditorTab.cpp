@@ -236,9 +236,11 @@ void ResourceEditorTab::CloseResourceGracefully(const ea::string& resourceName, 
     request.resourceNames_ = {resourceName};
     request.onSave_ = [=]()
     {
-        if (weakSelf)
+        // A vetoed save must not close: the edits would die with the
+        // document. The tab keeps it open and resolves the reason (e.g. the
+        // external-change dialog); the user closes again once it is saved.
+        if (weakSelf && weakSelf->SaveResource(resourceName))
         {
-            weakSelf->SaveResource(resourceName);
             weakSelf->CloseResource(resourceName);
             onClosed();
         }
@@ -287,23 +289,29 @@ bool ResourceEditorTab::CloseAllResourcesGracefully(const ea::string& pendingOpe
     });
 }
 
-void ResourceEditorTab::SaveResource(const ea::string& resourceName, bool forced)
+bool ResourceEditorTab::SaveResource(const ea::string& resourceName, bool forced)
 {
     if (!forced && !IsResourceUnsaved(resourceName))
-        return;
+        return true; // nothing to write; not a cancellation
 
     const auto iter = resources_.find(resourceName);
-    if (iter != resources_.end())
-    {
-        DoSaveResource(iter->first, iter->second);
-    }
+    if (iter == resources_.end())
+        return true;
+
+    // The tab vetoes or defers here (e.g. it asks the user before overwriting
+    // a file that was changed outside the editor).
+    if (!CanSaveResource(resourceName))
+        return false;
+
+    DoSaveResource(iter->first, iter->second);
+    return true;
 }
 
 void ResourceEditorTab::SaveAllResources(bool forced)
 {
     for (auto& [resourceName, data] : resources_)
     {
-        if (forced || IsResourceUnsaved(resourceName))
+        if ((forced || IsResourceUnsaved(resourceName)) && CanSaveResource(resourceName))
             DoSaveResource(resourceName, data);
     }
 }

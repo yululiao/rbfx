@@ -67,37 +67,80 @@ public:
         if (!gameViewTab_)
             return;
 
-        if (!gameViewTab_->IsPlaying())
+        if (gameViewTab_->IsPlaying())
+            gameViewTab_->Stop();
+        else
+            StartPlaySession(config, nullptr, {});
+    }
+
+    /// Runtime UI preview request from a tab: Play the edited scene and load
+    /// \a document into the session, with focus returning to \a owner on stop.
+    void RequestUiPreview(EditorTab* owner, const ea::string& document)
+    {
+        if (!gameViewTab_)
+            return;
+
+        if (gameViewTab_->IsPlaying())
         {
-            closeGameViewTabAfter_ = !gameViewTab_->IsOpen();
-            gameViewTab_->Open();
-
-            tabToFocusAfter_ = sceneViewTab_;
-            sceneViewTab_->SetupPluginContext();
-
-            // Save modified resources so the game can load them
-            const bool forceSaveResources = false;
-            project_->SaveResourcesOnly(forceSaveResources);
-
-            gameViewTab_->Focus();
-
-            if (config)
-                engine_->SetParameter(EP_MAIN_PLUGIN, config->mainPlugin_);
-            else
-                engine_->SetParameter(EP_MAIN_PLUGIN, Variant::EMPTY);
+            // Clicking Run again for the document that is already previewing
+            // stops the session. Any other running session (a different
+            // document, or a plain Launch) is superseded: the most recent
+            // request wins, sharing the same single-session mechanics.
+            const bool previewingThisDocument = gameViewTab_->GetActiveUiPreviewDocument() == document;
+            gameViewTab_->Stop();
+            if (previewingThisDocument)
+                return;
         }
-        else if (tabToFocusAfter_)
-        {
+
+        const LaunchConfiguration* currentConfig = project_->GetLaunchConfiguration();
+        StartPlaySession(currentConfig, owner, document);
+    }
+
+    /// Runs whenever a Play session stops, whichever path stopped it (toolbar,
+    /// hotkey, toggle, supersede, quit): refocus the tab that requested the
+    /// session and close the Game View if Play opened it implicitly.
+    void OnSessionStopped()
+    {
+        if (tabToFocusAfter_)
             tabToFocusAfter_->Focus();
-            tabToFocusAfter_ = nullptr;
+        tabToFocusAfter_ = nullptr;
 
-            if (closeGameViewTabAfter_)
-                gameViewTab_->Close();
-        }
-        gameViewTab_->TogglePlayed();
+        if (gameViewTab_ && closeGameViewTabAfter_)
+            gameViewTab_->Close();
+        closeGameViewTabAfter_ = false;
     }
 
 private:
+    /// Shared start pipeline of Launch and UI preview - one implementation, no
+    /// duplicated setup: hand the editor camera to the engine, save modified
+    /// resources, then start the session. \a focusAfter is the tab focused
+    /// again when the session stops (the Scene View when null), and
+    /// \a uiPreviewDocument, when non-empty, is the .rml this session loads.
+    void StartPlaySession(const LaunchConfiguration* config, EditorTab* focusAfter, const ea::string& uiPreviewDocument)
+    {
+        closeGameViewTabAfter_ = !gameViewTab_->IsOpen();
+        gameViewTab_->Open();
+
+        tabToFocusAfter_ = focusAfter ? focusAfter : sceneViewTab_.Get();
+        sceneViewTab_->SetupPluginContext();
+
+        // Save modified resources so the game can load them
+        const bool forceSaveResources = false;
+        project_->SaveResourcesOnly(forceSaveResources);
+
+        if (!uiPreviewDocument.empty())
+            gameViewTab_->SetPendingUiPreview(uiPreviewDocument);
+
+        gameViewTab_->Focus();
+
+        if (config)
+            engine_->SetParameter(EP_MAIN_PLUGIN, config->mainPlugin_);
+        else
+            engine_->SetParameter(EP_MAIN_PLUGIN, Variant::EMPTY);
+
+        gameViewTab_->Play();
+    }
+
     const WeakPtr<Engine> engine_;
 
     WeakPtr<EditorTab> tabToFocusAfter_;
@@ -120,6 +163,15 @@ void Tabs_ProjectGlue(Context* context, Project* project)
     const auto state = ea::make_shared<InternalState>(ctx);
 
     hotkeyManager->BindHotkey(hotkeyManager, Hotkey_Play, [state] { state->TogglePlayedDefault(); });
+
+    // Stop cleanup is driven by the signal so every stop path (toolbar Stop,
+    // hotkey toggle, UI preview supersede, game-requested quit) behaves alike.
+    ctx.gameViewTab_->OnSimulationStopped.Subscribe(project, [state] { state->OnSessionStopped(); });
+
+    project->OnRequestUiPreview.Subscribe(project, [state](EditorTab* owner, const ea::string& document)
+    {
+        state->RequestUiPreview(owner, document);
+    });
 
     project->OnRenderProjectMenu.Subscribe(project, [state](Project* project)
     {

@@ -121,6 +121,9 @@ public:
     Signal<void()> OnShallowSaved;
     Signal<void()> OnRenderProjectMenu;
     Signal<void()> OnRenderProjectToolbar;
+    /// Request a runtime UI preview session: Play (same as Launch) plus loading
+    /// \a document into the Game View. \a sender regains focus when it stops.
+    Signal<void(EditorTab* sender, const ea::string& document)> OnRequestUiPreview;
     Signal<void(ProjectRequest*)> OnRequest;
     Signal<void(const ea::string& command, const ea::string& args, bool& processed)> OnCommand;
 

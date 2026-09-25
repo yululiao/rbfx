@@ -152,6 +152,10 @@ protected:
     void OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName) override;
     void OnResourceSaved(const ea::string& resourceName) override;
     void OnResourceShallowSaved(const ea::string& resourceName) override;
+    /// Save guard: the base consults this before writing. Refuses when the
+    /// file changed on disk since this instance last loaded or wrote it, and
+    /// asks the user whether to overwrite (RenderExternalChangeDialog).
+    bool CanSaveResource(const ea::string& resourceName) override;
     /// Route open requests through OpenInBestInstance instead of opening the
     /// resource in every subscribed instance (the base behavior).
     void OnProjectRequest(ProjectRequest* request) override;
@@ -170,6 +174,24 @@ protected:
 private:
     void RenderToolbar();
     void RenderPreview();
+    /// Modal of the save guard: the file changed on disk while the document
+    /// was open and a save wanted to write over it. Overwrite re-runs the
+    /// save with a one-shot approval; Cancel keeps the document unsaved.
+    void RenderExternalChangeDialog();
+
+    /// Runtime preview: play the edited scene plus this document in the Game
+    /// View. The session itself (start/stop, focus, Game View open/close) is
+    /// owned by ProjectGlue, reached through Project::OnRequestUiPreview.
+    /// @{
+    /// Toolbar Run/Stop click: start the preview, or stop the running session
+    /// that is previewing this document.
+    void ToggleRunInGameView();
+    /// Whether the running Game View session is previewing this document.
+    bool IsPreviewingInGameView() const;
+    /// Empty when the Run button may start a preview; otherwise the reason it
+    /// is disabled (shown as its tooltip).
+    ea::string RunInGameViewUnavailableReason() const;
+    /// @}
     /// Floating inline editor for a pure-text element's #text child: Enter or
     /// blur submits through EditNodePayload, Esc reverts (ImGui built-in).
     void RenderInlineTextEdit(const DocViewport& vp);
@@ -271,6 +293,20 @@ private:
     /// this instance. One instance edits at most one resource; the base
     /// swaps it via the load/unload/activate callbacks.
     SharedPtr<UIViewDocument> document_;
+
+    // --- external-change guard (overwrite protection) -----------------------
+    /// Bytes of the file as this instance last loaded or wrote it: different
+    /// bytes on disk mean someone else edited the file while it was open.
+    ea::string diskText_;
+    /// Resource diskText_ belongs to (empty = no baseline yet).
+    ea::string diskTextName_;
+    /// Resource waiting for the user's overwrite decision (modal pending).
+    ea::string pendingExternalOverwrite_;
+    /// One-shot approval from the modal, consumed by the next
+    /// CanSaveResource call for that resource.
+    ea::string overwriteApproved_;
+    /// Whether the modal for pendingExternalOverwrite_ is open in ImGui.
+    bool externalDialogOpen_ = false;
 
     UiNode* selected_ = nullptr;
     ea::vector<unsigned> selPath_;
