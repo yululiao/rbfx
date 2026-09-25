@@ -5,6 +5,7 @@
 //
 
 #include "UIViewDocumentModel.h"
+#include "UIViewParagraphText.h"
 
 #include <Urho3D/Core/Format.h>
 #include <Urho3D/IO/Log.h>
@@ -578,6 +579,32 @@ void ReconcileSelf(const UiNode& node, int srcIdx, const RmlTextModel& src, std:
     }
 }
 
+/// Emission for a node whose text-run children a command rebuilt (a paragraph
+/// Content edit). The generic children pass below cannot express this: it only
+/// appends editor-created children at the inner end and skips bare text. The
+/// whole child region is therefore reconciled as one batch instead - removed
+/// anchored children patched out, changed runs patched in place, and the
+/// editor-created runs spliced at their position with raw text / generated
+/// <br/> markup. The batch math lives in the pure, headless-testable
+/// UIViewParagraphText unit; this adapter only converts model nodes to it.
+void ReconcileTextRunsChildren(const UiNode& node, const RmlTextModel& src, std::vector<RmlPatch>& out)
+{
+    std::vector<ParagraphChildState> states;
+    states.reserve(node.children_.size());
+    for (const SharedPtr<UiNode>& child : node.children_)
+    {
+        ParagraphChildState state;
+        state.srcNode = child->srcNode_;
+        state.isText = child->IsText();
+        if (state.isText)
+            state.text = Std(child->text_);
+        if (state.srcNode < 0)
+            state.markup = state.isText ? Std(child->text_) : GenSubtree(*child, 0);
+        states.push_back(std::move(state));
+    }
+    ComputeParagraphChildrenPatches(src, node.srcNode_, states, out);
+}
+
 /// Recursively collect save-time patches: self diffs for anchored nodes, whole-subtree
 /// generation + insertion for editor-created nodes, and removal patches for anchored source
 /// children that no longer have a model node.
@@ -599,6 +626,14 @@ void ReconcileNode(const UiNode& node, const RmlTextModel& src, std::vector<RmlP
 
     const int srcIdx = node.srcNode_;
     ReconcileSelf(node, srcIdx, src, out);
+
+    if (node.textRunsRebuilt_)
+    {
+        // A paragraph whose text/br children a command rebuilt: reconcile the
+        // run region as a unit (patches + positional splices).
+        ReconcileTextRunsChildren(node, src, out);
+        return;
+    }
 
     // Which source children are still referenced by an anchored model child.
     ea::vector<int> anchoredSrc;

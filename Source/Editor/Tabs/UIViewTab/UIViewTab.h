@@ -25,6 +25,7 @@ class InspectorTab;
 class UIViewTab;
 class UIViewHierarchy;
 class UIViewInspector;
+struct ResourceFileDescriptor;
 
 /// Bootstrapped by EditorApplication.
 void Tabs_UIViewTab(Context* context, Project* project);
@@ -110,6 +111,19 @@ public:
     void DeleteSelection();
     /// @}
 
+    /// Structural flow commands (context menus, toolbar, keyboard): wrap the
+    /// top-level selection into a flex/plain container, or trade the primary
+    /// selection's slot with its nearest element sibling. Both are one undo
+    /// step and no-op when their rules reject the selection.
+    /// @{
+    void WrapSelection(UiWrapMode mode);
+    /// Empty string when WrapSelection may run; otherwise the user-facing
+    /// reason it is unavailable (drives the disabled menu entries).
+    ea::string WrapUnavailableReason() const;
+    void MoveSelectionInFlow(int delta);
+    bool CanMoveInFlow(int delta) const;
+    /// @}
+
     /// Hierarchy/Inspector data sources hosted by this tab. The Glue binds
     /// the shared HierarchyBrowserTab / InspectorTab to these on focus.
     UIViewHierarchy* GetHierarchySource() const { return hierarchySource_; }
@@ -156,6 +170,27 @@ protected:
 private:
     void RenderToolbar();
     void RenderPreview();
+    /// Floating inline editor for a pure-text element's #text child: Enter or
+    /// blur submits through EditNodePayload, Esc reverts (ImGui built-in).
+    void RenderInlineTextEdit(const DocViewport& vp);
+    void BeginInlineTextEdit(UiNode* textNode);
+    void EndInlineTextEdit(bool commit);
+    /// Canvas keyboard shortcuts (Delete / Ctrl+D / Esc / Alt+Up / Alt+Down /
+    /// F), inert while any text field wants the keyboard.
+    void HandleShortcuts();
+    /// Screen-space top-left of the scaled canvas image for the current view
+    /// state (centered; viewPan_ nudges it).
+    ImVec2 CanvasOrigin(const ImVec2& canvasMin, const ImVec2& avail) const;
+    /// Wheel zoom (anchored on the pointer) and middle-drag pan; every other
+    /// view consumer reads the DocViewport built from the result.
+    void HandleViewInput(const ImVec2& canvasMin, const ImVec2& avail, bool canvasHovered);
+    /// Apply a canvas size to the view preference + the open document, then
+    /// re-fit so the whole canvas stays visible.
+    void ApplyCanvasSize(const IntVector2& size);
+    /// Index of the nearest element sibling of \a node in direction \a delta
+    /// (-1 up, +1 down), or M_MAX_UNSIGNED when there is none. Shared by the
+    /// reorder command and its enablement.
+    unsigned FindFlowNeighborIndex(UiNode* node, int delta) const;
 
     /// Create a fresh .rml from the built-in template via a native "Save As" dialog rooted at
     /// the project Data folder, then open it (a new document must live on disk to be a resource).
@@ -198,10 +233,39 @@ private:
     void BeginDrag(const GizmoHandle& handle, UiNode* node, const DocViewport& vp);
     void UpdateDrag(const DocViewport& vp);
     void CommitDrag();
+    /// Esc during a gizmo drag: put the DOM-only live preview back to the
+    /// press box; nothing was committed, so there is no undo step to roll back.
+    void CancelDrag();
     /// Rubber-band (marquee) selection: draw the live band and resolve it into
     /// a selection on release (a sub-threshold band degrades to a click-select).
     void DrawMarquee(const DocViewport& vp);
     void FinishMarquee(const DocViewport& vp);
+
+    /// Structural (flow) drag: move / re-parent a node by dragging it in the
+    /// preview. Pressing a flow element arms the candidate (a plain click
+    /// still selects); past the threshold the drop is solved every frame into
+    /// the drop feedback below and committed as one MoveNode on release.
+    /// @{
+    bool IsStructDragSource(const UiNode* node) const;
+    void CancelStructDrag();
+    /// Solve where \a source would land for a pointer at \a mouseDoc and fill
+    /// the drop feedback; the in-canvas drag and external payloads share this
+    /// and ApplyDrop. \a source may be null (a fresh widget, no cycle rules).
+    void EvaluateDrop(UiNode* source, const Vector2& mouseDoc, bool overCanvas);
+    /// Commit the evaluated drop as one undoable MoveNode (a no-op when the
+    /// node would not actually move).
+    void ApplyDrop(UiNode* source);
+    /// The canvas as a drop target for external payloads: hierarchy rows
+    /// (kUiNodeDragType) and single image files (ResourceDragDropPayload).
+    /// Called once per frame from RenderPreview.
+    void HandlePreviewDrop(const DocViewport& vp);
+    /// Insert a dropped single-image resource as an <img> at the evaluated
+    /// slot, sized from the texture.
+    void ApplyResourceDrop(const ResourceFileDescriptor& desc);
+    /// @}
+    /// Drop indicator for the feedback state above (structural drags and
+    /// external payloads alike).
+    void DrawDropIndicator(const DocViewport& vp);
 
     /// The document (model + live DOM projection + undo commands) edited by
     /// this instance. One instance edits at most one resource; the base
@@ -222,6 +286,52 @@ private:
     bool marqueeAdditive_ = false;
     Vector2 marqueeStartDoc_;
     Vector2 marqueeCurDoc_;
+
+    // --- structural (flow) drag state ---------------------------------------
+    bool structDragActive_ = false; ///< a press armed a drag candidate
+    bool structDragging_ = false; ///< past the threshold: the move is live
+    UiNode* structDragNode_ = nullptr; ///< the node being moved
+    Vector2 structDragStartDoc_; ///< document point of the press (threshold)
+
+    // --- inline text edit state ---------------------------------------------
+    bool textEditActive_ = false; ///< the floating #text editor is live
+    bool textEditJustOpened_ = false; ///< first frame: focus, skip blur-commit
+    UiNode* textEditNode_ = nullptr; ///< the #text node being edited
+    /// Child-index path of that node: the stable identity that survives the
+    /// whole-tree rebuilds (OnDocumentEdited re-resolves the pointer from it).
+    ea::vector<unsigned> textEditPath_;
+    char textEditBuf_[1024]{};
+
+    // --- preview view control (zoom / pan / canvas size) --------------------
+    float viewZoom_ = 1.0f; ///< screen px per document px (0.1-8.0)
+    bool viewFit_ = true; ///< zoom follows the panel until a manual zoom/pan
+    Vector2 viewPan_; ///< screen-space nudge of the centered canvas
+    bool panningActive_ = false;
+    Vector2 panStartMouse_;
+    Vector2 panStartOffset_;
+    /// Canvas-size preference of the preview. One value shared by every
+    /// instance - a tab spawned while the ini is replayed must open on the
+    /// same canvas - persisted to the editor ini by the primary instance,
+    /// and never written into the .rml.
+    static IntVector2 sViewCanvasSize_;
+    /// Custom W/H fields of the toolbar combo (view state, re-seeded on open).
+    int customCanvasW_ = 1024;
+    int customCanvasH_ = 768;
+
+    // --- widget palette filter (Add Widget combo) ---------------------------
+    char paletteFilter_[64]{};
+
+    // --- drop feedback (in-canvas drag and external payloads alike) ---------
+    /// 0 none, 1 before the hit node, 2 after it, 3 inside it.
+    unsigned dropKind_ = 0;
+    UiNode* dropParent_ = nullptr; ///< resolved insertion parent
+    unsigned dropIndex_ = 0; ///< full child index to insert at
+    UiBox dropHitBox_; ///< the hovered node's document-space border box
+    bool dropHaveHitBox_ = false;
+    bool dropSiblingAxisIsRow_ = false; ///< flow axis of the hit's parent
+    bool dropChildAxisIsRow_ = false; ///< flow axis inside the hit
+    ea::vector<UiBox> dropChildBoxes_; ///< element children boxes (slot drawing)
+    ea::vector<unsigned> dropChildIndices_; ///< their full child indices
 
     // --- multi-node move drag (extras tracked beside the primary gizmo) -----
     ea::vector<UiNode*> extraDragNodes_;
@@ -342,6 +452,11 @@ private:
     // the multiline editor is only refreshed when the selection changes.
     ea::vector<unsigned> lastStylePath_;
     bool styleSeedValid_ = false;
+    // Cached paragraph-content text: a <p>'s Content field is the multi-line
+    // editor, seeded only when the selection changes or the model was rebuilt.
+    char contentBuf_[4096]{};
+    ea::vector<unsigned> lastContentPath_;
+    bool contentSeedValid_ = false;
 };
 
 }

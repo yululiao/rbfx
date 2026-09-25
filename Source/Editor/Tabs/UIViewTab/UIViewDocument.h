@@ -50,6 +50,17 @@ enum class UiWidgetStylePolicy
     Outline,
 };
 
+/// Container flavor minted by UIViewDocument::WrapNodes around a selection.
+enum class UiWrapMode
+{
+    /// <div style="display: flex; flex-direction: row; gap: 8px;">.
+    Row,
+    /// <div style="display: flex; flex-direction: column; gap: 8px;">.
+    Column,
+    /// The plain <div>: a structural group with no authored look.
+    Box,
+};
+
 /// Recipe for one palette widget: the tag plus optional default content and
 /// the honest-minimum styling policy. Looks live in the project stylesheet;
 /// the editor only authors what keeps the element usable before the project
@@ -74,6 +85,10 @@ struct UiWidgetSpec
     bool materialize_ = true;
     /// Size of the born position box.
     Vector2 size_{160.0f, 48.0f};
+    /// Explicit width/height styles for a flow-born widget (materialize_
+    /// false): an <img> without a stylesheet rule has no intrinsic size and
+    /// would collapse to nothing. Zero (the default) adds no styles.
+    Vector2 flowSize_{};
 };
 
 /// One editable UI document: the editor model (source of truth) together with
@@ -120,6 +135,11 @@ public:
     /// Resource path the document was opened under (empty until loaded). Used
     /// as the reload URL and as the undo snapshot's document identity.
     const ea::string& GetSourcePath() const { return path_; }
+    /// Monotonic per-instance identity, stable across model rebuilds. Written
+    /// into drag payloads so a target on another document (another tab's
+    /// canvas or hierarchy) rejects the paths instead of resolving them
+    /// against the wrong model.
+    unsigned GetInstanceId() const { return instanceId_; }
     bool IsDirty() const { return dirty_; }
     void MarkSaved() { dirty_ = false; }
     void MarkDirty() { dirty_ = true; }
@@ -141,6 +161,11 @@ public:
     /// active one needs its preview texture refreshed every frame.
     void SetPreviewActive(bool active) { previewActive_ = active; }
 
+    /// Resize the offscreen preview canvas (the virtual viewport the document
+    /// lays out against) and rebuild the render target. The RmlUi context
+    /// follows the new surface dimensions, so the next update re-lays out.
+    void SetPreviewSize(const IntVector2& size);
+
     /// DOM queries for the views (document-space boxes and hit testing).
     /// @{
     UiNode* HitTest(const Vector2& docPos) const;
@@ -150,6 +175,11 @@ public:
     /// document (title bar, resize handles) so its outline marks the nested
     /// document's own contribution instead of the whole canvas.
     bool TryGetDomBoxes(const UiNode* node, ea::vector<UiBox>& out) const;
+    /// The four CSS box-model rectangles (content / padding / border /
+    /// margin) of a regular node, all in document space and carrying the
+    /// border box's accumulated transform map. False for the nested-doc
+    /// virtual node, text nodes and nodes without a live element.
+    bool TryGetBoxModel(const UiNode* node, UiBoxModel& out) const;
     Vector2 GetInlineStyleBase(const UiNode* node) const;
     /// The gizmo box for an absolutely positioned node (position: absolute) in
     /// the left/top frame its authored offsets resolve against, plus that
@@ -180,8 +210,10 @@ public:
     /// a snapshot action and notifies views (OnModelEdited).
     /// @{
     /// Create a widget from a palette recipe under \a parent (root when null
-    /// or unsuitable). Returns the new node in the rebuilt tree, or null.
-    UiNode* AddWidget(UiNode* parent, const UiWidgetSpec& spec);
+    /// or unsuitable), inserted at \a index in \a parent's child list (the
+    /// same full-index numbering MoveNode takes; M_MAX_UNSIGNED appends).
+    /// Returns the new node in the rebuilt tree, or null.
+    UiNode* AddWidget(UiNode* parent, const UiWidgetSpec& spec, unsigned index = M_MAX_UNSIGNED);
     UiNode* DuplicateNode(UiNode* node);
     bool DeleteNode(UiNode* node);
     /// Batch variants for multi-selection: every change is applied to the
@@ -199,12 +231,24 @@ public:
     /// rebuilt tree, or null when the move was rejected.
     UiNode* MoveNode(UiNode* node, UiNode* newParent, unsigned index);
     bool EditNodePayload(UiNode* node, const UiNodePayload& newData);
+    /// Replace a paragraph's text: \a buffer is the multi-line editor content,
+    /// one line per text run (a line break is emitted as <br/>). Runs and
+    /// breaks whose lines survive keep their exact bytes and spine anchors -
+    /// only the exported middle is rebuilt, as ONE recorded undo step.
+    bool SetParagraphText(UiNode* element, const ea::string& buffer);
     /// Commit a solved gizmo box (drag release) as one recorded style edit.
     bool CommitBoxEdit(UiNode* node, const UiBox& box);
     /// Commit solved gizmo boxes for several nodes as ONE recorded style edit
     /// (one undo step for a multi-selection drag). Applies every write to the
     /// model first, then a single rebuild, so all pointers stay live.
     bool CommitBoxEdits(const ea::vector<ea::pair<UiNode*, UiBox>>& edits);
+    /// Wrap \a nodes into a new container inserted at the first node's slot,
+    /// preserving their authored sibling order (one undo step). Rejects
+    /// (returns null) root/text/virtual nodes, cross-parent sets, and any
+    /// absolutely positioned node - its insets would visually re-anchor
+    /// against the new containing block. Returns the container in the
+    /// rebuilt tree, or null.
+    UiNode* WrapNodes(const ea::vector<UiNode*>& nodes, UiWrapMode mode);
     /// Add one <link> to the document <head> (\a type is "text/rcss" or
     /// "text/template"). <head> is spine territory (untouched by the tree
     /// commands above), so this is a text-level edit: emit, splice the link
@@ -256,6 +300,8 @@ private:
     UiDocumentModel model_;
     /// Resource path the document was loaded under; reused as the reload URL.
     ea::string path_;
+    /// See GetInstanceId(); assigned from the constructor's instance counter.
+    unsigned instanceId_ = 0;
     IntVector2 previewSize_{1024, 768};
     bool dirty_ = false;
     /// Set once per opened document after the no-effective-font warning fired,

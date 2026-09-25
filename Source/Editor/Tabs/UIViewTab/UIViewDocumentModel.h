@@ -47,6 +47,12 @@ struct UiNode : public RefCounted
     ea::vector<SharedPtr<UiNode>> children_;
     Rml::Element* dom_ = nullptr; ///< Runtime projection; rebuilt with the model on reload
     int srcNode_ = -1; ///< Index into UiDocumentModel::source_ this node was built from (-1 if editor-created)
+    /// Set by a command that rebuilt this node's text-run children (a paragraph
+    /// Content edit). The save-time reconcile then emits that child region via
+    /// the run routine below instead of the generic children pass (which only
+    /// appends new children and skips bare text). Cleared implicitly: every
+    /// command rebuilds the tree from the re-emitted text.
+    bool textRunsRebuilt_ = false;
 
     /// Virtual node standing for the nested .rml whose template mints the
     /// window chrome into the preview ("#nested-doc"). Exists only in the

@@ -130,7 +130,7 @@ private:
 /// @}
 
 /// Convert engine texture to ImTextureID.
-ImTextureID ToImTextureID(Texture2D* texture);
+URHO3D_API ImTextureID ToImTextureID(Texture2D* texture);
 
 }
 

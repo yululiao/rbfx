@@ -5,6 +5,8 @@
 //
 
 #include "UIViewTab.h"
+#include "UIViewDropMath.h"
+#include "UIViewParagraphText.h"
 
 #include "../../Core/IniHelpers.h"
 #include "../../Core/WidgetHelpers.h"
@@ -16,16 +18,23 @@
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/Log.h>
+#include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/SystemUI/DragDropPayload.h>
+#include <Urho3D/SystemUI/SystemUI.h>
 #include <Urho3D/SystemUI/Widgets.h>
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
 #include <nfd.h>
 
+#include <RmlUi/Core/ComputedValues.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/StyleTypes.h>
 
+#include <float.h>
 #include <math.h>
+#include <stdio.h>
 #include <algorithm>
 #include <cctype>
 #include <utility>
@@ -79,6 +88,21 @@ constexpr ImU32 kRotateColor = IM_COL32(255, 150, 60, 255);
 constexpr ImU32 kScaleColor = IM_COL32(90, 200, 255, 255);
 constexpr ImU32 kMarqueeColor = IM_COL32(120, 180, 255, 220);
 constexpr ImU32 kMarqueeFill = IM_COL32(120, 180, 255, 28);
+// Box-model band fills (DevTools palette): margin orange, border yellow,
+// padding green; the content area keeps showing the document itself.
+constexpr ImU32 kBoxMarginFill = IM_COL32(246, 178, 107, 72);
+constexpr ImU32 kBoxBorderFill = IM_COL32(255, 229, 153, 72);
+constexpr ImU32 kBoxPaddingFill = IM_COL32(195, 231, 167, 72);
+constexpr ImU32 kBoxLabelText = IM_COL32(255, 255, 255, 245);
+constexpr ImU32 kBoxLabelBg = IM_COL32(24, 24, 24, 210);
+// Drop feedback for structural drags and external payloads (flow editor):
+// the fill tints the container a drop lands inside, the solid color draws
+// the slot line and the outline of the node being moved.
+constexpr ImU32 kDropColor = IM_COL32(90, 230, 140, 240);
+constexpr ImU32 kDropFill = IM_COL32(90, 230, 140, 22);
+// Inline text editing: the marker around the element whose #text child is
+// being edited in place.
+constexpr ImU32 kTextEditColor = IM_COL32(255, 220, 90, 220);
 
 Vector2 V2(const Rml::Vector2f& v) { return Vector2{v.x, v.y}; }
 Vector2 V2(const ImVec2& v) { return Vector2{v.x, v.y}; }
@@ -232,6 +256,167 @@ ea::string ResolveRelativeResourcePath(const ea::string& basePath, const ea::str
     return out;
 }
 
+// Convert a resource-root-relative path ("Textures/foo.png") into a path
+// relative to the document that references it ("../Textures/foo.png"): the
+// spelling an <img src> needs, since RmlUi resolves references against the
+// .rml's own location (SystemInterface::JoinPath).
+ea::string MakeDocRelativePath(const ea::string& docPath, const ea::string& resourcePath)
+{
+    ea::vector<ea::string> docDirs;
+    const size_t docSlash = docPath.find_last_of('/');
+    const ea::string docDir = docSlash == ea::string::npos ? ea::string() : docPath.substr(0, docSlash);
+    size_t begin = 0;
+    while (begin < docDir.length())
+    {
+        const size_t end = docDir.find('/', begin);
+        docDirs.push_back(docDir.substr(begin, (end == ea::string::npos ? docDir.length() : end) - begin));
+        if (end == ea::string::npos)
+            break;
+        begin = end + 1;
+    }
+
+    ea::vector<ea::string> targetDirs;
+    begin = 0;
+    while (begin <= resourcePath.length())
+    {
+        const size_t end = resourcePath.find('/', begin);
+        if (end == ea::string::npos)
+        {
+            targetDirs.push_back(resourcePath.substr(begin));
+            break;
+        }
+        targetDirs.push_back(resourcePath.substr(begin, end - begin));
+        begin = end + 1;
+    }
+    if (targetDirs.empty())
+        return resourcePath;
+
+    // Longest common directory prefix; the file name itself never counts.
+    size_t common = 0;
+    while (common < docDirs.size() && common + 1 < targetDirs.size() && docDirs[common] == targetDirs[common])
+        ++common;
+
+    ea::string out2;
+    for (size_t i = common; i < docDirs.size(); i++)
+        out2 += "../";
+    for (size_t i = common; i < targetDirs.size(); i++)
+    {
+        if (i > common)
+            out2 += '/';
+        out2 += targetDirs[i];
+    }
+    return out2;
+}
+
+// Build the kUiNodeDragType payload: the source document's instance id
+// followed by the dragged node's child-index path. The id lets a target on
+// another document (another tab's canvas or hierarchy) reject the payload
+// instead of resolving the path against the wrong model.
+ea::vector<unsigned> MakeNodeDragData(const UIViewDocument* doc, const ea::vector<unsigned>& path)
+{
+    ea::vector<unsigned> data;
+    data.reserve(path.size() + 1);
+    data.push_back(doc->GetInstanceId());
+    data.insert(data.end(), path.begin(), path.end());
+    return data;
+}
+
+// Parse a kUiNodeDragType payload for \a doc. False for payloads from
+// another document and for malformed payloads; on success \a outPath gets
+// the dragged node's child-index path.
+bool ParseNodeDragData(const ImGuiPayload* payload, const UIViewDocument* doc, ea::vector<unsigned>& outPath)
+{
+    const unsigned count = static_cast<unsigned>(payload->DataSize) / sizeof(unsigned);
+    if (!doc || count == 0)
+        return false;
+    const unsigned* data = static_cast<const unsigned*>(payload->Data);
+    if (data[0] != doc->GetInstanceId())
+        return false;
+    outPath.assign(data + 1, data + count);
+    return true;
+}
+
+// Full child-list index of \a node inside \a parent (M_MAX_UNSIGNED when not
+// among its children). Text nodes count: the index numbering MoveNode and
+// AddWidget take is the model's full children_ numbering.
+unsigned ChildIndexOf(const UiNode* parent, const UiNode* node)
+{
+    if (!parent)
+        return M_MAX_UNSIGNED;
+    for (unsigned i = 0; i < parent->children_.size(); i++)
+    {
+        if (parent->children_[i].Get() == node)
+            return i;
+    }
+    return M_MAX_UNSIGNED;
+}
+
+// True when \a node is \a top or lives inside its subtree.
+bool IsInSubtree(const UiDocumentModel& model, const UiNode* top, const UiNode* node)
+{
+    for (const UiNode* n = node; n; n = model.FindParent(n))
+    {
+        if (n == top)
+            return true;
+    }
+    return false;
+}
+
+// Flow axis of a node's children: a flex row lays them out horizontally,
+// everything else (block / inline / no live DOM) stacks them vertically.
+DropAxis FlowAxisOf(const UiNode* node)
+{
+    if (node && node->dom_)
+    {
+        const Rml::ComputedValues& computed = node->dom_->GetComputedValues();
+        // The computed-value enums live in Rml::Style (StyleTypes.h).
+        const Rml::Style::Display display = computed.display();
+        if (display == Rml::Style::Display::Flex || display == Rml::Style::Display::InlineFlex)
+        {
+            const Rml::Style::FlexDirection direction = computed.flex_direction();
+            if (direction == Rml::Style::FlexDirection::Row
+                || direction == Rml::Style::FlexDirection::RowReverse)
+                return DropAxis::Horizontal;
+        }
+    }
+    return DropAxis::Vertical;
+}
+
+// The unique non-blank #text child of a pure-text element: exactly the shape
+// the inline canvas editor may open on ("children are whitespace text plus a
+// single text run"). Mixed content (any element child) and text-less elements
+// return null - double-clicking those only selects.
+UiNode* FindPureTextChild(UiNode* node)
+{
+    if (!node || node->IsText() || node->IsNestedDoc() || node->IsHeadLink())
+        return nullptr;
+    UiNode* text = nullptr;
+    for (const SharedPtr<UiNode>& child : node->children_)
+    {
+        if (!child->IsText())
+            return nullptr; // an element child makes this mixed content
+        if (Trim(child->text_).empty())
+            continue; // authored whitespace between tags is not content
+        if (text)
+            return nullptr; // several text runs: not the simple shape
+        text = child.Get();
+    }
+    return text;
+}
+
+// External payload acceptance: exactly one image file. Folders and
+// multi-file drags have no single authored element to become; the extension
+// list is what the engine's texture loaders cover.
+bool IsSupportedImageDrop(const ResourceDragDropPayload& payload)
+{
+    if (payload.resources_.size() != 1)
+        return false;
+    const ResourceFileDescriptor& desc = payload.resources_[0];
+    if (desc.isDirectory_)
+        return false;
+    return desc.HasExtension({"png", "jpg", "jpeg", "tga", "dds", "bmp"});
+}
+
 // Whether a resource name can be read right now (registered in the cache, or
 // present under the project's Data folder). Cache lookup is in-memory; the
 // filesystem probe is one stat per open template link per frame.
@@ -331,6 +516,10 @@ void OpenNestedDocumentFile(Context* context, UIViewDocument* doc, const ea::str
         project->ProcessRequest(MakeShared<OpenResourceRequest>(context, resPath, revealOnly).Get());
 }
 } // namespace
+
+// Canvas-size preference of the preview (see the declaration for the contract):
+// one value shared by every instance, persisted by the primary instance only.
+IntVector2 UIViewTab::sViewCanvasSize_{1024, 768};
 
 void Tabs_UIViewTab(Context* context, Project* project)
 {
@@ -457,6 +646,28 @@ void UIViewTab::OnDocumentEdited()
     if (!document_)
         return;
     const UiDocumentModel& model = document_->GetModel();
+
+    // A rebuild invalidates every node pointer a live gesture holds, and undo
+    // / redo can land mid-gesture (global shortcuts, menu). Only the stale
+    // pointers are cleared here - the model is never touched, and a command
+    // whose own commit caused this rebuild finishes its cleanup right after.
+    dragging_ = false;
+    gizmoNode_ = nullptr;
+    extraDragNodes_.clear();
+    extraDragStarts_.clear();
+    CancelStructDrag();
+    // The inline editor re-resolves its text run instead of closing, so a
+    // typed buffer survives an unrelated edit elsewhere. It ends only when
+    // the run itself did not survive the rebuild (e.g. an undo removed it).
+    if (textEditActive_)
+    {
+        UiNode* textNode = model.ResolvePath(textEditPath_);
+        if (textNode && textNode->IsText())
+            textEditNode_ = textNode;
+        else
+            EndInlineTextEdit(false);
+    }
+
     // Every command (and every undo/redo) rebuilds the whole model tree from
     // text, so no node pointer survives an edit; re-resolve every selected
     // path from its stable child-index path and drop the vanished ones.
@@ -752,8 +963,18 @@ void UIViewTab::ResetViewToDocument()
     gizmoNode_ = nullptr;
     dragging_ = false;
     marqueeActive_ = false;
+    CancelStructDrag();
     extraDragNodes_.clear();
     extraDragStarts_.clear();
+    // The canvas view always starts fitted to the (re)loaded document, and a
+    // live inline edit would still point at a node of the dying generation.
+    viewFit_ = true;
+    viewPan_ = Vector2::ZERO;
+    panningActive_ = false;
+    textEditActive_ = false;
+    textEditJustOpened_ = false;
+    textEditNode_ = nullptr;
+    textEditPath_.clear();
 }
 
 void UIViewTab::ConnectSharedPanels()
@@ -797,6 +1018,13 @@ void UIViewTab::OnResourceLoaded(const ea::string& resourceName)
 
     if (document_->LoadFromText(contents, resourceName))
     {
+        // The canvas size is an editor-wide view preference (restored from the
+        // ini), applied to the fresh surface so the document lays out against
+        // exactly the canvas the user last authored against; the toolbar
+        // combo's custom W/H fields start from the same value.
+        document_->SetPreviewSize(sViewCanvasSize_);
+        customCanvasW_ = sViewCanvasSize_.x_;
+        customCanvasH_ = sViewCanvasSize_.y_;
         // Fresh open: start with the root selected. Not gated on the active
         // resource: at runtime the base activates the resource only after
         // this callback returns, and a single-document instance hosts no
@@ -827,6 +1055,7 @@ void UIViewTab::OnResourceUnloaded(const ea::string& resourceName)
     gizmoNode_ = nullptr;
     dragging_ = false;
     marqueeActive_ = false;
+    CancelStructDrag();
     extraDragNodes_.clear();
     extraDragStarts_.clear();
 
@@ -843,6 +1072,7 @@ void UIViewTab::OnActiveResourceChanged(const ea::string& oldResourceName, const
     // A drag cannot span an activation change (the change re-opens the view).
     dragging_ = false;
     gizmoNode_ = nullptr;
+    CancelStructDrag();
 
     // Single-document instance: an activation change can only happen around
     // load/unload of this instance's one document. Attach the view when the
@@ -875,6 +1105,17 @@ void UIViewTab::OnResourceShallowSaved(const ea::string& resourceName)
 
 void UIViewTab::WriteIniSettings(ImGuiTextBuffer& output)
 {
+    // The canvas size leads the section, ahead of every base key: the ini is
+    // replayed line by line in file order, and the base's ActiveResourceName
+    // line opens this instance's document - OnResourceLoaded sizes the fresh
+    // surface from the value, so a later line would land one document too
+    // late. Primary only, like the Documents list below.
+    if (isPrimary_)
+    {
+        WriteIntToIni(output, "CanvasWidth", sViewCanvasSize_.x_);
+        WriteIntToIni(output, "CanvasHeight", sViewCanvasSize_.y_);
+    }
+
     ResourceEditorTab::WriteIniSettings(output);
 
     // Only the primary instance persists the editor's document layout:
@@ -909,6 +1150,17 @@ void UIViewTab::WriteIniSettings(ImGuiTextBuffer& output)
 
 void UIViewTab::ReadIniSettings(const char* line)
 {
+    // Parsed ahead of the base call: WriteIniSettings orders the file the same
+    // way, so by the time the base's resource keys open this instance's
+    // document, OnResourceLoaded already sees the restored size.
+    if (isPrimary_)
+    {
+        if (const auto width = ReadIntFromIni(line, "CanvasWidth"))
+            sViewCanvasSize_.x_ = Clamp(*width, 16, 8192);
+        if (const auto height = ReadIntFromIni(line, "CanvasHeight"))
+            sViewCanvasSize_.y_ = Clamp(*height, 16, 8192);
+    }
+
     ResourceEditorTab::ReadIniSettings(line);
 
     // Only the primary instance reads the shared document list: it re-creates
@@ -1097,6 +1349,13 @@ void UIViewTab::RenderToolbar()
     ui::BeginDisabled(!hasDoc);
     if (ui::BeginCombo(ICON_FA_PLUS " Add Widget", "Select..."))
     {
+        // Filter box at the top: typing narrows the palette to entries whose
+        // label or group matches (case-insensitive), so the longer palette
+        // stays quick to scan.
+        ui::SetNextItemWidth(-FLT_MIN);
+        ui::InputTextWithHint("##paletteFilter", ICON_FA_FILTER " Filter...", paletteFilter_,
+            sizeof(paletteFilter_));
+        const ea::string filter = LowerCopy(paletteFilter_);
         // Compare by content, not by pointer: identical string literals are
         // only merged into one address when the compiler pools strings, so a
         // pointer comparison would re-print the header before every entry on
@@ -1104,6 +1363,9 @@ void UIViewTab::RenderToolbar()
         ea::string lastGroup;
         for (const PaletteEntry& entry : kPalette)
         {
+            if (!filter.empty() && LowerCopy(entry.label_).find(filter) == ea::string::npos
+                && LowerCopy(entry.group_).find(filter) == ea::string::npos)
+                continue;
             if (lastGroup != entry.group_)
             {
                 ui::SeparatorText(entry.group_);
@@ -1173,6 +1435,78 @@ void UIViewTab::RenderToolbar()
     ui::EndDisabled();
     ui::EndDisabled();
 
+    // Structural commands on the selection: wrap the set into a container, or
+    // trade the primary's slot with a sibling. The disabled states carry the
+    // reason as a tooltip so the rules (one parent, no absolute nodes) stay
+    // visible instead of the buttons silently doing nothing.
+    const ea::string wrapReason = WrapUnavailableReason();
+    ui::BeginDisabled(!wrapReason.empty());
+    if (ui::Button(ICON_FA_OBJECT_GROUP " Wrap"))
+        ui::OpenPopup("##uiWrapMenu");
+    ui::EndDisabled();
+    if (!wrapReason.empty())
+        ui::SetItemTooltip("%s", wrapReason.c_str());
+    if (ui::BeginPopup("##uiWrapMenu"))
+    {
+        if (ui::MenuItem("Wrap in Row"))
+            WrapSelection(UiWrapMode::Row);
+        if (ui::MenuItem("Wrap in Column"))
+            WrapSelection(UiWrapMode::Column);
+        if (ui::MenuItem("Wrap in Box"))
+            WrapSelection(UiWrapMode::Box);
+        ui::EndPopup();
+    }
+    ui::SameLine();
+    ui::BeginDisabled(!CanMoveInFlow(-1));
+    if (ui::Button(ICON_FA_ARROW_UP))
+        MoveSelectionInFlow(-1);
+    ui::EndDisabled();
+    ui::SameLine();
+    ui::BeginDisabled(!CanMoveInFlow(1));
+    if (ui::Button(ICON_FA_ARROW_DOWN))
+        MoveSelectionInFlow(1);
+    ui::EndDisabled();
+    ui::SameLine();
+    ui::TextDisabled("Alt+Up/Down");
+
+    // View controls: how the canvas is sampled, not what it contains. Their
+    // single consumer is the DocViewport built in RenderPreview.
+    ui::BeginDisabled(!hasDoc);
+    if (ui::Button(ICON_FA_EXPAND " Fit"))
+        viewFit_ = true;
+    ui::SameLine();
+    if (ui::Button("100%"))
+    {
+        viewZoom_ = 1.0f;
+        viewFit_ = false;
+    }
+    ui::SameLine();
+    ui::TextDisabled("%d%%", static_cast<int>(lroundf(viewZoom_ * 100.0f)));
+    ui::SameLine();
+    const IntVector2 canvasNow = document_ ? document_->GetPreviewSize() : sViewCanvasSize_;
+    const ea::string canvasLabel = Format("Canvas %d x %d", canvasNow.x_, canvasNow.y_);
+    if (ui::BeginCombo("##uiViewCanvasSize", canvasLabel.c_str()))
+    {
+        static const IntVector2 presets[] = {{1024, 768}, {1280, 720}, {1920, 1080}, {768, 1024}};
+        for (const IntVector2& preset : presets)
+        {
+            const ea::string label = Format("%d x %d", preset.x_, preset.y_);
+            if (ui::Selectable(label.c_str(), preset == canvasNow))
+                ApplyCanvasSize(preset);
+        }
+        ui::SeparatorText("Custom");
+        ui::SetNextItemWidth(70.0f);
+        ui::InputInt("##canvasW", &customCanvasW_, 0, 0);
+        ui::SameLine();
+        ui::SetNextItemWidth(70.0f);
+        ui::InputInt("##canvasH", &customCanvasH_, 0, 0);
+        ui::SameLine();
+        if (ui::Button("Set"))
+            ApplyCanvasSize(IntVector2{Clamp(customCanvasW_, 16, 8192), Clamp(customCanvasH_, 16, 8192)});
+        ui::EndCombo();
+    }
+    ui::EndDisabled();
+
     // Element context menu (opened by a right-click on the preview). The right-
     // click handler already collapsed the selection to the picked node unless it
     // was part of a multi-selection, so acting on the whole selection is correct.
@@ -1202,6 +1536,34 @@ void UIViewTab::RenderToolbar()
             if (ui::MenuItem(ICON_FA_TRASH " Delete"))
                 DeleteSelection();
         }
+        // Structural commands act on the real-element selection: wrap the set
+        // (rules in WrapNodes) or trade the primary's slot with a sibling.
+        if (ctxCount > 0 && real)
+        {
+            ui::Separator();
+            const ea::string reason = WrapUnavailableReason();
+            ui::BeginDisabled(!reason.empty());
+            if (ui::MenuItem(ICON_FA_OBJECT_GROUP " Wrap in Row"))
+                WrapSelection(UiWrapMode::Row);
+            if (ui::MenuItem(ICON_FA_OBJECT_GROUP " Wrap in Column"))
+                WrapSelection(UiWrapMode::Column);
+            if (ui::MenuItem(ICON_FA_OBJECT_GROUP " Wrap in Box"))
+                WrapSelection(UiWrapMode::Box);
+            ui::EndDisabled();
+            if (!reason.empty())
+                ui::SetItemTooltip("%s", reason.c_str());
+            if (ctxCount == 1)
+            {
+                ui::BeginDisabled(!CanMoveInFlow(-1));
+                if (ui::MenuItem("Move Up (Alt+Up)"))
+                    MoveSelectionInFlow(-1);
+                ui::EndDisabled();
+                ui::BeginDisabled(!CanMoveInFlow(1));
+                if (ui::MenuItem("Move Down (Alt+Down)"))
+                    MoveSelectionInFlow(1);
+                ui::EndDisabled();
+            }
+        }
         ui::EndPopup();
     }
 }
@@ -1214,24 +1576,150 @@ void UIViewTab::RenderPreview()
         return;
     }
 
+    // Drop feedback is recomputed from scratch every frame - by the in-canvas
+    // structural drag or by an external payload hovering the canvas - so a
+    // stale indicator can never outlive the gesture that produced it.
+    dropKind_ = 0;
+
     // The document renders into the texture from E_BEGINRENDERING; here we
-    // only sample the produced texture (never issue draws during widget build).
+    // only sample the produced texture (never issue draws during widget
+    // build). The canvas is a plain draw-list image, not an ImGui item: no
+    // item means nothing inflates the window's content size, so zooming past
+    // the panel and panning never spawn scrollbars.
     const IntVector2 previewSize = document_->GetPreviewSize();
+    const ImVec2 canvasMin = ui::GetCursorScreenPos();
     const ImVec2 avail = ui::GetContentRegionAvail();
-    float scale = ea::min(avail.x / static_cast<float>(previewSize.x_),
-                          avail.y / static_cast<float>(previewSize.y_));
-    if (scale <= 0.0f)
-        scale = 0.1f;
-    const ImVec2 displaySize(previewSize.x_ * scale, previewSize.y_ * scale);
 
-    Widgets::Image(document_->GetPreviewTexture(), displaySize);
+    // The document always opens "fit": the zoom follows the panel size until
+    // the user zooms or pans by hand, which switches to the explicit viewZoom_.
+    float fitScale = ea::min(avail.x / static_cast<float>(previewSize.x_),
+                             avail.y / static_cast<float>(previewSize.y_));
+    if (fitScale <= 0.0f)
+        fitScale = 0.1f;
+    if (viewFit_)
+        viewZoom_ = fitScale;
 
+    const bool canvasHovered = ui::IsMouseHoveringRect(canvasMin,
+                                    ImVec2(canvasMin.x + avail.x, canvasMin.y + avail.y))
+        && ui::IsWindowHovered(ImGuiHoveredFlags_None);
+    // The inline editor owns the pointer while it is live: a stray click on
+    // the canvas must not also zoom / pan behind it.
+    if (!textEditActive_)
+        HandleViewInput(canvasMin, avail, canvasHovered);
+
+    // One mapping for every consumer below: picking, marquee, gizmo, drop
+    // solving and the overlay all read the same DocViewport.
+    const ImVec2 imageMin = CanvasOrigin(canvasMin, avail);
+    const ImVec2 imageMax(imageMin.x + previewSize.x_ * viewZoom_,
+                          imageMin.y + previewSize.y_ * viewZoom_);
     DocViewport vp;
-    vp.origin_ = V2(ui::GetItemRectMin());
-    vp.scale_ = scale;
+    vp.origin_ = V2(imageMin);
+    vp.scale_ = viewZoom_;
 
+    // Clip the canvas (and its overlay) to the preview region: at high zoom
+    // or with pan the image extends past the panel and must not paint over
+    // the toolbar.
+    ImDrawList* dl = ui::GetWindowDrawList();
+    dl->PushClipRect(canvasMin, ImVec2(canvasMin.x + avail.x, canvasMin.y + avail.y), true);
+    if (Texture2D* texture = document_->GetPreviewTexture())
+    {
+        // ReferenceTexture tags the SRV for the frame exactly like
+        // Widgets::Image did; the draw-list image itself has no item.
+        GetSubsystem<SystemUI>()->ReferenceTexture(texture);
+        dl->AddImage(ToImTextureID(texture), imageMin, imageMax);
+    }
+
+    // While the inline editor is live (including the frame that just ended
+    // it) the canvas pointer stays out of the way: the input's own focus
+    // rules decide when a click lands on it.
+    if (textEditActive_)
+    {
+        RenderInlineTextEdit(vp);
+        DrawOverlay(vp);
+        dl->PopClipRect();
+        return;
+    }
+
+    HandlePreviewDrop(vp);
+    // Shortcuts run before the pointer handler: an Esc that cancels a live
+    // drag must be consumed by that drag exactly once.
+    HandleShortcuts();
     HandlePreviewPointer(vp);
     DrawOverlay(vp);
+    dl->PopClipRect();
+}
+
+ImVec2 UIViewTab::CanvasOrigin(const ImVec2& canvasMin, const ImVec2& avail) const
+{
+    const IntVector2 previewSize = document_->GetPreviewSize();
+    const ImVec2 displaySize(previewSize.x_ * viewZoom_, previewSize.y_ * viewZoom_);
+    // Centered while it fits; the user's pan is added on top.
+    return ImVec2(canvasMin.x + (avail.x - displaySize.x) * 0.5f + viewPan_.x_,
+                  canvasMin.y + (avail.y - displaySize.y) * 0.5f + viewPan_.y_);
+}
+
+void UIViewTab::HandleViewInput(const ImVec2& canvasMin, const ImVec2& avail, bool canvasHovered)
+{
+    ImGuiIO& io = ui::GetIO();
+    const IntVector2 previewSize = document_->GetPreviewSize();
+
+    // Middle-drag pans; the wheel zooms around the pointer. Both only while
+    // this window is the front-most one under the cursor, so docked
+    // neighbours never fight for the same gesture.
+    if (panningActive_)
+    {
+        if (ui::IsMouseDown(ImGuiMouseButton_Middle))
+            viewPan_ = panStartOffset_ + (V2(io.MousePos) - panStartMouse_);
+        else
+            panningActive_ = false;
+        return;
+    }
+
+    if (!canvasHovered)
+        return;
+
+    if (ui::IsMouseClicked(ImGuiMouseButton_Middle))
+    {
+        panningActive_ = true;
+        panStartMouse_ = V2(io.MousePos);
+        panStartOffset_ = viewPan_;
+        // A manual pan detaches from "fit": the offset survives a resize.
+        viewFit_ = false;
+        return;
+    }
+
+    // Ctrl+wheel belongs to the editor's global UI zoom (if enabled), not to
+    // the canvas.
+    if (io.MouseWheel != 0.0f && !io.KeyCtrl)
+    {
+        const float oldZoom = viewZoom_;
+        float newZoom = oldZoom * (io.MouseWheel > 0.0f ? 1.1f : 1.0f / 1.1f);
+        newZoom = Clamp(newZoom, 0.1f, 8.0f);
+        if (newZoom == oldZoom)
+            return;
+        // Keep the document point under the cursor stationary: solve the pan
+        // that satisfies origin' + doc * newZoom == mouse.
+        const ImVec2 oldOrigin = CanvasOrigin(canvasMin, avail);
+        const Vector2 docUnderMouse = (V2(io.MousePos) - V2(oldOrigin)) / oldZoom;
+        viewFit_ = false;
+        viewZoom_ = newZoom;
+        const ImVec2 displaySize(previewSize.x_ * newZoom, previewSize.y_ * newZoom);
+        viewPan_ = V2(io.MousePos) - V2(canvasMin)
+            - Vector2{(avail.x - displaySize.x) * 0.5f, (avail.y - displaySize.y) * 0.5f}
+            - docUnderMouse * newZoom;
+    }
+}
+
+void UIViewTab::ApplyCanvasSize(const IntVector2& size)
+{
+    sViewCanvasSize_ = size;
+    customCanvasW_ = size.x_;
+    customCanvasH_ = size.y_;
+    if (document_)
+        document_->SetPreviewSize(size);
+    // A new canvas invalidates a hand-tuned view: re-fit so the whole canvas
+    // is visible again.
+    viewFit_ = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,6 +1742,13 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
 
     if (dragging_)
     {
+        // Esc aborts a gizmo drag: the DOM-only live preview returns to the
+        // press box and nothing is committed.
+        if (ui::IsKeyPressed(ImGuiKey_Escape))
+        {
+            CancelDrag();
+            return;
+        }
         UpdateDrag(vp);
         if (ui::IsMouseReleased(ImGuiMouseButton_Left))
             CommitDrag();
@@ -1267,6 +1762,46 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
         marqueeCurDoc_ = doc;
         if (ui::IsMouseReleased(ImGuiMouseButton_Left))
             FinishMarquee(vp);
+        return;
+    }
+
+    // A structural (flow) drag is live: solve the drop every frame and commit
+    // on release. Esc and the right button cancel; a sub-threshold release
+    // degrades to a plain click on the pressed node. (Drawing happens in
+    // DrawOverlay -> the drag outline / DrawDropIndicator.)
+    if (structDragActive_)
+    {
+        if (ui::IsKeyPressed(ImGuiKey_Escape) || ui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            CancelStructDrag();
+            return;
+        }
+        if (!ui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            if (!structDragging_)
+            {
+                // Never crossed the threshold: behave as a plain click.
+                UiNode* node = structDragNode_;
+                CancelStructDrag();
+                if (overImage)
+                    SetSelectedNode(node);
+                else
+                    SetSelectedNode(nullptr); // an empty click clears
+                return;
+            }
+            ApplyDrop(structDragNode_); // no-op unless a valid slot was solved
+            CancelStructDrag();
+            return;
+        }
+        if (!structDragging_)
+        {
+            const Vector2 startScreen = vp.ToScreen(structDragStartDoc_);
+            const Vector2 now = V2(io.MousePos);
+            if (fabsf(now.x_ - startScreen.x_) <= 4.0f && fabsf(now.y_ - startScreen.y_) <= 4.0f)
+                return; // still a click candidate
+            structDragging_ = true;
+        }
+        EvaluateDrop(structDragNode_, doc, overImage);
         return;
     }
 
@@ -1297,6 +1832,26 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
 
     if (ui::IsMouseClicked(ImGuiMouseButton_Left))
     {
+        // A double-click on a pure-text element opens the floating inline
+        // editor. Hooked on the press (before the gizmo pick and the
+        // struct-drag arm): a flow element's second press would otherwise
+        // just re-arm the drag candidate and never reach FinishMarquee.
+        if (!io.KeyCtrl && ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        {
+            UiNode* element = hover;
+            if (element && element->IsText())
+                element = document_->GetModel().FindParent(element);
+            // The root is the document scaffold, not a widget: a double-click
+            // on blank canvas must not open the editor on <body>'s own text.
+            if (element == document_->GetModel().root_.Get())
+                element = nullptr;
+            if (UiNode* textNode = FindPureTextChild(element))
+            {
+                SetSelectedNode(element);
+                BeginInlineTextEdit(textNode);
+                return;
+            }
+        }
         // A gizmo handle on the current primary selection wins over re-picking.
         // The drag box is left/top-space; DocToGizmoFrame shifts the mouse point
         // into that frame with the ancestor transform chain stripped.
@@ -1314,6 +1869,22 @@ void UIViewTab::HandlePreviewPointer(const DocViewport& vp)
                 BeginDrag(handle, selected_, vp);
                 return;
             }
+        }
+        // A press on a flow element arms a structural drag candidate: past
+        // the threshold the node re-orders / re-parents (see the
+        // structDragActive_ branch above). Ctrl keeps the additive-selection
+        // marquee path, and absolutely positioned nodes stay with their gizmo.
+        UiNode* pressNode = hover;
+        if (pressNode && pressNode->IsText())
+            pressNode = document_->GetModel().FindParent(pressNode);
+        if (!io.KeyCtrl && IsStructDragSource(pressNode))
+        {
+            structDragActive_ = true;
+            structDragging_ = false;
+            structDragNode_ = pressNode;
+            structDragStartDoc_ = doc;
+            hoveredPath_.clear();
+            return;
         }
         // Otherwise begin a rubber-band selection from this point. Ctrl makes it
         // additive; a sub-threshold band degrades to a click in FinishMarquee
@@ -1375,6 +1946,255 @@ void UIViewTab::FinishMarquee(const DocViewport& vp)
     {
         SetSelection(inside); // an empty band clears the selection
     }
+}
+
+// ---------------------------------------------------------------------------
+// Inline text editing (canvas)
+// ---------------------------------------------------------------------------
+
+void UIViewTab::BeginInlineTextEdit(UiNode* textNode)
+{
+    if (!textNode || !textNode->IsText())
+        return;
+    textEditActive_ = true;
+    textEditJustOpened_ = true;
+    textEditNode_ = textNode;
+    // The child-index path is the node's stable identity across the whole-
+    // tree rebuilds every command performs (OnDocumentEdited re-resolves the
+    // live pointer from it).
+    textEditPath_.clear();
+    if (document_)
+        document_->GetModel().BuildPath(textNode, textEditPath_);
+    // Snapshot into a fixed buffer; longer runs are truncated (the field is a
+    // convenience editor, not a text-area replacement).
+    snprintf(textEditBuf_, sizeof(textEditBuf_), "%s", textNode->text_.c_str());
+}
+
+void UIViewTab::EndInlineTextEdit(bool commit)
+{
+    if (!textEditActive_)
+        return;
+    UiNode* textNode = textEditNode_;
+    textEditActive_ = false;
+    textEditJustOpened_ = false;
+    textEditNode_ = nullptr;
+    textEditPath_.clear();
+    if (!commit || !document_ || !textNode)
+        return;
+    // Nothing effectively changed (Esc already reverted the buffer): no
+    // edit, no undo step.
+    if (textEditBuf_ == textNode->text_)
+        return;
+    UiNodePayload payload = SnapshotUiNodePayload(*textNode);
+    payload.text_ = textEditBuf_;
+    // The merge key is the text node's path: consecutive edits of the same
+    // text run collapse into one undo step where the undo manager's input-
+    // frame grouping allows it.
+    document_->EditNodePayload(textNode, payload);
+}
+
+void UIViewTab::RenderInlineTextEdit(const DocViewport& vp)
+{
+    UiNode* textNode = textEditNode_;
+    UiNode* element = textNode && document_ ? document_->GetModel().FindParent(textNode) : nullptr;
+    // The editor floats on the element's rect: the text run itself has no box
+    // of its own to anchor to.
+    ea::vector<UiBox> boxes;
+    if (!element || !document_->TryGetDomBoxes(element, boxes) || boxes.empty())
+    {
+        EndInlineTextEdit(false);
+        return;
+    }
+    const UiBox& box = boxes.front();
+    const ImVec2 min = IV2(vp.ToScreen(box.MapToWindow(box.pos_)));
+    const ImVec2 max = IV2(vp.ToScreen(box.MapToWindow(box.pos_ + box.size_)));
+    const float width = ea::max(fabsf(max.x - min.x), 48.0f);
+
+    // Font follows the zoom (clamped 11-24 px) so the field reads at roughly
+    // the rendered text size. SetWindowFontScale affects this window for the
+    // current frame; restore it right after the field.
+    const float baseFont = ui::GetFontSize();
+    const float fontPx = Clamp(baseFont * vp.scale_, 11.0f, 24.0f);
+    ui::SetWindowFontScale(fontPx / baseFont);
+
+    ui::SetCursorScreenPos(min);
+    ui::SetNextItemWidth(width);
+    if (textEditJustOpened_)
+        ui::SetKeyboardFocusHere();
+    const bool submit = ui::InputText("##uiViewInlineText", textEditBuf_, sizeof(textEditBuf_),
+        ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+    ui::SetWindowFontScale(1.0f);
+
+    // Marker around the element, so the floating field reads as editing it.
+    ui::GetWindowDrawList()->AddRect(ImVec2(min.x - 1.0f, min.y - 1.0f),
+        ImVec2(max.x + 1.0f, max.y + 1.0f), kTextEditColor, 0.0f, ImDrawFlags_None, 1.0f);
+
+    if (!textEditJustOpened_)
+    {
+        // Enter (submit) and losing focus (a click elsewhere) both commit;
+        // ImGui's built-in Esc revert leaves the buffer equal to the node's
+        // text, which EndInlineTextEdit treats as a cancel.
+        if (submit || !ui::IsItemActive())
+        {
+            EndInlineTextEdit(true);
+            return;
+        }
+    }
+    textEditJustOpened_ = false;
+}
+
+// ---------------------------------------------------------------------------
+// Structural commands (wrap / reorder) and canvas shortcuts
+// ---------------------------------------------------------------------------
+
+ea::string UIViewTab::WrapUnavailableReason() const
+{
+    if (!document_ || !document_->GetRmlDocument())
+        return "No document open";
+    const ea::vector<UiNode*> targets = GetTopLevelSelectedNodes();
+    if (targets.empty())
+        return "Select at least one element to wrap";
+    const UiDocumentModel& model = document_->GetModel();
+    UiNode* parent = model.FindParent(targets[0]);
+    for (UiNode* node : targets)
+    {
+        if (node->GetStyle("position") == "absolute")
+            return "Selection contains an absolutely positioned element";
+        if (model.FindParent(node) != parent)
+            return "Selection spans several parents";
+    }
+    return ea::string();
+}
+
+void UIViewTab::WrapSelection(UiWrapMode mode)
+{
+    if (!document_ || !WrapUnavailableReason().empty())
+        return;
+    if (UiNode* container = document_->WrapNodes(GetTopLevelSelectedNodes(), mode))
+        SetSelectedNode(container);
+}
+
+unsigned UIViewTab::FindFlowNeighborIndex(UiNode* node, int delta) const
+{
+    // Only real flow elements trade slots: the root, the virtual nodes and
+    // absolutely positioned elements have no flow position of their own.
+    if (!document_ || !node || delta == 0 || !IsStructDragSource(node))
+        return M_MAX_UNSIGNED;
+    const UiDocumentModel& model = document_->GetModel();
+    UiNode* parent = model.FindParent(node);
+    if (!parent)
+        return M_MAX_UNSIGNED;
+    unsigned index = M_MAX_UNSIGNED;
+    for (unsigned i = 0; i < parent->children_.size(); i++)
+    {
+        if (parent->children_[i].Get() == node)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index == M_MAX_UNSIGNED)
+        return M_MAX_UNSIGNED;
+    // The neighbor is the nearest ELEMENT sibling: trading slots with a
+    // whitespace text run would rewrite bytes without moving anything.
+    for (unsigned i = index;;)
+    {
+        if (delta < 0)
+        {
+            if (i == 0)
+                return M_MAX_UNSIGNED;
+            --i;
+        }
+        else
+        {
+            ++i;
+            if (i >= parent->children_.size())
+                return M_MAX_UNSIGNED;
+        }
+        const SharedPtr<UiNode>& sibling = parent->children_[i];
+        if (!sibling->IsText() && !sibling->IsHeadLink() && !sibling->IsNestedDoc())
+            return i;
+    }
+}
+
+bool UIViewTab::CanMoveInFlow(int delta) const
+{
+    return selected_ && FindFlowNeighborIndex(selected_, delta) != M_MAX_UNSIGNED;
+}
+
+void UIViewTab::MoveSelectionInFlow(int delta)
+{
+    UiNode* node = selected_;
+    if (!document_ || !node || delta == 0)
+        return;
+    UiNode* parent = document_->GetModel().FindParent(node);
+    const unsigned neighbor = FindFlowNeighborIndex(node, delta);
+    if (!parent || neighbor == M_MAX_UNSIGNED)
+        return;
+    // MoveNode inserts "before this slot" and shifts a same-parent index that
+    // sits behind the removed slot: asking for the neighbour's own slot moves
+    // the node in front of it; asking for the slot after it moves the node
+    // behind it.
+    const unsigned target = delta < 0 ? neighbor : neighbor + 1;
+    if (UiNode* moved = document_->MoveNode(node, parent, target))
+        SetSelectedNode(moved);
+}
+
+void UIViewTab::HandleShortcuts()
+{
+    ImGuiIO& io = ui::GetIO();
+    if (!document_ || !document_->GetRmlDocument())
+        return;
+    // Any live text input (inspector fields, the inline editor) owns the
+    // keyboard: nothing below may steal Delete or letters from it.
+    if (io.WantTextInput || textEditActive_)
+        return;
+    // Live canvas gestures keep their own Esc handling (the pointer path);
+    // only the marquee and the pan are cancelled right here, without touching
+    // the selection.
+    if (dragging_ || structDragActive_ || marqueeActive_ || panningActive_)
+    {
+        if (ui::IsKeyPressed(ImGuiKey_Escape))
+        {
+            marqueeActive_ = false; // the stale release selects nothing
+            panningActive_ = false;
+        }
+        return;
+    }
+    // The shortcuts belong to the canvas: while any other editor window is
+    // focused (hierarchy, inspector, console) its keys must stay its own.
+    if (!ui::IsWindowFocused(ImGuiFocusedFlags_None))
+        return;
+
+    if (ui::IsKeyPressed(ImGuiKey_Escape))
+    {
+        SetSelectedNode(nullptr); // clear the selection
+        return;
+    }
+    if (io.KeyCtrl && !io.KeyShift && ui::IsKeyPressed(ImGuiKey_D))
+    {
+        if (!GetTopLevelSelectedNodes().empty())
+            CopySelection();
+        return;
+    }
+    if (io.KeyAlt && ui::IsKeyPressed(ImGuiKey_UpArrow))
+    {
+        MoveSelectionInFlow(-1);
+        return;
+    }
+    if (io.KeyAlt && ui::IsKeyPressed(ImGuiKey_DownArrow))
+    {
+        MoveSelectionInFlow(1);
+        return;
+    }
+    if (ui::IsKeyPressed(ImGuiKey_Delete))
+    {
+        if (selected_ && selected_ != document_->GetModel().root_.Get())
+            DeleteSelection();
+        return;
+    }
+    if (!io.KeyCtrl && !io.KeyAlt && ui::IsKeyPressed(ImGuiKey_F))
+        viewFit_ = true;
 }
 
 void UIViewTab::BeginDrag(const GizmoHandle& handle, UiNode* node, const DocViewport& vp)
@@ -1466,6 +2286,256 @@ void UIViewTab::CommitDrag()
     extraDragStarts_.clear();
 }
 
+void UIViewTab::CancelDrag()
+{
+    // Esc during a gizmo drag: put the DOM-only live preview back to the
+    // press box. The drag never touched the model, so there is no undo step
+    // to roll back.
+    if (gizmoNode_)
+        document_->SetLiveBox(gizmoNode_, gizmoStartBox_);
+    dragging_ = false;
+    gizmoNode_ = nullptr;
+    extraDragNodes_.clear();
+    extraDragStarts_.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Structural (flow) drag / drop
+// ---------------------------------------------------------------------------
+
+bool UIViewTab::IsStructDragSource(const UiNode* node) const
+{
+    if (!node || !document_)
+        return false;
+    // Root IS the document, the virtual link nodes live in <head>, and an
+    // absolutely positioned element belongs to its gizmo (dragging it means
+    // writing left/top, not reflowing the document).
+    return node != document_->GetModel().root_.Get() && !node->IsNestedDoc()
+        && !node->IsHeadLink() && !node->IsText()
+        && node->GetStyle("position") != "absolute";
+}
+
+void UIViewTab::CancelStructDrag()
+{
+    structDragActive_ = false;
+    structDragging_ = false;
+    structDragNode_ = nullptr;
+    structDragStartDoc_ = Vector2::ZERO;
+    dropKind_ = 0;
+    dropParent_ = nullptr;
+    dropIndex_ = 0;
+    dropHaveHitBox_ = false;
+}
+
+void UIViewTab::EvaluateDrop(UiNode* source, const Vector2& mouseDoc, bool overCanvas)
+{
+    // Reset to "no feedback"; everything below either fills the state or
+    // leaves it empty (drawing and ApplyDrop both key on dropKind_).
+    dropKind_ = 0;
+    dropParent_ = nullptr;
+    dropIndex_ = 0;
+    dropHaveHitBox_ = false;
+    dropSiblingAxisIsRow_ = false;
+    dropChildAxisIsRow_ = false;
+    dropChildBoxes_.clear();
+    dropChildIndices_.clear();
+    if (!overCanvas || !document_ || !document_->GetRmlDocument())
+        return;
+
+    const UiDocumentModel& model = document_->GetModel();
+    UiNode* hit = document_->HitTest(mouseDoc);
+    if (hit && hit->IsText())
+        hit = model.FindParent(hit);
+    // A hit inside the dragged subtree is not a target: fall back to the
+    // subtree's parent, so hovering the node still offers a slot beside it.
+    if (hit && source && IsInSubtree(model, source, hit))
+        hit = model.FindParent(source);
+    if (!hit || hit->IsHeadLink() || (source && hit == source))
+        return;
+
+    // The hit's own border box (the nested-doc virtual node projects onto its
+    // chrome; a template-less document renders no chrome and offers no drop).
+    UiBox hitBox;
+    {
+        ea::vector<UiBox> boxes;
+        if (!document_->TryGetDomBoxes(hit, boxes) || boxes.empty())
+            return;
+        hitBox = boxes.front();
+        if (hitBox.size_.x_ <= 0.0f || hitBox.size_.y_ <= 0.0f)
+            return;
+    }
+
+    DropTargetFacts facts;
+    facts.rectMin_ = hitBox.pos_;
+    facts.rectMax_ = hitBox.pos_ + hitBox.size_;
+    facts.childAxis_ = FlowAxisOf(hit);
+    UiNode* hitParent = model.FindParent(hit);
+    facts.siblingAxis_ = FlowAxisOf(hitParent);
+    facts.selfIndex_ = ChildIndexOf(hitParent, hit);
+    facts.childCount_ = static_cast<unsigned>(hit->children_.size());
+    const bool isRoot = hit == model.root_.Get();
+    // Only block-level containers (or nodes that already hold element
+    // children) take a drop inside; the root always does.
+    unsigned elementChildren = 0;
+    for (const SharedPtr<UiNode>& child : hit->children_)
+    {
+        if (!child->IsText() && !child->IsHeadLink())
+            ++elementChildren;
+    }
+    facts.hostable_ = !hit->IsNestedDoc()
+        && (isRoot || elementChildren > 0 || IsFlowContainerTag(hit->tag_));
+    facts.forceInside_ = isRoot;
+    // The children's slot geometry: full indices + centers on the child axis.
+    for (unsigned i = 0; i < hit->children_.size(); i++)
+    {
+        const SharedPtr<UiNode>& child = hit->children_[i];
+        if (child->IsText() || child->IsHeadLink())
+            continue;
+        ea::vector<UiBox> boxes;
+        if (!document_->TryGetDomBoxes(child.Get(), boxes) || boxes.empty())
+            continue;
+        const UiBox& box = boxes.front();
+        if (box.size_.x_ <= 0.0f || box.size_.y_ <= 0.0f)
+            continue;
+        const Vector2 center = box.Center();
+        facts.children_.push_back(DropChild{
+            facts.childAxis_ == DropAxis::Horizontal ? center.x_ : center.y_, i});
+        dropChildBoxes_.push_back(box);
+        dropChildIndices_.push_back(i);
+    }
+
+    const DropSolution solution = SolveFlowDrop(mouseDoc, facts);
+    switch (solution.kind_)
+    {
+    case DropSolution::Kind::Inside:
+        dropKind_ = 3;
+        dropParent_ = hit;
+        break;
+    case DropSolution::Kind::Before:
+    case DropSolution::Kind::After:
+        if (!hitParent || facts.selfIndex_ == M_MAX_UNSIGNED)
+            return;
+        dropKind_ = solution.kind_ == DropSolution::Kind::Before ? 1 : 2;
+        dropParent_ = hitParent;
+        break;
+    default:
+        return;
+    }
+    dropIndex_ = solution.index_;
+    dropHitBox_ = hitBox;
+    dropHaveHitBox_ = true;
+    dropSiblingAxisIsRow_ = facts.siblingAxis_ == DropAxis::Horizontal;
+    dropChildAxisIsRow_ = facts.childAxis_ == DropAxis::Horizontal;
+
+    // The final safety net: a drop into the dragged subtree is a cycle that
+    // MoveNode would reject - never promise it.
+    if (source && IsInSubtree(model, source, dropParent_))
+    {
+        dropKind_ = 0;
+        dropParent_ = nullptr;
+        dropHaveHitBox_ = false;
+    }
+}
+
+void UIViewTab::ApplyDrop(UiNode* source)
+{
+    if (!document_ || !source || dropKind_ == 0 || !dropParent_)
+        return;
+    const UiDocumentModel& model = document_->GetModel();
+    // Inserting at the node's own slot (or right after it) changes nothing:
+    // skip the no-op instead of pushing an empty undo step.
+    UiNode* oldParent = model.FindParent(source);
+    const unsigned oldIndex = ChildIndexOf(oldParent, source);
+    if (dropParent_ == oldParent && (dropIndex_ == oldIndex || dropIndex_ == oldIndex + 1))
+        return;
+    if (UiNode* moved = document_->MoveNode(source, dropParent_, dropIndex_))
+        SetSelectedNode(moved);
+}
+
+void UIViewTab::ApplyResourceDrop(const ResourceFileDescriptor& desc)
+{
+    if (!document_ || dropKind_ == 0 || !dropParent_)
+        return;
+    UiWidgetSpec spec;
+    spec.tag_ = "img";
+    spec.attrName_ = "src";
+    spec.attrValue_ = MakeDocRelativePath(document_->GetSourcePath(), desc.resourceName_);
+    // Same placeholder policy as the palette's img: a box that marks the
+    // element until the project stylesheet has rules for it.
+    spec.stylePolicy_ = UiWidgetStylePolicy::Panel;
+    spec.materialize_ = false;
+    // Explicit pixel size: RmlUi has no intrinsic image size, an unsized
+    // <img> collapses to nothing. Fall back when the texture cannot be read.
+    Vector2 size{160.0f, 48.0f};
+    if (auto* cache = GetSubsystem<ResourceCache>())
+    {
+        if (Texture2D* texture = cache->GetResource<Texture2D>(desc.resourceName_))
+        {
+            size = Vector2{static_cast<float>(texture->GetWidth()),
+                static_cast<float>(texture->GetHeight())};
+        }
+    }
+    spec.flowSize_ = size;
+    if (UiNode* node = document_->AddWidget(dropParent_, spec, dropIndex_))
+        SetSelectedNode(node);
+}
+
+void UIViewTab::HandlePreviewDrop(const DocViewport& vp)
+{
+    // The whole canvas is one drop target: node moves dragged out of the
+    // hierarchy, and single image files from the Resource Browser or the OS.
+    // The preview item itself is a zero-ID Image that ImGui's item-based
+    // targeting cannot key on, so the target is custom: the image rect plus
+    // an explicit id.
+    const IntVector2 previewSize = document_->GetPreviewSize();
+    const ImVec2 min = IV2(vp.origin_);
+    const ImVec2 max(min.x + previewSize.x_ * vp.scale_, min.y + previewSize.y_ * vp.scale_);
+    if (!ui::BeginDragDropTargetCustom(ImRect(min, max), ui::GetID("UIViewPreview")))
+        return;
+
+    const Vector2 doc = vp.ToDoc(V2(ui::GetIO().MousePos));
+
+    // Hierarchy rows carry [document id, child-index path]: one structural
+    // drop, solved per frame so the indicator previews what a release commits.
+    if (const ImGuiPayload* payload = ui::AcceptDragDropPayload(kUiNodeDragType,
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+    {
+        ea::vector<unsigned> srcPath;
+        UiNode* src = ParseNodeDragData(payload, document_, srcPath)
+            ? document_->GetModel().ResolvePath(srcPath)
+            : nullptr;
+        if (src)
+        {
+            EvaluateDrop(src, doc, true);
+            if (ui::GetDragDropPayload()->IsDelivery())
+            {
+                ApplyDrop(src);
+                dropKind_ = 0; // the model was rebuilt; the feedback is spent
+            }
+        }
+    }
+    // System payloads (Resource Browser / OS file drags): a single image
+    // becomes an <img>; other payloads have no authored meaning here (yet).
+    else if (auto* resPayload = dynamic_cast<ResourceDragDropPayload*>(DragDropPayload::Get()))
+    {
+        if (IsSupportedImageDrop(*resPayload))
+        {
+            if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str(),
+                ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+            {
+                EvaluateDrop(nullptr, doc, true);
+                if (ui::GetDragDropPayload()->IsDelivery())
+                {
+                    ApplyResourceDrop(resPayload->resources_.front());
+                    dropKind_ = 0; // the model was rebuilt; the feedback is spent
+                }
+            }
+        }
+    }
+
+    ui::EndDragDropTarget();
+}
+
 // ---------------------------------------------------------------------------
 // Overlay / gizmo drawing (ImGui foreground draw list - presentation only)
 // ---------------------------------------------------------------------------
@@ -1493,6 +2563,102 @@ void DrawHandleSquare(ImDrawList* dl, const ImVec2& center, ImU32 fill)
     dl->AddRectFilled(a, b, fill);
     dl->AddRect(a, b, kGizmoHandleBorder);
 }
+
+// A small dark chip with text, used by the hover tag and the box-model
+// readouts. \a pos is the top-left of the text; the chip pads it by 2px.
+void DrawChip(ImDrawList* dl, const ImVec2& pos, const char* text)
+{
+    const ImVec2 size = ui::CalcTextSize(text);
+    dl->AddRectFilled(ImVec2(pos.x - 2.0f, pos.y - 2.0f), ImVec2(pos.x + size.x + 2.0f, pos.y + size.y + 2.0f), kBoxLabelBg);
+    dl->AddText(pos, kBoxLabelText, text);
+}
+
+// The rectangle corner closest to the top of the screen; labels hang off it
+// so a transformed (rotated) box cannot push its own label over its content.
+ImVec2 TopmostCorner(const ImVec2 c[4])
+{
+    ImVec2 top = c[0];
+    for (int i = 1; i < 4; i++)
+    {
+        if (c[i].y < top.y)
+            top = c[i];
+    }
+    return top;
+}
+
+// Tint the four edge strips of the band between two layout rectangles (the
+// CSS box-model look): only the space itself is filled, so the inner area
+// keeps showing the document.
+void FillBand(const DocViewport& vp, ImDrawList* dl, const UiBox& outer, const UiBox& inner, ImU32 color)
+{
+    const float ox = outer.pos_.x_, oy = outer.pos_.y_;
+    const float ow = outer.size_.x_, oh = outer.size_.y_;
+    const float ix = inner.pos_.x_, iy = inner.pos_.y_;
+    const float iw = inner.size_.x_, ih = inner.size_.y_;
+    const struct { float x_, y_, w_, h_; } strips[4] = {
+        {ox, oy, ow, iy - oy},                    // top
+        {ox, iy + ih, ow, (oy + oh) - (iy + ih)}, // bottom
+        {ox, iy, ix - ox, ih},                    // left
+        {ix + iw, iy, (ox + ow) - (ix + iw), ih}, // right
+    };
+    for (const auto& s : strips)
+    {
+        if (s.w_ <= 0.0f || s.h_ <= 0.0f)
+            continue;
+        UiBox strip = outer;
+        strip.pos_ = Vector2{s.x_, s.y_};
+        strip.size_ = Vector2{s.w_, s.h_};
+        ImVec2 c[4];
+        TransformedCorners(vp, strip, c);
+        dl->AddConvexPolyFilled(c, 4, color);
+    }
+}
+
+// Box-model overlay of the primary selection: margin / border / padding
+// bands, the border-box size, and per-edge values on bands thick enough
+// (>= 10 screen px) to label.
+void DrawBoxModelOverlay(const DocViewport& vp, const UiBoxModel& model)
+{
+    ImDrawList* dl = ui::GetWindowDrawList();
+    FillBand(vp, dl, model.margin_, model.border_, kBoxMarginFill);
+    FillBand(vp, dl, model.border_, model.padding_, kBoxBorderFill);
+    FillBand(vp, dl, model.padding_, model.content_, kBoxPaddingFill);
+
+    ImVec2 border[4];
+    TransformedCorners(vp, model.border_, border);
+    const ImVec2 top = TopmostCorner(border);
+    const ea::string sizeText = Format("%d × %d", (int)lroundf(model.border_.size_.x_), (int)lroundf(model.border_.size_.y_));
+    DrawChip(dl, ImVec2(top.x, top.y - ui::GetTextLineHeight() - 6.0f), sizeText.c_str());
+
+    // Per-edge readouts, anchored at each band's midpoint; [0]=left, [1]=top,
+    // [2]=right, [3]=bottom. Values are layout px.
+    const float proj = vp.scale_ * model.border_.WindowScale();
+    const auto drawBand = [&](const UiBox& outer, const UiBox& inner) {
+        const float left = inner.pos_.x_ - outer.pos_.x_;
+        const float topEdge = inner.pos_.y_ - outer.pos_.y_;
+        const float right = (outer.pos_.x_ + outer.size_.x_) - (inner.pos_.x_ + inner.size_.x_);
+        const float bottom = (outer.pos_.y_ + outer.size_.y_) - (inner.pos_.y_ + inner.size_.y_);
+        const float midX = inner.pos_.x_ + inner.size_.x_ * 0.5f;
+        const float midY = inner.pos_.y_ + inner.size_.y_ * 0.5f;
+        const struct { float value_; Vector2 at_; } readouts[4] = {
+            {left, Vector2{(outer.pos_.x_ + inner.pos_.x_) * 0.5f, midY}},
+            {topEdge, Vector2{midX, (outer.pos_.y_ + inner.pos_.y_) * 0.5f}},
+            {right, Vector2{((outer.pos_.x_ + outer.size_.x_) + (inner.pos_.x_ + inner.size_.x_)) * 0.5f, midY}},
+            {bottom, Vector2{midX, ((outer.pos_.y_ + outer.size_.y_) + (inner.pos_.y_ + inner.size_.y_)) * 0.5f}},
+        };
+        for (const auto& r : readouts)
+        {
+            if (r.value_ * proj < 10.0f)
+                continue;
+            const ea::string text = Format("%d", (int)lroundf(r.value_));
+            const ImVec2 size = ui::CalcTextSize(text.c_str());
+            const ImVec2 at = IV2(vp.ToScreen(outer.MapToWindow(r.at_)));
+            DrawChip(dl, ImVec2(at.x - size.x * 0.5f, at.y - size.y * 0.5f), text.c_str());
+        }
+    };
+    drawBand(model.margin_, model.border_);
+    drawBand(model.padding_, model.content_);
+}
 } // namespace
 
 void UIViewTab::DrawOverlay(const DocViewport& vp)
@@ -1511,6 +2677,25 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
                 ImVec2 c[4];
                 TransformedCorners(vp, box, c);
                 dl->AddPolyline(c, 4, kHoverColor, ImDrawFlags_Closed, 1.0f);
+            }
+
+            // DevTools-style hover tag: what this element is and how big it
+            // renders, so nested flow containers stay identifiable without
+            // selecting anything.
+            if (!hover->IsNestedDoc() && !boxes.empty() && boxes.front().size_.x_ > 0.0f)
+            {
+                ea::string label = hover->tag_;
+                if (!hover->classes_.empty())
+                {
+                    label += ".";
+                    for (char ch : hover->classes_)
+                        label += ch == ' ' ? '.' : ch;
+                }
+                label += Format(" %d × %d", (int)lroundf(boxes.front().size_.x_), (int)lroundf(boxes.front().size_.y_));
+                ImVec2 c[4];
+                TransformedCorners(vp, boxes.front(), c);
+                const ImVec2 top = TopmostCorner(c);
+                DrawChip(dl, ImVec2(top.x, top.y - ui::GetTextLineHeight() - 6.0f), label.c_str());
             }
         }
     }
@@ -1554,13 +2739,25 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
         else
             document_->TryGetDomBoxes(sel, boxes);
 
+        // In a flow layout the interesting facts are where margin, border and
+        // padding put the element, so the box-model bands replace the flat fill
+        // for the primary selection. While a gizmo drag is live the box is a
+        // DOM-preview snapshot with no reliable model, and the nested-doc
+        // virtual node has no box model at all: both keep the fill.
+        UiBoxModel boxModel;
+        const bool withBoxModel = !dragging && !structDragging_
+            && document_->TryGetBoxModel(sel, boxModel);
+        if (withBoxModel)
+            DrawBoxModelOverlay(vp, boxModel);
+
         for (const UiBox& box : boxes)
         {
             if (box.size_.x_ <= 0.0f || box.size_.y_ <= 0.0f)
                 continue;
             ImVec2 c[4];
             TransformedCorners(vp, box, c);
-            dl->AddConvexPolyFilled(c, 4, kSelectFill);
+            if (!withBoxModel)
+                dl->AddConvexPolyFilled(c, 4, kSelectFill);
             dl->AddPolyline(c, 4, kSelectColor, ImDrawFlags_Closed, 2.0f);
         }
 
@@ -1571,6 +2768,26 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
         if (!boxes.empty() && (dragging || sel->GetStyle("position") == "absolute"))
             DrawGizmo(vp, boxes.front());
     }
+
+    // While a structural drag is live, outline the node being moved so the
+    // dragged subject stays identifiable wherever the pointer wanders.
+    if (structDragging_ && structDragNode_ && structDragNode_->dom_)
+    {
+        ea::vector<UiBox> dragBoxes;
+        if (document_->TryGetDomBoxes(structDragNode_, dragBoxes))
+        {
+            for (const UiBox& box : dragBoxes)
+            {
+                ImVec2 c[4];
+                TransformedCorners(vp, box, c);
+                dl->AddPolyline(c, 4, kDropColor, ImDrawFlags_Closed, 2.0f);
+            }
+        }
+    }
+
+    // One indicator for every drop feedback source: the in-canvas drag and
+    // the external payloads both fill the same state (dropKind_).
+    DrawDropIndicator(vp);
 
     DrawMarquee(vp);
 }
@@ -1584,6 +2801,97 @@ void UIViewTab::DrawMarquee(const DocViewport& vp)
     const ImVec2 b = IV2(vp.ToScreen(marqueeCurDoc_));
     dl->AddRectFilled(a, b, kMarqueeFill);
     dl->AddRect(a, b, kMarqueeColor, 0.0f, ImDrawFlags_None, 1.0f);
+}
+
+void UIViewTab::DrawDropIndicator(const DocViewport& vp)
+{
+    if (dropKind_ == 0 || !dropHaveHitBox_)
+        return;
+    ImDrawList* dl = ui::GetWindowDrawList();
+    const UiBox& box = dropHitBox_;
+    // Keep a slot line 2 screen px clear of the neighbor it hugs, so it reads
+    // as a gap rather than as part of that neighbor's outline.
+    const float scale = vp.scale_ > 0.001f ? vp.scale_ : 0.001f;
+    const float pad = 2.0f / scale;
+
+    if (dropKind_ == 3)
+    {
+        // Inside: tint the receiving container and outline it, then draw the
+        // insertion slot itself.
+        ImVec2 c[4];
+        TransformedCorners(vp, box, c);
+        dl->AddConvexPolyFilled(c, 4, kDropFill);
+        dl->AddPolyline(c, 4, kDropColor, ImDrawFlags_Closed, 2.0f);
+
+        // The slot sits right after the child that precedes it on the child
+        // axis, or right before the one that follows it; an empty container
+        // (or one whose children all failed to measure) gets a centered line.
+        const UiBox* before = nullptr;
+        const UiBox* after = nullptr;
+        for (size_t i = 0; i < dropChildBoxes_.size(); i++)
+        {
+            if (dropChildIndices_[i] < dropIndex_)
+                before = &dropChildBoxes_[i];
+            else if (!after)
+                after = &dropChildBoxes_[i];
+        }
+        Vector2 a, b;
+        if (before || after)
+        {
+            const UiBox& ref = before ? *before : *after;
+            if (dropChildAxisIsRow_)
+            {
+                const float x = before ? ref.pos_.x_ + ref.size_.x_ + pad : ref.pos_.x_ - pad;
+                a = Vector2{x, ref.pos_.y_};
+                b = Vector2{x, ref.pos_.y_ + ref.size_.y_};
+            }
+            else
+            {
+                const float y = before ? ref.pos_.y_ + ref.size_.y_ + pad : ref.pos_.y_ - pad;
+                a = Vector2{ref.pos_.x_, y};
+                b = Vector2{ref.pos_.x_ + ref.size_.x_, y};
+            }
+            dl->AddLine(IV2(vp.ToScreen(ref.MapToWindow(a))), IV2(vp.ToScreen(ref.MapToWindow(b))),
+                kDropColor, 3.0f);
+        }
+        else
+        {
+            if (dropChildAxisIsRow_)
+            {
+                const float x = box.pos_.x_ + box.size_.x_ * 0.5f;
+                a = Vector2{x, box.pos_.y_};
+                b = Vector2{x, box.pos_.y_ + box.size_.y_};
+            }
+            else
+            {
+                const float y = box.pos_.y_ + box.size_.y_ * 0.5f;
+                a = Vector2{box.pos_.x_, y};
+                b = Vector2{box.pos_.x_ + box.size_.x_, y};
+            }
+            dl->AddLine(IV2(vp.ToScreen(box.MapToWindow(a))), IV2(vp.ToScreen(box.MapToWindow(b))),
+                kDropColor, 3.0f);
+        }
+        return;
+    }
+
+    // Before / After: a thick line along the hit node's leading (1) or
+    // trailing (2) edge on its parent's flow axis, spanning the hit's extent
+    // on the cross axis.
+    Vector2 a, b;
+    if (dropSiblingAxisIsRow_)
+    {
+        const float x = dropKind_ == 1 ? box.pos_.x_ - pad : box.pos_.x_ + box.size_.x_ + pad;
+        a = Vector2{x, box.pos_.y_};
+        b = Vector2{x, box.pos_.y_ + box.size_.y_};
+    }
+    else
+    {
+        const float y = dropKind_ == 1 ? box.pos_.y_ - pad : box.pos_.y_ + box.size_.y_ + pad;
+        a = Vector2{box.pos_.x_, y};
+        b = Vector2{box.pos_.x_ + box.size_.x_, y};
+    }
+    dl->AddLine(IV2(vp.ToScreen(box.MapToWindow(a))), IV2(vp.ToScreen(box.MapToWindow(b))),
+        kDropColor, 3.0f);
 }
 
 void UIViewTab::DrawGizmo(const DocViewport& vp, const UiBox& box)
@@ -1861,10 +3169,12 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
         && !node->IsHeadLink() && ui::BeginDragDropSource())
     {
         // Payload bytes must be contiguous; the local copy is swallowed
-        // (copied) by SetDragDropPayload within the same frame.
-        ea::vector<unsigned> dragPath = path;
-        ui::SetDragDropPayload(kUiNodeDragType, dragPath.data(),
-            dragPath.size() * sizeof(unsigned));
+        // (copied) by SetDragDropPayload within the same frame. The data is
+        // [source document id, child-index path], so a target can reject a
+        // drag that originated in another tab's document.
+        ea::vector<unsigned> dragData = MakeNodeDragData(tab->GetDocument(), path);
+        ui::SetDragDropPayload(kUiNodeDragType, dragData.data(),
+            dragData.size() * sizeof(unsigned));
         ui::TextUnformatted(label.c_str());
         ui::EndDragDropSource();
     }
@@ -1878,13 +3188,20 @@ void UIViewHierarchy::RenderNode(UiNode* node, const ea::vector<unsigned>& path)
             kHoverColor, 0.0f, 0, 2.0f);
         if (const ImGuiPayload* payload = ui::AcceptDragDropPayload(kUiNodeDragType))
         {
-            const unsigned* srcPath = static_cast<const unsigned*>(payload->Data);
-            ea::vector<unsigned> src(srcPath, srcPath + payload->DataSize / sizeof(unsigned));
+            // The payload is [source document id, child-index path]: resolve
+            // it against this model only when the id matches.
             UIViewDocument* doc = tab->GetDocument();
-            if (UiNode* moved = doc->MoveNode(doc->GetModel().ResolvePath(src), node,
-                static_cast<unsigned>(node->children_.size())))
+            ea::vector<unsigned> srcPath;
+            UiNode* src = ParseNodeDragData(payload, doc, srcPath)
+                ? doc->GetModel().ResolvePath(srcPath)
+                : nullptr;
+            if (src)
             {
-                tab->SetSelectedNode(moved);
+                if (UiNode* moved = doc->MoveNode(src, node,
+                    static_cast<unsigned>(node->children_.size())))
+                {
+                    tab->SetSelectedNode(moved);
+                }
             }
         }
         ui::EndDragDropTarget();
@@ -1991,6 +3308,40 @@ void UIViewHierarchy::RenderContextMenuItems()
                 tab->DeleteSelection();
             }
         }
+
+        // Structural flow commands mirror the canvas context menu: the same
+        // tab entry points and enablement rules (the right-click collapsed
+        // the selection to the target unless it was part of one).
+        ui::Separator();
+        const ea::string wrapReason = tab->WrapUnavailableReason();
+        ui::BeginDisabled(!wrapReason.empty());
+        if (ui::BeginMenu(ICON_FA_OBJECT_GROUP " Wrap in"))
+        {
+            if (ui::MenuItem("Row"))
+                tab->WrapSelection(UiWrapMode::Row);
+            if (ui::MenuItem("Column"))
+                tab->WrapSelection(UiWrapMode::Column);
+            if (ui::MenuItem("Box"))
+                tab->WrapSelection(UiWrapMode::Box);
+            ui::EndMenu();
+        }
+        ui::EndDisabled();
+        if (!wrapReason.empty())
+            ui::SetItemTooltip("%s", wrapReason.c_str());
+        const bool canMoveUp = tab->CanMoveInFlow(-1);
+        const bool canMoveDown = tab->CanMoveInFlow(1);
+        ui::BeginDisabled(!canMoveUp);
+        if (ui::MenuItem(ICON_FA_ARROW_UP " Move Up", "Alt+Up"))
+            tab->MoveSelectionInFlow(-1);
+        ui::EndDisabled();
+        if (!canMoveUp)
+            ui::SetItemTooltip("No element sibling above");
+        ui::BeginDisabled(!canMoveDown);
+        if (ui::MenuItem(ICON_FA_ARROW_DOWN " Move Down", "Alt+Down"))
+            tab->MoveSelectionInFlow(1);
+        ui::EndDisabled();
+        if (!canMoveDown)
+            ui::SetItemTooltip("No element sibling below");
     }
     contextMenuTargetValid_ = false;
 }
@@ -2113,8 +3464,10 @@ void UIViewInspector::RenderHeadLinks()
 void UIViewInspector::InvalidateCaches()
 {
     // Whole-tree rebuilds (every command / undo) replace all nodes; the cached
-    // inline-style text must be reseeded from the new node on the next render.
+    // inline-style and paragraph-content texts must be reseeded from the new
+    // node on the next render.
     styleSeedValid_ = false;
+    contentSeedValid_ = false;
 }
 
 void UIViewInspector::RenderNestedDoc(UiNode* node)
@@ -2314,6 +3667,59 @@ void UIViewInspector::RenderTemplates(UiNode* node)
     }
 }
 
+namespace
+{
+
+/// std::string copy of an eastl string (the paragraph unit is std-only).
+std::string Std(const ea::string& s)
+{
+    return std::string(s.c_str(), s.length());
+}
+
+/// True when the node's computed white-space keeps newlines (the pre kinds):
+/// such paragraphs already render raw \n as line breaks, so their raw editor
+/// stays the WYSIWYG form and the structural <br/> editor is not offered.
+bool ParagraphUsesPreWhitespace(const UiNode& node)
+{
+    if (node.dom_)
+    {
+        const Rml::Style::WhiteSpace ws = node.dom_->GetComputedValues().white_space();
+        return ws == Rml::Style::WhiteSpace::Pre || ws == Rml::Style::WhiteSpace::Prewrap
+            || ws == Rml::Style::WhiteSpace::Preline;
+    }
+    // No live projection: fall back to the authored inline declaration.
+    return LowerCopy(node.GetStyle("white-space")).find("pre") == 0;
+}
+
+/// Read the editable paragraph shape (children are text runs and bare <br/>
+/// only) into the editor's normalized lines. False for anything else.
+bool TryGetParagraphLines(const UiNode& host, std::vector<std::string>& lines)
+{
+    std::vector<ParagraphChildState> children;
+    children.reserve(host.children_.size());
+    for (const SharedPtr<UiNode>& child : host.children_)
+    {
+        ParagraphChildState state;
+        state.srcNode = child->srcNode_;
+        state.isText = child->IsText();
+        if (state.isText)
+        {
+            state.text = Std(child->text_);
+        }
+        else if (child->tag_ != "br" || !child->attributes_.empty() || !child->style_.empty()
+            || !child->id_.empty() || !child->classes_.empty() || !child->children_.empty())
+        {
+            return false;
+        }
+        children.push_back(std::move(state));
+    }
+    if (children.empty())
+        return false;
+    return ParagraphLinesOfChildren(children, lines);
+}
+
+} // namespace
+
 bool UIViewInspector::RenderTextContent(UiNode* node)
 {
     UIViewTab* tab = owner_;
@@ -2329,14 +3735,101 @@ bool UIViewInspector::RenderTextContent(UiNode* node)
         textNode = node;
     else if (node->children_.size() == 1 && node->children_[0]->IsText())
         textNode = node->children_[0].Get();
-    if (!textNode)
+
+    // A <p> whose children are text runs and bare <br/> takes the structural
+    // multi-line editor: one buffer line per run, and Enter covers a line break
+    // by inserting a <br/> on commit (under white-space: normal a raw \n would
+    // collapse to a space). pre-formatted paragraphs keep the raw editor -
+    // their \n already renders as breaks, so that form is their WYSIWYG one.
+    const UiDocumentModel& model = tab->GetDocument()->GetModel();
+    UiNode* host = node->IsText() ? model.FindParent(node) : node;
+    const bool paragraph = host && LowerCopy(host->tag_) == "p";
+    std::vector<std::string> paraLines;
+    std::string paraBuffer;
+    bool structural = false;
+    if (paragraph && !ParagraphUsesPreWhitespace(*host) && TryGetParagraphLines(*host, paraLines))
+    {
+        paraBuffer = JoinParagraphLines(paraLines);
+        // The fixed editor buffer must hold the whole paragraph; longer ones
+        // fall back rather than committing a truncated rewrite.
+        structural = paraBuffer.size() + 1 <= sizeof(contentBuf_);
+    }
+
+    if (!textNode && !structural)
         return false;
 
     if (!ui::CollapsingHeader(ICON_FA_FONT " Content", ImGuiTreeNodeFlags_DefaultOpen))
         return false;
 
-    // Same seed-per-frame + commit-on-deactivate model as the id/class rows:
-    // ImGui keeps its own edit buffer while focused, so re-seeding is safe.
+    if (structural)
+    {
+        // Same seed-per-selection + explicit-Apply model as the raw inline
+        // style editor: ImGui keeps its own buffer while the field is live, so
+        // the lines are only re-read when the selection changes or a rebuild
+        // invalidated the cache.
+        const ea::vector<unsigned> curPath = tab->GetSelectedPath();
+        if (!contentSeedValid_ || curPath != lastContentPath_)
+        {
+            snprintf(contentBuf_, sizeof(contentBuf_), "%s", paraBuffer.c_str());
+            lastContentPath_ = curPath;
+            contentSeedValid_ = true;
+        }
+
+        ui::InputTextMultiline("##textContent", contentBuf_, sizeof(contentBuf_), ImVec2(-1.0f, 120.0f));
+        if (ui::Button(ICON_FA_CHECK " Apply Content"))
+        {
+            contentSeedValid_ = false;
+            // An untouched buffer commits nothing (no edit, no undo step).
+            if (NormalizedParagraphLines(contentBuf_) != paraLines)
+            {
+                tab->GetDocument()->SetParagraphText(host, ea::string(contentBuf_));
+                return true; // the model was rebuilt; the nodes are dangling now
+            }
+        }
+        return false;
+    }
+
+    if (!textNode)
+        return false;
+
+    if (paragraph)
+    {
+        // A pre-formatted paragraph keeps the raw multi-line editor: its \n is
+        // rendered as authored, so the text is edited verbatim.
+        if (textNode->text_.length() + 1 > sizeof(contentBuf_))
+        {
+            ui::TextDisabled("Text is too long for the inline editor.");
+            return false;
+        }
+        // Same seed-per-selection + explicit-Apply model as the structural
+        // editor above.
+        const ea::vector<unsigned> curPath = tab->GetSelectedPath();
+        if (!contentSeedValid_ || curPath != lastContentPath_)
+        {
+            snprintf(contentBuf_, sizeof(contentBuf_), "%s", textNode->text_.c_str());
+            lastContentPath_ = curPath;
+            contentSeedValid_ = true;
+        }
+
+        ui::InputTextMultiline("##textContent", contentBuf_, sizeof(contentBuf_), ImVec2(-1.0f, 120.0f));
+        if (ui::Button(ICON_FA_CHECK " Apply Content"))
+        {
+            contentSeedValid_ = false;
+            // An untouched buffer commits nothing (no edit, no undo step).
+            if (ea::string(contentBuf_) != textNode->text_)
+            {
+                UiNodePayload payload = SnapshotUiNodePayload(*textNode);
+                payload.text_ = ea::string(contentBuf_);
+                tab->GetDocument()->EditNodePayload(textNode, payload);
+                return true; // the model was rebuilt; the node is dangling now
+            }
+        }
+        return false;
+    }
+
+    // Everything else keeps the single-line field: same seed-per-frame +
+    // commit-on-deactivate model as the id/class rows - ImGui keeps its own
+    // edit buffer while focused, so re-seeding is safe.
     char textBuf[1024];
     snprintf(textBuf, sizeof(textBuf), "%s", textNode->text_.c_str());
     ui::PushItemWidth(-1.0f);
@@ -3502,6 +4995,42 @@ bool UIViewInspector::RenderLayout(UiNode* node)
             }
             structural = true;
         }
+        ui::PopItemWidth();
+    }
+
+    // Margin: one field writes all four sides, mirroring Padding (four-way
+    // tuning lives in raw). Adjacent vertical margins collapse per CSS, so
+    // the rendered gap between neighbors can be smaller than the value here.
+    {
+        const ea::string mv = cur("margin-top");
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s", mv.c_str());
+        ui::Text("Margin");
+        ui::SameLine();
+        ui::PushItemWidth(-8.0f);
+        if (ui::InputTextWithHint("##margin", "0px", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            const ea::string next = Trim(buf);
+            if (next.empty())
+            {
+                DropPayloadStyle(payload, "margin-top");
+                DropPayloadStyle(payload, "margin-right");
+                DropPayloadStyle(payload, "margin-bottom");
+                DropPayloadStyle(payload, "margin-left");
+            }
+            else
+            {
+                SetPayloadStyle(payload, "margin-top", next);
+                SetPayloadStyle(payload, "margin-right", next);
+                SetPayloadStyle(payload, "margin-bottom", next);
+                SetPayloadStyle(payload, "margin-left", next);
+            }
+            structural = true;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Adjacent vertical margins collapse (CSS): the rendered gap between\n"
+                "neighbors is the larger of the two, not their sum. Four-way tuning\n"
+                "lives in the raw style.");
         ui::PopItemWidth();
     }
 

@@ -70,6 +70,19 @@ struct UiBox
     }
 };
 
+/// The four rectangles of the CSS box model of one element, in document
+/// (layout) space. All four share the border box's accumulated transform map
+/// (captured once from the live DOM), so each projects to the screen through
+/// MapToWindow; only the rectangle itself changes per area. Margin positions
+/// come out negative of the border box, as in CSS.
+struct UiBoxModel
+{
+    UiBox content_;
+    UiBox padding_;
+    UiBox border_;
+    UiBox margin_;
+};
+
 /// Screen<->document mapping for the scaled preview image. Screen coordinates
 /// are carried as Vector2 to keep this module ImGui-free; the caller converts.
 struct DocViewport

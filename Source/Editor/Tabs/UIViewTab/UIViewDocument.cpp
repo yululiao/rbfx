@@ -7,6 +7,7 @@
 #include "UIViewDocument.h"
 
 #include "UIViewActions.h"
+#include "UIViewParagraphText.h"
 
 #include "../../Project/Project.h"
 
@@ -25,6 +26,8 @@
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Types.h>
 
+#include <EASTL/sort.h>
+
 namespace Urho3D
 {
 
@@ -37,6 +40,16 @@ constexpr int kPreviewWidth = 1024;
 constexpr int kPreviewHeight = 768;
 
 Vector2 V2(const Rml::Vector2f& v) { return Vector2{v.x, v.y}; }
+
+std::string Std(const ea::string& s)
+{
+    return std::string(s.c_str(), s.length());
+}
+
+ea::string Ea(const std::string& s)
+{
+    return ea::string(s.c_str(), s.length());
+}
 
 // Origin of the coordinate frame an element's inline left/top resolve against,
 // derived from the element's own placement (absOrigin = frameOrigin + left).
@@ -213,7 +226,8 @@ UIViewDocument::UIViewDocument(Context* context)
     // names, and several documents can be open at once, so give each instance
     // its own context name.
     static unsigned instanceCounter = 0;
-    const ea::string contextName = Format("UIViewPreview-{}", ++instanceCounter);
+    instanceId_ = ++instanceCounter;
+    const ea::string contextName = Format("UIViewPreview-{}", instanceId_);
     previewUI_ = new RmlUI(context_, contextName.c_str());
     // Input isolation: drop RmlUI's global input subscriptions so the preview
     // cannot steal editor focus. SetBlockEvents() must NOT be used - it blocks
@@ -311,6 +325,17 @@ void UIViewDocument::Rebuild()
         previewUI_->SetRenderTarget(nullptr);
         URHO3D_LOGERROR("UIViewDocument: failed to acquire RenderSurface for preview texture.");
     }
+}
+
+void UIViewDocument::SetPreviewSize(const IntVector2& size)
+{
+    if (size.x_ <= 0 || size.y_ <= 0 || size == previewSize_)
+        return;
+    previewSize_ = size;
+    // The rebuild retargets the RmlUi context to the new surface size
+    // (RmlUI::SetRenderTarget feeds the context dimensions), so the next
+    // update lays the document out against the new canvas.
+    Rebuild();
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +470,32 @@ bool UIViewDocument::TryGetDomBoxes(const UiNode* node, ea::vector<UiBox>& out) 
     if (!Urho3D::TryGetDomBox(node->dom_, node, box))
         return false;
     out.push_back(box);
+    return true;
+}
+
+bool UIViewDocument::TryGetBoxModel(const UiNode* node, UiBoxModel& out) const
+{
+    // The box model describes a regular element's own four areas; the
+    // nested-doc virtual node has no box of its own (its dom_ is the outer
+    // body) and would only mislead.
+    if (!node || node->IsNestedDoc())
+        return false;
+    if (!Urho3D::TryGetDomBox(node->dom_, node, out.border_))
+        return false;
+    // Every area shares the border box's layout->window map; the layout
+    // rectangle of another area differs only by the Box's own edge offsets
+    // (margin offsets come out negative, as in CSS).
+    const Rml::Box& box = node->dom_->GetBox();
+    const Vector2 borderPos = out.border_.pos_;
+    out.padding_ = out.border_;
+    out.padding_.pos_ = borderPos + V2(box.GetPosition(Rml::BoxArea::Padding));
+    out.padding_.size_ = V2(box.GetSize(Rml::BoxArea::Padding));
+    out.content_ = out.border_;
+    out.content_.pos_ = borderPos + V2(box.GetPosition(Rml::BoxArea::Content));
+    out.content_.size_ = V2(box.GetSize(Rml::BoxArea::Content));
+    out.margin_ = out.border_;
+    out.margin_.pos_ = borderPos + V2(box.GetPosition(Rml::BoxArea::Margin));
+    out.margin_.size_ = V2(box.GetSize(Rml::BoxArea::Margin));
     return true;
 }
 
@@ -605,7 +656,7 @@ bool UIViewDocument::CommitAndReload(const ea::string& undoText, const ea::vecto
 // Undoable editing commands
 // ---------------------------------------------------------------------------
 
-UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec)
+UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec, unsigned index)
 {
     if (!model_.root_ || !document_ || spec.tag_.empty())
         return nullptr;
@@ -663,7 +714,7 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec)
     // Born materialized: explicitly sized, centered inside the parent's
     // rendered box when it has one (else the preview viewport), so the widget
     // lands in view and is draggable at once. Flow-born entries (text labels)
-    // skip the box and join the flow at the parent's end.
+    // skip the box and join the flow at the requested slot.
     if (spec.materialize_)
     {
         UiBox box;
@@ -678,12 +729,24 @@ UiNode* UIViewDocument::AddWidget(UiNode* parent, const UiWidgetSpec& spec)
         WriteBoxToStyle(*node, box);
     }
 
+    // Flow-born widgets have no position box, but some are nothing without
+    // explicit dimensions: an <img> with no stylesheet rule has no intrinsic
+    // size and would collapse to nothing. Width/height stay author-visible
+    // inline styles so they remain editable in the Style panel.
+    if (!spec.materialize_ && spec.flowSize_.x_ > 0.0f && spec.flowSize_.y_ > 0.0f)
+    {
+        node->SetStyle("width", FormatPx(spec.flowSize_.x_));
+        node->SetStyle("height", FormatPx(spec.flowSize_.y_));
+    }
+
     const ea::string undoText = model_.EmitRml();
     ea::vector<unsigned> parentPath;
     if (!model_.BuildPath(parent, parentPath))
         return nullptr;
-    const unsigned indexInParent = parent->children_.size();
-    parent->children_.push_back(node);
+    // Insert at the requested slot (a drop may land mid-list, not only at the
+    // end); the full child-index numbering matches what MoveNode takes.
+    const unsigned indexInParent = Min(index, static_cast<unsigned>(parent->children_.size()));
+    parent->children_.insert(parent->children_.begin() + indexInParent, node);
 
     ea::vector<unsigned> nodePath = parentPath;
     nodePath.push_back(indexInParent);
@@ -945,6 +1008,88 @@ UiNode* UIViewDocument::MoveNode(UiNode* node, UiNode* newParent, unsigned index
     return model_.ResolvePath(newPath);
 }
 
+UiNode* UIViewDocument::WrapNodes(const ea::vector<UiNode*>& nodes, UiWrapMode mode)
+{
+    if (nodes.empty())
+        return nullptr;
+    UiNode* parent = model_.FindParent(nodes[0]);
+    if (!parent)
+        return nullptr;
+
+    // Every target must be a real element and share one parent: a cross-parent
+    // wrap would tear siblings out of different flows, and absolutely
+    // positioned nodes are rejected because their insets re-anchor against
+    // the new containing block (the visual jump the menus warn about).
+    for (UiNode* node : nodes)
+    {
+        if (!node || node == model_.root_.Get() || node->IsText() || node->IsNestedDoc()
+            || node->IsHeadLink())
+            return nullptr;
+        if (model_.FindParent(node) != parent)
+            return nullptr;
+        if (node->GetStyle("position") == "absolute")
+            return nullptr;
+    }
+
+    auto indexOf = [parent](UiNode* node) -> unsigned {
+        for (unsigned i = 0; i < parent->children_.size(); i++)
+        {
+            if (parent->children_[i].Get() == node)
+                return i;
+        }
+        return M_MAX_UNSIGNED;
+    };
+
+    // Operate in document order regardless of the selection order: the
+    // wrapped children keep their authored sibling sequence, and the
+    // container takes the slot of the first (topmost) one.
+    ea::vector<UiNode*> ordered = nodes;
+    ea::sort(ordered.begin(), ordered.end(),
+        [&indexOf](UiNode* a, UiNode* b) { return indexOf(a) < indexOf(b); });
+    const unsigned insertIndex = indexOf(ordered[0]);
+    if (insertIndex == M_MAX_UNSIGNED)
+        return nullptr;
+
+    const ea::string undoText = model_.EmitRml();
+
+    auto container = MakeShared<UiNode>();
+    container->tag_ = "div";
+    if (mode == UiWrapMode::Row || mode == UiWrapMode::Column)
+    {
+        container->SetStyle("display", "flex");
+        container->SetStyle("flex-direction", mode == UiWrapMode::Row ? "row" : "column");
+        container->SetStyle("gap", "8px");
+    }
+    // UiWrapMode::Box authors no look at all: a bare grouping <div>.
+
+    // Detach the targets in document order, then splice them into the
+    // container. Like MoveNode, the moved subtrees lose their spine anchors:
+    // their old positions are deleted as such and the new ones are generated
+    // whole (GenSubtree), which is what keeps the emit diff exact.
+    ea::vector<SharedPtr<UiNode>> held;
+    for (UiNode* node : ordered)
+    {
+        const unsigned index = indexOf(node);
+        if (index == M_MAX_UNSIGNED)
+            continue;
+        held.push_back(parent->children_[index]);
+        parent->children_.erase(parent->children_.begin() + index);
+        ResetSpineAnchors(*held.back());
+    }
+    for (const SharedPtr<UiNode>& node : held)
+        container->children_.push_back(node);
+    parent->children_.insert(parent->children_.begin() + insertIndex, container);
+
+    ea::vector<unsigned> containerPath;
+    if (!model_.BuildPath(parent, containerPath))
+        return nullptr;
+    containerPath.push_back(insertIndex);
+    // One undo step for the whole wrap (empty merge key, like MoveNode).
+    if (!CommitAndReload(undoText, {}))
+        return nullptr;
+    return model_.ResolvePath(containerPath);
+}
+
 bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
 {
     if (!node || node->IsNestedDoc() || node->IsHeadLink())
@@ -957,6 +1102,77 @@ bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
         return false;
     ApplyUiNodePayload(*node, newData);
     return CommitAndReload(undoText, mergeKey);
+}
+
+bool UIViewDocument::SetParagraphText(UiNode* element, const ea::string& buffer)
+{
+    if (!element || element == model_.root_.Get() || element->IsText() || element->IsNestedDoc()
+        || element->IsHeadLink())
+    {
+        return false;
+    }
+
+    // The node must be the editable paragraph shape: children are text runs and
+    // bare <br/> only. Anything else (mixed content, attributed <br>, ...) is
+    // out of scope for the structural Content editor.
+    std::vector<ParagraphChildState> children;
+    children.reserve(element->children_.size());
+    for (const SharedPtr<UiNode>& child : element->children_)
+    {
+        ParagraphChildState state;
+        state.srcNode = child->srcNode_;
+        state.isText = child->IsText();
+        if (state.isText)
+        {
+            state.text = Std(child->text_);
+        }
+        else if (child->tag_ != "br" || !child->attributes_.empty() || !child->style_.empty()
+            || !child->id_.empty() || !child->classes_.empty() || !child->children_.empty())
+        {
+            return false;
+        }
+        children.push_back(std::move(state));
+    }
+
+    const std::vector<std::string> newLines = NormalizedParagraphLines(Std(buffer));
+
+    std::vector<std::string> oldLines;
+    std::vector<ParagraphPlanEntry> plan;
+    if (ParagraphLinesOfChildren(children, oldLines) && oldLines == newLines)
+        return false; // no-op: identical lines, nothing to record
+    if (!PlanParagraphChildren(children, newLines, plan))
+        plan = FreshParagraphPlan(newLines);
+
+    // Materialize the plan: reused slots keep their node (spine anchor and
+    // exact bytes), the rest are minted here and spliced at save time.
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<SharedPtr<UiNode>> rebuilt;
+    rebuilt.reserve(plan.size());
+    for (const ParagraphPlanEntry& entry : plan)
+    {
+        if (entry.reuseChild >= 0)
+        {
+            rebuilt.push_back(element->children_[static_cast<unsigned>(entry.reuseChild)]);
+        }
+        else if (entry.isBreak)
+        {
+            auto br = MakeShared<UiNode>();
+            br->tag_ = "br";
+            rebuilt.push_back(br);
+        }
+        else
+        {
+            auto run = MakeShared<UiNode>();
+            run->tag_ = "#text";
+            run->text_ = Ea(entry.text);
+            rebuilt.push_back(run);
+        }
+    }
+
+    element->textRunsRebuilt_ = true;
+    element->children_ = rebuilt;
+    // Empty merge key: every Apply is its own undo step (empty keys never merge).
+    return CommitAndReload(undoText, {});
 }
 
 bool UIViewDocument::CommitBoxEdit(UiNode* node, const UiBox& box)
