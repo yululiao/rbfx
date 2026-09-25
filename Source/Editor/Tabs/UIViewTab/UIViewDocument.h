@@ -231,6 +231,19 @@ public:
     /// rebuilt tree, or null when the move was rejected.
     UiNode* MoveNode(UiNode* node, UiNode* newParent, unsigned index);
     bool EditNodePayload(UiNode* node, const UiNodePayload& newData);
+    /// Show or hide \a nodes as ONE recorded edit (one undo step; the batch
+    /// variant of a payload edit, driving the Inspector visibility toggle).
+    /// Hiding authors inline `display: none`: the element and its subtree
+    /// leave the layout - the same channel game code drops to reveal a widget
+    /// at runtime. Un-hiding removes the declaration again, first restoring
+    /// the value the node carried when it was hidden: hiding overwrites the
+    /// one `display` declaration an element can carry, and dropping instead
+    /// of restoring would silently turn a wrapped flex row back into a plain
+    /// block. With nothing recorded the declaration is simply dropped and
+    /// the cascade decides. Text/virtual nodes are skipped; nodes already in
+    /// the requested state are no-ops. False (nothing recorded, nothing
+    /// rebuilt) when the whole call changes nothing.
+    bool SetNodesVisible(const ea::vector<UiNode*>& nodes, bool visible);
     /// Replace a paragraph's text: \a buffer is the multi-line editor content,
     /// one line per text run (a line break is emitted as <br/>). Runs and
     /// breaks whose lines survive keep their exact bytes and spine anchors -
@@ -290,6 +303,26 @@ private:
     /// must not collapse), mark dirty, notify views.
     bool CommitTextEdit(const ea::string& undoText, const ea::string& redoText);
     bool PushUndoAction(const SharedPtr<EditorAction>& action);
+
+    /// Inline `display` values recorded when a node was hidden through
+    /// SetNodesVisible, so un-hiding can restore what the declaration
+    /// overwrite would otherwise lose: the document text cannot carry the
+    /// pre-hide value (an element has one `display` declaration), so this is
+    /// session UX state, not source - cleared per open in LoadFromText.
+    /// Entries are matched back by child-index path plus node identity
+    /// (tag/id/classes), so a stale entry after structural edits can never
+    /// restore onto a different node.
+    struct HiddenDisplayEntry
+    {
+        ea::vector<unsigned> path_;
+        ea::string tag_;
+        ea::string id_;
+        ea::string classes_;
+        ea::string value_;
+    };
+    ea::vector<HiddenDisplayEntry> hiddenDisplays_;
+    void RememberHiddenDisplay(UiNode* node, const ea::string& value);
+    bool TakeHiddenDisplay(UiNode* node, ea::string& value);
 
     ea::function<bool(SharedPtr<EditorAction>)> undoPusher_;
 

@@ -26,6 +26,8 @@
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Types.h>
 
+#include <cctype>
+
 #include <EASTL/sort.h>
 
 namespace Urho3D
@@ -346,6 +348,7 @@ bool UIViewDocument::LoadFromText(const ea::string& text, const ea::string& path
 {
     path_ = path;
     warnedNoFont_ = false; // per-open diagnostics state
+    hiddenDisplays_.clear(); // per-open session state (see HiddenDisplayEntry)
     if (!ReloadFromText(text))
     {
         path_.clear();
@@ -1102,6 +1105,114 @@ bool UIViewDocument::EditNodePayload(UiNode* node, const UiNodePayload& newData)
         return false;
     ApplyUiNodePayload(*node, newData);
     return CommitAndReload(undoText, mergeKey);
+}
+
+namespace
+{
+
+// Case-insensitive test of a style value against the "none" keyword (CSS
+// keyword values compare case-insensitively; authored files spell it either
+// way). Mirrors how the Inspector reads display values back.
+bool IsDisplayNone(const ea::string& display)
+{
+    ea::string value = Trim(display);
+    for (char& c : value)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return value == "none";
+}
+
+} // namespace
+
+bool UIViewDocument::SetNodesVisible(const ea::vector<UiNode*>& nodes, bool visible)
+{
+    if (!model_.root_ || nodes.empty())
+        return false;
+
+    const ea::string undoText = model_.EmitRml();
+    // Write every node into the model first (all pointers are live), then do
+    // the one rebuild - so a whole-selection toggle is a single undo step.
+    bool changed = false;
+    for (UiNode* node : nodes)
+    {
+        if (!node || node->IsText() || node->IsNestedDoc() || node->IsHeadLink())
+            continue;
+        const ea::string display = node->GetStyle("display");
+        if (visible)
+        {
+            if (!IsDisplayNone(display))
+                continue; // already visible: nothing to restore
+            // Prefer the value recorded at hide time: hiding overwrote the
+            // one display declaration the element can carry, and dropping
+            // instead of restoring would silently turn a wrapped flex row
+            // back into a plain block.
+            ea::string restore;
+            if (TakeHiddenDisplay(node, restore))
+                node->SetStyle("display", restore);
+            else
+                node->RemoveStyle("display");
+        }
+        else
+        {
+            if (IsDisplayNone(display))
+                continue; // already hidden: keep the recorded value
+            const ea::string trimmed = Trim(display);
+            if (!trimmed.empty())
+                RememberHiddenDisplay(node, trimmed);
+            node->SetStyle("display", "none");
+        }
+        changed = true;
+    }
+    if (!changed)
+        return false;
+    // Empty merge key: one discrete step per toggle (like the link edits).
+    return CommitAndReload(undoText, {});
+}
+
+void UIViewDocument::RememberHiddenDisplay(UiNode* node, const ea::string& value)
+{
+    ea::vector<unsigned> path;
+    if (!model_.BuildPath(node, path))
+        return;
+    for (HiddenDisplayEntry& entry : hiddenDisplays_)
+    {
+        // Replace an entry for the same slot (hide / show / hide again), no
+        // matter which node identity it was recorded under: this IS now the
+        // node at that path.
+        if (entry.path_ == path && entry.tag_ == node->tag_)
+        {
+            entry.id_ = node->id_;
+            entry.classes_ = node->classes_;
+            entry.value_ = value;
+            return;
+        }
+    }
+    HiddenDisplayEntry entry;
+    entry.path_ = ea::move(path);
+    entry.tag_ = node->tag_;
+    entry.id_ = node->id_;
+    entry.classes_ = node->classes_;
+    entry.value_ = value;
+    hiddenDisplays_.push_back(ea::move(entry));
+}
+
+bool UIViewDocument::TakeHiddenDisplay(UiNode* node, ea::string& value)
+{
+    ea::vector<unsigned> path;
+    if (!model_.BuildPath(node, path))
+        return false;
+    for (unsigned i = 0; i < hiddenDisplays_.size(); i++)
+    {
+        HiddenDisplayEntry& entry = hiddenDisplays_[i];
+        if (entry.path_ != path || entry.tag_ != node->tag_)
+            continue;
+        // Identity check: a structural edit may have shifted a different
+        // node onto this path. Only a full match may restore.
+        const bool identityMatches = entry.id_ == node->id_ && entry.classes_ == node->classes_;
+        value = ea::move(entry.value_);
+        hiddenDisplays_.erase(hiddenDisplays_.begin() + i);
+        return identityMatches;
+    }
+    return false;
 }
 
 bool UIViewDocument::SetParagraphText(UiNode* element, const ea::string& buffer)

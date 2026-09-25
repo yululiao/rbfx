@@ -464,11 +464,15 @@ private:
     void RenderHeadLink(UiNode* node);
     /// Navigation panel for the nested-doc virtual node (path + reveal/open).
     void RenderNestedDoc(UiNode* node);
-    /// The four sections below return true when they committed an edit: any
+    /// The sections below return true when they committed an edit: any
     /// commit rebuilds the whole model tree, which invalidates every UiNode
     /// pointer - including the caller's. On true, RenderContent stops rendering
     /// for this frame and re-renders from the rebuilt model on the next one
     /// (the commit-then-return pattern the link panels already use).
+    /// The visibility row sits above the rest: show/hide is the one property
+    /// with a multi-selection meaning (the checkbox reflects the primary node,
+    /// the click toggles every selected element as one undo step).
+    bool RenderVisibility(UiNode* node);
     bool RenderTextContent(UiNode* node);
     bool RenderAttributes(UiNode* node);
     bool RenderLayout(UiNode* node);

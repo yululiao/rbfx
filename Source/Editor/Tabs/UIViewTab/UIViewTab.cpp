@@ -3595,6 +3595,8 @@ void UIViewInspector::RenderContent()
 
     // A committed edit rebuilds the model tree and dangles `node`; stop
     // rendering for this frame instead of touching freed memory below.
+    if (RenderVisibility(node))
+        return;
     if (RenderTextContent(node))
         return;
     if (RenderAttributes(node))
@@ -3904,6 +3906,36 @@ bool TryGetParagraphLines(const UiNode& host, std::vector<std::string>& lines)
 }
 
 } // namespace
+
+bool UIViewInspector::RenderVisibility(UiNode* node)
+{
+    UIViewTab* tab = owner_;
+    UIViewDocument* doc = tab ? tab->GetDocument() : nullptr;
+    if (!doc || node->IsText())
+        return false;
+
+    // Reflect the primary (Inspector) node, apply to the whole selection as
+    // ONE undo step (see UIViewDocument::SetNodesVisible). The authored state
+    // is inline display: none - the channel that removes the widget AND its
+    // layout space, and the one game code drops to reveal it at runtime.
+    bool visible = LowerCopy(Trim(node->GetStyle("display"))) != "none";
+    if (ui::Checkbox(ICON_FA_EYE " Visible", &visible))
+    {
+        if (doc->SetNodesVisible(tab->GetSelectedNodes(), visible))
+            return true; // the model was rebuilt; the node is dangling now
+    }
+    if (ui::IsItemHovered())
+    {
+        ui::SetTooltip("Hides the selected element(s) by authoring inline display: none -\n"
+            "the widget and its subtree leave the layout entirely, the way game UI\n"
+            "starts hidden until game code drops the declaration. Un-hiding restores\n"
+            "the value recorded when it was hidden (e.g. display: flex on a wrapped\n"
+            "row); with none recorded the declaration is dropped and the cascade\n"
+            "decides. A hidden element has no canvas box to click - re-select it\n"
+            "from the Hierarchy.");
+    }
+    return false;
+}
 
 bool UIViewInspector::RenderTextContent(UiNode* node)
 {
