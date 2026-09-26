@@ -1468,6 +1468,8 @@ ea::string UIViewTab::RunInGameViewUnavailableReason() const
         return "Open or create a document to preview in the game";
 
     auto* sceneViewTab = GetProject()->FindTab<SceneViewTab>();
+    if (!sceneViewTab || !sceneViewTab->GetActivePage())
+        return "Open a SceneViewTab  first";
     Scene* scene = sceneViewTab ? sceneViewTab->GetActivePage()->scene_.Get() : nullptr;
     if (!scene)
         return "Open a scene in the Scene View first";
