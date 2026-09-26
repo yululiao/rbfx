@@ -1358,7 +1358,7 @@ void UIViewTab::NewDocument()
 
 void UIViewTab::RenderContent()
 {
-    RenderToolbar();
+    RenderContentToolbar();
     ui::Separator();
     RenderPreview();
     RenderExternalChangeDialog();
@@ -1479,22 +1479,19 @@ ea::string UIViewTab::RunInGameViewUnavailableReason() const
 
 void UIViewTab::RenderToolbar()
 {
-    // Read-only display of the document being edited (empty until one is opened).
-    const ea::string& activeResource = GetActiveResourceName();
-    ui::AlignTextToFramePadding();
-    ui::TextDisabled("Editing: %s", activeResource.empty() ? "(no document open)" : activeResource.c_str());
-
-    if (ui::Button(ICON_FA_FILE_LINES " New"))
+    // EditorTab override: rendered into the application toolbar strip while
+    // this tab is focused. The strip is a fixed-height window, so everything
+    // must stay on one row: the document commands first, then the read-only
+    // "Editing:" label (the row that used to sit inside the tab content,
+    // above the canvas).
+    if (Widgets::ToolbarButton(ICON_FA_FILE_LINES, "New document"))
         NewDocument();
 
-    const bool hasDoc = document_ && document_->GetRmlDocument() != nullptr;
     const bool hasActive = !GetActiveResourceName().empty();
-    ui::SameLine();
     ui::BeginDisabled(!hasActive);
-    if (ui::Button(ICON_FA_FLOPPY_DISK " Save"))
+    if (Widgets::ToolbarButton(ICON_FA_FLOPPY_DISK, "Save document"))
         SaveCurrentResource();
-    ui::SameLine();
-    if (ui::Button(ICON_FA_ROTATE " Reload"))
+    if (Widgets::ToolbarButton(ICON_FA_ROTATE, "Reload the document from disk (discards unsaved edits)"))
     {
         const ea::string name = GetActiveResourceName();
         if (!name.empty())
@@ -1507,19 +1504,21 @@ void UIViewTab::RenderToolbar()
 
     if (hasActive && IsResourceUnsaved(GetActiveResourceName()))
     {
-        ui::SameLine();
+        Widgets::ToolbarSeparator();
+        ui::AlignTextToFramePadding();
         ui::TextDisabled("(unsaved)");
+        ui::SameLine();
     }
 
     // Runtime preview: Run plays the edited scene plus this document in the
     // Game View (see ToggleRunInGameView); while that session previews this
     // document the button turns into Stop. A disabled button carries its
     // reason in the tooltip.
-    ui::SameLine();
+    Widgets::ToolbarSeparator();
     const bool previewingInGameView = IsPreviewingInGameView();
     const ea::string runUnavailableReason = RunInGameViewUnavailableReason();
     ui::BeginDisabled(!runUnavailableReason.empty());
-    if (ui::Button(previewingInGameView ? ICON_FA_STOP " Stop" : ICON_FA_PLAY " Run"))
+    if (Widgets::ToolbarButton(previewingInGameView ? ICON_FA_STOP : ICON_FA_PLAY, nullptr))
         ToggleRunInGameView();
     if (ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     {
@@ -1532,95 +1531,24 @@ void UIViewTab::RenderToolbar()
     }
     ui::EndDisabled();
 
-    // Second row: structural editing, driven by the palette table.
-    ui::BeginDisabled(!hasDoc);
-    if (ui::BeginCombo(ICON_FA_PLUS " Add Widget", "Select..."))
-    {
-        // Filter box at the top: typing narrows the palette to entries whose
-        // label or group matches (case-insensitive), so the longer palette
-        // stays quick to scan.
-        ui::SetNextItemWidth(-FLT_MIN);
-        ui::InputTextWithHint("##paletteFilter", ICON_FA_FILTER " Filter...", paletteFilter_,
-            sizeof(paletteFilter_));
-        const ea::string filter = LowerCopy(paletteFilter_);
-        // Compare by content, not by pointer: identical string literals are
-        // only merged into one address when the compiler pools strings, so a
-        // pointer comparison would re-print the header before every entry on
-        // builds without pooling.
-        ea::string lastGroup;
-        for (const PaletteEntry& entry : kPalette)
-        {
-            if (!filter.empty() && LowerCopy(entry.label_).find(filter) == ea::string::npos
-                && LowerCopy(entry.group_).find(filter) == ea::string::npos)
-                continue;
-            if (lastGroup != entry.group_)
-            {
-                ui::SeparatorText(entry.group_);
-                lastGroup = entry.group_;
-            }
-            if (ui::Selectable(entry.label_))
-            {
-                if (UiNode* added = document_->AddWidget(selected_, MakeWidgetSpec(entry)))
-                    SetSelectedNode(added);
-            }
-        }
-        // Any tag: RmlUi tag names are only stylesheet lookup keys, so any name
-        // the project styles is valid. The entry gets the generic placeholder
-        // look until the project's stylesheet defines it.
-        ui::SeparatorText("Arbitrary tag");
-        static char anyTag[32] = "";
-        const bool enterPressed = ui::InputText("##anyTag", anyTag, sizeof(anyTag),
-            ImGuiInputTextFlags_EnterReturnsTrue);
-        bool tagLooksValid = anyTag[0] != '\0';
-        for (const char* p = anyTag; *p; ++p)
-        {
-            if (!std::isalnum(static_cast<unsigned char>(*p)) && *p != '-' && *p != '_')
-            {
-                tagLooksValid = false;
-                break;
-            }
-        }
-        ui::SameLine();
-        ui::BeginDisabled(!tagLooksValid);
-        if (tagLooksValid && (enterPressed || ui::Button(ICON_FA_PLUS " Add")))
-        {
-            UiWidgetSpec spec;
-            spec.tag_ = anyTag;
-            spec.stylePolicy_ = UiWidgetStylePolicy::Panel;
-            if (UiNode* added = document_->AddWidget(selected_, spec))
-                SetSelectedNode(added);
-            anyTag[0] = '\0';
-        }
-        ui::EndDisabled();
-        ui::EndCombo();
-    }
-    ui::SameLine();
-    const int selCount = static_cast<int>(GetTopLevelSelectedNodes().size());
-    ui::BeginDisabled(selCount == 0);
-    if (selCount > 1)
-    {
-        if (ui::Button(Format(ICON_FA_COPY " Copy (%d)", selCount).c_str()))
-            CopySelection();
-    }
-    else if (ui::Button(ICON_FA_COPY " Copy"))
-        CopySelection();
-    ui::EndDisabled();
-    // Delete also covers the virtual link nodes: deleting one removes its
-    // <link> line from <head> (text-level, undoable). Copy does not - a
-    // duplicated link line would be pointless noise.
-    const bool canDelete = selected_ && document_
-        && selected_ != document_->GetModel().root_.Get();
-    ui::SameLine();
-    ui::BeginDisabled(!canDelete);
-    if (selCount > 1)
-    {
-        if (ui::Button(Format(ICON_FA_TRASH " Delete (%d)", selCount).c_str()))
-            DeleteSelection();
-    }
-    else if (ui::Button(ICON_FA_TRASH " Delete"))
-        DeleteSelection(); // single real / virtual: DeleteSelection routes both
-    ui::EndDisabled();
-    ui::EndDisabled();
+    // Read-only display of the document being edited, trailing the commands.
+    // It is resolved after the buttons ran: a New/Reload click above may have
+    // repopulated the resources this frame, so an earlier lookup must not be
+    // reused.
+    const ea::string& activeResource = GetActiveResourceName();
+    Widgets::ToolbarSeparator();
+    ui::AlignTextToFramePadding();
+    ui::TextDisabled("Editing: %s", activeResource.empty() ? "(no document open)" : activeResource.c_str());
+}
+
+void UIViewTab::RenderContentToolbar()
+{
+    // The tab-content command row above the canvas: structural commands
+    // (wrap / flow move) on the left and the view controls (fit, zoom, canvas
+    // size) on the right, merged into one line. The document commands live in
+    // the editor toolbar strip (RenderToolbar); Add Widget and copy/delete
+    // live in the hierarchy context menu.
+    const bool hasDoc = document_ && document_->GetRmlDocument() != nullptr;
 
     // Structural commands on the selection: wrap the set into a container, or
     // trade the primary's slot with a sibling. The disabled states carry the
@@ -1657,7 +1585,9 @@ void UIViewTab::RenderToolbar()
     ui::TextDisabled("Alt+Up/Down");
 
     // View controls: how the canvas is sampled, not what it contains. Their
-    // single consumer is the DocViewport built in RenderPreview.
+    // single consumer is the DocViewport built in RenderPreview. A wider gap
+    // marks the group border inside the merged single-line row.
+    ui::SameLine(0.0f, ui::GetStyle().ItemSpacing.x * 3.0f);
     ui::BeginDisabled(!hasDoc);
     if (ui::Button(ICON_FA_EXPAND " Fit"))
         viewFit_ = true;
@@ -1755,11 +1685,74 @@ void UIViewTab::RenderToolbar()
     }
 }
 
+void UIViewTab::RenderAddWidgetPalette(UiNode* parent)
+{
+    if (!document_)
+        return;
+
+    // Filter box at the top: typing narrows the palette to entries whose
+    // label or group matches (case-insensitive), so the longer palette
+    // stays quick to scan.
+    ui::SetNextItemWidth(180.0f);
+    ui::InputTextWithHint("##paletteFilter", ICON_FA_FILTER " Filter...", paletteFilter_,
+        sizeof(paletteFilter_));
+    const ea::string filter = LowerCopy(paletteFilter_);
+    // Compare by content, not by pointer: identical string literals are
+    // only merged into one address when the compiler pools strings, so a
+    // pointer comparison would re-print the header before every entry on
+    // builds without pooling.
+    ea::string lastGroup;
+    for (const PaletteEntry& entry : kPalette)
+    {
+        if (!filter.empty() && LowerCopy(entry.label_).find(filter) == ea::string::npos
+            && LowerCopy(entry.group_).find(filter) == ea::string::npos)
+            continue;
+        if (lastGroup != entry.group_)
+        {
+            ui::SeparatorText(entry.group_);
+            lastGroup = entry.group_;
+        }
+        if (ui::MenuItem(entry.label_))
+        {
+            if (UiNode* added = document_->AddWidget(parent, MakeWidgetSpec(entry)))
+                SetSelectedNode(added);
+        }
+    }
+    // Any tag: RmlUi tag names are only stylesheet lookup keys, so any name
+    // the project styles is valid. The entry gets the generic placeholder
+    // look until the project's stylesheet defines it.
+    ui::SeparatorText("Arbitrary tag");
+    static char anyTag[32] = "";
+    const bool enterPressed = ui::InputText("##anyTag", anyTag, sizeof(anyTag),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    bool tagLooksValid = anyTag[0] != '\0';
+    for (const char* p = anyTag; *p; ++p)
+    {
+        if (!std::isalnum(static_cast<unsigned char>(*p)) && *p != '-' && *p != '_')
+        {
+            tagLooksValid = false;
+            break;
+        }
+    }
+    ui::SameLine();
+    ui::BeginDisabled(!tagLooksValid);
+    if (tagLooksValid && (enterPressed || ui::Button(ICON_FA_PLUS " Add")))
+    {
+        UiWidgetSpec spec;
+        spec.tag_ = anyTag;
+        spec.stylePolicy_ = UiWidgetStylePolicy::Panel;
+        if (UiNode* added = document_->AddWidget(parent, spec))
+            SetSelectedNode(added);
+        anyTag[0] = '\0';
+    }
+    ui::EndDisabled();
+}
+
 void UIViewTab::RenderPreview()
 {
     if (!document_ || !document_->GetRmlDocument())
     {
-        ui::TextUnformatted("No UI document open.\nDouble-click a .rml in the Resource Browser to edit it, or click New\nto create one (a Save As dialog picks the location under the project Data).");
+        ui::TextUnformatted("No UI document open.\nDouble-click a .rml in the Resource Browser to edit it, or click New\nin the toolbar to create one (a Save As dialog picks the location under\nthe project Data).");
         return;
     }
 
@@ -3472,8 +3465,20 @@ void UIViewHierarchy::RenderContextMenuItems()
         return;
     }
 
+    // Add Widget: the palette the toolbar combo used to carry, now adding
+    // into the right-clicked container (a root target appends into the
+    // document). It is the menu's constructive entry and applies to any
+    // element target - including the root, which has no other commands - so
+    // it sits above the selection commands.
+    if (ui::BeginMenu(ICON_FA_PLUS " Add Widget"))
+    {
+        tab->RenderAddWidgetPalette(target);
+        ui::EndMenu();
+    }
+
     if (target != doc->GetModel().root_.Get())
     {
+        ui::Separator();
         const int count = static_cast<int>(tab->GetTopLevelSelectedNodes().size());
         if (count > 1)
         {

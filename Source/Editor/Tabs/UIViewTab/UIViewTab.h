@@ -109,6 +109,10 @@ public:
     /// selection as a single undo step.
     void CopySelection();
     void DeleteSelection();
+    /// The Add Widget palette (filter box + grouped entries + arbitrary
+    /// tag), rendered into a container's menu (the hierarchy context menu).
+    /// \a parent receives the new widget; null adds to the document root.
+    void RenderAddWidgetPalette(UiNode* parent);
     /// @}
 
     /// Structural flow commands (context menus, toolbar, keyboard): wrap the
@@ -172,7 +176,15 @@ protected:
     bool CloseShouldRemove() override { return true; }
 
 private:
-    void RenderToolbar();
+    /// EditorTab override: rendered into the application toolbar strip while
+    /// this tab is focused. It must stay a single row - the strip is a
+    /// fixed-height window - and carries the document commands. The editing
+    /// controls of the document live in RenderContentToolbar.
+    void RenderToolbar() override;
+    /// The tab-content command row above the canvas: structural commands
+    /// (wrap / flow move) and the view controls (fit, zoom, canvas size),
+    /// merged into one line.
+    void RenderContentToolbar();
     void RenderPreview();
     /// Modal of the save guard: the file changed on disk while the document
     /// was open and a save wanted to write over it. Overwrite re-runs the
@@ -354,7 +366,7 @@ private:
     int customCanvasW_ = 1024;
     int customCanvasH_ = 768;
 
-    // --- widget palette filter (Add Widget combo) ---------------------------
+    // --- widget palette filter (Add Widget palette) -------------------------
     char paletteFilter_[64]{};
 
     // --- drop feedback (in-canvas drag and external payloads alike) ---------
