@@ -10,6 +10,8 @@
 #include "../Shared/HierarchyBrowserSource.h"
 #include "../Shared/InspectorSource.h"
 #include "UIViewDocument.h"
+#include "UIViewHierarchy.h"
+#include "UIViewInspector.h"
 
 namespace Rml
 {
@@ -23,8 +25,6 @@ namespace Urho3D
 class HierarchyBrowserTab;
 class InspectorTab;
 class UIViewTab;
-class UIViewHierarchy;
-class UIViewInspector;
 struct ResourceFileDescriptor;
 
 /// Bootstrapped by EditorApplication.
@@ -401,114 +401,6 @@ private:
 
     SharedPtr<UIViewHierarchy> hierarchySource_;
     SharedPtr<UIViewInspector> inspectorSource_;
-};
-
-/// HierarchyBrowserSource: walks the editor model of the tab's document.
-class UIViewHierarchy : public Object, public HierarchyBrowserSource
-{
-    URHO3D_OBJECT(UIViewHierarchy, Object)
-
-public:
-    explicit UIViewHierarchy(UIViewTab* owner);
-
-    /// Implement HierarchyBrowserSource
-    /// @{
-    EditorTab* GetOwnerTab() override { return owner_; }
-    void RenderContent() override;
-    void RenderContextMenuItems() override;
-    /// The hierarchy issues undoable editing commands through the same
-    /// project-wide UndoManager as the owner tab.
-    bool IsUndoSupported() override { return true; }
-    /// @}
-
-    /// Expand the ancestor chain of the given node path (called on selection).
-    void ExpandAncestors(const ea::vector<unsigned>& path);
-
-private:
-    void RenderNode(UiNode* node, const ea::vector<unsigned>& path);
-    bool IsOpen(UiNode* node, const ea::vector<unsigned>& path) const;
-    static bool PathIn(const ea::vector<ea::vector<unsigned>>& set, const ea::vector<unsigned>& path);
-
-    WeakPtr<UIViewTab> owner_;
-    // Right-click target, stored as a path: node pointers do not survive the
-    // whole-tree rebuilds that every editing command performs.
-    ea::vector<unsigned> contextMenuTargetPath_;
-    bool contextMenuTargetValid_ = false;
-    // Set by RenderNode on right-click, honored at the end of RenderContent:
-    // OpenPopup must run where BeginPopup runs (window base ID stack), see
-    // the comment there.
-    bool openNodeMenuRequested_ = false;
-    ea::vector<ea::vector<unsigned>> openedPaths_;
-    ea::vector<ea::vector<unsigned>> closedPaths_;
-    bool focusPathOnly_ = false;
-};
-
-/// InspectorSource: edits attributes and inline style of the selected model node.
-class UIViewInspector : public Object, public InspectorSource
-{
-    URHO3D_OBJECT(UIViewInspector, Object)
-
-public:
-    explicit UIViewInspector(UIViewTab* owner);
-
-    /// Implement InspectorSource
-    /// @{
-    EditorTab* GetOwnerTab() override { return owner_; }
-    void RenderContent() override;
-    /// Attribute and inline-style edits push onto the same project-wide
-    /// UndoManager as the owner tab.
-    bool IsUndoSupported() override { return true; }
-    /// @}
-
-    /// Drop cached per-node edit state (inline-style seed) so the next render
-    /// re-reads it from the rebuilt model.
-    void InvalidateCaches();
-
-private:
-    /// Document-level "add head link" row. The links themselves are
-    /// #head-link nodes at the top of the Hierarchy; this is only the spigot
-    /// that appends one more <link> to <head>. Rendered above the per-node
-    /// editors because it applies with or without a selection.
-    void RenderHeadLinks();
-    /// Per-link panel for a #head-link node: type/href editing, navigation to
-    /// the linked file, removal. The generic attribute/style editors do not
-    /// apply - head bytes are edited through the text-level link commands.
-    void RenderHeadLink(UiNode* node);
-    /// Navigation panel for the nested-doc virtual node (path + reveal/open).
-    void RenderNestedDoc(UiNode* node);
-    /// The sections below return true when they committed an edit: any
-    /// commit rebuilds the whole model tree, which invalidates every UiNode
-    /// pointer - including the caller's. On true, RenderContent stops rendering
-    /// for this frame and re-renders from the rebuilt model on the next one
-    /// (the commit-then-return pattern the link panels already use).
-    /// The visibility row sits above the rest: show/hide is the one property
-    /// with a multi-selection meaning (the checkbox reflects the primary node,
-    /// the click toggles every selected element as one undo step).
-    bool RenderVisibility(UiNode* node);
-    bool RenderTextContent(UiNode* node);
-    bool RenderAttributes(UiNode* node);
-    bool RenderLayout(UiNode* node);
-    bool RenderAppearance(UiNode* node);
-    bool RenderInlineStyle(UiNode* node);
-    /// Read-only sections: they never commit, so the node stays valid.
-    void RenderTemplates(UiNode* node);
-    void RenderComputed(UiNode* node);
-
-    WeakPtr<UIViewTab> owner_;
-    char attributeKeyBuf_[128]{};
-    char attributeValueBuf_[1024]{};
-    char styleBuf_[2048]{};
-    /// Resource path being typed into the head-link field.
-    char headLinkHrefBuf_[256]{};
-    // Cached inline-style text and the selection path it was seeded from, so
-    // the multiline editor is only refreshed when the selection changes.
-    ea::vector<unsigned> lastStylePath_;
-    bool styleSeedValid_ = false;
-    // Cached paragraph-content text: a <p>'s Content field is the multi-line
-    // editor, seeded only when the selection changes or the model was rebuilt.
-    char contentBuf_[4096]{};
-    ea::vector<unsigned> lastContentPath_;
-    bool contentSeedValid_ = false;
 };
 
 }
