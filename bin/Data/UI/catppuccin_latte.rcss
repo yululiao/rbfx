@@ -1,0 +1,481 @@
+/*
+ * catppuccin_latte.rcss - soft light theme based on the Catppuccin "Latte" palette.
+ *
+ * Design reference: Catppuccin (MIT)
+ *   https://catppuccin.com/palette
+ *   base #eff1f5 / mantle #e6e9ef / crust #dce0e8 / surface0 #ccd0da /
+ *   surface1 #bcc0cc / surface2 #acb0be / text #4c4f69 / subtext #6c6f85 /
+ *   overlay #9ca0b0 / blue #1e66f5 / lavender #7287fd / green #40a02b /
+ *   red #d20f39 / maroon #e64553 / mauve #8839ef.
+ *
+ * Usage: <link type="text/rcss" href="/UI/catppuccin_latte.rcss"/>
+ *
+ * A drop-in alternative to default.rcss: same selectors and geometry, only
+ * the look changes. Written against this engine's RmlUi build, which has no
+ * box-shadow / linear-gradient() / calc(): depth comes from layered surfaces,
+ * 1dp borders and two-stop decorator gradients. Sprites come from
+ * /Textures/RmlUI-1x.png and are recoloured with image-color - the white
+ * glyphs are tinted dark here so they stay visible on light surfaces.
+ * 'body' paints the page colour - drop its background line for a
+ * transparent overlay document.
+ */
+
+@spritesheet catppuccin-latte
+{
+    src: /Textures/RmlUI-1x.png;
+
+    latte-close-button: 0dp 0dp 20dp 20dp;
+    latte-arrow-right: 20dp 0dp 16dp 16dp;
+    latte-arrow-down: 36dp 0dp 16dp 16dp;
+    latte-radio-dot: 20dp 16dp 16dp 16dp;
+    latte-check-mark: 36dp 16dp 16dp 16dp;
+    latte-resize-handle: 36dp 32dp 16dp 16dp;
+}
+
+body
+{
+    font-family: "Noto Sans";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 16dp;
+    color: #4c4f69;
+    background: #eff1f5;
+    display: inline-block;
+    overflow: hidden;
+}
+
+#window
+{
+    background: #ffffff;
+    border: 1dp #ccd0da;
+    padding: 8dp;
+    border-radius: 6dp;
+    min-width: 100dp;
+    min-height: 100dp;
+}
+
+#titlebar
+{
+    background: #e6e9ef;
+    text-align: left;
+    margin: -8dp;
+    padding: 4dp 8dp;
+    border-bottom: 1dp #ccd0da;
+    border-top-left-radius: 6dp;
+    border-top-right-radius: 6dp;
+    height: 20dp;
+}
+
+#titlebar #title
+{
+    display: inline-block;
+    width: 100%;
+}
+
+#content
+{
+    width: auto;
+    overflow: hidden auto;
+    margin: 0;
+}
+
+*:disabled
+{
+    color: #9ca0b0;
+    cursor: unavailable;
+}
+
+/* button */
+button,
+input.submit
+{
+    background: #ffffff;
+    border: 1dp #ccd0da;
+    display: inline-block;
+    text-align: center;
+    padding: 4dp 8dp;
+    margin-right: 4dp;
+    tab-index: auto;
+    border-radius: 6dp;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+button:hover,
+input.submit:hover
+{
+    background: #e6e9ef;
+}
+
+button:active,
+input.submit:active
+{
+    background: #dce0e8;
+}
+
+button:disabled,
+input.submit:disabled
+{
+    background: #ffffff;
+}
+
+/* primary action: later rules win over the shared button rules above */
+input.submit
+{
+    background: #1e66f5;
+    border: 1dp #1e66f5;
+    color: #ffffff;
+}
+
+input.submit:hover
+{
+    background: #7287fd;
+    border: 1dp #7287fd;
+}
+
+input.submit:active
+{
+    background: #1e66f5;
+    border: 1dp #1e66f5;
+}
+
+input.submit:disabled
+{
+    background: #1e66f5;
+    border: 1dp #1e66f5;
+    color: #ffffff;
+    opacity: 0.5;
+}
+
+/* X button - a solid red dot reads best on light surfaces */
+.close-window
+{
+    background: #d20f39;
+    decorator: image(latte-close-button);
+    border: 0dp;
+    width: 20dp;
+    height: 20dp;
+    padding: 0;
+    position: absolute;
+    right: 3dp;
+    top: 3dp;
+    border-radius: 0.5em;
+    transition: 0.12s background-color cubic-out;
+}
+
+.close-window:hover
+{
+    background: #e64553;
+}
+
+.close-window:active
+{
+    background: #d20f39;
+}
+
+/* textarea */
+textarea
+{
+    background: #ffffff;
+    border: 1dp #ccd0da;
+    border-radius: 6dp;
+    padding: 4dp;
+    cursor: text;
+    display: block;
+    min-height: 100dp;
+    min-width: 200dp;
+    margin-top: 4dp;
+    caret-color: #1e66f5;
+    transition: 0.12s border-color cubic-out;
+}
+
+textarea:hover
+{
+    border: 1dp #bcc0cc;
+}
+
+textarea:focus
+{
+    border: 1dp #1e66f5;
+}
+
+/* checkbox, radio */
+input.checkbox
+{
+    width: 16dp;
+    height: 16dp;
+    vertical-align: -3dp;
+    margin-right: 4dp;
+    border: 1dp #bcc0cc;
+    border-radius: 4dp;
+    background: #ffffff;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+input.radio
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #bcc0cc;
+    border-radius: 0.5em;
+    background: #ffffff;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+input.checkbox:hover,
+input.radio:hover
+{
+    border: 1dp #acb0be;
+    background: #e6e9ef;
+}
+
+input.checkbox:checked
+{
+    background: #40a02b;
+    border: 1dp #40a02b;
+    decorator: image(latte-check-mark);
+}
+
+input.radio:checked
+{
+    background: #1e66f5;
+    border: 1dp #1e66f5;
+    decorator: image(latte-radio-dot);
+}
+
+/* range */
+input.range
+{
+    height: 16dp;
+    border-radius: 6dp;
+    border: 1dp #ccd0da;
+    background: #e6e9ef;
+}
+
+/* text */
+input.text,
+input.password
+{
+    background: #ffffff;
+    border: 1dp #ccd0da;
+    padding: 4dp;
+    height: 20dp;
+    border-radius: 6dp;
+    caret-color: #1e66f5;
+    transition: 0.12s border-color cubic-out;
+}
+
+input.text:hover,
+input.password:hover
+{
+    border: 1dp #bcc0cc;
+}
+
+input.text:focus,
+input.password:focus
+{
+    border: 1dp #1e66f5;
+}
+
+/* select */
+select
+{
+    background: #ffffff;
+    border: 1dp #ccd0da;
+    border-radius: 6dp;
+    padding: 0dp 4dp;
+    margin-top: 4dp;
+    height: 20dp;
+}
+
+select selectarrow
+{
+    width: 16dp;
+    height: 16dp;
+    decorator: image(latte-arrow-down);
+    image-color: #6c6f85;
+}
+
+select selectbox
+{
+    background: #ffffff;
+    border: 1dp #ccd0da;
+    border-top: 0;
+    padding: 0 4dp;
+    border-bottom-left-radius: 6dp;
+    border-bottom-right-radius: 6dp;
+}
+
+select selectbox option
+{
+    padding: 2dp 4dp;
+}
+
+select selectbox option:hover
+{
+    background: #e6e9ef;
+}
+
+/* scrollbar */
+scrollbarvertical, scrollbarhorizontal
+{
+    background: #e6e9ef;
+    border: 1dp #ccd0da;
+    border-radius: 6dp;
+}
+
+scrollbarvertical
+{
+    width: 16dp;
+    border-top: 0dp;
+    border-bottom: 0dp;
+}
+
+scrollbarhorizontal
+{
+    height: 16dp;
+    border-left: 0dp;
+    border-right: 0dp;
+}
+
+scrollbarvertical sliderarrowinc,
+scrollbarvertical sliderarrowdec,
+scrollbarhorizontal sliderarrowinc,
+scrollbarhorizontal sliderarrowdec,
+input.range sliderarrowinc,
+input.range sliderarrowdec
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #ccd0da;
+    border-radius: 6dp;
+    background: #e6e9ef;
+    image-color: #6c6f85;
+    transition: 0.12s background-color cubic-out;
+}
+
+scrollbarvertical sliderarrowdec
+{
+    decorator: image(latte-arrow-down flip-vertical);
+}
+
+scrollbarvertical sliderarrowinc
+{
+    decorator: image(latte-arrow-down);
+}
+
+scrollbarhorizontal sliderarrowdec,
+input.range sliderarrowdec
+{
+    decorator: image(latte-arrow-right flip-horizontal);
+}
+
+scrollbarhorizontal sliderarrowinc,
+input.range sliderarrowinc
+{
+    decorator: image(latte-arrow-right);
+}
+
+scrollbarvertical sliderarrowinc:hover,
+scrollbarvertical sliderarrowdec:hover,
+scrollbarhorizontal sliderarrowinc:hover,
+scrollbarhorizontal sliderarrowdec:hover,
+input.range sliderarrowinc:hover,
+input.range sliderarrowdec:hover
+{
+    background: #dce0e8;
+}
+
+sliderbar
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #ccd0da;
+    border-radius: 6dp;
+    background: #bcc0cc;
+    transition: 0.12s background-color cubic-out;
+}
+
+sliderbar:hover
+{
+    background: #acb0be;
+}
+
+sliderbar:active
+{
+    background: #9ca0b0;
+}
+
+scrollbarhorizontal > sliderbar
+{
+    width: auto;
+}
+
+scrollbarvertical > sliderbar
+{
+    height: auto;
+}
+
+/* progress */
+progress
+{
+    display: block;
+    background: #e6e9ef;
+    border: 1dp #ccd0da;
+    border-radius: 6dp;
+}
+
+progress.horizontal
+{
+    height: 20dp;
+}
+
+progress.vertical
+{
+    width: 20dp;
+}
+
+progress fill
+{
+    decorator: gradient(vertical #8839ef #1e66f5);
+    border-radius: 6dp;
+}
+
+/* window resize handle */
+.resize-handle
+{
+    decorator: image(latte-resize-handle);
+    image-color: #9ca0b0;
+    position: absolute;
+    width: 16dp;
+    height: 16dp;
+    bottom: 1dp;
+    right: 1dp;
+    cursor: resize;
+    clip: 1;
+}
+
+/* tables */
+table {
+    box-sizing: border-box;
+    display: table;
+}
+tr {
+    box-sizing: border-box;
+    display: table-row;
+}
+td {
+    box-sizing: border-box;
+    display: table-cell;
+    padding: 4dp 8dp;
+    border-bottom: 1dp #e6e9ef;
+}
+col {
+    box-sizing: border-box;
+    display: table-column;
+}
+colgroup {
+    display: table-column-group;
+}
+thead, tbody, tfoot {
+    display: table-row-group;
+}

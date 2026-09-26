@@ -1,0 +1,492 @@
+/*
+ * dracula_dark.rcss - night-neon theme based on the Dracula palette.
+ *
+ * Design reference: Dracula Theme (MIT)
+ *   https://draculatheme.com/spec
+ *   background #282a36 / darker #21222c, #191a21 / current line #44475a /
+ *   comment #6272a4 / foreground #f8f8f2 / cyan #8be9fd / green #50fa7b /
+ *   orange #ffb86c / pink #ff79c6 / purple #bd93f9 / red #ff5555 /
+ *   yellow #f1fa8c.
+ *
+ * Usage: <link type="text/rcss" href="/UI/dracula_dark.rcss"/>
+ *   The .pulse helper (e.g. <button class="pulse">) adds a soft opacity
+ *   heartbeat for attention-grabbing elements, demoing @keyframes support.
+ *
+ * A drop-in alternative to default.rcss: same selectors and geometry, only
+ * the look changes. Written against this engine's RmlUi build, which has no
+ * box-shadow / linear-gradient() / calc(): glow-free depth comes from layered
+ * surfaces, 1dp borders and two-stop decorator gradients. Sprites come from
+ * /Textures/RmlUI-1x.png and are recoloured with image-color.
+ * 'body' paints the background colour - drop its background line for a
+ * transparent overlay document.
+ */
+
+@spritesheet dracula-dark
+{
+    src: /Textures/RmlUI-1x.png;
+
+    dracula-close-button: 0dp 0dp 20dp 20dp;
+    dracula-arrow-right: 20dp 0dp 16dp 16dp;
+    dracula-arrow-down: 36dp 0dp 16dp 16dp;
+    dracula-radio-dot: 20dp 16dp 16dp 16dp;
+    dracula-check-mark: 36dp 16dp 16dp 16dp;
+    dracula-resize-handle: 36dp 32dp 16dp 16dp;
+}
+
+body
+{
+    font-family: "Noto Sans";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 16dp;
+    color: #f8f8f2;
+    background: #282a36;
+    display: inline-block;
+    overflow: hidden;
+}
+
+#window
+{
+    background: #282a36;
+    border: 1dp #44475a;
+    padding: 8dp;
+    border-radius: 6dp;
+    min-width: 100dp;
+    min-height: 100dp;
+}
+
+#titlebar
+{
+    background: #21222c;
+    text-align: left;
+    margin: -8dp;
+    padding: 4dp 8dp;
+    border-bottom: 1dp #44475a;
+    border-top-left-radius: 6dp;
+    border-top-right-radius: 6dp;
+    height: 20dp;
+}
+
+#titlebar #title
+{
+    display: inline-block;
+    width: 100%;
+}
+
+#content
+{
+    width: auto;
+    overflow: hidden auto;
+    margin: 0;
+}
+
+*:disabled
+{
+    color: #6272a4;
+    cursor: unavailable;
+}
+
+/* button */
+button,
+input.submit
+{
+    background: #44475a;
+    border: 1dp #6272a4;
+    display: inline-block;
+    text-align: center;
+    padding: 4dp 8dp;
+    margin-right: 4dp;
+    tab-index: auto;
+    border-radius: 6dp;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+button:hover,
+input.submit:hover
+{
+    background: #6272a4;
+}
+
+button:active,
+input.submit:active
+{
+    border: 1dp #bd93f9;
+}
+
+button:disabled,
+input.submit:disabled
+{
+    background: #44475a;
+}
+
+/* primary action: later rules win over the shared button rules above */
+input.submit
+{
+    decorator: gradient(vertical #bd93f9 #ff79c6);
+    border: 1dp #bd93f9;
+    color: #282a36;
+}
+
+input.submit:hover
+{
+    decorator: gradient(vertical #ff79c6 #bd93f9);
+    border: 1dp #ff79c6;
+}
+
+input.submit:active
+{
+    decorator: gradient(vertical #bd93f9 #ff79c6);
+    border: 1dp #bd93f9;
+}
+
+input.submit:disabled
+{
+    opacity: 0.5;
+}
+
+/* X button */
+.close-window
+{
+    background: #44475a;
+    decorator: image(dracula-close-button);
+    border: 0dp;
+    width: 20dp;
+    height: 20dp;
+    padding: 0;
+    position: absolute;
+    right: 3dp;
+    top: 3dp;
+    border-radius: 6dp;
+    transition: 0.12s background-color cubic-out;
+}
+
+.close-window:hover
+{
+    background: #ff5555;
+}
+
+.close-window:active
+{
+    background: #ff5555;
+}
+
+/* textarea */
+textarea
+{
+    background: #21222c;
+    border: 1dp #44475a;
+    border-radius: 6dp;
+    padding: 4dp;
+    cursor: text;
+    display: block;
+    min-height: 100dp;
+    min-width: 200dp;
+    margin-top: 4dp;
+    caret-color: #8be9fd;
+    transition: 0.12s border-color cubic-out;
+}
+
+textarea:hover
+{
+    border: 1dp #6272a4;
+}
+
+textarea:focus
+{
+    border: 1dp #bd93f9;
+}
+
+/* checkbox, radio */
+input.checkbox
+{
+    width: 16dp;
+    height: 16dp;
+    vertical-align: -3dp;
+    margin-right: 4dp;
+    border: 1dp #44475a;
+    border-radius: 4dp;
+    background: #21222c;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+input.radio
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #44475a;
+    border-radius: 0.5em;
+    background: #21222c;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+input.checkbox:hover,
+input.radio:hover
+{
+    border: 1dp #6272a4;
+}
+
+input.checkbox:checked
+{
+    background: #bd93f9;
+    border: 1dp #bd93f9;
+    decorator: image(dracula-check-mark);
+    image-color: #282a36;
+}
+
+input.radio:checked
+{
+    background: #ff79c6;
+    border: 1dp #ff79c6;
+    decorator: image(dracula-radio-dot);
+    image-color: #282a36;
+}
+
+/* range */
+input.range
+{
+    height: 16dp;
+    border-radius: 6dp;
+    border: 1dp #44475a;
+    background: #21222c;
+}
+
+/* text */
+input.text,
+input.password
+{
+    background: #21222c;
+    border: 1dp #44475a;
+    padding: 4dp;
+    height: 20dp;
+    border-radius: 6dp;
+    caret-color: #8be9fd;
+    transition: 0.12s border-color cubic-out;
+}
+
+input.text:hover,
+input.password:hover
+{
+    border: 1dp #6272a4;
+}
+
+input.text:focus,
+input.password:focus
+{
+    border: 1dp #bd93f9;
+}
+
+/* select */
+select
+{
+    background: #21222c;
+    border: 1dp #44475a;
+    border-radius: 6dp;
+    padding: 0dp 4dp;
+    margin-top: 4dp;
+    height: 20dp;
+}
+
+select selectarrow
+{
+    width: 16dp;
+    height: 16dp;
+    decorator: image(dracula-arrow-down);
+    image-color: #8be9fd;
+}
+
+select selectbox
+{
+    background: #21222c;
+    border: 1dp #44475a;
+    border-top: 0;
+    padding: 0 4dp;
+    border-bottom-left-radius: 6dp;
+    border-bottom-right-radius: 6dp;
+}
+
+select selectbox option
+{
+    padding: 2dp 4dp;
+}
+
+select selectbox option:hover
+{
+    background: #44475a;
+}
+
+/* scrollbar */
+scrollbarvertical, scrollbarhorizontal
+{
+    background: #191a21;
+    border: 1dp #21222c;
+    border-radius: 6dp;
+}
+
+scrollbarvertical
+{
+    width: 16dp;
+    border-top: 0dp;
+    border-bottom: 0dp;
+}
+
+scrollbarhorizontal
+{
+    height: 16dp;
+    border-left: 0dp;
+    border-right: 0dp;
+}
+
+scrollbarvertical sliderarrowinc,
+scrollbarvertical sliderarrowdec,
+scrollbarhorizontal sliderarrowinc,
+scrollbarhorizontal sliderarrowdec,
+input.range sliderarrowinc,
+input.range sliderarrowdec
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #44475a;
+    border-radius: 6dp;
+    background: #21222c;
+    image-color: #8be9fd;
+    transition: 0.12s background-color cubic-out;
+}
+
+scrollbarvertical sliderarrowdec
+{
+    decorator: image(dracula-arrow-down flip-vertical);
+}
+
+scrollbarvertical sliderarrowinc
+{
+    decorator: image(dracula-arrow-down);
+}
+
+scrollbarhorizontal sliderarrowdec,
+input.range sliderarrowdec
+{
+    decorator: image(dracula-arrow-right flip-horizontal);
+}
+
+scrollbarhorizontal sliderarrowinc,
+input.range sliderarrowinc
+{
+    decorator: image(dracula-arrow-right);
+}
+
+scrollbarvertical sliderarrowinc:hover,
+scrollbarvertical sliderarrowdec:hover,
+scrollbarhorizontal sliderarrowinc:hover,
+scrollbarhorizontal sliderarrowdec:hover,
+input.range sliderarrowinc:hover,
+input.range sliderarrowdec:hover
+{
+    background: #44475a;
+}
+
+sliderbar
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #44475a;
+    border-radius: 6dp;
+    background: #6272a4;
+    transition: 0.12s background-color cubic-out;
+}
+
+sliderbar:hover
+{
+    background: #8be9fd;
+}
+
+sliderbar:active
+{
+    background: #bd93f9;
+}
+
+scrollbarhorizontal > sliderbar
+{
+    width: auto;
+}
+
+scrollbarvertical > sliderbar
+{
+    height: auto;
+}
+
+/* progress */
+progress
+{
+    display: block;
+    background: #21222c;
+    border: 1dp #44475a;
+    border-radius: 6dp;
+}
+
+progress.horizontal
+{
+    height: 20dp;
+}
+
+progress.vertical
+{
+    width: 20dp;
+}
+
+progress fill
+{
+    decorator: gradient(vertical #50fa7b #8be9fd);
+    border-radius: 6dp;
+}
+
+/* window resize handle */
+.resize-handle
+{
+    decorator: image(dracula-resize-handle);
+    image-color: #6272a4;
+    position: absolute;
+    width: 16dp;
+    height: 16dp;
+    bottom: 1dp;
+    right: 1dp;
+    cursor: resize;
+    clip: 1;
+}
+
+/* tables */
+table {
+    box-sizing: border-box;
+    display: table;
+}
+tr {
+    box-sizing: border-box;
+    display: table-row;
+}
+td {
+    box-sizing: border-box;
+    display: table-cell;
+    padding: 4dp 8dp;
+    border-bottom: 1dp #44475a;
+}
+col {
+    box-sizing: border-box;
+    display: table-column;
+}
+colgroup {
+    display: table-column-group;
+}
+thead, tbody, tfoot {
+    display: table-row-group;
+}
+
+/* pulse helper: a soft heartbeat driven by @keyframes */
+@keyframes dracula-pulse
+{
+    from { opacity: 0.5; }
+    to   { opacity: 1.0; }
+}
+
+.pulse
+{
+    animation: 1.4s dracula-pulse infinite alternate cubic-in-out;
+}

@@ -1,0 +1,480 @@
+/*
+ * primer_dark.rcss - flat dark theme inspired by GitHub Primer (dark default).
+ *
+ * Design reference: GitHub Primer color system (MIT)
+ *   https://primer.style/foundations/color
+ *   canvas #0d1117 / surface #161b22 / control #21262d / hover #30363d /
+ *   border #30363d / text #e6edf3 / muted #848d97 / accent #2f81f7 /
+ *   success #238636, #2ea043 / danger #da3633, #b62324.
+ *
+ * Usage: <link type="text/rcss" href="/UI/primer_dark.rcss"/>
+ *
+ * A drop-in alternative to default.rcss: same selectors and geometry, only
+ * the look changes. Written against this engine's RmlUi build, which has no
+ * box-shadow / linear-gradient() / calc(): depth comes from layered surfaces,
+ * 1dp borders and two-stop decorator gradients. Sprites come from
+ * /Textures/RmlUI-1x.png and are recoloured with image-color.
+ * 'body' paints the canvas colour - drop its background line for a
+ * transparent overlay document.
+ */
+
+@spritesheet primer-dark
+{
+    src: /Textures/RmlUI-1x.png;
+
+    primer-close-button: 0dp 0dp 20dp 20dp;
+    primer-arrow-right: 20dp 0dp 16dp 16dp;
+    primer-arrow-down: 36dp 0dp 16dp 16dp;
+    primer-radio-dot: 20dp 16dp 16dp 16dp;
+    primer-check-mark: 36dp 16dp 16dp 16dp;
+    primer-resize-handle: 36dp 32dp 16dp 16dp;
+}
+
+body
+{
+    font-family: "Noto Sans";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 16dp;
+    color: #e6edf3;
+    background: #0d1117;
+    display: inline-block;
+    overflow: hidden;
+}
+
+#window
+{
+    background: #0d1117;
+    border: 1dp #30363d;
+    padding: 8dp;
+    border-radius: 6dp;
+    min-width: 100dp;
+    min-height: 100dp;
+}
+
+#titlebar
+{
+    background: #161b22;
+    text-align: left;
+    margin: -8dp;
+    padding: 4dp 8dp;
+    border-bottom: 1dp #30363d;
+    border-top-left-radius: 6dp;
+    border-top-right-radius: 6dp;
+    height: 20dp;
+}
+
+#titlebar #title
+{
+    display: inline-block;
+    width: 100%;
+}
+
+#content
+{
+    width: auto;
+    overflow: hidden auto;
+    margin: 0;
+}
+
+*:disabled
+{
+    color: #6e7681;
+    cursor: unavailable;
+}
+
+/* button */
+button,
+input.submit
+{
+    background: #21262d;
+    border: 1dp rgba(240,246,252,0.1);
+    display: inline-block;
+    text-align: center;
+    padding: 4dp 8dp;
+    margin-right: 4dp;
+    tab-index: auto;
+    border-radius: 6dp;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+button:hover,
+input.submit:hover
+{
+    background: #30363d;
+}
+
+button:active,
+input.submit:active
+{
+    background: #282e33;
+}
+
+button:disabled,
+input.submit:disabled
+{
+    background: #21262d;
+}
+
+/* primary action: later rules win over the shared button rules above */
+input.submit
+{
+    background: #238636;
+    color: #ffffff;
+}
+
+input.submit:hover
+{
+    background: #2ea043;
+}
+
+input.submit:active
+{
+    background: #238636;
+}
+
+/* X button */
+.close-window
+{
+    background: #21262d;
+    decorator: image(primer-close-button);
+    border: 0dp;
+    width: 20dp;
+    height: 20dp;
+    padding: 0;
+    position: absolute;
+    right: 3dp;
+    top: 3dp;
+    border-radius: 6dp;
+    transition: 0.12s background-color cubic-out;
+}
+
+.close-window:hover
+{
+    background: #da3633;
+}
+
+.close-window:active
+{
+    background: #b62324;
+}
+
+/* textarea */
+textarea
+{
+    background: #0d1117;
+    border: 1dp #30363d;
+    border-radius: 6dp;
+    padding: 4dp;
+    cursor: text;
+    display: block;
+    min-height: 100dp;
+    min-width: 200dp;
+    margin-top: 4dp;
+    caret-color: #2f81f7;
+    transition: 0.12s border-color cubic-out;
+}
+
+textarea:hover
+{
+    border: 1dp #484f58;
+}
+
+textarea:focus
+{
+    border: 1dp #2f81f7;
+}
+
+/* checkbox, radio */
+input.checkbox
+{
+    width: 16dp;
+    height: 16dp;
+    vertical-align: -3dp;
+    margin-right: 4dp;
+    border: 1dp #30363d;
+    border-radius: 4dp;
+    background: #0d1117;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+input.radio
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #30363d;
+    border-radius: 0.5em;
+    background: #0d1117;
+    transition: 0.12s background-color border-color cubic-out;
+}
+
+input.checkbox:hover,
+input.radio:hover
+{
+    border: 1dp #484f58;
+    background: #161b22;
+}
+
+input.checkbox:checked
+{
+    background: #238636;
+    border: 1dp #238636;
+    decorator: image(primer-check-mark);
+}
+
+input.checkbox:checked:hover
+{
+    background: #2ea043;
+    border: 1dp #2ea043;
+}
+
+input.radio:checked
+{
+    background: #1f6feb;
+    border: 1dp #1f6feb;
+    decorator: image(primer-radio-dot);
+}
+
+input.radio:checked:hover
+{
+    background: #2f81f7;
+    border: 1dp #2f81f7;
+}
+
+/* range */
+input.range
+{
+    height: 16dp;
+    border-radius: 6dp;
+    border: 1dp #30363d;
+    background: #21262d;
+}
+
+/* text */
+input.text,
+input.password
+{
+    background: #0d1117;
+    border: 1dp #30363d;
+    padding: 4dp;
+    height: 20dp;
+    border-radius: 6dp;
+    caret-color: #2f81f7;
+    transition: 0.12s border-color cubic-out;
+}
+
+input.text:hover,
+input.password:hover
+{
+    border: 1dp #484f58;
+}
+
+input.text:focus,
+input.password:focus
+{
+    border: 1dp #2f81f7;
+}
+
+/* select */
+select
+{
+    background: #21262d;
+    border: 1dp #30363d;
+    border-radius: 6dp;
+    padding: 0dp 4dp;
+    margin-top: 4dp;
+    height: 20dp;
+}
+
+select selectarrow
+{
+    width: 16dp;
+    height: 16dp;
+    decorator: image(primer-arrow-down);
+    image-color: #848d97;
+}
+
+select selectbox
+{
+    background: #161b22;
+    border: 1dp #30363d;
+    border-top: 0;
+    padding: 0 4dp;
+    border-bottom-left-radius: 6dp;
+    border-bottom-right-radius: 6dp;
+}
+
+select selectbox option
+{
+    padding: 2dp 4dp;
+}
+
+select selectbox option:hover
+{
+    background: #21262d;
+}
+
+/* scrollbar */
+scrollbarvertical, scrollbarhorizontal
+{
+    background: #0d1117;
+    border: 1dp #21262d;
+    border-radius: 6dp;
+}
+
+scrollbarvertical
+{
+    width: 16dp;
+    border-top: 0dp;
+    border-bottom: 0dp;
+}
+
+scrollbarhorizontal
+{
+    height: 16dp;
+    border-left: 0dp;
+    border-right: 0dp;
+}
+
+scrollbarvertical sliderarrowinc,
+scrollbarvertical sliderarrowdec,
+scrollbarhorizontal sliderarrowinc,
+scrollbarhorizontal sliderarrowdec,
+input.range sliderarrowinc,
+input.range sliderarrowdec
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #30363d;
+    border-radius: 6dp;
+    background: #21262d;
+    image-color: #848d97;
+    transition: 0.12s background-color cubic-out;
+}
+
+scrollbarvertical sliderarrowdec
+{
+    decorator: image(primer-arrow-down flip-vertical);
+}
+
+scrollbarvertical sliderarrowinc
+{
+    decorator: image(primer-arrow-down);
+}
+
+scrollbarhorizontal sliderarrowdec,
+input.range sliderarrowdec
+{
+    decorator: image(primer-arrow-right flip-horizontal);
+}
+
+scrollbarhorizontal sliderarrowinc,
+input.range sliderarrowinc
+{
+    decorator: image(primer-arrow-right);
+}
+
+scrollbarvertical sliderarrowinc:hover,
+scrollbarvertical sliderarrowdec:hover,
+scrollbarhorizontal sliderarrowinc:hover,
+scrollbarhorizontal sliderarrowdec:hover,
+input.range sliderarrowinc:hover,
+input.range sliderarrowdec:hover
+{
+    background: #30363d;
+}
+
+sliderbar
+{
+    width: 16dp;
+    height: 16dp;
+    border: 1dp #30363d;
+    border-radius: 6dp;
+    background: #30363d;
+    transition: 0.12s background-color cubic-out;
+}
+
+sliderbar:hover
+{
+    background: #484f58;
+}
+
+sliderbar:active
+{
+    background: #6e7681;
+}
+
+scrollbarhorizontal > sliderbar
+{
+    width: auto;
+}
+
+scrollbarvertical > sliderbar
+{
+    height: auto;
+}
+
+/* progress */
+progress
+{
+    display: block;
+    background: #21262d;
+    border: 1dp #30363d;
+    border-radius: 6dp;
+}
+
+progress.horizontal
+{
+    height: 20dp;
+}
+
+progress.vertical
+{
+    width: 20dp;
+}
+
+progress fill
+{
+    background-color: #238636;
+    border-radius: 6dp;
+}
+
+/* window resize handle */
+.resize-handle
+{
+    decorator: image(primer-resize-handle);
+    image-color: #6e7681;
+    position: absolute;
+    width: 16dp;
+    height: 16dp;
+    bottom: 1dp;
+    right: 1dp;
+    cursor: resize;
+    clip: 1;
+}
+
+/* tables */
+table {
+    box-sizing: border-box;
+    display: table;
+}
+tr {
+    box-sizing: border-box;
+    display: table-row;
+}
+td {
+    box-sizing: border-box;
+    display: table-cell;
+    padding: 4dp 8dp;
+    border-bottom: 1dp #21262d;
+}
+col {
+    box-sizing: border-box;
+    display: table-column;
+}
+colgroup {
+    display: table-column-group;
+}
+thead, tbody, tfoot {
+    display: table-row-group;
+}
