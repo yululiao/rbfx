@@ -102,6 +102,9 @@
 #ifdef URHO3D_ACTIONS
 #include "../Actions/ActionManager.h"
 #endif
+#ifdef URHO3D_TIMELINE
+#include "../Timeline/Timeline.h"
+#endif
 #ifdef URHO3D_XR
     #include "Urho3D/XR/VRRig.h"
     #include "Urho3D/XR/OpenXR.h"
@@ -303,6 +306,10 @@ Engine::Engine(Context* context) :
 
 #ifdef URHO3D_ACTIONS
     context_->RegisterSubsystem<ActionManager>();
+#endif
+
+#ifdef URHO3D_TIMELINE
+    RegisterTimelineLibrary(context_);
 #endif
 
 #ifdef URHO3D_XR

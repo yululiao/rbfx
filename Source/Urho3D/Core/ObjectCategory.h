@@ -40,6 +40,7 @@ URHO3D_GLOBAL_CONSTANT(ConstString Category_Physics2D{"Component/Physics2D"});
 URHO3D_GLOBAL_CONSTANT(ConstString Category_RmlUI{"Component/RmlUI"});
 URHO3D_GLOBAL_CONSTANT(ConstString Category_Scene{"Component/Scene"});
 URHO3D_GLOBAL_CONSTANT(ConstString Category_Subsystem{"Component/Subsystem"});
+URHO3D_GLOBAL_CONSTANT(ConstString Category_Timeline{"Component/Timeline"});
 URHO3D_GLOBAL_CONSTANT(ConstString Category_Urho2D{"Component/Urho2D"});
 /// @}
 

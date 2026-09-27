@@ -99,6 +99,10 @@ if (URHO3D_ACTIONS)
     define_engine_source_files (Actions)
 endif ()
 
+if (URHO3D_TIMELINE)
+    define_engine_source_files (Timeline)
+endif ()
+
 if (URHO3D_XR)
     add_definitions(-DXR_USE_TIMESPEC)
     if (PLATFORM_WIN32 OR PLATFORM_UNIVERSAL_WINDOWS)
