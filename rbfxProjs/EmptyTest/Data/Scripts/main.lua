@@ -118,7 +118,7 @@ SubscribeToEvent("Update", function(data)
     local timeStep = data.TimeStep
     for _, mover in ipairs(movers) do
         local node = mover.node
-        node:Translate(node.direction * mover.moveSpeed * timeStep, TS.LOCAL)
+        node:Translate(node:GetDirection() * mover.moveSpeed * timeStep, TS.LOCAL)
 
         local pos = node:GetPosition()
         if pos.x < mover.bounds.min.x or pos.x > mover.bounds.max.x
