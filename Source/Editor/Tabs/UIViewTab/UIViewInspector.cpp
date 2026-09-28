@@ -9,6 +9,7 @@
 #include "UIViewParagraphText.h"
 
 #include "UIViewTab.h"
+#include "../TextEditorTab.h"
 
 #include "../../Project/Project.h"
 
@@ -19,6 +20,8 @@
 #include <RmlUi/Core/ComputedValues.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/PropertyDefinition.h>
+#include <RmlUi/Core/StyleSheetSpecification.h>
 #include <RmlUi/Core/StyleTypes.h>
 
 #include <EASTL/sort.h>
@@ -112,6 +115,7 @@ void UIViewInspector::RenderContent()
     RenderTemplates(node);
     ui::Separator();
     RenderComputed(node);
+    RenderMatchedStyles(node);
 }
 
 void UIViewInspector::RenderHeadLinks()
@@ -1653,6 +1657,27 @@ bool UIViewInspector::RenderLayout(UiNode* node)
         static const char* const al[] = { "Start", "Center", "End", "Stretch" };
         static const char* const av[] = { "flex-start", "center", "flex-end", "stretch" };
         LayoutCombo(payload, structural, "Align (cross axis)", "align-items", al, av, 4, "stretch");
+
+        // Wrap + line packing: children that do not fit flow onto a new line
+        // instead of being squeezed onto one. align-content packs those lines
+        // on the cross axis, so it stays visible but greyed until a wrap is
+        // authored (mirroring the flex gating above, no panel reshuffling).
+        static const char* const wl[] = { "No wrap", "Wrap", "Wrap reversed" };
+        static const char* const wv[] = { "nowrap", "wrap", "wrap-reverse" };
+        LayoutCombo(payload, structural, "Wrap", "flex-wrap", wl, wv, 3, "nowrap");
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Wrap moves children that do not fit onto a new line. With No wrap\n"
+                "they stay on one line and shrink to fit instead.");
+
+        const ea::string wrap = LowerCopy(cur("flex-wrap"));
+        ui::BeginDisabled(wrap != "wrap" && wrap != "wrap-reverse");
+        static const char* const cl[] = { "Start", "Center", "End", "Between", "Around", "Stretch" };
+        static const char* const cv[] = { "flex-start", "center", "flex-end", "space-between", "space-around", "stretch" };
+        LayoutCombo(payload, structural, "Align lines", "align-content", cl, cv, 6, "stretch");
+        ui::EndDisabled();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("How the wrapped lines pack on the cross axis. Only applies once\n"
+                "Wrap is on.");
     }
     ui::EndDisabled();
 
@@ -1794,6 +1819,15 @@ bool UIViewInspector::RenderLayout(UiNode* node)
         ui::PopItemWidth();
         if (ui::IsItemHovered())
             ui::SetTooltip("Available when this element's parent is a Row/Column container.");
+
+        // Per-item cross-axis override: the same choices as the container's
+        // Align (cross axis), applied to this child alone (auto = follow the
+        // container).
+        static const char* const xl[] = { "Start", "Center", "End", "Baseline", "Stretch" };
+        static const char* const xv[] = { "flex-start", "center", "flex-end", "baseline", "stretch" };
+        LayoutCombo(payload, structural, "Align (self)", "align-self", xl, xv, 5, "auto");
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Overrides the container's Align (cross axis) for this child alone.");
     }
     ui::EndDisabled();
 
@@ -1867,6 +1901,89 @@ void UIViewInspector::RenderComputed(UiNode* node)
     // here: an absolutely positioned node can be dragged/resized in the preview.
     if (node->GetStyle("position") == "absolute")
         ui::TextDisabled("(absolutely positioned - drag the handles in the preview to move or resize)");
+}
+
+void UIViewInspector::RenderMatchedStyles(UiNode* node)
+{
+    if (!ui::CollapsingHeader(ICON_FA_MAGNIFYING_GLASS " Matched styles"))
+        return;
+
+    // This needs the live preview DOM: without a correlated element (template
+    // subtrees can stay uncorrelated) there is nothing to introspect.
+    if (!node->dom_)
+    {
+        ui::TextDisabled("No live preview element correlated for this node.");
+        return;
+    }
+
+    // For every registered property, ask RmlUi's public arbitration chain
+    // (inline -> rcss rule -> inherited -> default) where the winning value
+    // came from. PropertySource carries the selector plus the originating
+    // file and line, alive for the whole runtime - no internal headers needed.
+    struct Row
+    {
+        ea::string name;
+        ea::string value;
+        ea::string origin; ///< "(inline style)" | selector text | "(inherited)"
+        ea::string path;   ///< rule file (RmlUi resource URL), empty when not rule-backed
+        int line = -1;     ///< 1-based rule line in the file
+    };
+    ea::vector<Row> rows;
+
+    const Rml::PropertyMap& inlineStyles = node->dom_->GetLocalStyleProperties();
+    const Rml::PropertyIdSet& registered = Rml::StyleSheetSpecification::GetRegisteredProperties();
+    for (Rml::PropertyId id : registered)
+    {
+        const Rml::Property* p = node->dom_->GetProperty(id);
+        if (!p)
+            continue;
+        const ea::string name = Rml::StyleSheetSpecification::GetPropertyName(id).c_str();
+        if (inlineStyles.find(id) != inlineStyles.end())
+        {
+            rows.push_back({ name, p->ToString().c_str(), "(inline style)", "", -1 });
+            continue;
+        }
+        if (p->source)
+        {
+            rows.push_back({ name, p->ToString().c_str(), p->source->rule_name.c_str(),
+                p->source->path.c_str(), p->source->line_number });
+            continue;
+        }
+        // No source: either the engine default (skip - noise) or a value
+        // inherited from an ancestor's inline style (the inheritance chain
+        // hands back the ancestor's local property, which carries no source).
+        const Rml::PropertyDefinition* def = Rml::StyleSheetSpecification::GetProperty(id);
+        if (def && p != def->GetDefaultValue())
+            rows.push_back({ name, p->ToString().c_str(), "(inherited)", "", -1 });
+    }
+
+    if (rows.empty())
+    {
+        ui::TextDisabled("No rule hits: every property sits on its engine default.");
+        return;
+    }
+    ea::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.name < b.name; });
+    for (const Row& r : rows)
+    {
+        ui::Text("%s", r.name.c_str());
+        ui::SameLine(0.0f, 10.0f);
+        ui::Text("%s", r.value.c_str());
+        ui::SameLine(0.0f, 10.0f);
+        const bool clickable = !r.path.empty() && r.line > 0;
+        ui::TextDisabled("%s%s%s", clickable ? ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " " : "",
+            r.path.empty() ? r.origin.c_str()
+                : Format("{}:{}  {}", r.path.c_str(), r.line, r.origin.c_str()).c_str(),
+            "");
+        if (clickable && ui::IsItemHovered() && ui::IsItemClicked(ImGuiMouseButton_Left))
+        {
+            // Click-through: open the originating file in the text editor tab,
+            // scrolled to the rule's line.
+            if (UIViewTab* tab = owner_)
+                TextEditorTab::OpenAtLine(tab->GetProject(), r.path, r.line);
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("%s", r.origin.c_str());
+    }
 }
 
 }

@@ -108,6 +108,12 @@ public:
     /// menu and the hierarchy context menu. They act on the top-level
     /// selection as a single undo step.
     void CopySelection();
+    /// True clipboard semantics (the OS clipboard holds standalone RML, so it
+    /// also bridges across documents and into external editors). Copy/
+    /// Cut/Paste; the legacy CopySelection stays the in-place duplicate.
+    void CopySelectionToClipboard();
+    void CutSelection();
+    void PasteFromClipboard();
     void DeleteSelection();
     /// The Add Widget palette (filter box + grouped entries + arbitrary
     /// tag), rendered into a container's menu (the hierarchy context menu).

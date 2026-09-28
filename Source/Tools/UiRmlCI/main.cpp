@@ -23,6 +23,10 @@
 //  11. Separator hygiene: a declaration appended after an authored trailing ';'
 //      reuses it (never mints ';;'); remove-last + add-new in one save coalesces
 //      into one clean whole-value rewrite.
+//  12. Clipboard fragments: SerializeSubtree -> ParseFragment -> SerializeSubtree
+//      is the identity (classes, bindings, styles, nesting, valueless attributes
+//      all carried); a pasted fragment appends as generated content without
+//      touching the destination's authored bytes; prose never pastes.
 //
 
 #include "RmlTextModel.h"
@@ -624,6 +628,58 @@ void TestHeadLinkCommands()
     Check(!cmd.RemoveHeadLinkAt(ToEa(emptyHead), 0, out), "remove on empty head rejected");
 }
 
+// Clipboard fragments (guarantee 12): SerializeSubtree writes standalone RML and
+// ParseFragment reads it back, so a copy/paste (also across documents, through the
+// OS clipboard) never loses attributes, classes, styles, text or nesting. Parsed
+// nodes count as editor-made content: appending them regenerates their markup like
+// any new widget instead of patching a spine they never belonged to.
+void TestClipboardFragment()
+{
+    std::cout << "TestClipboardFragment\n";
+    const std::string doc =
+        "<rml><body><div id=\"a\" class=\"row tall\" data-x=\"{{v}}\" "
+        "style=\"display: flex; gap: 4px\">hi<button disabled>ok</button></div></body></rml>";
+    Urho3D::UiDocumentModel model;
+    Check(model.BuildTreeFromText(ToEa(doc)), "fragment source doc builds");
+
+    // Serialize -> parse -> serialize is the identity: whatever the clipboard
+    // carries pastes back without a byte of drift.
+    Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+    Check(div != nullptr, "found div");
+    const std::string clip = ToStd(model.SerializeSubtree(*div));
+    Check(clip.find("class=\"row tall\"") != std::string::npos, "classes serialized");
+    Check(clip.find("data-x=\"{{v}}\"") != std::string::npos, "binding attribute serialized");
+    Check(clip.find("style=\"display: flex; gap: 4px\"") != std::string::npos, "style serialized");
+    const auto frag = model.ParseFragment(ToEa(clip));
+    Check(frag.size() == 1, "single fragment root");
+    Check(ToStd(model.SerializeSubtree(*frag[0])) == clip, "fragment round-trip is the identity");
+
+    // Paste into a second document: the fragment appends as generated
+    // (editor-made) content and the destination's authored bytes stay put.
+    const std::string doc2 = "<rml><body><p id=\"stay\">t</p></body></rml>";
+    Urho3D::UiDocumentModel dst;
+    Check(dst.BuildTreeFromText(ToEa(doc2)), "destination doc builds");
+    const auto frag2 = dst.ParseFragment(ToEa(clip));
+    Check(frag2.size() == 1, "fragment parses against another model");
+    frag2[0]->id_ = "b"; // paste-side rename, as PasteNodes does
+    dst.root_->children_.push_back(frag2[0]);
+    const std::string pasted = ToStd(dst.EmitRml());
+    Check(pasted.find("<p id=\"stay\">t</p>") != std::string::npos, "authored bytes untouched");
+    Check(pasted.find("<div id=\"b\"") != std::string::npos, "pasted subtree generated");
+    Check(pasted.find("disabled") != std::string::npos, "valueless attribute pasted");
+    Check(pasted.find(">ok<") != std::string::npos, "nested text pasted");
+    // The pasted document itself round-trips (anchors were cleared, not carried).
+    Urho3D::UiDocumentModel re;
+    Check(re.BuildTreeFromText(ToEa(pasted)), "pasted doc rebuilds");
+    Check(ToStd(re.EmitRml()) == pasted, "pasted doc round-trips");
+
+    // Multi-root clipboards paste as siblings; prose and emptiness never paste.
+    const auto two = model.ParseFragment(ToEa("<br/><hr/>"));
+    Check(two.size() == 2, "multi-root fragment yields two nodes");
+    Check(model.ParseFragment(ToEa("just some words, no tags")).empty(), "prose rejected");
+    Check(model.ParseFragment(ToEa("")).empty(), "empty rejected");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -644,6 +700,7 @@ int main(int argc, char** argv)
     TestValuelessAttributeRoundTrip();
     TestStyleSemicolonHygiene();
     TestHeadLinkCommands();
+    TestClipboardFragment();
 
     std::cout << "WalkSamples\n";
     for (const auto& r : roots)

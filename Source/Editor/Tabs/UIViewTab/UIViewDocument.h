@@ -224,6 +224,12 @@ public:
     /// @{
     bool DeleteNodes(const ea::vector<UiNode*>& nodes);
     ea::vector<UiNode*> DuplicateNodes(const ea::vector<UiNode*>& nodes);
+
+    /// Paste parsed fragment nodes (UiDocumentModel::ParseFragment products) as
+    /// the last children of \a parent in one undo step. Ids colliding with the
+    /// document or within the batch get a -2/-3/... suffix. Returns the pasted
+    /// nodes; empty when the parent rejects children or nothing pasted.
+    ea::vector<UiNode*> PasteNodes(UiNode* parent, const ea::vector<SharedPtr<UiNode>>& fragment);
     /// @}
     /// Move a node (with its subtree) under \a newParent at \a index. Guards:
     /// no text/nested-doc/root involved, and \a newParent must not live inside

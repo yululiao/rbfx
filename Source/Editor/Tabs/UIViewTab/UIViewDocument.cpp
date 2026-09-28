@@ -870,6 +870,76 @@ ea::vector<UiNode*> UIViewDocument::DuplicateNodes(const ea::vector<UiNode*>& no
     return results;
 }
 
+namespace
+{
+void CollectIds(const UiNode& node, ea::hash_set<ea::string>& ids)
+{
+    if (!node.id_.empty())
+        ids.insert(node.id_);
+    for (const SharedPtr<UiNode>& child : node.children_)
+        CollectIds(*child, ids);
+}
+
+/// Re-suffix a pasted id that collides with the document or an earlier batch
+/// entry ("button" -> "button-2", "button-3", ...), matching the DuplicateNode
+/// naming convention. Ids that are free stay verbatim.
+void RenameCollidingIds(UiNode& node, ea::hash_set<ea::string>& taken)
+{
+    if (!node.id_.empty() && taken.find(node.id_) != taken.end())
+    {
+        int suffix = 2;
+        while (taken.find(Format("{}-{}", node.id_, suffix)) != taken.end())
+            ++suffix;
+        node.id_ = Format("{}-{}", node.id_, suffix);
+    }
+    if (!node.id_.empty())
+        taken.insert(node.id_);
+    for (const SharedPtr<UiNode>& child : node.children_)
+        RenameCollidingIds(*child, taken);
+}
+}
+
+ea::vector<UiNode*> UIViewDocument::PasteNodes(UiNode* parent, const ea::vector<SharedPtr<UiNode>>& fragment)
+{
+    ea::vector<UiNode*> results;
+    if (!model_.root_ || !document_ || !parent || fragment.empty())
+        return results;
+    if (parent->IsText() || parent->IsNestedDoc() || parent->IsHeadLink())
+        return results;
+
+    const ea::string undoText = model_.EmitRml();
+    ea::vector<unsigned> parentPath;
+    if (!model_.BuildPath(parent, parentPath))
+        return results;
+
+    // Pasted ids must stay unique against the document and within the batch;
+    // the fragment is caller-owned and freshly parsed, so re-suffixing in place
+    // is safe (a failed commit below discards the whole attempt anyway).
+    ea::hash_set<ea::string> taken;
+    CollectIds(*model_.root_, taken);
+    ea::vector<ea::vector<unsigned>> newPaths;
+    for (const SharedPtr<UiNode>& node : fragment)
+    {
+        if (!node || node->IsNestedDoc() || node->IsHeadLink())
+            continue; // a virtual node never pastes
+        RenameCollidingIds(*node, taken);
+        const unsigned indexInParent = static_cast<unsigned>(parent->children_.size());
+        parent->children_.push_back(node);
+        ea::vector<unsigned> path = parentPath;
+        path.push_back(indexInParent);
+        newPaths.push_back(path);
+    }
+
+    if (newPaths.empty() || !CommitAndReload(undoText, {}))
+        return results;
+    for (const ea::vector<unsigned>& path : newPaths)
+    {
+        if (UiNode* r = model_.ResolvePath(path))
+            results.push_back(r);
+    }
+    return results;
+}
+
 bool UIViewDocument::DeleteNode(UiNode* node)
 {
     if (!node || node == model_.root_.Get() || node->IsText())

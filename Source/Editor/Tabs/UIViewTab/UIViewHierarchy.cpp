@@ -370,6 +370,12 @@ void UIViewHierarchy::RenderContextMenuItems()
         ui::EndMenu();
     }
 
+    // Paste is selection-relative (lands beside the current selection, into
+    // the body when nothing is selected), so it applies to any target,
+    // including the root.
+    if (ui::MenuItem(ICON_FA_PASTE " Paste"))
+        tab->PasteFromClipboard();
+
     if (target != doc->GetModel().root_.Get())
     {
         ui::Separator();
@@ -377,16 +383,25 @@ void UIViewHierarchy::RenderContextMenuItems()
         if (count > 1)
         {
             if (ui::MenuItem(Format(ICON_FA_COPY " Copy %d Items", count).c_str()))
-                tab->CopySelection();
+                tab->CopySelectionToClipboard();
+            if (ui::MenuItem(Format(ICON_FA_SCISSORS " Cut %d Items", count).c_str()))
+                tab->CutSelection();
             if (ui::MenuItem(Format(ICON_FA_TRASH " Delete %d Items", count).c_str()))
                 tab->DeleteSelection();
         }
         else
         {
+            // "Copy" writes the OS clipboard (standalone RML); the in-place
+            // duplicate stays on Ctrl+D only.
             if (ui::MenuItem(ICON_FA_COPY " Copy"))
             {
                 tab->SetSelectedNode(target);
-                tab->CopySelection();
+                tab->CopySelectionToClipboard();
+            }
+            if (ui::MenuItem(ICON_FA_SCISSORS " Cut"))
+            {
+                tab->SetSelectedNode(target);
+                tab->CutSelection();
             }
             if (ui::MenuItem(ICON_FA_TRASH " Delete"))
             {

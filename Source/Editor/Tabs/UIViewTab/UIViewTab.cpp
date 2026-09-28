@@ -635,6 +635,65 @@ void UIViewTab::CopySelection()
         SetSelection(copies);
 }
 
+void UIViewTab::CopySelectionToClipboard()
+{
+    if (!document_)
+        return;
+    const ea::vector<UiNode*> targets = GetTopLevelSelectedNodes();
+    if (targets.empty())
+        return; // a virtual / root-only selection has no serialized form
+    // One subtree per line: standalone RML that stays human-readable when
+    // pasted into an external editor and parses straight back on paste.
+    ea::string text;
+    for (UiNode* node : targets)
+    {
+        if (!text.empty())
+            text += "\n";
+        text += document_->GetModel().SerializeSubtree(*node);
+    }
+    ui::SetClipboardText(text.c_str());
+}
+
+void UIViewTab::CutSelection()
+{
+    // A virtual selection cannot be serialized: cutting it would silently
+    // degrade to a plain delete, so refuse the whole gesture instead.
+    if (!document_ || GetTopLevelSelectedNodes().empty())
+        return;
+    CopySelectionToClipboard();
+    DeleteSelection();
+}
+
+void UIViewTab::PasteFromClipboard()
+{
+    if (!document_ || !document_->GetRmlDocument())
+        return;
+    const char* clip = ui::GetClipboardText();
+    if (!clip || !clip[0])
+        return;
+    const ea::vector<SharedPtr<UiNode>> fragment =
+        document_->GetModel().ParseFragment(ea::string(clip));
+    if (fragment.empty())
+        return; // prose / garbage on the clipboard never pastes
+
+    // Paste lands next to the selection: appended to the selection's parent
+    // (the text case targets the text's own element). A virtual / root-only
+    // (or empty) selection pastes into the body - never into a virtual node.
+    const UiDocumentModel& model = document_->GetModel();
+    UiNode* parent = nullptr;
+    if (selected_ && selected_ != model.root_.Get())
+    {
+        if (!selected_->IsNestedDoc() && !selected_->IsHeadLink())
+            parent = model.FindParent(selected_);
+    }
+    if (!parent || parent->IsNestedDoc() || parent->IsHeadLink())
+        parent = model.root_.Get();
+
+    const ea::vector<UiNode*> pasted = document_->PasteNodes(parent, fragment);
+    if (!pasted.empty())
+        SetSelection(pasted);
+}
+
 void UIViewTab::DeleteSelection()
 {
     if (!document_)
@@ -2145,6 +2204,21 @@ void UIViewTab::HandleShortcuts()
     {
         if (!GetTopLevelSelectedNodes().empty())
             CopySelection();
+        return;
+    }
+    if (io.KeyCtrl && !io.KeyShift && ui::IsKeyPressed(ImGuiKey_C))
+    {
+        CopySelectionToClipboard();
+        return;
+    }
+    if (io.KeyCtrl && !io.KeyShift && ui::IsKeyPressed(ImGuiKey_X))
+    {
+        CutSelection();
+        return;
+    }
+    if (io.KeyCtrl && !io.KeyShift && ui::IsKeyPressed(ImGuiKey_V))
+    {
+        PasteFromClipboard();
         return;
     }
     if (io.KeyAlt && ui::IsKeyPressed(ImGuiKey_UpArrow))

@@ -137,6 +137,17 @@ struct UiDocumentModel
     /// the spine and applying only the changed regions as span patches.
     ea::string EmitRml() const;
 
+    /// Serialize one subtree as standalone RML (depth-0, no leading indent) -
+    /// the clipboard / copy-out representation. ParseFragment is its inverse.
+    ea::string SerializeSubtree(const UiNode& node) const;
+
+    /// Parse a standalone RML fragment (one or more root-level elements) into
+    /// fresh model nodes. Loose text is dropped (copy never produces it), so
+    /// prose on the clipboard never pastes. Spine anchors are cleared: pasted
+    /// nodes count as editor-made content. Returns empty when the text holds
+    /// no element.
+    ea::vector<SharedPtr<UiNode>> ParseFragment(const ea::string& rmlText) const;
+
     UiNode* FindByDom(const Rml::Element* element) const;
     /// Parent of \a node in the model tree, or null (root / not found).
     UiNode* FindParent(const UiNode* node) const;

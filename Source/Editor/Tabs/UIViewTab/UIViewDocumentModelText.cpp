@@ -777,6 +777,51 @@ ea::string UiDocumentModel::EmitRml() const
     return Ea(spine.GetText());
 }
 
+namespace
+{
+/// Normalize a parsed fragment node into "editor-made" content: strip the
+/// anchors BuildElement seeded from the fragment-local spine (the save-time
+/// reconcile must fully generate these nodes, like AddWidget products, not
+/// patch spans of a spine they never belonged to) and trim text runs - the
+/// parser's text runs swallow the generated indentation between siblings,
+/// which a re-serialize would double.
+void NormalizeFragmentNode(UiNode& node)
+{
+    node.srcNode_ = -1;
+    if (node.IsText())
+        node.text_ = Trim(node.text_);
+    for (const SharedPtr<UiNode>& child : node.children_)
+        NormalizeFragmentNode(*child);
+}
+}
+
+ea::string UiDocumentModel::SerializeSubtree(const UiNode& node) const
+{
+    return Ea(GenSubtree(node, 0));
+}
+
+ea::vector<SharedPtr<UiNode>> UiDocumentModel::ParseFragment(const ea::string& rmlText) const
+{
+    // A fragment has no <body>: its root-level ELEMENTS are the pasteables (loose
+    // text is dropped - copy never produces it, so accepting it would only let
+    // pasted prose into the document). The parse is deliberately lenient
+    // (RmlTextModel::Load never fails), so the element gate is what rejects
+    // plain prose / garbage input. Comments and whitespace runs never paste.
+    ea::vector<SharedPtr<UiNode>> out;
+    RmlTextModel spine;
+    spine.Load(Std(rmlText));
+    for (int cidx : spine.Node(spine.Root()).children)
+    {
+        const RmlNode& cn = spine.Node(cidx);
+        if (cn.kind != RmlNodeKind::Element)
+            continue;
+        SharedPtr<UiNode> node = BuildElement(spine, cidx);
+        NormalizeFragmentNode(*node);
+        out.push_back(node);
+    }
+    return out;
+}
+
 UiNode* UiDocumentModel::FindParent(const UiNode* node) const
 {
     if (!root_ || !node || node == root_)

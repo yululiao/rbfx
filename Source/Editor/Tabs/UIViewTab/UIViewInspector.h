@@ -74,6 +74,10 @@ private:
     /// Read-only sections: they never commit, so the node stays valid.
     void RenderTemplates(UiNode* node);
     void RenderComputed(UiNode* node);
+    /// Read-only "Matched styles" introspection: for every registered property,
+    /// where the winning value comes from (inline / rcss rule + file:line /
+    /// inherited). RmlUi keeps the source alive at runtime - public API only.
+    void RenderMatchedStyles(UiNode* node);
 
     WeakPtr<UIViewTab> owner_;
     char attributeKeyBuf_[128]{};
