@@ -23,6 +23,7 @@
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/Resource/ResourceEvents.h>
 #include <Urho3D/SystemUI/DragDropPayload.h>
 #include <Urho3D/SystemUI/SystemUI.h>
 #include <Urho3D/SystemUI/Widgets.h>
@@ -51,6 +52,10 @@ namespace
 {
 // On-screen radius (in pixels) for grabbing a gizmo handle.
 constexpr float kHandleGrabPx = 7.0f;
+
+// On-screen radius (in pixels) a dragged box's edge/center snaps to a
+// sibling's or parent's edge/center from (alignment guides).
+constexpr float kSnapThresholdPx = 6.0f;
 
 // How many UIViewTab instances have ever been created. Tab identity (ImGui
 // window id, ini section, Project tab registry) is keyed on the title, so
@@ -84,9 +89,25 @@ constexpr ImU32 kBoxLabelBg = IM_COL32(24, 24, 24, 210);
 // the slot line and the outline of the node being moved.
 constexpr ImU32 kDropColor = IM_COL32(90, 230, 140, 240);
 constexpr ImU32 kDropFill = IM_COL32(90, 230, 140, 22);
+// Alignment guides: lines drawn across the canvas at a snapped alignment.
+constexpr ImU32 kGuideColor = IM_COL32(255, 80, 110, 230);
 // Inline text editing: the marker around the element whose #text child is
 // being edited in place.
 constexpr ImU32 kTextEditColor = IM_COL32(255, 220, 90, 220);
+
+// Walk the model tree to the direct parent of \a node (UiNode carries no
+// parent pointer; the tree is small enough for a linear walk per drag frame).
+UiNode* FindParentNode(UiNode* root, const UiNode* node)
+{
+    for (const SharedPtr<UiNode>& child : root->children_)
+    {
+        if (child.Get() == node)
+            return root;
+        if (UiNode* hit = FindParentNode(child.Get(), node))
+            return hit;
+    }
+    return nullptr;
+}
 
 // The widget palette is a data table so the toolbar renders and dispatches
 // without a chain of per-control branches. Entries also carry the widget
@@ -343,6 +364,13 @@ UIViewTab::UIViewTab(Context* context)
     // attribute every action to this instance's resource.
     hierarchySource_ = MakeShared<UIViewHierarchy>(this);
     inspectorSource_ = MakeShared<UIViewInspector>(this);
+
+    // Hot refresh: react to file-watcher events so an .rcss sheet or .rml
+    // template saved on disk (from the text editor tab or an external tool)
+    // refreshes the canvas without reopening the document. The preview's
+    // private RmlUI instance stays unsubscribed from E_FILECHANGED (reload
+    // immunity, see UIViewDocument) - this subscription owns the reaction.
+    SubscribeToEvent(E_FILECHANGED, URHO3D_HANDLER(UIViewTab, HandleFileChanged));
 }
 
 UIViewTab::~UIViewTab()
@@ -1004,6 +1032,100 @@ void UIViewTab::OnResourceShallowSaved(const ea::string& resourceName)
     (void)resourceName;
 }
 
+bool UIViewTab::PointerInteractionActive() const
+{
+    // Any held-button or in-canvas editing gesture: a model rebuild under it
+    // would free the node pointers the gesture state machines still hold.
+    return dragging_ || structDragActive_ || structDragging_ || marqueeActive_ || panningActive_
+        || textEditActive_;
+}
+
+void UIViewTab::HandleFileChanged(StringHash eventType, VariantMap& eventData)
+{
+    using namespace FileChanged;
+    (void)eventType;
+    const ea::string& changed = eventData[P_RESOURCENAME].GetString();
+    const ea::string& active = GetActiveResourceName();
+    if (active.empty() || !document_)
+        return;
+
+    // The open document itself changed on disk. Our own save echoes through
+    // the watcher too, so the apply step narrows this by comparing the disk
+    // bytes with the model. Never while unsaved edits exist: the overwrite
+    // guard owns that conflict at save time, and an automatic reload must
+    // not discard work.
+    if (changed.comparei(active) == 0)
+    {
+        if (!IsResourceUnsaved(active))
+            pendingHotReloadFromDisk_ = true;
+        return;
+    }
+
+    // A referenced asset changed: a linked .rcss stylesheet or an .rml
+    // template (nested documents). The document is re-projected wholesale
+    // rather than tracking the reference set - cheap at editor scale.
+    const ea::string ext = GetExtension(changed);
+    if (ext == ".rcss" || ext == ".rml")
+        pendingHotAssetRefresh_ = true;
+}
+
+void UIViewTab::ApplyPendingHotRefresh()
+{
+    if (!pendingHotReloadFromDisk_ && !pendingHotAssetRefresh_)
+        return;
+    // File-watcher events land on BeginFrame, mid-gesture included. Defer
+    // every rebuild until no pointer interaction is live.
+    if (PointerInteractionActive())
+        return;
+
+    const ea::string active = GetActiveResourceName();
+    if (active.empty() || !document_)
+    {
+        // The document closed while the change was pending: nothing to do.
+        pendingHotReloadFromDisk_ = false;
+        pendingHotAssetRefresh_ = false;
+        return;
+    }
+
+    if (pendingHotReloadFromDisk_)
+    {
+        pendingHotReloadFromDisk_ = false;
+        // Re-check at apply time: edits may have started (or the file been
+        // saved again by us) between the watcher event and this frame.
+        if (IsResourceUnsaved(active))
+            return;
+        const ea::string diskText = ReadResourceFile(active);
+        if (diskText.empty() || diskText == document_->EmitRml())
+            return; // our own save echoing back, or the file vanished
+
+        URHO3D_LOGINFO("UIViewTab: '{}' changed on disk - reloading.", active.c_str());
+        // In-place reload, deliberately not Close/Open: closing the resource
+        // would also close a secondary instance tab, which a disk change
+        // must never do. Mirrors OnResourceLoaded minus the fresh-document
+        // setup; undo keeps its snapshots (undoing past the external change
+        // is an explicit user choice).
+        if (!document_->LoadFromText(diskText, active))
+        {
+            URHO3D_LOGERROR("UIViewTab: failed to reload '{}' from disk - keeping the last good document",
+                active.c_str());
+            // LoadFromText cleared the path on failure; re-project the
+            // unchanged model so the editing session survives broken bytes.
+            document_->LoadFromText(document_->EmitRml(), active);
+            return;
+        }
+        diskText_ = diskText; // new save-guard baseline
+        diskTextName_ = active;
+        ResetViewToDocument();
+        if (hierarchySource_)
+            hierarchySource_->ExpandAncestors(selPath_);
+        ConnectSharedPanels();
+        return;
+    }
+
+    pendingHotAssetRefresh_ = false;
+    document_->RefreshProjection();
+}
+
 void UIViewTab::WriteIniSettings(ImGuiTextBuffer& output)
 {
     // The canvas size leads the section, ahead of every base key: the ini is
@@ -1207,6 +1329,7 @@ void UIViewTab::NewDocument()
 
 void UIViewTab::RenderContent()
 {
+    ApplyPendingHotRefresh();
     RenderContentToolbar();
     ui::Separator();
     RenderPreview();
@@ -2283,21 +2406,127 @@ void UIViewTab::UpdateDrag(const DocViewport& vp)
     const UiBox solved = SolveDrag(gizmoStartBox_, gizmoDrag_, gizmoPressDoc_, gizmoCurDoc_);
     gizmoLiveBox_ = solved;
 
+    // Alignment snap (move only): adjusts the live box and the pointer
+    // position the eventual commit re-solves from, so the live preview, the
+    // committed box and the drawn guides can never disagree.
+    if (gizmoDrag_.op_ == GizmoOp::Move)
+        ApplyDragSnap(vp);
+
     // Live preview into the DOM projection; the model is only touched on
     // release. Layout re-flows next E_POSTUPDATE (Context::Update).
-    document_->SetLiveBox(gizmoNode_, solved);
+    document_->SetLiveBox(gizmoNode_, gizmoLiveBox_);
 
     if (gizmoDrag_.op_ == GizmoOp::Move && !extraDragNodes_.empty())
     {
         // Same layout-space translation as the primary (its base cancels out of
         // pos_-pos_, so this is exact for siblings sharing a containing block).
-        const Vector2 delta = solved.pos_ - gizmoStartBox_.pos_;
+        // gizmoLiveBox_ is post-snap, so the extras follow the snapped primary.
+        const Vector2 delta = gizmoLiveBox_.pos_ - gizmoStartBox_.pos_;
         for (size_t i = 0; i < extraDragNodes_.size(); i++)
         {
             UiBox b = extraDragStarts_[i];
             b.pos_ += delta;
             document_->SetLiveBox(extraDragNodes_[i], b);
         }
+    }
+}
+
+void UIViewTab::ApplyDragSnap(const DocViewport& vp)
+{
+    snapGuidesX_.clear();
+    snapGuidesY_.clear();
+    if (!gizmoNode_ || !gizmoNode_->dom_)
+        return;
+
+    // Candidate alignment boxes, in the dragged node's authored (gizmo)
+    // frame: the offset parent and its element children. Doc-space boxes
+    // lifted by -gizmoBase_ - the same pure translation DrawOverlay applies
+    // in reverse when it lifts the live box into document space.
+    const UiNode* parent = FindParentNode(document_->GetModel().root_.Get(), gizmoNode_);
+    if (!parent)
+        return;
+    auto isDragged = [this](const UiNode* n)
+    {
+        if (n == gizmoNode_)
+            return true;
+        for (UiNode* extra : extraDragNodes_)
+            if (extra == n)
+                return true;
+        return false;
+    };
+    ea::vector<UiBox> targets;
+    auto addBox = [&](const UiNode* n)
+    {
+        ea::vector<UiBox> boxes;
+        if (document_->TryGetDomBoxes(n, boxes))
+        {
+            for (const UiBox& b : boxes)
+            {
+                UiBox t = b;
+                t.pos_ -= gizmoBase_;
+                targets.push_back(t);
+            }
+        }
+    };
+    addBox(parent);
+    for (const SharedPtr<UiNode>& child : parent->children_)
+    {
+        const UiNode* c = child.Get();
+        if (isDragged(c) || c->IsText() || c->IsNestedDoc() || c->IsHeadLink() || !c->dom_)
+            continue;
+        addBox(c);
+    }
+
+    // Best alignment per axis within the screen-constant snap threshold:
+    // each of the dragged box's two edges and center against each target's.
+    const float threshold = kSnapThresholdPx / vp.scale_;
+    const float dragX[3] = { gizmoLiveBox_.pos_.x_,
+        gizmoLiveBox_.pos_.x_ + 0.5f * gizmoLiveBox_.size_.x_,
+        gizmoLiveBox_.pos_.x_ + gizmoLiveBox_.size_.x_ };
+    const float dragY[3] = { gizmoLiveBox_.pos_.y_,
+        gizmoLiveBox_.pos_.y_ + 0.5f * gizmoLiveBox_.size_.y_,
+        gizmoLiveBox_.pos_.y_ + gizmoLiveBox_.size_.y_ };
+    float bestDx = FLT_MAX, snapDx = 0.0f, guideX = 0.0f;
+    float bestDy = FLT_MAX, snapDy = 0.0f, guideY = 0.0f;
+    for (const UiBox& t : targets)
+    {
+        const float tx[3] = { t.pos_.x_, t.pos_.x_ + 0.5f * t.size_.x_, t.pos_.x_ + t.size_.x_ };
+        const float ty[3] = { t.pos_.y_, t.pos_.y_ + 0.5f * t.size_.y_, t.pos_.y_ + t.size_.y_ };
+        for (float dx : dragX)
+            for (float cx : tx)
+            {
+                const float d = Abs(dx - cx);
+                if (d <= threshold && d < bestDx)
+                {
+                    bestDx = d;
+                    snapDx = cx - dx;
+                    guideX = cx;
+                }
+            }
+        for (float dy : dragY)
+            for (float cy : ty)
+            {
+                const float d = Abs(dy - cy);
+                if (d <= threshold && d < bestDy)
+                {
+                    bestDy = d;
+                    snapDy = cy - dy;
+                    guideY = cy;
+                }
+            }
+    }
+
+    if (bestDx <= threshold)
+    {
+        gizmoLiveBox_.pos_.x_ += snapDx;
+        gizmoCurDoc_.x_ += snapDx; // the commit re-solves from this
+        snapGuidesX_.push_back(guideX + gizmoBase_.x_); // doc space, for drawing
+    }
+    if (bestDy <= threshold)
+    {
+        gizmoLiveBox_.pos_.y_ += snapDy;
+        gizmoCurDoc_.y_ += snapDy;
+        snapGuidesY_.push_back(guideY + gizmoBase_.y_);
     }
 }
 
@@ -2328,6 +2557,8 @@ void UIViewTab::CommitDrag()
     gizmoNode_ = nullptr;
     extraDragNodes_.clear();
     extraDragStarts_.clear();
+    snapGuidesX_.clear();
+    snapGuidesY_.clear();
 }
 
 void UIViewTab::CancelDrag()
@@ -2341,6 +2572,8 @@ void UIViewTab::CancelDrag()
     gizmoNode_ = nullptr;
     extraDragNodes_.clear();
     extraDragStarts_.clear();
+    snapGuidesX_.clear();
+    snapGuidesY_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -2833,6 +3066,7 @@ void UIViewTab::DrawOverlay(const DocViewport& vp)
     // the external payloads both fill the same state (dropKind_).
     DrawDropIndicator(vp);
 
+    DrawSnapGuides(vp);
     DrawMarquee(vp);
 }
 
@@ -2845,6 +3079,22 @@ void UIViewTab::DrawMarquee(const DocViewport& vp)
     const ImVec2 b = IV2(vp.ToScreen(marqueeCurDoc_));
     dl->AddRectFilled(a, b, kMarqueeFill);
     dl->AddRect(a, b, kMarqueeColor, 0.0f, ImDrawFlags_None, 1.0f);
+}
+
+void UIViewTab::DrawSnapGuides(const DocViewport& vp)
+{
+    if (!dragging_ || gizmoDrag_.op_ != GizmoOp::Move)
+        return;
+    if (snapGuidesX_.empty() && snapGuidesY_.empty())
+        return;
+    ImDrawList* dl = ui::GetWindowDrawList();
+    const IntVector2 previewSize = document_->GetPreviewSize();
+    for (float x : snapGuidesX_)
+        dl->AddLine(IV2(vp.ToScreen(Vector2(x, 0.0f))),
+            IV2(vp.ToScreen(Vector2(x, (float)previewSize.y_))), kGuideColor, 1.0f);
+    for (float y : snapGuidesY_)
+        dl->AddLine(IV2(vp.ToScreen(Vector2(0.0f, y))),
+            IV2(vp.ToScreen(Vector2((float)previewSize.x_, y))), kGuideColor, 1.0f);
 }
 
 void UIViewTab::DrawDropIndicator(const DocViewport& vp)

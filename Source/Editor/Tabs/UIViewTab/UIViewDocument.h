@@ -152,6 +152,13 @@ public:
     bool RestoreText(const ea::string& text);
     /// Serialize the model back to complete .rml text.
     ea::string EmitRml() const { return model_.EmitRml(); }
+    /// Hot refresh: rebuild the projection from the unchanged model text
+    /// after a referenced asset (a linked .rcss sheet, an .rml template)
+    /// changed on disk. Clears RmlUi's parse-level caches first so the same
+    /// href resolves to the new bytes. Not an edit: no undo step, no dirty
+    /// flag - but the model is rebuilt, so views re-resolve their node paths
+    /// (OnModelEdited) like after any other reload.
+    bool RefreshProjection();
 
     /// During-drag DOM-only preview write (the model is only touched on
     /// commit; layout re-flows on the next engine update).

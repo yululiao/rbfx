@@ -24,6 +24,7 @@
 #include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/Factory.h>
 #include <RmlUi/Core/Types.h>
 
 #include <cctype>
@@ -603,6 +604,29 @@ bool UIViewDocument::EmitAndReload(ea::string& outText)
 {
     outText = model_.EmitRml();
     return ReloadFromText(outText);
+}
+
+bool UIViewDocument::RefreshProjection()
+{
+    // Hot refresh for externally changed assets (a linked .rcss sheet or a
+    // referenced .rml template saved on disk). The parse-level caches must
+    // go first: without clearing them RmlUi resolves the same <link> or
+    // template href to the stale parse. Both caches are process-global and
+    // lazily repopulated - the same recipe the engine's own reload path
+    // uses (RmlUI::HandleResourceReloaded) - so a running game view merely
+    // picks up the new bytes on its next document load.
+    if (!model_.root_ || path_.empty())
+        return false;
+    Rml::Factory::ClearStyleSheetCache();
+    Rml::Factory::ClearTemplateCache();
+    const ea::string text = model_.EmitRml();
+    if (!ReloadFromText(text))
+    {
+        URHO3D_LOGERROR("UIViewDocument: hot refresh failed to reload '{}'", path_.c_str());
+        return false;
+    }
+    OnModelEdited(this);
+    return true;
 }
 
 bool UIViewDocument::CorrectLanding(const ea::vector<unsigned>& path, const Vector2& desiredAbs)

@@ -257,6 +257,25 @@ private:
     /// would hand it back until the window is focused.
     void ConnectSharedPanels();
 
+    // --- hot refresh (file watcher -> canvas update) -----------------------
+    /// File-watcher event: arm a deferred refresh. The open document itself
+    /// changing on disk arms an in-place reload (only while clean - the
+    /// overwrite guard owns the conflict while unsaved edits exist); any
+    /// other .rcss/.rml change (a linked sheet or template) arms a
+    /// re-projection of the canvas from the unchanged model.
+    void HandleFileChanged(StringHash eventType, VariantMap& eventData);
+    /// Apply an armed refresh from RenderContent, so a model rebuild never
+    /// lands under a live pointer gesture (the gesture state machines hold
+    /// node pointers a rebuild would free).
+    void ApplyPendingHotRefresh();
+    /// Whether a held-button or in-canvas editing gesture is in progress.
+    bool PointerInteractionActive() const;
+
+    /// Own document changed on disk while clean: reload it in place.
+    bool pendingHotReloadFromDisk_ = false;
+    /// A referenced .rcss/.rml asset changed: re-project the canvas.
+    bool pendingHotAssetRefresh_ = false;
+
     // --- selection helpers ---------------------------------------------------
     ea::vector<unsigned> NodePath(const UiNode* node) const;
     /// Re-point selected_ / selPath_ at the last live selection entry.
@@ -272,10 +291,19 @@ private:
     void DrawGizmo(const DocViewport& vp, const UiBox& box);
     void BeginDrag(const GizmoHandle& handle, UiNode* node, const DocViewport& vp);
     void UpdateDrag(const DocViewport& vp);
+    /// Move drags: snap the live box to the offset parent's / siblings'
+    /// edges and centers within a screen-constant threshold. Adjusts both
+    /// the live box and the pointer state the eventual commit re-solves
+    /// from, so live preview, committed box and drawn guides cannot
+    /// disagree; records guide positions for DrawSnapGuides.
+    void ApplyDragSnap(const DocViewport& vp);
     void CommitDrag();
     /// Esc during a gizmo drag: put the DOM-only live preview back to the
     /// press box; nothing was committed, so there is no undo step to roll back.
     void CancelDrag();
+    /// Alignment guides of the current drag frame: full-canvas lines at the
+    /// snapped alignments (document-space positions, empty = no snap).
+    void DrawSnapGuides(const DocViewport& vp);
     /// Rubber-band (marquee) selection: draw the live band and resolve it into
     /// a selection on release (a sub-threshold band degrades to a click-select).
     void DrawMarquee(const DocViewport& vp);
@@ -404,6 +432,10 @@ private:
     Vector2 gizmoPressDoc_; ///< document-space mouse at press
     Vector2 gizmoCurDoc_; ///< document-space mouse of the latest frame
     bool dragging_ = false;
+    /// Alignment guides of the current drag frame (document-space line
+    /// positions), filled by ApplyDragSnap, consumed by DrawSnapGuides.
+    ea::vector<float> snapGuidesX_;
+    ea::vector<float> snapGuidesY_;
 
     SharedPtr<UIViewHierarchy> hierarchySource_;
     SharedPtr<UIViewInspector> inspectorSource_;
