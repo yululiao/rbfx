@@ -684,7 +684,23 @@ bool RmlTextModel::ComputeStylePropertyPatch(int node, const std::string& proper
 
     out.span.offset = style->valueSpan.End();
     out.span.length = 0;
-    out.replacement = style->styleDecls.empty() ? (property + ": " + value) : ("; " + property + ": " + value);
+    // The authored value may already end with a separator (a trailing ';' such
+    // as style="height: 100dp;" - HelloRmlUI.rml carries exactly this shape).
+    // Appending "; property: value" would mint ';;' diff noise; reuse the
+    // authored separator and only supply the missing space.
+    bool authoredSeparator = false;
+    for (int e = out.span.offset; e > style->valueSpan.offset; --e)
+    {
+        const char c = text_[e - 1];
+        if (c == ' ')
+            continue;
+        authoredSeparator = (c == ';');
+        break;
+    }
+    if (authoredSeparator)
+        out.replacement = " " + property + ": " + value;
+    else
+        out.replacement = style->styleDecls.empty() ? (property + ": " + value) : ("; " + property + ": " + value);
     return true;
 }
 

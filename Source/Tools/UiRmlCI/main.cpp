@@ -20,6 +20,9 @@
 //  10. Attribute fidelity: valueless attributes (disabled) and authored empty values
 //      (foo="") survive an untouched round-trip; only an actually-cleared valued
 //      attribute is removed.
+//  11. Separator hygiene: a declaration appended after an authored trailing ';'
+//      reuses it (never mints ';;'); remove-last + add-new in one save coalesces
+//      into one clean whole-value rewrite.
 //
 
 #include "RmlTextModel.h"
@@ -519,6 +522,47 @@ void TestValuelessAttributeRoundTrip()
     Check(after.find("foo=") == std::string::npos, "cleared valued attribute removed");
 }
 
+// Separator hygiene (guarantee 11, the P1-4 corners). The originally recorded
+// combo - remove the LAST declaration and add a new one in one save - used to
+// leave a stray ';' behind; the style coalescing rewrote that into one clean
+// patch. Its sibling stayed alive until now: a single append onto a style whose
+// authored value ends with ';' (style="height: 100dp;" - HelloRmlUI.rml carries
+// exactly this shape) minted 'height: 100dp;; width: 10px'.
+void TestStyleSemicolonHygiene()
+{
+    std::cout << "TestStyleSemicolonHygiene\n";
+    {
+        const std::string doc =
+            "<rml><body><div id=\"a\" style=\"width: 10px; height: 20px\">x</div></body></rml>";
+        Urho3D::UiDocumentModel model;
+        Check(model.BuildTreeFromText(ToEa(doc)), "hygiene doc builds");
+        Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+        Check(div != nullptr, "found div");
+        div->RemoveStyle("height");
+        div->SetStyle("color", "red");
+        const std::string after = ToStd(model.EmitRml());
+        Check(CountOf(after, "style=") == 1, "one style attribute");
+        Check(after.find("style=\"width: 10px; color: red\"") != std::string::npos,
+            "remove-last + add-new rewrites cleanly");
+        Check(after.find(";;") == std::string::npos, "no double separator");
+        Check(after.find("; \"") == std::string::npos, "no separator before closing quote");
+    }
+    {
+        const std::string doc =
+            "<rml><body><div id=\"a\" style=\"height: 100dp;\">x</div></body></rml>";
+        Urho3D::UiDocumentModel model;
+        Check(model.BuildTreeFromText(ToEa(doc)), "trailing-semicolon doc builds");
+        Check(ToStd(model.EmitRml()) == doc, "authored trailing ';' preserved unedited");
+        Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+        Check(div != nullptr, "found div");
+        div->SetStyle("width", "10px");
+        const std::string after = ToStd(model.EmitRml());
+        Check(after.find(";;") == std::string::npos, "single append never mints ';;'");
+        Check(after.find("style=\"height: 100dp; width: 10px\"") != std::string::npos,
+            "appended after the authored ';'");
+    }
+}
+
 // Head <link> commands (guarantee 9): the head is not part of the editor tree, so these
 // edit a throwaway spine parse. Insert lands after the last link, edit rewrites exactly
 // the addressed link, remove takes the whole authored line - and the body bytes never move.
@@ -598,6 +642,7 @@ int main(int argc, char** argv)
     TestStyleSelfHeal();
     TestStyleClearRemovesAttribute();
     TestValuelessAttributeRoundTrip();
+    TestStyleSemicolonHygiene();
     TestHeadLinkCommands();
 
     std::cout << "WalkSamples\n";
