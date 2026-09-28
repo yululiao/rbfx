@@ -95,7 +95,7 @@ rbfx 编辑器内置的可视化 UI 编辑器（UI tab）用于创作 [RmlUi](ht
 |---|---|
 | **Content** | 编辑元素的文字内容（对纯文本元素生效，实时预览） |
 | **Attributes** | 元素属性（id、class、type、src 等），资源类属性带浏览器按钮 |
-| **Appearance** | background-color / opacity / color / font-size；**Background image** 编辑单图 decorator（`image(...)`，支持路径或精灵名，带资源选择按钮）。混合 decorator（叠加渐变等）显示为只读并提示走 raw，避免破坏你手写的内容 |
+| **Appearance** | background-color / opacity / color / font-size / text-align（继承属性带 `*` 标记）；**Background image** 编辑单图 decorator（`image(...)`，支持路径或精灵名，带资源选择按钮）。混合 decorator（叠加渐变等）显示为只读并提示走 raw，避免破坏你手写的内容 |
 | **Layout** | 见第 5 节 |
 | **Inline Style (raw)** | 原始 `style` 声明文本——结构化行覆盖不到的属性在这里手写，与手写代码完全同权 |
 | **Computed** | 只读的最终计算值（调试用） |

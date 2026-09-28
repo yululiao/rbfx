@@ -95,7 +95,7 @@ For a fixed-height vertical scrolling list, give the children `flex-shrink: 0` (
 |---|---|
 | **Content** | Edits the element's text content (pure-text elements; live preview) |
 | **Attributes** | Element attributes (id, class, type, src, ...); resource attributes carry a browse button |
-| **Appearance** | background-color / opacity / color / font-size; **Background image** edits a single-image decorator (`image(...)`, path or sprite name, with a resource picker). Mixed decorators (layered gradients etc.) render read-only with a hint to use raw, so nothing you hand-authored gets destroyed |
+| **Appearance** | background-color / opacity / color / font-size / text-align (inherited rows carry an `*` marker); **Background image** edits a single-image decorator (`image(...)`, path or sprite name, with a resource picker). Mixed decorators (layered gradients etc.) render read-only with a hint to use raw, so nothing you hand-authored gets destroyed |
 | **Layout** | See chapter 5 |
 | **Inline Style (raw)** | The raw `style` declaration text — anything the structured rows don't cover is written here, with exactly the same authority as hand-written code |
 | **Computed** | Read-only final computed values (debugging) |

@@ -1028,6 +1028,7 @@ const StyleRow kAppearanceRows[] = {
     { "opacity", "1", true, StyleKind::Number, nullptr },
     { "color", "white", true, StyleKind::Color, nullptr },
     { "font-size", "12px", true, StyleKind::Length, nullptr },
+    { "text-align", "left", true, StyleKind::Keyword, "left, right, center, justify" },
 };
 
 int FindStyleIndexIn(const ea::vector<UiStyleDecl>& decls, const ea::string& name)
