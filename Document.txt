@@ -64,3 +64,7 @@ BindTool缺点：
 它自述的定位：README 第一句 "A source code generator for source code generator™"（给 SWIG 这个生成器生成输入），且是手动偶尔执行的工具，不在任何持续集成环节里。
 就算改造它做 Lua 生成，也是回头路：clang-AST codegen 正是 gen_lua_binding/SKILL.md 第 305-307 行明确禁止重新引入的方案。当初的边界条件没变——rbfx 引擎无方法级反射基建，
 codegen 产出的绑定会失去“绑到成员函数指针、引擎改签名即编译期报错”的性质，还得维护 AST dump 与引擎演进的同步
+
+
+抖音开发者工具下载：
+https://developer.open-douyin.com/docs/resource/zh-CN/mini-game/develop/developer-instrument/developer-instrument-update-and-download
