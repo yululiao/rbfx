@@ -66,5 +66,16 @@ BindTool缺点：
 codegen 产出的绑定会失去“绑到成员函数指针、引擎改签名即编译期报错”的性质，还得维护 AST dump 与引擎演进的同步
 
 
-抖音开发者工具下载：
-https://developer.open-douyin.com/docs/resource/zh-CN/mini-game/develop/developer-instrument/developer-instrument-update-and-download
+步骤
+下载工具：抖音开放平台 → 下载 抖音开发者工具（小游戏独立版）
+官网：https://developer.open-douyin.com/
+文档页（工具更新及下载）：https://developer.open-douyin.com/docs/resource/zh-CN/mini-game/develop/developer-instrument/developer-instrument-update-and-download
+登录：打开工具后用抖音 App 扫码登录。
+导入项目：选"导入项目"，目录选：
+d:\openSrc\rbfx\rbfxProjs\EmptyTest\Build\Douyin
+目录里有 project.config.json + game.json（还有 subPackages 分包声明），工具会自动识别为小游戏项目。game.json 里已声明 package_wasm / package_data 两个子包，本地调试时直接生效。
+运行：点编译/预览，模拟器里直接跑。首次启动需要编译 34MB 的 wasm，等几秒到几十秒。
+唯一可能需要准备的：appid
+当前包的 project.config.json 里 appid 是空的（出包时留空是合法设计）。导入时如提示绑定 appid：
+在抖音开放平台免费注册一个小游戏应用即可拿到（个人开发者可注册）；
+拿到后可以填进编辑器 Build 面板的 Douyin → Application id，重新出包时 project.config.json 就会自动带上，不用每次导入再填。
