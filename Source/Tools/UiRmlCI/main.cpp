@@ -1,6 +1,7 @@
 //
-// Standalone round-trip CI for the RmlTextModel. Pure std, no engine, no CMake target:
-// build with cl.exe (see run.ps1) and it exits non-zero on any failure.
+// Standalone round-trip CI for the RmlUi layout editor's text model. Pure std + the
+// DOM-free editor-model units, no engine code, no CMake target: build with cl.exe
+// (see run.ps1) and it exits non-zero on any failure.
 //
 // Guarantees asserted:
 //   1. Lossless identity: load(every sample .rml/.rcss) -> GetText() == original bytes.
@@ -8,9 +9,21 @@
 //   3. Bindings/templates/comments survive untouched (identity covers them; plus explicit check).
 //   4. Localization: a targeted style edit changes only the targeted bytes; siblings intact.
 //   5. Generation: MakeElement + InsertElement add standard RML without disturbing siblings.
+//   6. Model round-trip: BuildTreeFromText + EmitRml reproduce every sample .rml byte-for-byte.
+//   7. Minimal diff: a targeted model edit (style value / id) changes ONE confined window
+//      inside the target's open tag; head, comments, bindings and siblings stay untouched.
+//   8. Style batch coalescing (historical regressions): a multi-add on a style-less element
+//      mints ONE style attribute; duplicate style attributes self-heal on rewrite; clearing
+//      removes the attribute outright (no style="" husk).
+//   9. Head <link> commands: insert/edit/remove keep the head structure and leave the body
+//      bytes untouched.
+//  10. Attribute fidelity: valueless attributes (disabled) and authored empty values
+//      (foo="") survive an untouched round-trip; only an actually-cleared valued
+//      attribute is removed.
 //
 
 #include "RmlTextModel.h"
+#include "UIViewDocumentModel.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -70,6 +83,51 @@ bool ChangeConfined(const std::string& a, const std::string& b, int lo, int hi)
     return oldStart >= lo && oldEnd <= hi;
 }
 
+ea::string ToEa(const std::string& s)
+{
+    return ea::string(s.c_str(), s.length());
+}
+
+std::string ToStd(const ea::string& s)
+{
+    return std::string(s.c_str(), s.length());
+}
+
+int CountOf(const std::string& hay, const std::string& needle)
+{
+    int n = 0;
+    size_t p = 0;
+    while ((p = hay.find(needle, p)) != std::string::npos)
+    {
+        ++n;
+        p += needle.size();
+    }
+    return n;
+}
+
+bool HasBodyTag(const std::string& text)
+{
+    size_t p = 0;
+    while ((p = text.find("<body", p)) != std::string::npos)
+    {
+        const char c = p + 5 < text.size() ? text[p + 5] : '\0';
+        if (c == '\0' || c == '>' || c == ' ' || c == '/' || c == '\t' || c == '\r' || c == '\n')
+            return true;
+        p += 5;
+    }
+    return false;
+}
+
+Urho3D::UiNode* FindNodeByTagId(Urho3D::UiNode* node, const char* tag, const char* id)
+{
+    if (node->tag_ == tag && node->id_ == id)
+        return node;
+    for (const auto& child : node->children_)
+        if (Urho3D::UiNode* found = FindNodeByTagId(child.Get(), tag, id))
+            return found;
+    return nullptr;
+}
+
 void VerifyIdentity(const std::string& path, const std::string& text)
 {
     RmlTextModel m;
@@ -126,6 +184,21 @@ std::string LowerExt(std::string s)
     return s;
 }
 
+// Full editor-model round-trip (guarantee 6): tree build + save-time reconcile over the
+// untouched spine must reproduce the document byte-for-byte. Files without a <body>
+// (template fragments) have no editor tree and are skipped - the spine identity test
+// above already covers them.
+void VerifyModelRoundTrip(const std::string& path, const std::string& text)
+{
+    Urho3D::UiDocumentModel model;
+    if (!model.BuildTreeFromText(ToEa(text)))
+    {
+        Check(!HasBodyTag(text), "model build succeeded (or no <body>): " + path);
+        return;
+    }
+    Check(ToStd(model.EmitRml()) == text, "model round-trip: " + path);
+}
+
 void WalkSamples(const std::filesystem::path& root)
 {
     std::error_code ec;
@@ -148,7 +221,10 @@ void WalkSamples(const std::filesystem::path& root)
         const std::string p = de.path().string();
         VerifyIdentity(p, text);
         if (ext == ".rml" || ext == ".xml")
+        {
             VerifyInvariants(p, text);
+            VerifyModelRoundTrip(p, text);
+        }
         ++count;
     }
     std::cout << "  scanned " << count << " file(s) under " << root.string() << "\n";
@@ -298,6 +374,212 @@ void TestStableSameOffset()
         "same-offset inserts keep queue order (id before class)");
 }
 
+// Targeted model edits must stay surgical (guarantees 7): the emitted diff is ONE hunk
+// confined to the edited node's open tag, and every zone the editor does not understand
+// (head, comments, {{bindings}}, sibling markup, whitespace) is preserved byte-for-byte.
+void TestModelTargetedEdit()
+{
+    std::cout << "TestModelTargetedEdit\n";
+    const std::string doc =
+        "<rml>\n"
+        "<head>\n"
+        "  <link type=\"text/rcss\" href=\"theme.rcss\"/>\n"
+        "  <style>body { top: 0px; }</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "  <!-- keep me -->\n"
+        "  <div id=\"target\" class=\"box\" style=\"width: 10px; height: 20px\">old</div>\n"
+        "  <span>{{counter}}</span>\n"
+        "</body>\n"
+        "</rml>\n";
+    const std::string before = doc;
+    const size_t bodyAt = before.find("<body");
+
+    // Locate the div's open tag in the ORIGINAL text (all change windows are measured there).
+    RmlTextModel locate;
+    locate.Load(before);
+    const int divIdx = locate.FindFirstElement("div");
+    Check(divIdx > 0, "located div in spine");
+    const int openLo = locate.Node(divIdx).openTag.offset;
+    const int openHi = locate.Node(divIdx).openTag.End();
+
+    // Style value edit.
+    Urho3D::UiDocumentModel model;
+    Check(model.BuildTreeFromText(ToEa(before)), "targeted-edit doc builds");
+    Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "target");
+    Check(div != nullptr, "found target div");
+    div->SetStyle("width", "300px");
+    std::string after = ToStd(model.EmitRml());
+    Check(after.find("width: 300px") != std::string::npos, "style value changed");
+    Check(after.find("height: 20px") != std::string::npos, "sibling declaration kept");
+    Check(ChangeConfined(before, after, openLo, openHi), "style edit confined to open tag");
+    Check(CountOf(after, "style=") == 1, "exactly one style attribute");
+
+    // Id edit on a pristine rebuild.
+    Check(model.BuildTreeFromText(ToEa(before)), "pristine rebuild");
+    div = FindNodeByTagId(model.root_.Get(), "div", "target");
+    Check(div != nullptr, "re-found target div");
+    div->id_ = "renamed";
+    after = ToStd(model.EmitRml());
+    Check(after.find("id=\"renamed\"") != std::string::npos, "id renamed");
+    Check(after.find("id=\"target\"") == std::string::npos, "old id gone");
+    Check(ChangeConfined(before, after, openLo, openHi), "id edit confined to open tag");
+
+    // Ignorant zones byte-preserved (ChangeConfined implies them; explicit checks give
+    // readable failure messages).
+    Check(after.substr(0, bodyAt) == before.substr(0, bodyAt), "head bytes untouched");
+    Check(after.find("<!-- keep me -->") != std::string::npos, "comment preserved");
+    Check(after.find("{{counter}}") != std::string::npos, "binding preserved");
+    Check(after.find("<span>{{counter}}</span>") != std::string::npos, "sibling element untouched");
+    Check(after.find(">old<") != std::string::npos, "text content untouched");
+}
+
+// Historical regression (guarantee 8): two style adds on a style-less element used to
+// mint two whole style attributes at the same offset (`style="a" style="b"`). The
+// reconcile must coalesce any multi-change style edit into ONE patch.
+void TestStyleBatchSinglePatch()
+{
+    std::cout << "TestStyleBatchSinglePatch\n";
+    const std::string doc = "<rml><body><div id=\"a\"></div></body></rml>";
+    Urho3D::UiDocumentModel model;
+    Check(model.BuildTreeFromText(ToEa(doc)), "batch doc builds");
+    Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+    Check(div != nullptr, "found div");
+    div->SetStyle("width", "10px");
+    div->SetStyle("height", "20px");
+    const std::string after = ToStd(model.EmitRml());
+    Check(CountOf(after, "style=") == 1, "exactly one style attribute");
+    Check(after.find("style=\"width: 10px; height: 20px\"") != std::string::npos,
+        "declarations merged with '; ' separator");
+}
+
+// Historical regression (guarantee 8): documents saved by older builds carry duplicate
+// style attributes. Unedited, they round-trip verbatim; any style rewrite must collapse
+// them back to one attribute carrying the model's declarations.
+void TestStyleSelfHeal()
+{
+    std::cout << "TestStyleSelfHeal\n";
+    const std::string doc =
+        "<rml><body><div id=\"a\" style=\"width: 10px\" style=\"height: 20px\">x</div></body></rml>";
+    Urho3D::UiDocumentModel model;
+    Check(model.BuildTreeFromText(ToEa(doc)), "self-heal doc builds");
+    Check(ToStd(model.EmitRml()) == doc, "unedited damaged doc preserved verbatim");
+    Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+    Check(div != nullptr, "found div");
+    div->SetStyle("width", "30px");
+    const std::string after = ToStd(model.EmitRml());
+    Check(CountOf(after, "style=") == 1, "duplicate style collapsed to one");
+    Check(after.find("width: 30px") != std::string::npos, "edited value written");
+    Check(after.find("height: 20px") == std::string::npos, "second attribute dropped");
+}
+
+// Historical regression (guarantee 8): clearing style used to leave a style="" husk
+// that re-seeded the no-separator merge bug on the next multi-add. The attribute must
+// vanish outright.
+void TestStyleClearRemovesAttribute()
+{
+    std::cout << "TestStyleClearRemovesAttribute\n";
+    const std::string doc = "<rml><body><div id=\"a\" style=\"width: 10px\">x</div></body></rml>";
+    Urho3D::UiDocumentModel model;
+    Check(model.BuildTreeFromText(ToEa(doc)), "clear doc builds");
+    Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+    Check(div != nullptr, "found div");
+    div->RemoveStyle("width");
+    const std::string after = ToStd(model.EmitRml());
+    Check(after.find("style=") == std::string::npos, "style attribute removed outright (no husk)");
+    Check(after.find("<div id=\"a\">x</div>") != std::string::npos, "element otherwise intact");
+}
+
+// Historical regression (guarantee 10): valueless attributes (disabled, checked, ...)
+// and authored empty values (foo="") load into the model as empty strings; the
+// reconcile used to read that state as "the value was cleared" and DELETE the
+// attribute on save - opening and saving HelloRmlUI.rml silently re-enabled its
+// disabled inputs.
+void TestValuelessAttributeRoundTrip()
+{
+    std::cout << "TestValuelessAttributeRoundTrip\n";
+    const std::string doc =
+        "<rml>\n<body>\n  <input type=\"submit\" disabled>Go</input>\n"
+        "  <div id=\"a\" foo=\"\">x</div>\n</body>\n</rml>\n";
+    Urho3D::UiDocumentModel model;
+    Check(model.BuildTreeFromText(ToEa(doc)), "valueless doc builds");
+    Check(ToStd(model.EmitRml()) == doc, "valueless + empty-value attributes preserved verbatim");
+
+    // Clearing a VALUED attribute in the editor still removes it outright.
+    const std::string doc2 = "<rml><body><div id=\"a\" foo=\"bar\">x</div></body></rml>";
+    Check(model.BuildTreeFromText(ToEa(doc2)), "valued doc builds");
+    Urho3D::UiNode* div = FindNodeByTagId(model.root_.Get(), "div", "a");
+    Check(div != nullptr, "found div");
+    for (auto& attr : div->attributes_)
+    {
+        if (attr.first == "foo")
+            attr.second = "";
+    }
+    const std::string after = ToStd(model.EmitRml());
+    Check(after.find("foo=") == std::string::npos, "cleared valued attribute removed");
+}
+
+// Head <link> commands (guarantee 9): the head is not part of the editor tree, so these
+// edit a throwaway spine parse. Insert lands after the last link, edit rewrites exactly
+// the addressed link, remove takes the whole authored line - and the body bytes never move.
+void TestHeadLinkCommands()
+{
+    std::cout << "TestHeadLinkCommands\n";
+    const std::string doc =
+        "<rml>\n<head>\n  <link type=\"text/rcss\" href=\"a.rcss\"/>\n"
+        "  <link type=\"text/rcss\" href=\"b.rcss\"/>\n</head>\n<body>\n</body>\n</rml>\n";
+    const std::string bodyTail = doc.substr(doc.find("<body"));
+    Urho3D::UiDocumentModel cmd;
+    ea::string out;
+
+    // Insert: third link lands after the last existing one; body bytes untouched.
+    Check(cmd.InsertHeadLink(ToEa(doc), "text/rcss", "c.rcss", out), "insert link");
+    const std::string inserted = ToStd(out);
+    Check(CountOf(inserted, "<link ") == 3, "head now has three links");
+    Check(inserted.find("<link type=\"text/rcss\" href=\"c.rcss\"/>") != std::string::npos,
+        "new link markup present");
+    Check(inserted.substr(inserted.find("<body")) == bodyTail, "body bytes untouched by insert");
+    {
+        RmlTextModel m;
+        m.Load(inserted);
+        const int head = m.FindFirstElement("head");
+        std::vector<std::string> hrefs;
+        for (int c : m.Node(head).children)
+        {
+            const RmlNode& ch = m.Node(c);
+            if (ch.kind != RmlNodeKind::Element || ch.tag != "link")
+                continue;
+            for (const RmlAttribute& a : ch.attributes)
+                if (a.name == "href")
+                    hrefs.push_back(a.value);
+        }
+        Check(hrefs.size() == 3 && hrefs[0] == "a.rcss" && hrefs[1] == "b.rcss" && hrefs[2] == "c.rcss",
+            "inserted after the last existing link");
+    }
+    Check(!cmd.InsertHeadLink(ToEa(inserted), "text/rcss", "c.rcss", out), "duplicate insert rejected");
+    Check(!cmd.InsertHeadLink(ToEa(doc), "text/rcss", "", out), "empty href rejected");
+
+    // Edit: rewrite the first link's type/href in place; the rest stays put.
+    Check(cmd.EditHeadLinkAt(ToEa(doc), 0, "text/template", "t.rml", out), "edit link");
+    Check(ToStd(out) ==
+        "<rml>\n<head>\n  <link type=\"text/template\" href=\"t.rml\"/>\n"
+        "  <link type=\"text/rcss\" href=\"b.rcss\"/>\n</head>\n<body>\n</body>\n</rml>\n",
+        "edit rewrites exactly the first link");
+    Check(!cmd.EditHeadLinkAt(ToEa(doc), 9, "text/rcss", "x.rcss", out), "stale ordinal rejected");
+
+    // Remove: the whole authored line (indent + newline) goes away.
+    Check(cmd.RemoveHeadLinkAt(ToEa(doc), 1, out), "remove link");
+    const std::string afterRemove = ToStd(out);
+    Check(afterRemove ==
+        "<rml>\n<head>\n  <link type=\"text/rcss\" href=\"a.rcss\"/>\n</head>\n<body>\n</body>\n</rml>\n",
+        "removed the whole authored line");
+    Check(cmd.RemoveHeadLinkAt(ToEa(afterRemove), 0, out), "remove last link");
+    const std::string emptyHead = ToStd(out);
+    Check(emptyHead == "<rml>\n<head>\n</head>\n<body>\n</body>\n</rml>\n",
+        "empty head left clean (no blank line)");
+    Check(!cmd.RemoveHeadLinkAt(ToEa(emptyHead), 0, out), "remove on empty head rejected");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -311,6 +593,12 @@ int main(int argc, char** argv)
     TestGenerationInsert();
     TestBatchPatches();
     TestStableSameOffset();
+    TestModelTargetedEdit();
+    TestStyleBatchSinglePatch();
+    TestStyleSelfHeal();
+    TestStyleClearRemovesAttribute();
+    TestValuelessAttributeRoundTrip();
+    TestHeadLinkCommands();
 
     std::cout << "WalkSamples\n";
     for (const auto& r : roots)

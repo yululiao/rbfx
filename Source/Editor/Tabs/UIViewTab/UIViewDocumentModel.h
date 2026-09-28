@@ -123,6 +123,16 @@ struct UiDocumentModel
     /// correlation (elements match by tag/ordinal; exotic subtrees may stay null).
     bool BuildFromText(const ea::string& sourceText, Rml::ElementDocument* document);
 
+    /// Text-only half of BuildFromText: seeds the spine and constructs the
+    /// editor tree (body + head-link virtual nodes) without touching any DOM.
+    /// Lives in the DOM-free translation unit so the build/reconcile pipeline
+    /// can be exercised headless (UiRmlCI) without linking RmlUi.
+    bool BuildTreeFromText(const ea::string& sourceText);
+    /// DOM half of BuildFromText: correlates the built tree against \a document
+    /// and collects the nested-template chrome. A null document leaves every
+    /// dom_ null - the model stays fully usable for text-only work.
+    void AttachDocument(Rml::ElementDocument* document);
+
     /// Serialize back to a complete .rml text by diffing the current tree against
     /// the spine and applying only the changed regions as span patches.
     ea::string EmitRml() const;
