@@ -232,10 +232,11 @@ private:
 };
 
 /// Douyin minigame: assemble the vendor package from the minigame build tree. The bootstrap scripts
-/// move to the package root, each wasm subpackage gets the module pair beside its entry script, and
-/// the manifests the vendor runtime and the engine file layer read (game.json, project.config.json,
-/// rbfx_files.json) are regenerated around the subpackages this build actually produced. The staged
-/// game files are already in place: the platform exported them into the data subpackage root.
+/// move to the package root, each wasm subpackage gets its entry script and the brotli-compressed
+/// module beside it, and the manifests the vendor runtime and the engine file layer read (game.json,
+/// project.config.json, rbfx_files.json) are regenerated around the subpackages this build actually
+/// produced. The staged game files are already in place: the platform exported them into the data
+/// subpackage root.
 class DouyinRuntimeStep : public BuildStep
 {
 public:
@@ -247,9 +248,12 @@ private:
     /// Copy the main-package bootstrap scripts out of the build tree to the package root, where the
     /// vendor runtime looks for its entry document.
     bool StageBootstrap(const ea::string& bin, ea::string& message);
-    /// Copy one wasm subpackage: its entry script as staged by the build, plus the module pair the
-    /// entry requires beside itself.
+    /// Copy one wasm subpackage: its entry script as staged by the build, plus the module the entry
+    /// requires beside itself, brotli-compressed for the vendor loader.
     bool StageWasmSubpackage(const ea::string& bin, const ea::string& name, ea::string& message);
+    /// Place the compressed engine module into the subpackage: the wasm from 'bin' through the node
+    /// emsdk ships, landing as <module>.wasm.br beside the entry script.
+    bool CompressWasmModule(const ea::string& bin, const ea::string& destination, ea::string& message);
     /// Regenerate rbfx_game_config.js around the subpackages this build actually produced; the
     /// template beside it names both variants, which is only true for a merged package.
     bool WriteGameConfig(const ea::vector<ea::string>& wasmSubpackages, ea::string& message);

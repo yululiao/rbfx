@@ -175,6 +175,10 @@ public:
     /// interpreter emsdk ships; others fall back to whatever is on PATH so a caller that asks still
     /// gets something.
     virtual ea::string ResolveEmsdkPython() const;
+    /// Runtime to run node scripts with, resolved like the python interpreter above. Only the
+    /// minigame package assembler asks: it brotli-compresses the engine module through the node
+    /// emsdk ships (its zlib is a brotli encoder), so no compression dependency enters the build.
+    virtual ea::string ResolveEmsdkNode() const;
     /// Whether the autoRunAfterBuild switch can do anything here. Android has no host binary to
     /// launch from the machine that built it, so it declines.
     virtual bool SupportsAutoRun() const { return true; }
@@ -275,6 +279,7 @@ public:
     bool ConfigureEngineBuildArgs(ea::vector<ea::string>& arguments, const ea::string& cmakeCommand,
         const ea::string& buildTree, ea::string& message) const override;
     ea::string ResolveEmsdkPython() const override;
+    ea::string ResolveEmsdkNode() const override;
 
     // Reached by the terminal steps of the derived platforms, which downcast the BuildStep owner.
     /// Root of the emscripten toolchain that owns file_packager.py, resolved from the platform, the
@@ -282,6 +287,9 @@ public:
     ea::string ResolveEmscriptenRoot(ea::string& message) const;
     /// Interpreter shipped inside an emsdk root ("<emsdk>/python/<version>/python.exe"), or empty.
     ea::string FindBundledPython(const ea::string& emsdkRoot) const;
+    /// Runtime shipped inside an emsdk root ("<emsdk>/node/<version>_64bit/node.exe" on Windows,
+    /// ".../bin/node" elsewhere), or empty.
+    ea::string FindBundledNode(const ea::string& emsdkRoot) const;
 };
 
 /// Web: builds the wasm host through the shared emsdk toolchain, bundles the packages with

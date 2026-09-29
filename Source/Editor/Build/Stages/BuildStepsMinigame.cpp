@@ -3,11 +3,11 @@
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 
 // The terminal packaging step of the Douyin platform: the vendor package assembled around the
-// minigame build tree. The engine wasm and the game data each ship as a subpackage - the vendor caps
-// the main package well below the size of the game data - and every manifest (the vendor's game.json
-// and project.config.json, and the engine file layer's rbfx_files.json) is generated to describe
-// exactly the subpackages this build produced, so a single-variant build and a two-variant build
-// both yield a working package.
+// minigame build tree. The engine module and the game data each ship as a subpackage - the vendor
+// caps the subpackages, so the module goes brotli-compressed for the loader that decompresses it -
+// and every manifest (the vendor's game.json and project.config.json, and the engine file layer's
+// rbfx_files.json) is generated to describe exactly the subpackages this build produced, so a
+// single-variant build and a two-variant build both yield a working package.
 
 #include "../BuildPlatform.h"
 #include "../BuildSettings.h"
@@ -34,6 +34,11 @@ namespace
 /// dialog.
 constexpr unsigned long long MainPackageBudget = 4ull * 1024 * 1024;
 constexpr unsigned long long TotalPackageBudget = 20ull * 1024 * 1024;
+
+/// Brotli quality for the compressed engine module. Measured on the 34 MB module: quality 9 lands at
+/// a sixth of the size in about a second and a half, quality 11 buys two points more for thirty
+/// times the time - the bytes it saves do not pay for the wait, so the step stays at 9.
+constexpr int WasmBrotliQuality = 9;
 
 /// Write a generated text file, reporting the path on any failure.
 bool WriteTextFile(Context* context, const ea::string& path, const ea::string& text, ea::string& message)
@@ -188,8 +193,9 @@ bool DouyinRuntimeStep::StageWasmSubpackage(const ea::string& bin, const ea::str
     const ea::string destination = owner_.outputDir() + name + "/";
 
     // What the build staged into the subpackage directory is the entry script; it requires the
-    // module beside itself, and the build keeps that pair at the binary directory root, so it is
-    // copied in here (the same mapping `cmake --install` performs).
+    // module beside itself, and the build keeps the two at the binary directory root, so the entry
+    // is copied in here (the same mapping `cmake --install` performs) and the module follows
+    // compressed.
     if (!fs->CopyDir(bin + name, destination))
     {
         message = Format("Could not copy the wasm subpackage from '{}'.", bin + name);
@@ -201,21 +207,79 @@ bool DouyinRuntimeStep::StageWasmSubpackage(const ea::string& bin, const ea::str
         return false;
     }
 
-    for (const char* extension : {".js", ".wasm"})
+    const ea::string source = bin + MinigameHostName + ".js";
+    const ea::string artifact = destination + MinigameHostName + ".js";
+    if (!fs->FileExists(source))
     {
-        const ea::string source = bin + MinigameHostName + extension;
-        const ea::string artifact = destination + MinigameHostName + extension;
-        if (!fs->FileExists(source))
-        {
-            message = Format("'{}' is not there to be copied.", source);
-            return false;
-        }
-        if (!fs->Copy(source, artifact))
-        {
-            message = Format("Could not copy '{}' to '{}'.", source, artifact);
-            return false;
-        }
+        message = Format("'{}' is not there to be copied.", source);
+        return false;
     }
+    if (!fs->Copy(source, artifact))
+    {
+        message = Format("Could not copy '{}' to '{}'.", source, artifact);
+        return false;
+    }
+
+    return CompressWasmModule(bin, destination, message);
+}
+
+bool DouyinRuntimeStep::CompressWasmModule(const ea::string& bin, const ea::string& destination,
+    ea::string& message)
+{
+    auto* fs = owner_.context()->GetSubsystem<FileSystem>();
+    const ea::string source = bin + MinigameHostName + ".wasm";
+    if (!fs->FileExists(source))
+    {
+        message = Format("'{}' is not there to be compressed.", source);
+        return false;
+    }
+
+    // The vendor loader decompresses a brotli module itself - a package file named *.wasm.br loads
+    // from base library 3.7.0.0 on - so the package carries only the compressed form. Shipping the
+    // uncompressed module beside it would pay the subpackage budget twice for the same bytes, and
+    // inflating in JavaScript was rejected: the platform already decompresses the module, so a
+    // script-side inflater would add code and a wait to every start for nothing. The compression
+    // itself rides the node inside the emsdk that built the module - its zlib is a brotli encoder -
+    // so the pipeline adds no compression dependency of its own; the script is a throwaway written
+    // beside the package and removed once it has run.
+    ea::string script;
+    script += "// Compress the engine module the way the vendor loader reads it. The build step writes\n";
+    script += "// this file, runs it once and removes it again; argv: source, target, quality.\n";
+    script += "\"use strict\";\n";
+    script += "const fs = require(\"fs\");\n";
+    script += "const zlib = require(\"zlib\");\n";
+    script += "const input = fs.readFileSync(process.argv[2]);\n";
+    script += "const output = zlib.brotliCompressSync(input, {params: {\n";
+    script += "    [zlib.constants.BROTLI_PARAM_QUALITY]: Number(process.argv[4]),\n";
+    script += "    [zlib.constants.BROTLI_PARAM_SIZE_HINT]: input.length}});\n";
+    script += "fs.writeFileSync(process.argv[3], output);\n";
+
+    const ea::string scriptPath = owner_.outputDir() + "rbfx_compress_wasm.js";
+    if (!WriteTextFile(owner_.context(), scriptPath, script, message))
+        return false;
+
+    const ea::string artifact = destination + MinigameHostName + ".wasm.br";
+    ea::vector<ea::string> arguments{scriptPath, source, artifact, Format("{}", WasmBrotliQuality)};
+    ea::string output;
+    const int exitCode = fs->SystemRun(owner_.ResolveEmsdkNode(), arguments, output);
+    fs->Delete(scriptPath);
+
+    if (exitCode != 0)
+    {
+        message = Format("Compressing '{}' failed (exit code {}): {}", source, exitCode, output);
+        return false;
+    }
+    if (!fs->FileExists(artifact))
+    {
+        message = Format("Compressing '{}' produced no '{}'.", source, artifact);
+        return false;
+    }
+
+    File wasmHandle(owner_.context(), source, FILE_READ);
+    File moduleHandle(owner_.context(), artifact, FILE_READ);
+    URHO3D_LOGINFO("[Build] Compressed the engine module for the vendor loader: {} KB -> {} KB; "
+        "the package needs Douyin base library 3.7.0.0 or newer",
+        (wasmHandle.GetSize() + 1023) / 1024, (moduleHandle.GetSize() + 1023) / 1024);
     return true;
 }
 
@@ -228,8 +292,9 @@ bool DouyinRuntimeStep::WriteGameConfig(const ea::vector<ea::string>& wasmSubpac
     // The template the build staged names both variants, which is only true for a package assembled
     // from two trees; regenerate it around what this build actually produced. The first segment of a
     // module path is the subpackage the loading manager downloads, so the config and the payload
-    // cannot drift apart.
-    const auto wasmPath = [](const ea::string& name) { return name + "/" + MinigameHostName + ".wasm"; };
+    // cannot drift apart. The path ends in .wasm.br: the staging compressed the module and the
+    // vendor loader decompresses it in place (base library 3.7.0.0 and newer).
+    const auto wasmPath = [](const ea::string& name) { return name + "/" + MinigameHostName + ".wasm.br"; };
     const auto hasSubpackage = [&wasmSubpackages](const ea::string& name)
     {
         return ea::find(wasmSubpackages.begin(), wasmSubpackages.end(), name) != wasmSubpackages.end();

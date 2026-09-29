@@ -482,6 +482,13 @@ ea::string BuildPlatform::ResolveEmsdkPython() const
 #endif
 }
 
+ea::string BuildPlatform::ResolveEmsdkNode() const
+{
+    // Same posture as the python resolution above: the emscripten backends override this with the
+    // runtime inside their emsdk root; everywhere else a caller still gets one from PATH.
+    return "node";
+}
+
 void BuildPlatform::LaunchAfterBuild(const ea::string& outputDir) const
 {
     // Desktop default: run the produced host binary and do not wait, so the window stays open until

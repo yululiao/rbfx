@@ -156,6 +156,31 @@ ea::string EmscriptenBuildPlatform::FindBundledPython(const ea::string& emsdkRoo
     return EMPTY_STRING;
 }
 
+ea::string EmscriptenBuildPlatform::FindBundledNode(const ea::string& emsdkRoot) const
+{
+    if (emsdkRoot.empty())
+        return EMPTY_STRING;
+    auto* fs = context()->GetSubsystem<FileSystem>();
+
+    // "<emsdk>/node/<version>_64bit" is where the sdk keeps the runtime its own toolchain scripts
+    // run on. One version at a time is installed, so first hit wins.
+    ea::vector<ea::string> versions;
+    fs->ScanDir(versions, NormalizeDir(emsdkRoot) + "node", "*", SCAN_DIRS);
+    for (const ea::string& version : versions)
+    {
+        if (version == "." || version == "..")
+            continue;
+#if defined(_WIN32)
+        const ea::string candidate = NormalizeDir(emsdkRoot) + "node/" + version + "/node.exe";
+#else
+        const ea::string candidate = NormalizeDir(emsdkRoot) + "node/" + version + "/bin/node";
+#endif
+        if (fs->FileExists(candidate))
+            return candidate;
+    }
+    return EMPTY_STRING;
+}
+
 ea::string EmscriptenBuildPlatform::ResolveEmsdkPython() const
 {
     // The toolchain scripts need nothing beyond the standard library, but the interpreter emsdk
@@ -177,6 +202,27 @@ ea::string EmscriptenBuildPlatform::ResolveEmsdkPython() const
 #else
     return "python3";
 #endif
+}
+
+ea::string EmscriptenBuildPlatform::ResolveEmsdkNode() const
+{
+    // The compression step rides the runtime emsdk itself runs on, for the same reason the python
+    // resolution prefers the bundled interpreter: it is the one the sdk is tested with, and it is
+    // where a brotli encoder is guaranteed to be present. Unlike python, no script depends on the
+    // exact version here, only on the encoder it carries.
+    ea::string ignored;
+    const ea::string emscriptenRoot = ResolveEmscriptenRoot(ignored);
+    if (!emscriptenRoot.empty())
+    {
+        const ea::string emsdkRoot = NormalizeDir(
+            GetPath(RemoveTrailingSlash(GetPath(RemoveTrailingSlash(emscriptenRoot)))));
+        const ea::string bundled = FindBundledNode(emsdkRoot);
+        if (!bundled.empty())
+            return bundled;
+    }
+    // Whatever is on PATH then; a machine that built a minigame module at all has a node somewhere,
+    // and a too-old one surfaces as the script's own error output.
+    return "node";
 }
 
 } // namespace Urho3D
