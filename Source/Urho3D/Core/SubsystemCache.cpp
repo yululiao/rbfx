@@ -45,7 +45,9 @@
 #include "../Network/Network.h"
 #endif
 #include "../Input/Input.h"
+#if URHO3D_UI
 #include "../UI/UI.h"
+#endif
 #if URHO3D_SYSTEMUI
 #include "../SystemUI/SystemUI.h"
 #endif

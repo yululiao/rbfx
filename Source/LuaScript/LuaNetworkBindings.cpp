@@ -13,20 +13,27 @@
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/MemoryBuffer.h"
 #include "../Urho3D/IO/VectorBuffer.h"
+#include "../Urho3D/Resource/JSONFile.h"
+#include "../Urho3D/Scene/Node.h"
+#include "../Urho3D/Scene/Scene.h"
+
+#include <sol/sol.hpp>
+
+// URHO3D_NETWORK is defined to 1 only when the subsystem is part of this engine build; its types -
+// headers, sol specializations and registrations - are guarded throughout this file. VectorBuffer,
+// MemoryBuffer and the JSON types stay unguarded on purpose: they carry event data and parsed
+// documents that have nothing to do with networking.
+#if URHO3D_NETWORK
 #include "../Urho3D/Network/Connection.h"
 #include "../Urho3D/Network/HttpRequest.h"
 #include "../Urho3D/Network/LANDiscoveryManager.h"
 #include "../Urho3D/Network/Network.h"
 #include "../Urho3D/Network/Protocol.h"
-#include "../Urho3D/Resource/JSONFile.h"
 #include "../Urho3D/Replica/BehaviorNetworkObject.h"
 #include "../Urho3D/Replica/ClientReplica.h"
 #include "../Urho3D/Replica/NetworkObject.h"
 #include "../Urho3D/Replica/ReplicationManager.h"
-#include "../Urho3D/Scene/Node.h"
-#include "../Urho3D/Scene/Scene.h"
-
-#include <sol/sol.hpp>
+#endif
 
 namespace Urho3D
 {
@@ -65,18 +72,24 @@ struct LuaMemoryBuffer
 namespace sol
 {
 
+#if URHO3D_NETWORK
 template <> struct is_automagical<Urho3D::Network> : std::false_type {};
 template <> struct is_automagical<Urho3D::Connection> : std::false_type {};
+#endif
 template <> struct is_automagical<Urho3D::VectorBuffer> : std::false_type {};
 template <> struct is_automagical<Urho3D::LuaMemoryBuffer> : std::false_type {};
+#if URHO3D_NETWORK
 template <> struct is_automagical<Urho3D::ReplicationManager> : std::false_type {};
 template <> struct is_automagical<Urho3D::ClientReplica> : std::false_type {};
 template <> struct is_automagical<Urho3D::NetworkObject> : std::false_type {};
 template <> struct is_automagical<Urho3D::BehaviorNetworkObject> : std::false_type {};
 template <> struct is_automagical<Urho3D::HttpRequest> : std::false_type {};
+#endif
 template <> struct is_automagical<Urho3D::JSONFile> : std::false_type {};
 template <> struct is_automagical<Urho3D::JSONValue> : std::false_type {};
+#if URHO3D_NETWORK
 template <> struct is_automagical<Urho3D::LANDiscoveryManager> : std::false_type {};
+#endif
 
 } // namespace sol
 
@@ -85,6 +98,7 @@ namespace Urho3D
 
 void RegisterNetworkBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_NETWORK
     // Network subsystem. rbfx addresses endpoints through the URL type; the
     // bindings accept a "host:port" string or a bare port number.
     {
@@ -157,6 +171,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<Connection>();
+#endif
 
     // VectorBuffer: construct outgoing network messages (16_Chat). The
     // buffer is not reference-counted (AbstractFile has no RefCounted base),
@@ -233,6 +248,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
         );
     }
 
+#if URHO3D_NETWORK
     // Reserved base for user-defined network message IDs (Protocol.h).
     LUA_ENUM_TABLE(MSG, "USER", MSG_USER);
 
@@ -319,6 +335,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
     // HTTP connection state constants.
     LUA_ENUM_TABLE(HTTP, "INITIALIZING", HTTP_INITIALIZING, "ERROR", HTTP_ERROR,
         "OPEN", HTTP_OPEN, "CLOSED", HTTP_CLOSED);
+#endif
 
     // JSONFile: parsed JSON document (43_HttpRequestDemo, 40_Localization).
     {
@@ -363,6 +380,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
         );
     }
 
+#if URHO3D_NETWORK
     // LANDiscoveryManager: LAN server discovery beacons (53_LANDiscovery).
     // Constructed explicitly, mirroring the C++ sample's MakeShared call.
     {
@@ -394,6 +412,7 @@ void RegisterNetworkBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<LANDiscoveryManager>();
+#endif
 }
 
 } // namespace Urho3D

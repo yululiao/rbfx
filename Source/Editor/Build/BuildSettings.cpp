@@ -131,6 +131,29 @@ ea::string GetExecutableSuffix()
 #endif
 }
 
+const ea::vector<EngineModuleInfo>& GetEngineModules()
+{
+    // Listed in the order they are worth looking at for a size cut: the subsystems that tend to
+    // move the wasm module the most come first, which is the order a size conscious user works
+    // through the list in.
+    static const ea::vector<EngineModuleInfo> modules =
+    {
+        {"URHO3D_PHYSICS", "Physics", "3D rigid bodies, colliders and raycasts", true},
+        {"URHO3D_PHYSICS2D", "Physics2D", "2D rigid bodies and colliders (Box2D)", true},
+        {"URHO3D_URHO2D", "Urho2D", "2D sprites, tile maps and drawables"},
+        {"URHO3D_NAVIGATION", "Navigation", "Navmesh building and pathfinding", true},
+        {"URHO3D_NETWORK", "Network", "Scene replication and client/server transport"},
+        {"URHO3D_IK", "IK", "Inverse kinematics for skeletal animation", true},
+        {"URHO3D_UI", "UI", "Built-in UIElement widgets, fonts and 3D text", true},
+        {"URHO3D_RMLUI", "RmlUI", "RmlUI themed application UI"},
+        {"URHO3D_SYSTEMUI", "SystemUI", "Dear ImGui tool and debug UI", true},
+        {"URHO3D_PARTICLE_GRAPH", "ParticleGraph", "Graph driven particle effects"},
+        {"URHO3D_ACTIONS", "Actions", "Coroutine style scripted actions"},
+        {"URHO3D_TIMELINE", "Timeline", "Timeline based animation"},
+    };
+    return modules;
+}
+
 void AndroidBuildSettings::SerializeInBlock(Archive& archive)
 {
     SerializeOptionalValue(archive, "ApplicationId", applicationId_, ea::string("com.example.game"));
@@ -181,6 +204,7 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     ea::string engineBuild = EngineBuildModeNames[static_cast<unsigned>(engineBuild_)];
     SerializeOptionalValue(archive, "EngineBuild", engineBuild, ea::string(EngineBuildModeNames[0]));
     EngineBuildModeFromString(engineBuild, engineBuild_);
+    SerializeOptionalValue(archive, "DisabledEngineModules", disabledEngineModules_, ea::vector<ea::string>{});
     // The block itself is always written while every leaf inside it decides for itself whether it
     // differs from its fallback. Writing the block unconditionally keeps the reader from having to
     // tell "section absent" apart from "section present and complete".
@@ -343,6 +367,18 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
     {
         const ea::string projectName = SanitizePackageSegment(GetFileNameAndExtension(RemoveTrailingSlash(projectPath)));
         platform.android_.applicationId_ = "com.example." + projectName;
+    }
+
+    // A fresh minigame platform starts from the size-cut selection: the modules a typical minigame
+    // does not use are left out of the box, so the first build already produces the small package
+    // without anyone having to find and uncheck them.
+    if (platform.IsDouyin())
+    {
+        for (const EngineModuleInfo& module : GetEngineModules())
+        {
+            if (module.disabledByDefault_)
+                platform.disabledEngineModules_.push_back(module.name_);
+        }
     }
 
     // Seed concrete per-platform formats so a fresh Build.json documents what a build will do. The

@@ -11,12 +11,20 @@
 #include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
+
+// URHO3D_URHO2D and URHO3D_PHYSICS2D are defined to 1 only when the respective subsystem is part
+// of this engine build; what each of them owns here - headers, sol specializations, registrations
+// and enum tables - sits behind its own guard, and RegisterUrho2DBindings keeps existing either
+// way so the VM can keep calling every entry point unconditionally.
+#if URHO3D_PHYSICS2D
 #include "../Urho3D/Physics2D/CollisionBox2D.h"
 #include "../Urho3D/Physics2D/CollisionCircle2D.h"
 #include "../Urho3D/Physics2D/CollisionShape2D.h"
 #include "../Urho3D/Physics2D/PhysicsWorld2D.h"
 #include "../Urho3D/Physics2D/RigidBody2D.h"
+#endif
 #include "../Urho3D/Scene/Node.h"
+#if URHO3D_URHO2D
 #include "../Urho3D/Urho2D/AnimatedSprite2D.h"
 #include "../Urho3D/Urho2D/AnimationSet2D.h"
 #include "../Urho3D/Urho2D/Drawable2D.h"
@@ -29,12 +37,14 @@
 #include "../Urho3D/Urho2D/TileMapDefs2D.h"
 #include "../Urho3D/Urho2D/TileMapLayer2D.h"
 #include "../Urho3D/Urho2D/TmxFile2D.h"
+#endif
 
 #include <sol/sol.hpp>
 
 namespace sol
 {
 
+#if URHO3D_URHO2D
 template <> struct is_automagical<Urho3D::Drawable2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::Sprite2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::AnimationSet2D> : std::false_type {};
@@ -49,11 +59,14 @@ template <> struct is_automagical<Urho3D::ParticleEmitter2D> : std::false_type {
 template <> struct is_automagical<Urho3D::StretchableSprite2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::TmxFile2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::TileMapInfo2D> : std::false_type {};
+#endif
+#if URHO3D_PHYSICS2D
 template <> struct is_automagical<Urho3D::RigidBody2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::CollisionShape2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::CollisionBox2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::CollisionCircle2D> : std::false_type {};
 template <> struct is_automagical<Urho3D::PhysicsWorld2D> : std::false_type {};
+#endif
 
 } // namespace sol
 
@@ -62,6 +75,7 @@ namespace Urho3D
 
 void RegisterUrho2DBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_URHO2D
     // Drawable2D: shared 2D layer/order controls.
     {
         using LUA_THIS = Drawable2D;
@@ -299,7 +313,9 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
         );
     }
     // Tile2D is plain RefCounted, not an Object: no caster.
+#endif
 
+#if URHO3D_PHYSICS2D
     // --- Physics2D ---
 
     {
@@ -440,7 +456,9 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
 
     // Box2D body type constants.
     LUA_ENUM_TABLE(BT2D, "STATIC", BT_STATIC, "DYNAMIC", BT_DYNAMIC, "KINEMATIC", BT_KINEMATIC);
+#endif
 
+#if URHO3D_URHO2D
     // Tile map orientation constants (TileMapDefs2D.h).
     LUA_ENUM_TABLE(ORIENT2D, "ORTHOGONAL", O_ORTHOGONAL, "ISOMETRIC", O_ISOMETRIC,
         "STAGGERED", O_STAGGERED, "HEXAGONAL", O_HEXAGONAL);
@@ -451,6 +469,14 @@ void RegisterUrho2DBindings(sol::state& lua, Context* context)
     // Tile map object type constants (Sample2D collision shape factory).
     LUA_ENUM_TABLE(OT2D, "RECTANGLE", OT_RECTANGLE, "ELLIPSE", OT_ELLIPSE, "POLYGON", OT_POLYGON,
         "POLYLINE", OT_POLYLINE, "TILE", OT_TILE);
+#endif
+
+#if !URHO3D_URHO2D && !URHO3D_PHYSICS2D
+    // Both 2D subsystems are compiled out of this engine build; the entry point stays so the VM
+    // can keep calling it.
+    (void)lua;
+    (void)context;
+#endif
 }
 
 } // namespace Urho3D

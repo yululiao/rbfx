@@ -42,6 +42,9 @@
 #include "../Graphics/VertexBuffer.h"
 #include "../Graphics/Zone.h"
 #include "../Input/InputEvents.h"
+#if !URHO3D_UI
+#include "../Input/Input.h"
+#endif
 #include "../IO/Log.h"
 #include "../RenderAPI/RenderAPIUtils.h"
 #include "../RenderAPI/RenderDevice.h"
@@ -49,7 +52,9 @@
 #include "../Resource/ResourceCache.h"
 #include "../Resource/XMLFile.h"
 #include "../Scene/Scene.h"
+#if URHO3D_UI
 #include "../UI/UI.h"
+#endif
 
 #include <EASTL/bonus/adaptors.h>
 #include <EASTL/functional.h>
@@ -755,7 +760,11 @@ void Renderer::HandleRenderUpdate(StringHash eventType, VariantMap& eventData)
 
 void Renderer::UpdateMousePositionsForMainViewports()
 {
+#if URHO3D_UI
     auto* ui = GetSubsystem<UI>();
+#else
+    auto* input = GetSubsystem<Input>();
+#endif
 
     for (Viewport* viewport : viewports_)
     {
@@ -763,7 +772,12 @@ void Renderer::UpdateMousePositionsForMainViewports()
             continue;
 
         const IntRect rect = viewport->GetEffectiveRect(backbufferSurface_, false);
+#if URHO3D_UI
         const IntVector2 mousePosition = ui->GetSystemCursorPosition();
+#else
+        // Without the built-in UI there is no software cursor, so the raw mouse position is used as-is.
+        const IntVector2 mousePosition = input->GetMousePosition();
+#endif
 
         const auto rectPos = rect.Min().ToVector2();
         const auto rectSizeMinusOne = (rect.Size() - IntVector2::ONE).ToVector2();

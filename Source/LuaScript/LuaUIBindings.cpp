@@ -12,6 +12,13 @@
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/IO/Log.h"
+
+// Everything in this file belongs to the optional UIElement based interface. URHO3D_UI is defined
+// to 1 only when the subsystem is part of this engine build; headers, sol specializations and the
+// registration below all follow it, and RegisterUIBindings degrades to a stub so the VM can keep
+// calling every entry point unconditionally. The Console additionally lives in SystemUI and keeps
+// its own URHO3D_SYSTEMUI gate, nested inside this one.
+#if URHO3D_UI
 #include "../Urho3D/UI/BorderImage.h"
 #include "../Urho3D/UI/Button.h"
 #include "../Urho3D/UI/CheckBox.h"
@@ -26,18 +33,26 @@
 #include "../Urho3D/UI/ToolTip.h"
 #include "../Urho3D/UI/UI.h"
 #include "../Urho3D/UI/UIComponent.h"
+
+#if URHO3D_SYSTEMUI
 #include "../Urho3D/SystemUI/Console.h"
+#endif
+
 #include "../Urho3D/Scene/ValueAnimation.h"
 #include "../Urho3D/Scene/Animatable.h"
 #include "../Urho3D/UI/UIElement.h"
 #include "../Urho3D/UI/Window.h"
+#endif
 
 #include <sol/sol.hpp>
 
 namespace sol
 {
 
+#if URHO3D_UI
+#if URHO3D_SYSTEMUI
 template <> struct is_automagical<Urho3D::Console> : std::false_type {};
+#endif
 
 template <> struct is_automagical<Urho3D::UIElement> : std::false_type {};
 template <> struct is_automagical<Urho3D::Font> : std::false_type {};
@@ -55,6 +70,7 @@ template <> struct is_automagical<Urho3D::UIComponent> : std::false_type {};
 template <> struct is_automagical<Urho3D::LineEdit> : std::false_type {};
 template <> struct is_automagical<Urho3D::Cursor> : std::false_type {};
 template <> struct is_automagical<Urho3D::UI> : std::false_type {};
+#endif
 
 } // namespace sol
 
@@ -63,6 +79,7 @@ namespace Urho3D
 
 void RegisterUIBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_UI
     // Root widget base: transforms, alignment, layout, children. Widget types
     // without an explicit registration (LineEdit, CheckBox, ...) are created
     // through UIElement::CreateChild and stay usable via attribute reflection.
@@ -543,6 +560,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
     }
     RegisterLuaObjectWrapper<UI>();
 
+#if URHO3D_SYSTEMUI
     // Console subsystem (SystemUI): command interpreter + visibility
     // (26_ConsoleInput). Console command events arrive with the "Command"
     // parameter name.
@@ -562,6 +580,7 @@ void RegisterUIBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<Console>();
+#endif
 
     // UIComponent: renders a UI subtree into 3D space on a material
     // (48_Hello3DUI).
@@ -608,6 +627,11 @@ void RegisterUIBindings(sol::state& lua, Context* context)
         "ALPHA", BLEND_ALPHA, "ADDALPHA", BLEND_ADDALPHA, "PREMULALPHA", BLEND_PREMULALPHA,
         "INVDESTALPHA", BLEND_INVDESTALPHA, "SUBTRACT", BLEND_SUBTRACT, "SUBTRACTALPHA",
         BLEND_SUBTRACTALPHA, "DEFERRED_DECAL", BLEND_DEFERRED_DECAL);
+#else
+    // Compiled out of this engine build; the entry point stays so the VM can keep calling it.
+    (void)lua;
+    (void)context;
+#endif
 }
 
 } // namespace Urho3D

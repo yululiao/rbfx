@@ -31,7 +31,9 @@
 #include "../Input/Input.h"
 #include "../Input/InputEvents.h"
 #include "../Scene/Node.h"
+#if URHO3D_UI
 #include "../UI/UI.h"
+#endif
 #include "../Engine/StateManager.h"
 
 namespace Urho3D
@@ -432,9 +434,11 @@ void FreeFlyController::HandleKeyboardMouseAndJoysticks(float timeStep)
 
 void FreeFlyController::Update(float timeStep)
 {
+#if URHO3D_UI
     // Do not move if the UI has a focused element (the console)
     if (GetSubsystem<UI>()->GetFocusElement())
         return;
+#endif
 
     auto* input = GetSubsystem<Input>();
     if (isActive_ || input->GetMouseMode() == MM_FREE)

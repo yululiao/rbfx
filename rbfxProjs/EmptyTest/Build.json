@@ -47,6 +47,14 @@
 		},
 		{
 			"Android": {},
+			"DisabledEngineModules": [
+				"URHO3D_PHYSICS",
+				"URHO3D_PHYSICS2D",
+				"URHO3D_NAVIGATION",
+				"URHO3D_IK",
+				"URHO3D_UI",
+				"URHO3D_SYSTEMUI"
+			],
 			"Douyin": {},
 			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
 			"EngineBuild": "Incremental",

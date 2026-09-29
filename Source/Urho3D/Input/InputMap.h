@@ -30,6 +30,9 @@
 
 namespace Urho3D
 {
+
+class UI;
+
 namespace Detail
 {
 /// Helper class to translate keyboard keys.

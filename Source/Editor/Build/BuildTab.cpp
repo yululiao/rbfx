@@ -59,10 +59,12 @@ void RenderEnvironmentStatus(const ea::string& name)
         ui::TextWrapped(ICON_FA_TRIANGLE_EXCLAMATION " %s is not set in the environment", name.c_str());
 }
 
-bool ContainsAbi(const ea::vector<ea::string>& abis, const char* abi)
+/// Whether a string list contains the value. Used for the ABI list and for the engine modules a
+/// web-based platform leaves out.
+bool Contains(const ea::vector<ea::string>& list, const ea::string& value)
 {
-    return ea::find_if(abis.begin(), abis.end(), [abi](const ea::string& entry) { return entry == abi; })
-        != abis.end();
+    return ea::find_if(list.begin(), list.end(), [&value](const ea::string& entry) { return entry == value; })
+        != list.end();
 }
 
 } // namespace
@@ -196,6 +198,8 @@ void BuildTab::RenderContent()
         RenderWebOptions(*platform);
     if (platform->IsDouyin())
         RenderDouyinOptions(*platform);
+    if (platform->IsWebBased())
+        RenderEngineModuleOptions(*platform);
     ui::EndDisabled();
 
     RenderStatus(platform, settings, project);
@@ -323,7 +327,7 @@ void BuildTab::RenderAndroidOptions(BuildPlatformData& platform)
             "than at install time.");
         for (const char* abi : AndroidAbis)
         {
-            bool enabled = ContainsAbi(android.abis_, abi);
+            bool enabled = Contains(android.abis_, abi);
             if (!ui::Checkbox(abi, &enabled))
                 continue;
 
@@ -392,6 +396,54 @@ void BuildTab::RenderDouyinOptions(BuildPlatformData& platform)
 
     ui::TextWrapped("The output is the vendor package itself: open its directory with the Douyin "
         "developer tool to preview and upload it.");
+}
+
+void BuildTab::RenderEngineModuleOptions(BuildPlatformData& platform)
+{
+    if (!ui::CollapsingHeader(ICON_FA_CUBE " Engine modules", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    // Web and Douyin share the list because both compile the same wasm module. Only the entries of
+    // GetEngineModules have a checkbox; a name a hand-edited Build.json invented is ignored, both
+    // here and by the build.
+    const auto& modules = GetEngineModules();
+    ea::vector<ea::string>& disabled = platform.disabledEngineModules_;
+
+    unsigned disabledCount = 0;
+    for (const EngineModuleInfo& module : modules)
+    {
+        if (Contains(disabled, module.name_))
+            ++disabledCount;
+    }
+
+    if (disabledCount == 0)
+        ui::TextWrapped("Everything is compiled into the wasm module. Unchecking a subsystem makes "
+            "the next build reconfigure and recompile the engine build tree, which then produces a "
+            "module without it.");
+    else
+        ui::TextWrapped(ICON_FA_TRIANGLE_EXCLAMATION " %u of %u subsystems are left out of the "
+            "engine; the next build reconfigures and recompiles it.",
+            disabledCount, static_cast<unsigned>(modules.size()));
+
+    for (const EngineModuleInfo& module : modules)
+    {
+        bool enabled = !Contains(disabled, module.name_);
+        const bool changed = ui::Checkbox(module.label_.c_str(), &enabled);
+        if (ui::IsItemHovered())
+            ui::SetTooltip("%s", module.description_.c_str());
+        if (!changed)
+            continue;
+
+        Touch(true);
+        // A pressed checkbox hands back the state it just switched to: an unchecked module joins
+        // the disabled list, a re-checked one leaves it; the list holds every name at most once.
+        const auto iter = ea::find_if(disabled.begin(), disabled.end(),
+            [&module](const ea::string& entry) { return entry == module.name_; });
+        if (!enabled && iter == disabled.end())
+            disabled.push_back(module.name_);
+        else if (enabled && iter != disabled.end())
+            disabled.erase(iter);
+    }
 }
 
 void BuildTab::RenderEmsdkRootField(BuildPlatformData& platform)

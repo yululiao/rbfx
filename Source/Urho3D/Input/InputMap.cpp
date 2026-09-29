@@ -26,7 +26,9 @@
 #include "Urho3D/Input/InputMap.h"
 #include "Urho3D/IO/VirtualFileSystem.h"
 #include "Urho3D/Resource/ResourceCache.h"
+#if URHO3D_UI
 #include "Urho3D/UI/UI.h"
+#endif
 
 namespace Urho3D
 {
@@ -515,7 +517,12 @@ void ActionMapping::SerializeInBlock(Archive& archive)
 
 float ActionMapping::Evaluate(Input* input, UI* ui, float deadZone, int ignoreJoystickId) const
 {
-    const UIElement* elementInFocus = (ui != nullptr) ? ui->GetFocusElement(): nullptr;
+#if URHO3D_UI
+    const UIElement* elementInFocus = (ui != nullptr) ? ui->GetFocusElement() : nullptr;
+#else
+    const UIElement* elementInFocus = nullptr;
+    (void)ui;
+#endif
 
     if (!elementInFocus)
     {
@@ -556,6 +563,7 @@ float ActionMapping::Evaluate(Input* input, UI* ui, float deadZone, int ignoreJo
         return 0.0f;
     }
 
+#if URHO3D_UI
     if (ui != nullptr && !screenButtons_.empty())
     {
         const unsigned numTouches = input->GetNumTouches();
@@ -574,6 +582,7 @@ float ActionMapping::Evaluate(Input* input, UI* ui, float deadZone, int ignoreJo
             }
         }
     }
+#endif
 
     const unsigned numJoysticks = input->GetNumJoysticks();
     float sum = 0.0f;
@@ -807,7 +816,11 @@ float InputMap::Evaluate(const ea::string& action)
     if (iter == actions_.end())
         return 0.0f;
     const auto input = context_->GetSubsystem<Input>();
+#if URHO3D_UI
     const auto ui = context_->GetSubsystem<UI>();
+#else
+    UI* ui = nullptr;
+#endif
     return iter->second.Evaluate(input, ui, deadZone_, ignoreJoystickId_);
 }
 
@@ -817,7 +830,11 @@ float InputMap::EvaluateByHash(StringHash actionHash)
     if (iter != actions_.end())
         return 0.0f;
     const auto input = context_->GetSubsystem<Input>();
+#if URHO3D_UI
     const auto ui = context_->GetSubsystem<UI>();
+#else
+    UI* ui = nullptr;
+#endif
     return iter->second.Evaluate(input, ui, deadZone_, ignoreJoystickId_);
 }
 

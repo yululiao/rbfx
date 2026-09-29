@@ -12,15 +12,21 @@
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Math/Ray.h"
+#include "../Urho3D/Scene/Node.h"
+
+#include <sol/sol.hpp>
+
+// URHO3D_PHYSICS is defined to 1 only when the subsystem is part of this engine build; everything
+// physics below - headers, sol specializations and registrations - follows it, and
+// RegisterPhysicsBindings degrades to a stub so the VM can keep calling every entry point
+// unconditionally.
+#if URHO3D_PHYSICS
 #include "../Urho3D/Physics/CollisionShape.h"
 #include "../Urho3D/Physics/Constraint.h"
 #include "../Urho3D/Physics/PhysicsWorld.h"
 #include "../Urho3D/Physics/RaycastVehicle.h"
 #include "../Urho3D/Physics/RaycastVehicleWheel.h"
 #include "../Urho3D/Physics/RigidBody.h"
-#include "../Urho3D/Scene/Node.h"
-
-#include <sol/sol.hpp>
 
 namespace sol
 {
@@ -33,12 +39,14 @@ template <> struct is_automagical<Urho3D::RaycastVehicle> : std::false_type {};
 template <> struct is_automagical<Urho3D::RaycastVehicleWheel> : std::false_type {};
 
 } // namespace sol
+#endif
 
 namespace Urho3D
 {
 
 void RegisterPhysicsBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_PHYSICS
     // PhysicsWorld: simulation setup and ray queries.
     {
         using LUA_THIS = PhysicsWorld;
@@ -275,6 +283,11 @@ void RegisterPhysicsBindings(sol::state& lua, Context* context)
     // Constraint types for Constraint:SetConstraintType.
     LUA_ENUM_TABLE(CT, "POINT", CONSTRAINT_POINT, "HINGE", CONSTRAINT_HINGE,
         "SLIDER", CONSTRAINT_SLIDER, "CONETWIST", CONSTRAINT_CONETWIST);
+#else
+    // Compiled out of this engine build; the entry point stays so the VM can keep calling it.
+    (void)lua;
+    (void)context;
+#endif
 }
 
 } // namespace Urho3D

@@ -28,7 +28,9 @@
 #include "../Input/InputEvents.h"
 #include "../Core/CoreEvents.h"
 #include "../Graphics/Graphics.h"
+#if URHO3D_UI
 #include "../UI/UI.h"
+#endif
 
 namespace Urho3D
 {
@@ -323,11 +325,13 @@ void PointerAdapter::SetCursorAcceleration(float cursorAcceleration)
 
 IntVector2 PointerAdapter::GetUIPointerPosition() const
 {
+#if URHO3D_UI
     const auto ui = GetSubsystem<UI>();
     const auto pos = GetPointerPosition();
     if (ui)
         return ui->ConvertSystemToUI(pos);
-    return pos;
+#endif
+    return GetPointerPosition();
 }
 
 DirectionAggregator* PointerAdapter::GetDirectionAggregator() const

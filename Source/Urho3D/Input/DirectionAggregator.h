@@ -23,12 +23,18 @@
 
 #include "../Container/FlagSet.h"
 #include "../Core/Object.h"
+#if URHO3D_UI
 #include "../UI/UIElement.h"
+#endif
 #include "../Input/AxisAdapter.h"
 #include <EASTL/fixed_vector.h>
 
 namespace Urho3D
 {
+
+#if !URHO3D_UI
+class UIElement;
+#endif
 
 enum class DirectionAggregatorMask : unsigned
 {

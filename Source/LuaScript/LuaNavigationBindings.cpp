@@ -11,6 +11,15 @@
 #include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Scene/Node.h"
+
+#include <sol/sol.hpp>
+
+// URHO3D_NAVIGATION is defined to 1 only when the subsystem is part of this engine build;
+// everything navigation below - headers, sol specializations and registrations - follows it, and
+// RegisterNavigationBindings degrades to a stub so the VM can keep calling every entry point
+// unconditionally.
+#if URHO3D_NAVIGATION
 #include "../Urho3D/Navigation/CrowdAgent.h"
 #include "../Urho3D/Navigation/CrowdManager.h"
 #include "../Urho3D/Navigation/DynamicNavigationMesh.h"
@@ -18,9 +27,6 @@
 #include "../Urho3D/Navigation/NavigationMesh.h"
 #include "../Urho3D/Navigation/Obstacle.h"
 #include "../Urho3D/Navigation/OffMeshConnection.h"
-#include "../Urho3D/Scene/Node.h"
-
-#include <sol/sol.hpp>
 
 namespace sol
 {
@@ -34,12 +40,14 @@ template <> struct is_automagical<Urho3D::CrowdAgent> : std::false_type {};
 template <> struct is_automagical<Urho3D::CrowdManager> : std::false_type {};
 
 } // namespace sol
+#endif
 
 namespace Urho3D
 {
 
 void RegisterNavigationBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_NAVIGATION
     // NavigationMesh: agent config + path queries. The mesh rebuilds itself
     // from scene geometry, so only configuration and queries are needed.
     {
@@ -272,6 +280,11 @@ void RegisterNavigationBindings(sol::state& lua, Context* context)
 
     LUA_ENUM_TABLE(CROWD_STATE, "INVALID", CA_STATE_INVALID, "WALKING", CA_STATE_WALKING,
         "OFFMESH", CA_STATE_OFFMESH);
+#else
+    // Compiled out of this engine build; the entry point stays so the VM can keep calling it.
+    (void)lua;
+    (void)context;
+#endif
 }
 
 } // namespace Urho3D

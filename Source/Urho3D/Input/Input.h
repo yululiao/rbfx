@@ -28,9 +28,13 @@
 #include "../Core/Mutex.h"
 #include "../Core/Object.h"
 #include "../Core/Signal.h"
+#include "../Core/Timer.h"
 #include "../Input/InputEvents.h"
+#if URHO3D_UI
 #include "../UI/Cursor.h"
+#endif
 
+#include <EASTL/hash_set.h>
 #include <EASTL/list.h>
 #include <EASTL/optional.h>
 #include <EASTL/unique_ptr.h>

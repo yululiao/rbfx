@@ -78,7 +78,14 @@ void DirectionAggregator::SetSubscriptionMask(DirectionAggregatorFlags mask)
 }
 
 /// Set UI element to filter touch events. Only touch events originated in the element going to be handled.
-void DirectionAggregator::SetUIElement(UIElement* element) { uiElement_ = element; }
+void DirectionAggregator::SetUIElement(UIElement* element)
+{
+#if URHO3D_UI
+    uiElement_ = element;
+#else
+    (void)element;
+#endif
+}
 
 /// Set dead zone to mitigate axis drift.
 void DirectionAggregator::SetDeadZone(float deadZone) { axisAdapter_.SetDeadZone(deadZone); }

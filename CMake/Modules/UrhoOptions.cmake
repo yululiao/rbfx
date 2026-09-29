@@ -181,6 +181,7 @@ cmake_dependent_option(URHO3D_PROFILING          "Profiler support enabled"     
 cmake_dependent_option(URHO3D_PROFILING_FALLBACK "Profiler uses low-precision timer"                     OFF                  "URHO3D_PROFILING"              OFF)
 cmake_dependent_option(URHO3D_PROFILING_SYSTRACE "Profiler systrace support enabled"                     OFF                  "URHO3D_PROFILING"              OFF)
 option                (URHO3D_SYSTEMUI           "Build SystemUI subsystem"                              ${URHO3D_ENABLE_ALL})
+option                (URHO3D_UI                 "Built-in UIElement based user interface"               ${URHO3D_ENABLE_ALL})
 option                (URHO3D_URHO2D             "2D subsystem enabled"                                  ${URHO3D_ENABLE_ALL})
 option                (URHO3D_PHYSICS2D          "2D physics subsystem enabled"                          ${URHO3D_ENABLE_ALL})
 option                (URHO3D_RMLUI              "HTML subset UIs via RmlUI middleware"                  ${URHO3D_ENABLE_ALL})
@@ -260,6 +261,13 @@ elseif (URHO3D_TOOLS OR URHO3D_EDITOR)
     set (URHO3D_FILEWATCHER ON)
     set (URHO3D_LOGGING ON)
     set (URHO3D_HASH_DEBUG ON)
+endif ()
+
+# The UIElement based interface is what the editor, tools, samples, tests, C# bindings and
+# SystemUI are built against, so it is forced on for them. Runtime-only builds - minigame
+# packages in particular - can leave it out and render their UI with RmlUI instead.
+if (URHO3D_EDITOR OR URHO3D_TOOLS OR URHO3D_SAMPLES OR URHO3D_TESTING OR URHO3D_CSHARP OR URHO3D_SYSTEMUI)
+    set (URHO3D_UI ON)
 endif ()
 
 if (EMSCRIPTEN)

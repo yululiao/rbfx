@@ -27,7 +27,9 @@
 #include "../IO/ArchiveSerializationBasic.h"
 #include "../IO/Log.h"
 #include "../Scene/Node.h"
+#if URHO3D_UI
 #include "../UI/UIElement.h"
+#endif
 #include "AttributeActionState.h"
 #include "FiniteTimeActionState.h"
 
@@ -57,10 +59,12 @@ public:
         {
             node->Remove();
         }
+#if URHO3D_UI
         else if (UIElement* element = target->Cast<UIElement>())
         {
             element->Remove();
         }
+#endif
     }
 };
 

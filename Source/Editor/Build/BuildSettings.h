@@ -98,6 +98,29 @@ struct TextureCompressionSettings
     void SerializeInBlock(Archive& archive);
 };
 
+/// One engine subsystem a web-based build can leave out. name_ is the CMake option the engine is
+/// configured with, so it must match CMake/Modules/UrhoOptions.cmake verbatim - it ends up on the
+/// reconfigure command line and in Build.json, and a typo would silently produce a build that is
+/// not the one the checkboxes describe.
+struct EngineModuleInfo
+{
+    /// CMake option name, e.g. "URHO3D_PHYSICS".
+    ea::string name_;
+    /// Name shown in the Build tab.
+    ea::string label_;
+    /// One line on what the game loses by leaving the subsystem out.
+    ea::string description_;
+    /// Whether a freshly seeded minigame platform starts with this subsystem left out. Marks the
+    /// modules a typical minigame does not use, so the default Douyin selection already is the
+    /// size-cut one and nothing has to be unchecked by hand.
+    bool disabledByDefault_{};
+};
+
+/// The engine subsystems the Build tab offers to prune from a web-based build. Every entry must be
+/// excludable on its own: the host, the remaining bindings and every other enabled subsystem have
+/// to keep compiling and linking with the option off.
+const ea::vector<EngineModuleInfo>& GetEngineModules();
+
 /// One named build configuration. Persisted in <project>/Build.json, which this struct family
 /// owns exclusively - Project.json stays untouched so adding build settings cannot break the
 /// plugin/launch schema that already lives there.
@@ -146,6 +169,12 @@ struct BuildPlatformData
     /// takes minutes, so a platform opts in when it wants a one click turnaround of engine changes.
     /// The stage runs before anything else because it produces the artifacts Validate checks.
     EngineBuildMode engineBuild_{};
+    /// Engine subsystems (CMake options, see GetEngineModules) left out of the build. Empty means
+    /// everything is enabled, which is what a Build.json written before this field existed resolves
+    /// to; a freshly seeded minigame platform instead comes with the disabledByDefault_ modules
+    /// already named. Only the web-based platforms read it: pruning targets the wasm module size,
+    /// and their build tree is the one the editor reconfigures itself.
+    ea::vector<ea::string> disabledEngineModules_;
     AndroidBuildSettings android_;
     DouyinBuildSettings douyin_;
     TextureCompressionSettings textureCompression_;

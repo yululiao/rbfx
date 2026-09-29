@@ -149,8 +149,11 @@ void BuildPlatform::ComposePlan()
     plan_.clear();
     // The compile goes first when asked for: it produces the very artifacts the Validate step checks
     // for, so a platform that compiles never has to be built twice to get past validation. Android is
-    // left out because its gradle project compiles the engine itself.
-    if (platform_->engineBuild_ != EngineBuildMode::Never && UsesEngineBuild())
+    // left out because its gradle project compiles the engine itself, and a platform the editor also
+    // reconfigures keeps the step even with "do not compile": a module selection that changed has to
+    // reach the tree before the package is assembled from it, and the step itself decides whether
+    // there is anything to compile that way.
+    if (UsesEngineBuild() && (platform_->engineBuild_ != EngineBuildMode::Never || SyncsEngineFeatures()))
         plan_.push_back(ea::make_unique<EngineBuildStep>(*this));
     plan_.push_back(ea::make_unique<ValidateStep>(*this));
     // Cook imported assets before anything reads Cache: this is the step that guarantees the Cache

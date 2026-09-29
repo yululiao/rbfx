@@ -11,6 +11,15 @@
 #include "LuaBindMacros.h"
 
 #include "../Urho3D/Core/Context.h"
+#include "../Urho3D/Scene/Node.h"
+
+#include <sol/sol.hpp>
+
+// URHO3D_PHYSICS2D is defined to 1 only when the subsystem is part of this engine build; everything
+// 2D physics below - headers, sol specializations and registrations - follows it, and
+// RegisterPhysics2DBindings degrades to a stub so the VM can keep calling every entry point
+// unconditionally.
+#if URHO3D_PHYSICS2D
 #include "../Urho3D/Physics2D/CollisionChain2D.h"
 #include "../Urho3D/Physics2D/CollisionEdge2D.h"
 #include "../Urho3D/Physics2D/CollisionPolygon2D.h"
@@ -28,9 +37,6 @@
 #include "../Urho3D/Physics2D/ConstraintWheel2D.h"
 #include "../Urho3D/Physics2D/PhysicsWorld2D.h"
 #include "../Urho3D/Physics2D/RigidBody2D.h"
-#include "../Urho3D/Scene/Node.h"
-
-#include <sol/sol.hpp>
 
 namespace sol
 {
@@ -52,10 +58,12 @@ template <> struct is_automagical<Urho3D::CollisionPolygon2D> : std::false_type 
 template <> struct is_automagical<Urho3D::CollisionChain2D> : std::false_type {};
 
 } // namespace sol
+#endif
 
 namespace Urho3D
 {
 
+#if URHO3D_PHYSICS2D
 namespace
 {
 
@@ -76,9 +84,11 @@ ea::vector<Vector2> LuaTableToVector2Array(const sol::table& vertices)
 }
 
 } // namespace
+#endif
 
 void RegisterPhysics2DBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_PHYSICS2D
     // Constraint2D: shared base of all 2D physics joints. The owner body is
     // the body the constraint component is attached to (32_Physics2DConstraints).
     {
@@ -273,6 +283,11 @@ void RegisterPhysics2DBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<CollisionChain2D>();
+#else
+    // Compiled out of this engine build; the entry point stays so the VM can keep calling it.
+    (void)lua;
+    (void)context;
+#endif
 }
 
 } // namespace Urho3D

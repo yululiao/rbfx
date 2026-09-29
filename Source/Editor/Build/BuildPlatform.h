@@ -161,6 +161,20 @@ public:
     {
         return true;
     }
+    /// Whether the engine build tree carries an engine feature selection this editor manages: the
+    /// module checkboxes of the Build tab. False by default - a desktop tree belongs to the user,
+    /// and nothing in the editor edits it - so only the platforms that show the checkboxes say yes.
+    virtual bool SyncsEngineFeatures() const { return false; }
+    /// Decide whether the engine build tree has to be reconfigured before it can produce the module
+    /// the platform describes, and collect the "-D<option>=<ON|OFF>" arguments that bring it in
+    /// line. Called with a located 'buildTree'; needsReconfigure stays false when nothing has to
+    /// change. Returning false aborts the build with the reason.
+    virtual bool CollectFeatureReconfigure(const ea::string& /*buildTree*/, ea::vector<ea::string>& /*defines*/,
+        bool& needsReconfigure, ea::string& /*message*/) const
+    {
+        needsReconfigure = false;
+        return true;
+    }
     /// CMake target the engine-compile stage drives. The default is the complete host application
     /// every desktop-like platform packages; a platform whose payload is a different embedder
     /// overrides this.
@@ -278,6 +292,9 @@ public:
 
     bool ConfigureEngineBuildArgs(ea::vector<ea::string>& arguments, const ea::string& cmakeCommand,
         const ea::string& buildTree, ea::string& message) const override;
+    bool SyncsEngineFeatures() const override { return true; }
+    bool CollectFeatureReconfigure(const ea::string& buildTree, ea::vector<ea::string>& defines,
+        bool& needsReconfigure, ea::string& message) const override;
     ea::string ResolveEmsdkPython() const override;
     ea::string ResolveEmsdkNode() const override;
 

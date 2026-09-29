@@ -23,6 +23,7 @@
 #include "Urho3D/Input/MoveAndOrbitController.h"
 
 #include "Urho3D/Input/MoveAndOrbitComponent.h"
+#include "Urho3D/Input/Input.h"
 #include "Urho3D/Core/Context.h"
 #include "Urho3D/Core/CoreEvents.h"
 #include "Urho3D/Graphics/Graphics.h"
@@ -89,12 +90,20 @@ ResourceRef MoveAndOrbitController::GetInputMapAttr() const
 
 void MoveAndOrbitController::SetMovementUIElement(UIElement* element)
 {
+#if URHO3D_UI
     movementUIElement_ = element;
+#else
+    (void)element;
+#endif
 }
 
 void MoveAndOrbitController::SetRotationUIElement(UIElement* element)
 {
+#if URHO3D_UI
     rotationUIElement_ = element;
+#else
+    (void)element;
+#endif
 }
 
 void MoveAndOrbitController::OnNodeSet(Node* previousNode, Node* currentNode)
@@ -248,6 +257,7 @@ void MoveAndOrbitController::EvaluateTouchRects(IntRect& movementRect, IntRect& 
         }
     }
 
+#if URHO3D_UI
     if (movementUIElement_)
     {
         movementRect = movementUIElement_->GetCombinedScreenRect();
@@ -264,6 +274,11 @@ void MoveAndOrbitController::EvaluateTouchRects(IntRect& movementRect, IntRect& 
     {
         rotationRect = screenRect;
     }
+#else
+    // Touch filtering by UI element is meaningless without the built-in UI, fall back to the whole screen.
+    movementRect = screenRect;
+    rotationRect = screenRect;
+#endif
     if (movementUIElement_ == rotationUIElement_)
     {
         const auto halfSize = IntVector2(movementRect.Width() / 2, movementRect.Height());

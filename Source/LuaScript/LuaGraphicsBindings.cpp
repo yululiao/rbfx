@@ -38,7 +38,10 @@
 #include "../Urho3D/Graphics/VertexBuffer.h"
 #include "../Urho3D/Graphics/IndexBuffer.h"
 #include "../Urho3D/Graphics/Geometry.h"
+// Text3D is part of the optional built-in UI module; it is compiled out together with it.
+#if URHO3D_UI
 #include "../Urho3D/UI/Text3D.h"
+#endif
 #include "../Urho3D/Graphics/Texture.h"
 #include "../Urho3D/Graphics/Texture2D.h"
 #include "../Urho3D/Graphics/Viewport.h"
@@ -87,7 +90,9 @@ template <> struct is_automagical<Urho3D::RibbonTrail> : std::false_type {};
 template <> struct is_automagical<Urho3D::VertexBuffer> : std::false_type {};
 template <> struct is_automagical<Urho3D::IndexBuffer> : std::false_type {};
 template <> struct is_automagical<Urho3D::Geometry> : std::false_type {};
+#if URHO3D_UI
 template <> struct is_automagical<Urho3D::Text3D> : std::false_type {};
+#endif
 template <> struct is_automagical<Urho3D::RenderSurface> : std::false_type {};
 template <> struct is_automagical<Urho3D::Technique> : std::false_type {};
 template <> struct is_automagical<Urho3D::VertexElement> : std::false_type {};
@@ -710,6 +715,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
     }
     RegisterLuaObjectWrapper<Geometry>();
 
+#if URHO3D_UI
     // Text3D: text component in world space (32_Physics2DConstraints).
     {
         using LUA_THIS = Text3D;
@@ -732,6 +738,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<Text3D>();
+#endif
 
     // Skybox: default environment backdrop used by most samples.
     {

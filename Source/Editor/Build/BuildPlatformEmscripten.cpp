@@ -15,6 +15,8 @@
 #include <Urho3D/Core/StringUtils.h>
 #include <Urho3D/IO/FileSystem.h>
 
+#include <EASTL/algorithm.h>
+
 #include <cstdlib>
 
 namespace Urho3D
@@ -74,6 +76,32 @@ bool EmscriptenBuildPlatform::ConfigureEngineBuildArgs(ea::vector<ea::string>& a
     // another cmake invocation inside the injected environment. Without it the `--build` that follows
     // would be the command cmake tries and fails to execute.
     arguments.push_back(cmakeCommand.empty() ? ea::string("cmake") : cmakeCommand);
+    return true;
+}
+
+bool EmscriptenBuildPlatform::CollectFeatureReconfigure(const ea::string& buildTree,
+    ea::vector<ea::string>& defines, bool& needsReconfigure, ea::string& /*message*/) const
+{
+    needsReconfigure = false;
+
+    // The selection is spelled out for every module, enabled or not. Passing only the disabled ones
+    // would be enough to prune, but it would leave an "=OFF" behind in the cache for a checkbox
+    // that was unchecked once and is checked again: the cache remembers it, and the tree would keep
+    // producing a pruned module that nothing on screen asks for anymore.
+    const auto& disabled = platform_->disabledEngineModules_;
+    const ea::string cachePath = RemoveTrailingSlash(buildTree) + "/CMakeCache.txt";
+    for (const EngineModuleInfo& module : GetEngineModules())
+    {
+        const bool enabled = ea::find(disabled.begin(), disabled.end(), module.name_) == disabled.end();
+        defines.push_back(module.name_ + (enabled ? "=ON" : "=OFF"));
+
+        // A cache that disagrees - including one from before the option existed, which reads as
+        // absent - means the tree was configured for a different module selection than the one on
+        // screen, so it cannot produce the module the platform describes until it is reconfigured.
+        const ea::string cached = ReadCMakeCacheEntry(cachePath, module.name_);
+        if (cached.comparei(enabled ? "ON" : "OFF") != 0)
+            needsReconfigure = true;
+    }
     return true;
 }
 

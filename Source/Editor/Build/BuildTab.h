@@ -50,6 +50,9 @@ private:
     void RenderWebOptions(BuildPlatformData& platform);
     /// The part of a platform only the minigame package assembler reads.
     void RenderDouyinOptions(BuildPlatformData& platform);
+    /// The engine subsystems a web-based build can leave out: the wasm module shrinks by whatever
+    /// is unchecked, at the price of reconfiguring and recompiling the build tree.
+    void RenderEngineModuleOptions(BuildPlatformData& platform);
     /// The emsdk root field the emscripten-backed platforms share.
     void RenderEmsdkRootField(BuildPlatformData& platform);
     /// Progress of a build in flight, or the reason the last one did not succeed.

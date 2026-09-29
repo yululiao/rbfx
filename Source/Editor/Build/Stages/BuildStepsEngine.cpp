@@ -4,9 +4,10 @@
 
 // Engine-host compilation stage as a BuildStep: the one step that shells out to CMake to produce the
 // host binaries the rest of the plan then packages. The shared "--build" driving lives here; the
-// toolchain arguments, the compile target and the proof of what the compile produced are the
-// platform's, reached through owner_.ConfigureEngineBuildArgs / GetEngineBuildTarget /
-// VerifyEngineArtifacts. The build-tree probing it leans on (LocateEngineBuildTree,
+// toolchain arguments, the compile target, the proof of what the compile produced and the engine
+// feature selection the tree has to match are the platform's, reached through
+// owner_.ConfigureEngineBuildArgs / GetEngineBuildTarget / VerifyEngineArtifacts /
+// CollectFeatureReconfigure. The build-tree probing it leans on (LocateEngineBuildTree,
 // ReadCMakeCacheEntry) is on BuildPlatform because the emscripten-backed platforms need it too.
 
 #include "../../Assets/TextureImportSettings.h"
@@ -24,6 +25,76 @@ namespace Urho3D
 {
 
 bool EngineBuildStep::Run(ea::string& message)
+{
+    const BuildPlatformData* platform = owner_.platform();
+    const bool compiling = platform->engineBuild_ != EngineBuildMode::Never;
+
+    ea::string tree, cmakeCommand, generator;
+    ea::string locateError;
+    const bool treeFound = owner_.LocateEngineBuildTree(tree, cmakeCommand, generator, locateError);
+
+    ea::vector<ea::string> featureDefines;
+    bool needsReconfigure = false;
+    if (treeFound && !owner_.CollectFeatureReconfigure(tree, featureDefines, needsReconfigure, message))
+        return false;
+
+    // A tree that cannot be found is only a problem when this step needed it: to compile into, or
+    // to apply a module selection. "Do not compile" over a prebuilt engine - binaries assembled
+    // from a tree that never existed on this machine - keeps working without one.
+    if (!treeFound && (compiling || !platform->disabledEngineModules_.empty()))
+    {
+        message = locateError;
+        return false;
+    }
+
+    if (!treeFound)
+    {
+        URHO3D_LOGINFO("[Build] Engine compile skipped: no build tree found and no module is disabled");
+        return true;
+    }
+
+    if (!compiling && !needsReconfigure)
+    {
+        URHO3D_LOGINFO("[Build] Engine compile skipped: the build tree already matches the module selection");
+        return true;
+    }
+
+    if (needsReconfigure)
+    {
+        // -D on top of the existing cache is the whole reconfigure: the toolchain, the generator and
+        // every other setting of the original configure already live in that cache. The source
+        // directory is the one thing it has to name, because -S cannot be reconstructed from
+        // anything else.
+        const ea::string sourceDir = owner_.ReadCMakeCacheEntry(
+            RemoveTrailingSlash(tree) + "/CMakeCache.txt", "CMAKE_HOME_DIRECTORY");
+        if (sourceDir.empty())
+        {
+            message = Format("Cannot reconfigure '{}': its CMake cache does not name the source "
+                "directory it was configured from.", tree);
+            return false;
+        }
+
+        ea::vector<ea::string> arguments;
+        if (!owner_.ConfigureEngineBuildArgs(arguments, cmakeCommand, tree, message))
+            return false;
+        arguments.push_back("-S");
+        arguments.push_back(RemoveTrailingSlash(sourceDir));
+        arguments.push_back("-B");
+        arguments.push_back(RemoveTrailingSlash(tree));
+        for (const ea::string& define : featureDefines)
+            arguments.push_back("-D" + define);
+
+        // The compile that follows runs even in "do not compile" mode: the selection changed, and a
+        // package assembled from the old module would not match what the checkboxes describe.
+        URHO3D_LOGINFO("[Build] Engine module selection changed; reconfiguring the build tree first");
+        return owner_.StartProcess(cmakeCommand.empty() ? ea::string("cmake") : cmakeCommand, arguments,
+            [this](ea::string& resumeMessage) { return StartCompile(resumeMessage); }, message);
+    }
+
+    return StartCompile(message);
+}
+
+bool EngineBuildStep::StartCompile(ea::string& message)
 {
     const BuildPlatformData* platform = owner_.platform();
 

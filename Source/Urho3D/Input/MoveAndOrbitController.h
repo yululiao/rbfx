@@ -24,11 +24,17 @@
 
 #include "Urho3D/Scene/LogicComponent.h"
 #include "Urho3D/Input/InputMap.h"
+#if URHO3D_UI
+#include "Urho3D/UI/UIElement.h"
+#endif
 
 namespace Urho3D
 {
 class MoveAndOrbitComponent;
 class InputTranslator;
+#if !URHO3D_UI
+class UIElement;
+#endif
 
 class URHO3D_API MoveAndOrbitController : public Component
 {

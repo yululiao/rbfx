@@ -51,7 +51,7 @@ endmacro()
 
 define_engine_source_files (Container Core IO Math)
 
-define_engine_source_files (Audio Engine Graphics Input Plugins RenderAPI RenderPipeline Resource Scene Script Shader UI Utility)
+define_engine_source_files (Audio Engine Graphics Input Plugins RenderAPI RenderPipeline Resource Scene Script Shader Utility)
 list (REMOVE_ITEM SOURCE_FILES BindAll.cpp)     # Utility file for BindTool.
 
 # Host bridge for minigame platforms (Douyin/WeChat style runtimes). Compiled on every
@@ -94,6 +94,13 @@ endif ()
 
 if (URHO3D_PHYSICS2D)
     define_engine_source_files (Physics2D)
+endif ()
+
+# UIElement based user interface. Optional: builds that render their UI with RmlUI (minigame
+# packages) leave it out to shrink the binary. The editor, tools, samples, tests, C# bindings
+# and SystemUI force it back on in UrhoOptions.cmake.
+if (URHO3D_UI)
+    define_engine_source_files (UI)
 endif ()
 
 if (URHO3D_SYSTEMUI)

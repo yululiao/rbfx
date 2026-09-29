@@ -27,13 +27,19 @@
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Graphics/Texture2D.h"
 #include "../Urho3D/IO/Log.h"
-#include "../Urho3D/RmlUI/RmlCanvasComponent.h"
-#include "../Urho3D/RmlUI/RmlUI.h"
-#include "../Urho3D/RmlUI/RmlUIComponent.h"
 
 #include <EASTL/map.h>
 
 #include <sol/sol.hpp>
+
+// URHO3D_RMLUI is defined to 1 only when the subsystem is part of this engine build; everything
+// RmlUI below - headers, sol specializations, the trampoline component and its registrations -
+// follows it, and RegisterRmlUIBindings degrades to a stub so the VM can keep calling every entry
+// point unconditionally.
+#if URHO3D_RMLUI
+#include "../Urho3D/RmlUI/RmlCanvasComponent.h"
+#include "../Urho3D/RmlUI/RmlUI.h"
+#include "../Urho3D/RmlUI/RmlUIComponent.h"
 
 namespace Urho3D
 {
@@ -49,10 +55,12 @@ template <> struct is_automagical<Urho3D::RmlCanvasComponent> : std::false_type 
 template <> struct is_automagical<Urho3D::LuaRmlUIComponent> : std::false_type {};
 
 } // namespace sol
+#endif
 
 namespace Urho3D
 {
 
+#if URHO3D_RMLUI
 /// Lua-driven RmlUIComponent. Behaves exactly like the built-in window component
 /// but lets a script supply an "onInit" handler (invoked at the precise moment the
 /// RmlUi data model is being constructed, when Bind* calls are legal) and an
@@ -254,9 +262,11 @@ private:
     ea::map<ea::string, VariantVector> vectorSlots_;
     ea::map<ea::string, VariantMap> mapSlots_;
 };
+#endif
 
 void RegisterRmlUIBindings(sol::state& lua, Context* context)
 {
+#if URHO3D_RMLUI
     // Make the trampoline creatable via Node:CreateComponent("LuaRmlUIComponent").
     LuaRmlUIComponent::RegisterObject(context);
 
@@ -342,6 +352,11 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<LuaRmlUIComponent>();
+#else
+    // Compiled out of this engine build; the entry point stays so the VM can keep calling it.
+    (void)lua;
+    (void)context;
+#endif
 }
 
 } // namespace Urho3D

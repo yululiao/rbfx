@@ -8,7 +8,9 @@
 #include "Urho3D/Engine/Application.h"
 #include "Urho3D/Graphics/Viewport.h"
 #include "Urho3D/Input/Input.h"
-#include "Urho3D/UI/Window.h"
+#if URHO3D_UI
+    #include "Urho3D/UI/Window.h"
+#endif
 #if URHO3D_ACTIONS
     #include "Urho3D/Actions/ActionManager.h"
 #endif
@@ -61,10 +63,12 @@ public:
     /// Set the mouse mode.
     void SetMouseMode(MouseMode mode);
 
+#if URHO3D_UI
     /// Set cursor UI element.
     void SetCursor(Cursor* cursor);
     /// Return cursor.
     Cursor* GetCursor() const { return cursor_; }
+#endif
 
     /// Return whether the operating system mouse cursor is visible.
     /// @property
@@ -76,6 +80,7 @@ public:
     /// @property
     MouseMode GetMouseMode() const { return mouseMode_; }
 
+#if URHO3D_UI
     /// Return root UI element.
     /// @property
     UIElement* GetUIRoot() const { return rootElement_; }
@@ -89,6 +94,7 @@ public:
     /// to window size is in use instead (default).
     /// @property
     const IntVector2& GetUICustomSize() const { return rootCustomSize_; }
+#endif
 
     /// Set number of backbuffer viewports to render.
     /// @property
@@ -129,6 +135,7 @@ private:
 private:
     /// Is the game screen active.
     bool active_{false};
+#if URHO3D_UI
     /// UI root element.
     SharedPtr<UIElement> rootElement_{};
     /// UI root element saved upon activation to be restored at deactivation.
@@ -141,6 +148,7 @@ private:
     IntVector2 rootCustomSize_{};
     /// UI root element custom size saved upon activation to be restored at deactivation.
     IntVector2 savedRootCustomSize_{};
+#endif
     /// Backbuffer viewports.
     ea::vector<SharedPtr<Viewport>> viewports_;
     /// Operating system mouse cursor visible flag.
@@ -215,8 +223,10 @@ public:
     /// Get target application state.
     StringHash GetTargetState() const;
 
+#if URHO3D_UI
     /// Get fade overlay
     Window* GetFadeOverlay();
+#endif
 
     /// Set fade in animation duration;
     void SetFadeInDuration(float durationInSeconds);
@@ -277,8 +287,10 @@ private:
     /// Fade out duration in seconds.
     float fadeOutDuration_{ea::numeric_limits<float>::epsilon()};
 
+#if URHO3D_UI
     /// Fade overlay window.
     SharedPtr<Window> fadeOverlay_;
+#endif
 
     /// State transition state.
     TransitionState transitionState_{TransitionState::Sustain};

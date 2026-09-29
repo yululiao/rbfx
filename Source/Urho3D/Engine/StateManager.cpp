@@ -12,7 +12,9 @@
 #include "Urho3D/Graphics/Renderer.h"
 #include "Urho3D/Graphics/Zone.h"
 #include "Urho3D/Resource/ResourceCache.h"
+#if URHO3D_UI
 #include "Urho3D/UI/UI.h"
+#endif
 #if URHO3D_SYSTEMUI
     #include "Urho3D/SystemUI/Console.h"
 #endif
@@ -22,7 +24,9 @@ namespace Urho3D
 
 ApplicationState::ApplicationState(Context* context)
     : Object(context)
+#if URHO3D_UI
     , rootElement_(MakeShared<UIElement>(context))
+#endif
 #if URHO3D_ACTIONS
     , actionManager_(MakeShared<ActionManager>(context, false))
 #endif
@@ -54,6 +58,7 @@ void ApplicationState::Activate(StringVariantMap& bundle)
         input->SetMouseVisible(mouseVisible_);
         input->SetMouseGrabbed(mouseGrabbed_);
     }
+#if URHO3D_UI
     {
         auto* ui = GetSubsystem<UI>();
         savedRootElement_ = ui->GetRoot();
@@ -63,6 +68,7 @@ void ApplicationState::Activate(StringVariantMap& bundle)
         ui->SetCustomSize(rootCustomSize_);
         ui->SetCursor(cursor_);
     }
+#endif
     {
         auto* renderer = GetSubsystem<Renderer>();
         if (renderer)
@@ -110,6 +116,7 @@ void ApplicationState::Deactivate()
     // Subscribe HandleUpdate() method for processing update events
     UnsubscribeFromEvent(E_UPDATE);
 
+#if URHO3D_UI
     auto* ui = GetSubsystem<UI>();
     if (ui)
     {
@@ -119,6 +126,7 @@ void ApplicationState::Deactivate()
         ui->SetCustomSize(savedRootCustomSize_);
         ui->SetCursor(savedCursor_);
     }
+#endif
     auto* renderer = GetSubsystem<Renderer>();
     if (renderer)
     {
@@ -161,6 +169,7 @@ void ApplicationState::SetMouseMode(MouseMode mode)
     }
 }
 
+#if URHO3D_UI
 void ApplicationState::SetCursor(Cursor* cursor)
 {
     cursor_ = cursor;
@@ -170,7 +179,9 @@ void ApplicationState::SetCursor(Cursor* cursor)
         ui->SetCursor(cursor);
     }
 }
+#endif
 
+#if URHO3D_UI
 void ApplicationState::SetUICustomSize(const IntVector2& size)
 {
     rootCustomSize_ = size;
@@ -185,6 +196,7 @@ void ApplicationState::SetUICustomSize(int width, int height)
 {
     SetUICustomSize(IntVector2(width, height));
 }
+#endif
 
 void ApplicationState::SetNumViewports(unsigned num)
 {
@@ -445,10 +457,12 @@ void StateManager::SetTransitionState(TransitionState state)
     {
     case TransitionState::Sustain:
         UnsubscribeFromEvent(E_UPDATE);
+#if URHO3D_UI
         if (fadeOverlay_)
         {
             fadeOverlay_->Remove();
         }
+#endif
         break;
     case TransitionState::FadeIn:
     case TransitionState::FadeOut:
@@ -457,10 +471,12 @@ void StateManager::SetTransitionState(TransitionState state)
         SubscribeToEvent(E_UPDATE, URHO3D_HANDLER(StateManager, HandleUpdate));
         break;
     case TransitionState::WaitToExit:
+#if URHO3D_UI
         if (fadeOverlay_)
         {
             fadeOverlay_->Remove();
         }
+#endif
         SubscribeToEvent(E_UPDATE, URHO3D_HANDLER(StateManager, HandleUpdate));
         break;
     default: break;
@@ -479,6 +495,7 @@ void StateManager::SetTransitionState(TransitionState state)
 /// Update fade overlay size and transparency.
 void StateManager::UpdateFadeOverlay(float t)
 {
+#if URHO3D_UI
     Window* overlay = GetFadeOverlay();
     auto* ui = context_->GetSubsystem<UI>();
     auto* root = ui->GetRoot();
@@ -495,6 +512,10 @@ void StateManager::UpdateFadeOverlay(float t)
     }
     overlay->SetOpacity(t);
     overlay->SetSize(ui->GetSize());
+#else
+    // Without UI there is no overlay to fade through; state transitions remain instantaneous.
+    (void)t;
+#endif
 }
 
 /// Notify subscribers about transition state updates.
@@ -550,6 +571,7 @@ StringHash StateManager::GetTargetState() const
     return stateQueue_.back().stateType_;
 }
 
+#if URHO3D_UI
 Window* StateManager::GetFadeOverlay()
 {
     if (!fadeOverlay_)
@@ -563,6 +585,7 @@ Window* StateManager::GetFadeOverlay()
     }
     return fadeOverlay_;
 }
+#endif
 
 void StateManager::SetFadeInDuration(float durationInSeconds)
 {

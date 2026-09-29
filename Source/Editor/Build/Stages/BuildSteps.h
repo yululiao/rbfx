@@ -107,6 +107,11 @@ private:
 /// produces the artifacts the Validate stage then checks for. The compile itself is shared; the
 /// arguments the toolchain needs and the proof of what it produced are the platform's (see
 /// BuildPlatform::ConfigureEngineBuildArgs / VerifyEngineArtifacts).
+///
+/// A platform whose engine feature selection the editor manages (SyncsEngineFeatures) is asked first
+/// whether the tree still matches it; a tree that does not is reconfigured on the spot, and the
+/// compile that follows runs even when the platform is otherwise not compiling - a module checkbox
+/// that never reaches the tree is a checkbox that does nothing.
 class EngineBuildStep : public BuildStep
 {
 public:
@@ -115,6 +120,8 @@ public:
     bool Run(ea::string& message) override;
 
 private:
+    /// Continuation after the reconfigure: compile with the tree now in line with the selection.
+    bool StartCompile(ea::string& message);
     /// Continuation after the compile: prove it actually produced the host artifacts before the rest
     /// of the plan starts relying on them.
     bool Finalize(ea::string& message);
