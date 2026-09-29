@@ -3,9 +3,10 @@
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 
 // The platform-agnostic data stages, each a BuildStep: validate, wait for cooking, clean and recreate
-// the output, merge the Data/ trees into staging, compile and prune scripts, pack the resources and
-// report. They reach the resolved paths, platform, error list and process runner through the owning
-// BuildPlatform. Bodies are the pipeline's own, moved verbatim into the step types.
+// the output, stage the project's Data/ and the engine's CoreData/ into staging, compile and prune
+// scripts, pack the resources and report. They reach the resolved paths, platform, error list and
+// process runner through the owning BuildPlatform. Bodies are the pipeline's own, moved verbatim
+// into the step types.
 
 #include "../../Assets/TextureImportSettings.h"
 #include "../BuildInternal.h"
@@ -47,6 +48,48 @@ bool MergeDirectory(FileSystem* fs, const ea::string& source, const ea::string& 
         message = Format("Failed to copy '{}' into '{}'.", source, destination);
         return false;
     }
+    return true;
+}
+
+/// The merge MergeDirectory cannot do: FileSystem::CopyDir never skips a file, and the staged Data/
+/// must leave cooking-only sources behind (IsCookingSourceFile). Merge semantics are otherwise the
+/// same; directories are created around each surviving file rather than copied up front, so a folder
+/// that held nothing but sources does not resurface empty in the package.
+bool MergeProjectData(FileSystem* fs, const ea::string& source, const ea::string& destination, ea::string& message)
+{
+    if (!fs->DirExists(source))
+    {
+        message = Format("Nothing to copy from '{}': the directory does not exist.", source);
+        return false;
+    }
+
+    ea::vector<ea::string> files;
+    fs->ScanDir(files, source, "*", SCAN_FILES | SCAN_RECURSIVE);
+
+    unsigned skipped = 0;
+    for (const ea::string& relative : files)
+    {
+        if (IsCookingSourceFile(relative))
+        {
+            ++skipped;
+            continue;
+        }
+
+        const ea::string target = destination + relative;
+        if (!fs->CreateDirsRecursive(GetPath(target)))
+        {
+            message = Format("Could not create the staging directory for '{}'.", target);
+            return false;
+        }
+        if (!fs->Copy(source + relative, target))
+        {
+            message = Format("Failed to copy '{}' into '{}'.", source + relative, destination);
+            return false;
+        }
+    }
+
+    if (skipped > 0)
+        URHO3D_LOGINFO("[Build] Left {} cooking source file(s) out of the staged Data/", skipped);
     return true;
 }
 
@@ -155,19 +198,14 @@ bool StageDataStep::Run(ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     auto* project = owner_.context()->GetSubsystem<Project>();
-    const BuildPlatformData* platform = owner_.platform();
 
     const ea::string staged = owner_.stagingDir() + DataDirName;
 
-    // Engine resources first, project resources on top: a project can then replace a single engine
-    // file by carrying a file of the same name, without anybody editing the engine working tree.
-    if (platform->includeEngineData_)
-    {
-        const ea::string engineData = AddTrailingSlash(ForwardSlashes(platform->engineData_)) + DataDirName;
-        if (!MergeDirectory(fs, engineData, staged, message))
-            return false;
-    }
-    if (!MergeDirectory(fs, NormalizeDir(project->GetDataPath()), staged, message))
+    // The project's Data/ is the only source of this tree: engine sample resources are not the
+    // game's, and the engine's own contribution to a package is CoreData/, staged separately. A
+    // project that needs an engine sample copies it into its own Data/. Cooking-only sources stay
+    // behind: nothing resolves the .fbx after the import, only the .mdl staged from the Cache.
+    if (!MergeProjectData(fs, NormalizeDir(project->GetDataPath()), staged, message))
         return false;
 
     // Imported assets cook their runtime-format products (the .mdl/.ani behind a source .fbx) into the

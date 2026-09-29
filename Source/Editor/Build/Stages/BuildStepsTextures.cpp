@@ -263,18 +263,13 @@ ea::string CompressTexturesStep::FindOriginalDataFile(const ea::string& relative
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     auto* project = owner_.context()->GetSubsystem<Project>();
-    const BuildPlatformData* platform = owner_.platform();
 
-    // Project Data/ is copied over engine Data/, so a file present in both came from the project.
+    // Every staged texture comes from the project's own Data/, so that tree is the only place an
+    // original can live. The lookup exists because the original keeps the import metadata and a
+    // stable mtime for the cache key, neither of which the staged copy can supply.
     const ea::string projectData = NormalizeDir(project->GetDataPath());
     if (fs->FileExists(projectData + relative))
         return projectData + relative;
-    if (platform->includeEngineData_)
-    {
-        const ea::string engineData = AddTrailingSlash(ForwardSlashes(platform->engineData_)) + DataDirName;
-        if (fs->FileExists(engineData + relative))
-            return engineData + relative;
-    }
     return EMPTY_STRING;
 }
 

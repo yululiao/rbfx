@@ -44,4 +44,12 @@ inline bool IsTextureSourceFile(const ea::string& name)
         ExtensionIs(name, "bmp") || ExtensionIs(name, "tga");
 }
 
+/// Sources that exist in Data/ purely as cooking inputs. The importer reads them from the project
+/// tree and the runtime resolves the products it wrote (a source .fbx arrived as the .mdl staged
+/// beside it), so the staging step leaves these behind instead of spending package size on them.
+inline bool IsCookingSourceFile(const ea::string& name)
+{
+    return ExtensionIs(name, "fbx");
+}
+
 } // namespace Urho3D

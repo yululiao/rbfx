@@ -117,7 +117,8 @@ struct BuildPlatformData
     ea::string platform_;
     /// Absolute directory holding the already-built host binary and shared libraries.
     ea::string engineBin_;
-    /// Absolute directory holding CoreData/ and Data/ of the engine working tree.
+    /// Absolute directory holding the engine's CoreData/. The engine contributes it to every
+    /// package; the engine samples in Data/ beside it are reference material and never ship.
     ea::string engineData_;
     /// Output directory, absolute or relative to the project. Empty resolves to Build/<Name>,
     /// which is why there is no per-field fallback for it - the default depends on the platform.
@@ -130,8 +131,6 @@ struct BuildPlatformData
     bool compressPackages_{};
     /// Run the project's Lua sources through LuaCompiler into encrypted .luc containers.
     bool encryptScripts_{};
-    /// Copy the engine's own Data/ into the package underneath the project files.
-    bool includeEngineData_{};
     /// Launch the produced executable once the build finished. A convenience for iteration.
     bool autoRunAfterBuild_{};
     /// Name of the environment variable holding the 64-hex content key handed to LuaCompiler.

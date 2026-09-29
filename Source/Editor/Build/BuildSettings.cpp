@@ -173,7 +173,6 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "PackData", packData_, true);
     SerializeOptionalValue(archive, "CompressPackages", compressPackages_, true);
     SerializeOptionalValue(archive, "EncryptScripts", encryptScripts_, false);
-    SerializeOptionalValue(archive, "IncludeEngineData", includeEngineData_, true);
     SerializeOptionalValue(archive, "AutoRunAfterBuild", autoRunAfterBuild_, false);
     SerializeOptionalValue(archive, "ScriptKeyEnvVar", scriptKeyEnvVar_, ea::string(DefaultScriptKeyEnvVar));
     SerializeOptionalValue(archive, "EmsdkRoot", emsdkRoot_, ea::string());
@@ -337,7 +336,6 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
     platform.packData_ = !platform.IsDouyin();
     platform.compressPackages_ = true;
     platform.encryptScripts_ = false;
-    platform.includeEngineData_ = true;
     platform.autoRunAfterBuild_ = false;
     platform.scriptKeyEnvVar_ = DefaultScriptKeyEnvVar;
 
@@ -451,9 +449,9 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
         errors.push_back("Engine data directory is not set.");
     else if (!fs->DirExists(platform.engineData_))
         errors.push_back(ToString("Engine data directory does not exist: '%s'.", platform.engineData_.c_str()));
-    else if (platform.includeEngineData_ && !fs->DirExists(platform.engineData_ + "/Data"))
-        errors.push_back(ToString("'%s' has no Data/ subdirectory, but the platform includes engine data.",
-            platform.engineData_.c_str()));
+    else if (!fs->DirExists(platform.engineData_ + "/CoreData"))
+        errors.push_back(ToString("'%s' has no CoreData/ subdirectory, so the package would ship "
+            "without a single engine resource.", platform.engineData_.c_str()));
 
     if (platform.executableName_.empty())
         errors.push_back("Executable name is empty.");

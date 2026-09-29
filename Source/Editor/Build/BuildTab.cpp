@@ -263,11 +263,6 @@ void BuildTab::RenderPackageOptions(BuildPlatformData& platform)
     ui::EndDisabled();
     ui::Unindent();
 
-    Touch(ui::Checkbox("Include engine Data/ files", &platform.includeEngineData_));
-    if (ui::IsItemHovered())
-        ui::SetTooltip("Project files win on name clashes, so turning this off only shrinks the "
-            "package if the project already carries everything it needs");
-
     ui::BeginDisabled(platform.IsDouyin());
     Touch(ui::Checkbox("Run the game when the build finishes", &platform.autoRunAfterBuild_));
     ui::EndDisabled();
