@@ -112,9 +112,9 @@ public:
         // The bootstrap mirrors selected output into user storage on its own.
         engineParameters_[EP_LOG_NAME] = EMPTY_STRING;
         // Narrower on purpose than the engine default ("CoreData;Cache;Data"): a shipped game
-        // has no asset cache next to it. Each name becomes a namespace inside the package,
-        // mounted by Start() below; every entry is also looked up under the prefix paths
-        // when running out of a build tree.
+        // has no asset cache next to it. Each name becomes a namespace inside the package
+        // (see HandleVirtualFileSystemInitialized); every entry is also looked up under the
+        // prefix paths when running out of a build tree.
         engineParameters_[EP_RESOURCE_PATHS] = "CoreData;Data";
         // A packaged game needs nothing here; running out of a build tree still benefits from
         // the same discovery the editor uses. A ResourceRoot.ini beside the module, or an
