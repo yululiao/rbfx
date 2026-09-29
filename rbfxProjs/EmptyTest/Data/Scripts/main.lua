@@ -94,24 +94,24 @@ end
 ----------------------------------------------------------------------
 -- Instructions overlay
 ----------------------------------------------------------------------
-local function CreateInstructions(text)
-    local root = GetUIRoot()
-    if not root then return end
+-- local function CreateInstructions(text)
+--     local root = GetUIRoot()
+--     if not root then return end
 
-    local instructions = root:CreateChild("Text", "Instructions")
-    instructions:SetFont("Fonts/Anonymous Pro.ttf", 15)
-    instructions:SetText(text)
-    instructions:SetTextAlignment(HA.LEFT)
-    instructions:SetPosition(10, 10)
-    instructions:SetWidth(root:GetWidth() - 20)
-    instructions:SetColor(Color(0.0, 1.0, 0.0))
-end
+--     local instructions = root:CreateChild("Text", "Instructions")
+--     instructions:SetFont("Fonts/Anonymous Pro.ttf", 15)
+--     instructions:SetText(text)
+--     instructions:SetTextAlignment(HA.LEFT)
+--     instructions:SetPosition(10, 10)
+--     instructions:SetWidth(root:GetWidth() - 20)
+--     instructions:SetColor(Color(0.0, 1.0, 0.0))
+-- end
 
 ----------------------------------------------------------------------
 -- Main
 ----------------------------------------------------------------------
 local movers = CreateScene()
-CreateInstructions("Kachujin Test - WASD to move, mouse to look\nPackaged game: close the window to exit. Editor Play: click Stop to reset the scene")
+--CreateInstructions("Kachujin Test - WASD to move, mouse to look\nPackaged game: close the window to exit. Editor Play: click Stop to reset the scene")
 
 -- Per-frame movement: walk forward, yaw when hitting bounds
 SubscribeToEvent("Update", function(data)
