@@ -84,20 +84,18 @@ bool EmscriptenBuildPlatform::CollectFeatureReconfigure(const ea::string& buildT
 {
     needsReconfigure = false;
 
-    // The selection is spelled out for every module, enabled or not. Passing only the disabled ones
-    // would be enough to prune, but it would leave an "=OFF" behind in the cache for a checkbox
-    // that was unchecked once and is checked again: the cache remembers it, and the tree would keep
-    // producing a pruned module that nothing on screen asks for anymore.
+    // The same spelling a from-scratch configure is fed with; what is added here is the verdict a
+    // fresh tree cannot deliver: whether the one on disk has to be reconfigured to reach it.
+    CollectEngineModuleDefines(defines);
+
     const auto& disabled = platform_->disabledEngineModules_;
     const ea::string cachePath = RemoveTrailingSlash(buildTree) + "/CMakeCache.txt";
     for (const EngineModuleInfo& module : GetEngineModules())
     {
-        const bool enabled = ea::find(disabled.begin(), disabled.end(), module.name_) == disabled.end();
-        defines.push_back(module.name_ + (enabled ? "=ON" : "=OFF"));
-
         // A cache that disagrees - including one from before the option existed, which reads as
         // absent - means the tree was configured for a different module selection than the one on
         // screen, so it cannot produce the module the platform describes until it is reconfigured.
+        const bool enabled = ea::find(disabled.begin(), disabled.end(), module.name_) == disabled.end();
         const ea::string cached = ReadCMakeCacheEntry(cachePath, module.name_);
         if (cached.comparei(enabled ? "ON" : "OFF") != 0)
             needsReconfigure = true;

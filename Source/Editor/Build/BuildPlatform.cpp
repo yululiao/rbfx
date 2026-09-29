@@ -370,6 +370,20 @@ void BuildPlatform::CleanupStaging()
     stagingDir_.clear();
 }
 
+void BuildPlatform::CollectEngineModuleDefines(ea::vector<ea::string>& defines) const
+{
+    // The selection is spelled out for every module, enabled or not. Passing only the disabled
+    // ones would be enough to prune, but it would leave an "=OFF" behind in the cache for a
+    // checkbox that was unchecked once and is checked again: the cache remembers it, and the tree
+    // would keep producing a pruned module that nothing on screen asks for anymore.
+    const auto& disabled = platform_->disabledEngineModules_;
+    for (const EngineModuleInfo& module : GetEngineModules())
+    {
+        const bool enabled = ea::find(disabled.begin(), disabled.end(), module.name_) == disabled.end();
+        defines.push_back(module.name_ + (enabled ? "=ON" : "=OFF"));
+    }
+}
+
 bool BuildPlatform::LocateEngineBuildTree(ea::string& tree, ea::string& cmakeCommand,
     ea::string& generator, ea::string& message) const
 {

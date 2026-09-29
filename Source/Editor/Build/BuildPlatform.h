@@ -142,6 +142,10 @@ public:
     ea::string ReadCMakeCacheEntry(const ea::string& cachePath, const ea::string& key) const;
     /// Number of bytes of every file below a directory, recursively.
     unsigned long long DirectorySize(const ea::string& directory) const;
+    /// The "-D<module>=<ON|OFF>" arguments that spell out the current module selection, one per
+    /// module of GetEngineModules(). Unlike CollectFeatureReconfigure this reads no cache: it is
+    /// what a from-scratch configure is fed with, before a tree exists to disagree with.
+    void CollectEngineModuleDefines(ea::vector<ea::string>& defines) const;
     ///@}
 
     // --- Platform differences. The base answers with the desktop behaviour; subclasses override.
@@ -160,6 +164,21 @@ public:
         const ea::string& /*buildTree*/, ea::string& /*message*/) const
     {
         return true;
+    }
+    /// Configure a build tree from scratch when none exists at or above the engine binary
+    /// directory. Called by the engine-compile stage when LocateEngineBuildTree comes up empty but
+    /// the plan needs a tree - to compile into, or to apply a module selection. The platform derives
+    /// the tree location from the engine binary path, locates the engine sources and the local
+    /// tools, and answers with the complete configure invocation, environment injection included,
+    /// exactly as if the user had run the configure by hand. 'tree' receives the location the
+    /// configure creates; 'cmakeCommand' and 'arguments' are what StartProcess is then given.
+    /// Returning false falls back to the "configure one first" error, overridden by 'message' when
+    /// one is set. The default declines: a desktop tree belongs to the user, not the editor.
+    virtual bool ConfigureEngineBuildTreeFromScratch(ea::string& /*tree*/, ea::string& /*cmakeCommand*/,
+        ea::vector<ea::string>& /*arguments*/, const ea::vector<ea::string>& /*featureDefines*/,
+        ea::string& /*message*/) const
+    {
+        return false;
     }
     /// Whether the engine build tree carries an engine feature selection this editor manages: the
     /// module checkboxes of the Build tab. False by default - a desktop tree belongs to the user,
@@ -345,6 +364,12 @@ public:
     ea::string GetEngineBuildTarget() const override { return MinigameHostName; }
     /// The module pair the embedder consists of.
     bool VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const override;
+    /// The first Build on a machine that never compiled the module has no build tree to lean on.
+    /// The editor configures one itself - from the engine binary layout, the checkout above the
+    /// program directory and the local cmake/ninja - instead of pointing the user at a terminal.
+    bool ConfigureEngineBuildTreeFromScratch(ea::string& tree, ea::string& cmakeCommand,
+        ea::vector<ea::string>& arguments, const ea::vector<ea::string>& featureDefines,
+        ea::string& message) const override;
     ea::unique_ptr<BuildStep> MakeRuntimeStep() override;
     bool SupportsAutoRun() const override { return false; }
     void LaunchAfterBuild(const ea::string& /*outputDir*/) const override { }

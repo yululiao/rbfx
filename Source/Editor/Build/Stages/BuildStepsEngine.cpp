@@ -40,8 +40,37 @@ bool EngineBuildStep::Run(ea::string& message)
 
     // A tree that cannot be found is only a problem when this step needed it: to compile into, or
     // to apply a module selection. "Do not compile" over a prebuilt engine - binaries assembled
-    // from a tree that never existed on this machine - keeps working without one.
-    if (!treeFound && (compiling || !platform->disabledEngineModules_.empty()))
+    // from a tree that never existed on this machine - keeps working without one. A tree needed
+    // for a compile is instead configured on the spot by the platform: the whole point of the
+    // editor is that a first build needs nothing but the platform fields a user filled in.
+    if (!treeFound && compiling)
+    {
+        // The module selection is spelled out for the fresh tree in the same pass: the configure
+        // that creates a tree is the right place for it, because the alternative - fixing the
+        // selection up afterwards - would trigger a reconfigure the moment the tree was built.
+        owner_.CollectEngineModuleDefines(featureDefines);
+
+        ea::string firstTimeCmake;
+        ea::vector<ea::string> firstTimeArguments;
+        if (!owner_.ConfigureEngineBuildTreeFromScratch(
+                tree, firstTimeCmake, firstTimeArguments, featureDefines, message))
+        {
+            // A platform that cannot name a reason leaves the locate report as the failure; it is
+            // the one that named the missing tree, which is what the user has to act on.
+            if (message.empty())
+                message = locateError;
+            return false;
+        }
+
+        URHO3D_LOGINFO("[Build] No build tree found; configuring one from scratch at '{}'", tree);
+        return owner_.StartProcess(firstTimeCmake.empty() ? ea::string("cmake") : firstTimeCmake,
+            firstTimeArguments,
+            [this](ea::string& resumeMessage) { return StartCompile(resumeMessage); }, message);
+    }
+
+    // A module selection with no tree to reach and no compile to rebuild one: the locate report is
+    // the whole truth of it.
+    if (!treeFound && !platform->disabledEngineModules_.empty())
     {
         message = locateError;
         return false;
