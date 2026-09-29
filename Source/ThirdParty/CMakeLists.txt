@@ -378,6 +378,15 @@ if (NOT URHO3D_DEBUG_GRAPHICS)
     set_property(TARGET Diligent-PublicBuildSettings PROPERTY INTERFACE_COMPILE_DEFINITIONS ${DILIGENT_COMPILE_DEFS})
 endif ()
 
+# Patch: Diligent's Emscripten OpenGL backend requests -s USE_PTHREADS=1 for every consumer of the
+# target. Any single-threaded web build (the minigame target among them) must stay free of it,
+# or the linker pulls in --shared-memory and rejects objects built without atomics. The rest of
+# the option list stays.
+if (WEB AND NOT URHO3D_THREADING)
+    set_property(TARGET Diligent-GraphicsEngineOpenGL-static PROPERTY INTERFACE_LINK_OPTIONS
+        "SHELL: -s FULL_ES3=1")
+endif ()
+
 # Patch: Diligent does not use install interface, make it explicitly empty
 foreach (TARGET ${DILIGENT_ALL_TARGETS})
     if (TARGET ${TARGET})

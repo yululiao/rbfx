@@ -54,6 +54,11 @@ define_engine_source_files (Container Core IO Math)
 define_engine_source_files (Audio Engine Graphics Input Plugins RenderAPI RenderPipeline Resource Scene Script Shader UI Utility)
 list (REMOVE_ITEM SOURCE_FILES BindAll.cpp)     # Utility file for BindTool.
 
+# Host bridge for minigame platforms (Douyin/WeChat style runtimes). Compiled on every
+# platform: the vendor-specific parts compile out elsewhere, and desktop/editor builds get
+# the same (inert) subsystem surface so game code, bindings and tests stay uniform.
+define_engine_source_files (Minigame)
+
 if (URHO3D_PARTICLE_GRAPH)
     define_engine_source_files (Particles)
 endif ()
@@ -437,11 +442,22 @@ endif ()
 
 if (WEB)
     target_link_libraries(Urho3D PUBLIC "-s WASM=$<BOOL:EMSCRIPTEN_WASM>")
-    target_compile_options(Urho3D PUBLIC -pthread -sUSE_PTHREADS=1)
+    if (URHO3D_THREADING)
+        target_compile_options(Urho3D PUBLIC -pthread -sUSE_PTHREADS=1)
+    endif ()
+    if (MINIGAME)
+        target_compile_definitions(Urho3D PUBLIC -DURHO3D_MINIGAME=1)
+    endif ()
     target_compile_options(Urho3D PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-O3>)
     target_link_options(Urho3D PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-sAGGRESSIVE_VARIABLE_ELIMINATION=1>)
     target_compile_options(Urho3D PUBLIC $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${EMCC_WITH_SOURCE_MAPS_FLAG}>)
-    target_link_libraries(Urho3D PUBLIC -sFETCH -sDISABLE_EXCEPTION_CATCHING=1 -sFORCE_FILESYSTEM=1 -sDISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0 -lidbfs.js)
+    target_link_libraries(Urho3D PUBLIC -sFETCH -sDISABLE_EXCEPTION_CATCHING=1 -sFORCE_FILESYSTEM=1 -sDISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0)
+    # IDBFS is a browser-only filesystem backend backed by IndexedDB. The minigame runtime has no
+    # such storage and nothing in the engine references IDBFS by name, so the library is linked
+    # for the browser target only.
+    if (NOT MINIGAME)
+        target_link_libraries(Urho3D PUBLIC -lidbfs.js)
+    endif ()
     target_link_libraries(Urho3D PUBLIC --bind)
     if (NOT EMSCRIPTEN_TOTAL_MEMORY OR "${EMSCRIPTEN_TOTAL_MEMORY}" STREQUAL "0")
         target_link_libraries(Urho3D PUBLIC "-s ALLOW_MEMORY_GROWTH=1" --no-heap-copy)

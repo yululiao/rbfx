@@ -28,6 +28,7 @@ namespace
 const ea::string DefaultWindowsName = "Windows";
 const ea::string DefaultAndroidName = "Android";
 const ea::string DefaultWebName = "Web";
+const ea::string DefaultDouyinName = "Douyin";
 const ea::string DefaultExecutableName = "Game";
 
 /// Environment variable the runtime already consults for a content key override, so a platform that
@@ -144,6 +145,12 @@ void AndroidBuildSettings::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "KeystoreAliasEnvVar", keystoreAliasEnvVar_, ea::string());
 }
 
+void DouyinBuildSettings::SerializeInBlock(Archive& archive)
+{
+    SerializeOptionalValue(archive, "AppId", appId_, ea::string());
+    SerializeOptionalValue(archive, "Orientation", orientation_, ea::string("portrait"));
+}
+
 void TextureCompressionSettings::SerializeInBlock(Archive& archive)
 {
     SerializeOptionalValue(archive, "Enabled", enabled_, false);
@@ -169,7 +176,7 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "IncludeEngineData", includeEngineData_, true);
     SerializeOptionalValue(archive, "AutoRunAfterBuild", autoRunAfterBuild_, false);
     SerializeOptionalValue(archive, "ScriptKeyEnvVar", scriptKeyEnvVar_, ea::string(DefaultScriptKeyEnvVar));
-    SerializeOptionalValue(archive, "WebEmsdkRoot", webEmsdkRoot_, ea::string());
+    SerializeOptionalValue(archive, "EmsdkRoot", emsdkRoot_, ea::string());
     // The mode round-trips through its name: the file stays readable and an unknown word degrades
     // to Never with a warning instead of failing the load over one bad token.
     ea::string engineBuild = EngineBuildModeNames[static_cast<unsigned>(engineBuild_)];
@@ -179,6 +186,7 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     // differs from its fallback. Writing the block unconditionally keeps the reader from having to
     // tell "section absent" apart from "section present and complete".
     SerializeOptionalValue(archive, "Android", android_, AlwaysSerialize{});
+    SerializeOptionalValue(archive, "Douyin", douyin_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "TextureCompression", textureCompression_, AlwaysSerialize{});
 }
 
@@ -196,7 +204,7 @@ ea::string BuildPlatformData::ResolveOutputDir(const ea::string& projectPath) co
 TextureCompressionSettings BuildPlatformData::GetEffectiveTextureCompression() const
 {
     TextureCompressionSettings result = textureCompression_;
-    ApplyTextureCompressionDefaults(result, IsAndroid(), IsWeb());
+    ApplyTextureCompressionDefaults(result, IsAndroid(), IsWebBased());
     return result;
 }
 
@@ -250,15 +258,25 @@ bool BuildSettings::LoadProject(const ea::string& projectPath, const ea::string&
     if (!seedDefaults)
         return true;
 
-    // Seed only when the file held nothing at all. A platform somebody trimmed by hand stays trimmed,
-    // while a project that never had a Build.json still gets something it can build - and since the
-    // tab has no way to create a platform, an empty list would otherwise be a dead end.
-    if (!platforms_.empty())
-        return true;
+    bool changed = false;
 
-    EnsurePlatform(DefaultWindowsName, projectPath, engineData);
-    EnsurePlatform(DefaultAndroidName, projectPath, engineData);
-    EnsurePlatform(DefaultWebName, projectPath, engineData);
+    // A project that never had a Build.json gets something it can build; a platform somebody
+    // trimmed by hand stays trimmed.
+    if (platforms_.empty())
+    {
+        changed |= EnsurePlatform(DefaultWindowsName, projectPath, engineData);
+        changed |= EnsurePlatform(DefaultAndroidName, projectPath, engineData);
+        changed |= EnsurePlatform(DefaultWebName, projectPath, engineData);
+    }
+
+    // Every project gets a Douyin platform, including the ones whose Build.json predates it: a
+    // minigame package is assembled around the platform entry and no UI creates one by hand, so a
+    // project without it would silently lack the option. By design this also re-adds a Douyin
+    // platform removed by hand: it is the one platform the list never loses.
+    changed |= EnsurePlatform(DefaultDouyinName, projectPath, engineData);
+
+    if (!changed)
+        return true;
 
     if (!SaveFile(path))
     {
@@ -303,13 +321,20 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
         platform.platform_ = "Android";
     else if (name == DefaultWebName)
         platform.platform_ = "Web";
+    else if (name == DefaultDouyinName)
+        platform.platform_ = "Douyin";
     else
         platform.platform_ = "WindowsDesktop";
-    platform.engineBin_ = RemoveTrailingSlash(fs->GetProgramDir());
+    // An emscripten-built platform points at a build tree made by its own toolchain, so a
+    // freshly seeded one deliberately leaves the field empty: the editor cannot know where
+    // that tree is, and a wrong guess would surface as a confusing artifact error much later.
+    platform.engineBin_ = platform.IsWebBased() ? EMPTY_STRING : RemoveTrailingSlash(fs->GetProgramDir());
     platform.engineData_ = engineData;
     platform.outputDir_ = "Build/" + name;
     platform.executableName_ = DefaultExecutableName;
-    platform.packData_ = true;
+    // The minigame file layer serves loose files only (its single synchronous primitive is a
+    // plain file read), so a Douyin package can never be a .pak archive.
+    platform.packData_ = !platform.IsDouyin();
     platform.compressPackages_ = true;
     platform.encryptScripts_ = false;
     platform.includeEngineData_ = true;
@@ -324,7 +349,7 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
 
     // Seed concrete per-platform formats so a fresh Build.json documents what a build will do. The
     // master switch stays off: texture compression is opt-in.
-    ApplyTextureCompressionDefaults(platform.textureCompression_, platform.IsAndroid(), platform.IsWeb());
+    ApplyTextureCompressionDefaults(platform.textureCompression_, platform.IsAndroid(), platform.IsWebBased());
 
     platforms_.push_back(platform);
     return true;
@@ -355,17 +380,19 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
 
     if (platform.name_.empty())
         errors.push_back("Platform has no name.");
-    if (!platform.IsAndroid() && !platform.IsWindowsDesktop() && !platform.IsWeb())
+    if (!platform.IsAndroid() && !platform.IsWindowsDesktop() && !platform.IsWeb() && !platform.IsDouyin())
     {
-        errors.push_back(ToString("Platform '%s': unknown platform '%s', expected 'WindowsDesktop', 'Android' or 'Web'.",
+        errors.push_back(ToString("Platform '%s': unknown platform '%s', expected 'WindowsDesktop', "
+            "'Android', 'Web' or 'Douyin'.",
             platform.name_.c_str(), platform.platform_.c_str()));
     }
 
     const ea::string exeSuffix = GetExecutableSuffix();
 
-    // The engine binaries are only consumed by a desktop or web package. Android compiles the host
-    // from source inside gradle, so pointing it at a Windows build directory would be meaningless.
-    if (platform.IsWindowsDesktop() || platform.IsWeb())
+    // The engine binaries are only consumed by the platforms that package a prebuilt host. Android
+    // compiles the host from source inside gradle, so pointing it at a build directory would be
+    // meaningless.
+    if (platform.IsWindowsDesktop() || platform.IsWebBased())
     {
         if (platform.engineBin_.empty())
         {
@@ -387,7 +414,7 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
                 errors.push_back(ToString("Missing '%s'. Build it first (%s), or set 'Compile engine "
                     "host' on this platform and the build does it itself.", engineLib.c_str(), buildCommand));
         }
-        else
+        else if (platform.IsWeb())
         {
             // The web host is one html page plus its script and binary sidecars, produced by the
             // emscripten engine build into the engine binary directory.
@@ -399,6 +426,22 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
                 if (!fs->FileExists(bin + artifact))
                     errors.push_back(ToString("Missing '%s'. Build the web host first (%s), or set "
                         "'Compile engine host' on this platform and the build does it itself.",
+                        (bin + artifact).c_str(), buildCommand));
+            }
+        }
+        else
+        {
+            // The minigame host is a glue/payload pair produced by the emscripten engine build
+            // with URHO3D_MINIGAME=ON into the engine binary directory. The bootstrap scripts
+            // and the wasm subpackage staged beside it are checked by the packaging step itself.
+            const ea::string bin = RemoveTrailingSlash(platform.engineBin_);
+            const char* buildCommand = "cmake --build <minigame tree> --target MinigamePlayer";
+            const char* const douyinArtifacts[] = {"/MinigamePlayer.js", "/MinigamePlayer.wasm"};
+            for (const char* artifact : douyinArtifacts)
+            {
+                if (!fs->FileExists(bin + artifact))
+                    errors.push_back(ToString("Missing '%s'. Build the minigame host first (%s), or "
+                        "set 'Compile engine host' on this platform and the build does it itself.",
                         (bin + artifact).c_str(), buildCommand));
             }
         }
@@ -421,6 +464,12 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
     if (platform.packData_ && FindTool(platform, "PackageTool").empty())
         errors.push_back("PackageTool was not found next to the engine binaries or the editor. "
             "Build it with: cmake --build msvc --target PackageTool --config Debug");
+
+    // The runtime's only synchronous package access is a plain file read, so an archive would be
+    // invisible to the game. The flag can still be set while editing; it just cannot ship.
+    if (platform.IsDouyin() && platform.packData_)
+        errors.push_back("Douyin packages serve loose files only: the runtime file layer cannot read "
+            "inside a .pak archive. Turn off 'Pack resources into .pak files' for this platform.");
 
     if (platform.textureCompression_.enabled_ && FindTool(platform, "PVRTexToolCLI").empty())
         errors.push_back("Texture compression is enabled but PVRTexToolCLI was not found next to the "

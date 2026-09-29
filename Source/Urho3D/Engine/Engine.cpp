@@ -677,6 +677,17 @@ void Engine::InitializeVirtualFileSystem(bool enableResourceRootFile)
             }
         }
     }
+    // Let hosts that the standard mounts cannot serve attach their own mount points before
+    // anything is read: a minigame package behind a platform file API only becomes visible
+    // here. Everything below - the emptiness check, config loading, subsystem defaults -
+    // then sees the host mounts too.
+    {
+        using namespace VirtualFileSystemInitialized;
+        VariantMap& eventData = GetEventDataMap();
+        eventData[P_NUMMOUNTPOINTS] = vfs->NumMountPoints();
+        SendEvent(E_VIRTUALFILESYSTEMINITIALIZED, eventData);
+    }
+
     if (numMountPoints == vfs->NumMountPoints())
         URHO3D_LOGERROR("No resource directories or packages were mounted");
 

@@ -4,10 +4,10 @@
 
 // Engine-host compilation stage as a BuildStep: the one step that shells out to CMake to produce the
 // host binaries the rest of the plan then packages. The shared "--build" driving lives here; the
-// toolchain arguments and the proof of what the compile produced are the platform's, reached through
-// owner_.ConfigureEngineBuildArgs / VerifyEngineArtifacts. The build-tree probing it leans on
-// (LocateEngineBuildTree, ReadCMakeCacheEntry) is on BuildPlatform because the web backend needs it
-// too.
+// toolchain arguments, the compile target and the proof of what the compile produced are the
+// platform's, reached through owner_.ConfigureEngineBuildArgs / GetEngineBuildTarget /
+// VerifyEngineArtifacts. The build-tree probing it leans on (LocateEngineBuildTree,
+// ReadCMakeCacheEntry) is on BuildPlatform because the emscripten-backed platforms need it too.
 
 #include "../../Assets/TextureImportSettings.h"
 #include "../BuildPlatform.h"
@@ -38,7 +38,7 @@ bool EngineBuildStep::Run(ea::string& message)
     arguments.push_back("--build");
     arguments.push_back(RemoveTrailingSlash(tree));
     arguments.push_back("--target");
-    arguments.push_back(HostName);
+    arguments.push_back(owner_.GetEngineBuildTarget());
 
     // Multi-config generators pick the configuration at build time, and the engine binary
     // directory already names it (".../bin/Release"). Single-config trees baked theirs in at

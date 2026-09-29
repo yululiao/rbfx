@@ -11,7 +11,7 @@
 -- Scene setup
 ----------------------------------------------------------------------
 ---lua 调试
-require("LuaPanda").start("127.0.0.1", 8818)
+--require("LuaPanda").start("127.0.0.1", 8818)
 -- 基建 lua 冒烟：require 以脚本根为基准解析（依赖 EngineLuaVM 的 "Scripts/" require 前缀）。
 -- local Object = require("core.Object")
 local Counter = require("core.Counter")

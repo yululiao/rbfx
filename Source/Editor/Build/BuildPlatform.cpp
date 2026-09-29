@@ -39,6 +39,9 @@ const ea::string DataPackageName = "Data.pak";
 const ea::string CoreDataPackageName = "CoreData.pak";
 const ea::string HostName = "LuaGamePlayer";
 const ea::string EngineLibraryName = "Urho3D";
+const ea::string MinigameHostName = "MinigamePlayer";
+const ea::string MinigameWasmSubpackageName = "package_wasm";
+const ea::string MinigameDataSubpackageName = "package_data";
 
 ea::string ForwardSlashes(ea::string text)
 {
@@ -516,6 +519,8 @@ ea::unique_ptr<BuildPlatform> CreateBuildPlatform(Context* context, const ea::st
         return ea::make_unique<AndroidBuildPlatform>(context);
     if (platformKind == "Web")
         return ea::make_unique<WebBuildPlatform>(context);
+    if (platformKind == "Douyin")
+        return ea::make_unique<DouyinBuildPlatform>(context);
     return ea::make_unique<DesktopBuildPlatform>(context);
 }
 

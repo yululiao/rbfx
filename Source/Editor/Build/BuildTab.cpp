@@ -121,13 +121,13 @@ void BuildTab::RenderContent()
         ui::EndCombo();
     }
 
-    const ea::string outputDir = platform->ResolveOutputDir(project->GetProjectPath());
-    ui::Text("Output: %s", outputDir.c_str());
-
     // A build in flight reads the platform from memory, and a read only project must not gain files
     // from being looked at; both lock the same widgets.
     const bool readOnly = project->GetFlags().Test(ProjectFlag::ReadOnly);
     auto* fs = GetSubsystem<FileSystem>();
+
+    const ea::string outputDir = platform->ResolveOutputDir(project->GetProjectPath());
+    ui::Text("Output: %s", outputDir.c_str());
 
     {
         const bool building = build->IsBuilding();
@@ -157,7 +157,7 @@ void BuildTab::RenderContent()
             fs->SystemOpen(outputDir);
         ui::EndDisabled();
 
-        if (!platform->IsAndroid())
+        if (!platform->IsAndroid() && !platform->IsDouyin())
         {
             ui::SameLine();
             if (platform->IsWeb())
@@ -194,6 +194,8 @@ void BuildTab::RenderContent()
         RenderAndroidOptions(*platform);
     if (platform->IsWeb())
         RenderWebOptions(*platform);
+    if (platform->IsDouyin())
+        RenderDouyinOptions(*platform);
     ui::EndDisabled();
 
     RenderStatus(platform, settings, project);
@@ -238,7 +240,12 @@ void BuildTab::RenderPackageOptions(BuildPlatformData& platform)
         "Absolute, or relative to the project folder. It is emptied at the start of "
             "every build, so point it at a directory the build owns"));
 
+    ui::BeginDisabled(platform.IsDouyin());
     Touch(ui::Checkbox("Pack resources into .pak files", &platform.packData_));
+    ui::EndDisabled();
+    if (platform.IsDouyin() && ui::IsItemHovered())
+        ui::SetTooltip("Douyin packages serve loose files only: the runtime's single synchronous "
+            "file API reads the package directory directly, which a .pak archive cannot satisfy");
     ui::Indent();
     ui::BeginDisabled(!platform.packData_);
     Touch(ui::Checkbox("Compress packages", &platform.compressPackages_));
@@ -261,7 +268,12 @@ void BuildTab::RenderPackageOptions(BuildPlatformData& platform)
         ui::SetTooltip("Project files win on name clashes, so turning this off only shrinks the "
             "package if the project already carries everything it needs");
 
+    ui::BeginDisabled(platform.IsDouyin());
     Touch(ui::Checkbox("Run the game when the build finishes", &platform.autoRunAfterBuild_));
+    ui::EndDisabled();
+    if (platform.IsDouyin() && ui::IsItemHovered())
+        ui::SetTooltip("The output is a vendor package; open the output directory with the Douyin "
+            "developer tool to play it");
 
     ui::Separator();
     Touch(PathField("Engine binaries", platform.engineBin_, PathFieldKind::Directory));
@@ -345,10 +357,53 @@ void BuildTab::RenderWebOptions(BuildPlatformData& platform)
     if (!ui::CollapsingHeader(ICON_FA_GLOBE " Web", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
-    Touch(PathField("Emsdk root", platform.webEmsdkRoot_, PathFieldKind::Directory, nullptr,
-        "Your emsdk directory, where the build finds file_packager.py. Empty tries "
-            "the emsdk environment variables first and then the CMake cache of the web engine "
-            "build"));
+    RenderEmsdkRootField(platform);
+}
+
+void BuildTab::RenderDouyinOptions(BuildPlatformData& platform)
+{
+    DouyinBuildSettings& douyin = platform.douyin_;
+
+    if (!ui::CollapsingHeader(ICON_FA_GAMEPAD " Douyin", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    // A closed list on purpose: the vendor runtime takes these two values and nothing else, and a
+    // typo caught here beats a package rejected by the upload tool.
+    const char* const orientations[] = {"portrait", "landscape"};
+    const int current = douyin.orientation_ == "landscape" ? 1 : 0;
+    if (ui::BeginCombo("Device orientation", orientations[current]))
+    {
+        for (int i = 0; i < 2; ++i)
+        {
+            if (ui::Selectable(orientations[i], i == current))
+            {
+                douyin.orientation_ = orientations[i];
+                Touch(true);
+            }
+        }
+        ui::EndCombo();
+    }
+    if (ui::IsItemHovered())
+        ui::SetTooltip("The fixed screen orientation of the whole game; the vendor runtime reads "
+            "it from game.json");
+
+    Touch(ui::InputText("Application id", &douyin.appId_));
+    if (ui::IsItemHovered())
+        ui::SetTooltip("The appid from the Douyin developer console, written into "
+            "project.config.json; may stay empty until the game is registered");
+
+    ui::Separator();
+    RenderEmsdkRootField(platform);
+
+    ui::TextWrapped("The output is the vendor package itself: open its directory with the Douyin "
+        "developer tool to preview and upload it.");
+}
+
+void BuildTab::RenderEmsdkRootField(BuildPlatformData& platform)
+{
+    Touch(PathField("Emsdk root", platform.emsdkRoot_, PathFieldKind::Directory, nullptr,
+        "Your emsdk directory, where the build finds file_packager.py. Empty tries the emsdk "
+        "environment variables first and then the CMake cache of the engine build tree"));
 }
 
 void BuildTab::RenderTextureCompressionOptions(BuildPlatformData& platform)

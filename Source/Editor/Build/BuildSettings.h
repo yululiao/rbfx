@@ -58,6 +58,21 @@ struct AndroidBuildSettings
     void SerializeInBlock(Archive& archive);
 };
 
+/// Douyin specific part of a build platform. Ignored by every other platform; it describes
+/// the vendor project the assembled package declares itself as.
+struct DouyinBuildSettings
+{
+    /// Vendor app id written into project.config.json. Empty is legal: the devtools lets the
+    /// developer pick the app when the id is missing, and a value pasted here ends up in the
+    /// package, so it stays opt-in.
+    ea::string appId_;
+    /// game.json deviceOrientation ("portrait"/"landscape"). The runtime rotates the canvas
+    /// according to it, so it must match the orientation the game was authored for.
+    ea::string orientation_ = "portrait";
+
+    void SerializeInBlock(Archive& archive);
+};
+
 /// Per-platform texture compression parameters, applied at build time by the offline PVRTexTool.
 ///
 /// Every string field treats "" as "use the platform default", resolved by
@@ -95,9 +110,10 @@ struct BuildPlatformData
     /// Display name, unique inside the file. Doubles as the argument to `--build`. Deliberately
     /// without a fallback: a platform nobody can name is an error, not something to guess at.
     ea::string name_;
-    /// "WindowsDesktop", "Android" or "Web". Kept as a string on purpose: an unknown value has to be
-    /// reported as an error rather than quietly resolved to one of the known platforms, and a
-    /// missing one is reported the same way instead of defaulting an Android platform to desktop.
+    /// "WindowsDesktop", "Android", "Web" or "Douyin". Kept as a string on purpose: an unknown
+    /// value has to be reported as an error rather than quietly resolved to one of the known
+    /// platforms, and a missing one is reported the same way instead of defaulting an Android
+    /// platform to desktop.
     ea::string platform_;
     /// Absolute directory holding the already-built host binary and shared libraries.
     ea::string engineBin_;
@@ -122,15 +138,17 @@ struct BuildPlatformData
     /// Defaults to RBFX_LUA_SCRIPT_KEY, which is also the variable the runtime reads, so the two
     /// ends cannot disagree without somebody going out of their way to make it happen.
     ea::string scriptKeyEnvVar_;
-    /// Root of the Emscripten SDK the web host was built with (".../emsdk"). Optional: when
+    /// Root of the Emscripten SDK the wasm host was built with (".../emsdk"). Optional: when
     /// empty the build resolves it from the EMSCRIPTEN environment variable or from the
-    /// CMakeCache.txt next to the engine binaries. Only the Web platform reads it.
-    ea::string webEmsdkRoot_;
+    /// CMakeCache.txt next to the engine binaries. Only the emscripten-based platforms
+    /// (Web, Douyin) read it.
+    ea::string emsdkRoot_;
     /// Whether the build compiles the C++ engine host itself first. Never by default: a compile
     /// takes minutes, so a platform opts in when it wants a one click turnaround of engine changes.
     /// The stage runs before anything else because it produces the artifacts Validate checks.
     EngineBuildMode engineBuild_{};
     AndroidBuildSettings android_;
+    DouyinBuildSettings douyin_;
     TextureCompressionSettings textureCompression_;
 
     void SerializeInBlock(Archive& archive);
@@ -138,6 +156,11 @@ struct BuildPlatformData
     bool IsAndroid() const { return platform_ == "Android"; }
     bool IsWindowsDesktop() const { return platform_ == "WindowsDesktop"; }
     bool IsWeb() const { return platform_ == "Web"; }
+    bool IsDouyin() const { return platform_ == "Douyin"; }
+    /// Whether the platform's host is built by the emscripten toolchain into a wasm module:
+    /// the web page and the minigame host share the toolchain probing and the texture
+    /// format defaults of a WebGL-only target.
+    bool IsWebBased() const { return IsWeb() || IsDouyin(); }
 
     /// Texture compression settings with every empty field resolved to this platform's platform default.
     TextureCompressionSettings GetEffectiveTextureCompression() const;
@@ -165,10 +188,12 @@ public:
     const ea::string& GetFilePath() const { return filePath_; }
 
     /// Open the Build.json of a project. A file that does not exist yet gets the default platforms
-    /// written into it, because a project without a platform has nothing to build. seedDefaults is
-    /// off for a project opened read only, which must not gain files just by being looked at.
-    /// projectPath resolves the relative default output directories, engineData is the directory
-    /// that holds CoreData/ and Data/ of the engine working tree - only the caller can know it.
+    /// written into it, because a project without a platform has nothing to build; on top of that
+    /// every project comes out of here with a Douyin platform whether the file had one or not.
+    /// seedDefaults is off for a project opened read only, which must not gain files just by being
+    /// looked at. projectPath resolves the relative default output directories, engineData is the
+    /// directory that holds CoreData/ and Data/ of the engine working tree - only the caller can
+    /// know it.
     bool LoadProject(const ea::string& projectPath, const ea::string& engineData, bool seedDefaults);
 
     const BuildPlatformDataVector& GetPlatforms() const { return platforms_; }

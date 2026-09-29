@@ -44,6 +44,24 @@
 				"Container": "ktx",
 				"NormalFormat": "ETC2_RGBA"
 			}
+		},
+		{
+			"Android": {},
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
+			"EngineBuild": "Incremental",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Douyin",
+			"OutputDir": "Build/Douyin",
+			"PackData": false,
+			"Platform": "Douyin",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"Enabled": true,
+				"NormalFormat": "ETC2_RGBA"
+			}
 		}
 	]
 }

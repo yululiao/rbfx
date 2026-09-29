@@ -22,6 +22,9 @@ env:
   URHO3D_PRISTINE_FULL_BUILDS: ON
   DOTNET_VERSION: '8.0'
   CMAKE_VERSION: 4.3.x
+  # Pinned Emscripten toolchain. The minigame target (Douyin/WeChat) is validated against this
+  # version and the CMakePresets minigame presets assume it; bump deliberately, never "latest".
+  EMSDK_VERSION: 6.0.9
   # ccache configuration
   ccache_prefix: ${{ secrets.CACHE_VERSION }}-master
   CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -152,8 +155,8 @@ jobs:
         if: env.ci_platform == 'web'
         run: |
           cd ${{ github.workspace }}/emsdk
-          ./emsdk install latest
-          ./emsdk activate latest
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
           echo "PATH=$PATH:${{ github.workspace }}/emsdk:${{ github.workspace }}/emsdk/upstream/emscripten" >> $GITHUB_ENV
           echo "EMSDK=${{ github.workspace }}/emsdk" >> $GITHUB_ENV
 
@@ -288,6 +291,12 @@ jobs:
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ env.ci_cache_id }}-${{ env.ci_short_sha }}
+
+      # Web-specific: Inspect artifact sizes. Informational today; the minigame packaging
+      # reuses the same script with hard budgets (main package < 4 MiB).
+      - name: Size Report (Web)
+        if: env.ci_platform == 'web'
+        run: ${{ env.ci_build_script }} size-report -- --sections
 
       # Web-specific: Deploy to GitHub Pages
       - name: Deploy to GitHub Pages

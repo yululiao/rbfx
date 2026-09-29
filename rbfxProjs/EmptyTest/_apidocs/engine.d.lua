@@ -845,6 +845,14 @@ function LuaRmlUIComponent.SetVariant(...) end
 function LuaRmlUIComponent.SetVariantMap(...) end
 function LuaRmlUIComponent.SetVariantVector(...) end
 
+---@class MINIGAME_REQUEST_KIND
+MINIGAME_REQUEST_KIND = {}
+MINIGAME_REQUEST_KIND.LOGIN = 0
+MINIGAME_REQUEST_KIND.PAYMENT = 0
+MINIGAME_REQUEST_KIND.PRIVACY_AUTHORIZATION = 0
+MINIGAME_REQUEST_KIND.REWARDED_AD = 0
+MINIGAME_REQUEST_KIND.SHARE = 0
+
 ---@class MM
 MM = {}
 MM.ABSOLUTE = 0
@@ -898,6 +906,28 @@ function MemoryBuffer.ReadVector3(...) end
 Microphone = {}
 function Microphone.GetFrequency(...) end
 function Microphone.Link(...) end
+
+---@class MinigamePlatform : Object
+MinigamePlatform = {}
+function MinigamePlatform.ExitGame(...) end
+---@return string
+function MinigamePlatform.GetUserDataPath(...) end
+---@return boolean
+function MinigamePlatform.IsForeground(...) end
+---@return boolean
+function MinigamePlatform.IsHostAvailable(...) end
+function MinigamePlatform.PrefetchFiles(...) end
+
+---@class MinigameSDK : Object
+MinigameSDK = {}
+---@return boolean
+function MinigameSDK.IsAvailable(...) end
+function MinigameSDK.Login(...) end
+function MinigameSDK.Pay(...) end
+function MinigameSDK.RequestPrivacyAuthorization(...) end
+---@return integer
+function MinigameSDK.Share(...) end
+function MinigameSDK.ShowRewardedAd(...) end
 
 ---@class Model : Resource, Object
 Model = {}

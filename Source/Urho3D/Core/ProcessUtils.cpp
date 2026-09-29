@@ -130,7 +130,7 @@ static ea::string currentLine;
 static ea::vector<ea::string> arguments;
 static ea::string miniDumpDir;
 
-#ifdef URHO3D_PLATFORM_WEB
+#if defined(URHO3D_PLATFORM_WEB) && defined(__EMSCRIPTEN_PTHREADS__)
 unsigned GetNumPthreadWorkers()
 {
     const auto varPThread = emscripten::val::global("PThread");

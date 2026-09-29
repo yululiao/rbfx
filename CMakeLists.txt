@@ -90,8 +90,12 @@ endif ()
 # Set compiler variable
 set ("${CMAKE_CXX_COMPILER_ID}" ON)
 if (WEB)
-    # Ensure EVERYTHING is compiled with threads support for emscripten.
-    add_compile_options(-pthread -sUSE_PTHREADS=1)
+    # Compile EVERYTHING with threads support for emscripten, but only when threading is wanted:
+    # a single-threaded web target (the minigame platform among them) must stay free of -pthread,
+    # which would otherwise drag in the SharedArrayBuffer requirement at link time.
+    if (URHO3D_THREADING)
+        add_compile_options(-pthread -sUSE_PTHREADS=1)
+    endif ()
 else ()
     set (CMAKE_INSTALL_RPATH "$ORIGIN")
     if (GNU OR MINGW)
@@ -273,6 +277,9 @@ message(STATUS "  Compute         ${URHO3D_COMPUTE}")
 message(STATUS "  Glow            ${URHO3D_GLOW}")
 message(STATUS "  IK              ${URHO3D_IK}")
 message(STATUS "  Lua             ${URHO3D_LUA}")
+if (WEB)
+    message(STATUS "  Minigame        ${URHO3D_MINIGAME}")
+endif ()
 message(STATUS "  Navigation      ${URHO3D_NAVIGATION}")
 message(STATUS "  Network         ${URHO3D_NETWORK}")
 message(STATUS "  Particle Graph  ${URHO3D_PARTICLE_GRAPH}")

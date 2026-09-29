@@ -2,9 +2,9 @@
 
 # ci_build.sh <action> [options] [-- extra cmake args]
 #
-# Actions: dependencies|generate|build|install|test|cstest|apk|publish-to-itch|
-#          release-mobile-artifacts|test-project|download-release|download-nuget-sdks|
-#          copy-cached-sdk|setup-environment
+# Actions: dependencies|generate|build|install|size-report|test|cstest|apk|
+#          publish-to-itch|release-mobile-artifacts|test-project|download-release|
+#          download-nuget-sdks|copy-cached-sdk|setup-environment
 #
 # Environment variables (used for defaults):
 #   ci_platform:      windows|linux|macos|android|ios|web|uwp
@@ -27,6 +27,7 @@ then
     echo "  generate                  Generate build files with CMake"
     echo "  build                     Build the project"
     echo "  install                   Install build artifacts"
+    echo "  size-report               Report artifact sizes (web deploy directory)"
     echo "  test                      Run native tests"
     echo "  cstest                    Run C# tests"
     echo "  apk                       Build Android APK"
@@ -335,6 +336,17 @@ function action-install() {
             $ci_sdk_dir/bin/${types[$arg_build_type]}/Samples.html        \
             $ci_sdk_dir/deploy/
     fi
+}
+
+function action-size-report() {
+    # Arguments: -- <extra args passed to report_size.py>
+
+    # Report the size of build artifacts. On web this is the deploy directory that maps
+    # to a minigame package layout; budgets are opt-in via extra args, e.g.:
+    #   ci_build.sh size-report -- --budget package_wasm=24 --budget package_main=4
+    local python_bin=python3
+    command -v python3 >/dev/null 2>&1 || python_bin=python
+    "$python_bin" "$ci_source_dir/script/report_size.py" "$ci_sdk_dir/deploy" "${arg_extra[@]}"
 }
 
 function action-test() {

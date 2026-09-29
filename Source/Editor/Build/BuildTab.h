@@ -48,6 +48,10 @@ private:
     void RenderAndroidOptions(BuildPlatformData& platform);
     /// The part of a platform only the web package assembler reads.
     void RenderWebOptions(BuildPlatformData& platform);
+    /// The part of a platform only the minigame package assembler reads.
+    void RenderDouyinOptions(BuildPlatformData& platform);
+    /// The emsdk root field the emscripten-backed platforms share.
+    void RenderEmsdkRootField(BuildPlatformData& platform);
     /// Progress of a build in flight, or the reason the last one did not succeed.
     void RenderStatus(BuildPlatformData* platform, BuildSettings* settings, Project* project);
     /// Remember that a widget changed the platform, so Build.json is rewritten once this frame.

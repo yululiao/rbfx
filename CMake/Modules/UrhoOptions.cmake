@@ -218,6 +218,11 @@ option                (URHO3D_PACKAGING          "Enable *.pak file creation"   
 # Web
 cmake_dependent_option(EMSCRIPTEN_WASM           "Use wasm instead of asm.js"                            ON                   "EMSCRIPTEN"                           OFF)
 set(EMSCRIPTEN_TOTAL_MEMORY 0 CACHE STRING       "Memory limit in megabytes. Set to 0 for dynamic growth.")
+# Minigame hosts (Douyin/WeChat) run Emscripten output inside a vendor runtime instead of a browser:
+# no DOM, no IDBFS, no SharedArrayBuffer guarantee, and the package is assembled as subpackages by
+# the editor. URHO3D_MINIGAME refines WEB, it does not replace it.
+cmake_dependent_option(URHO3D_MINIGAME            "Build for minigame hosts (Douyin/WeChat) instead of the browser." OFF "WEB"                          OFF)
+cmake_dependent_option(URHO3D_MINIGAME_LEGACY     "Produce the legacy-compatible minigame variant (iOS 14: no WebAssembly BigInt, size-optimized)." OFF "URHO3D_MINIGAME" OFF)
 
 # Graphics configuration
 option                (URHO3D_DEBUG_GRAPHICS     "Enable debug checks in renderer"                       OFF)
@@ -269,6 +274,20 @@ if (EMSCRIPTEN)
     if (NOT URHO3D_PACKAGING)
         # Web builds do not function without data packaging.
         set (URHO3D_PACKAGING ON)
+    endif ()
+    if (URHO3D_MINIGAME)
+        set (MINIGAME ON)
+        if (URHO3D_THREADING)
+            # The minigame runtime provides no guaranteed SharedArrayBuffer, so the engine must
+            # ship without pthreads. Accepting the combination silently would produce a package
+            # that fails to start on device; refuse instead.
+            message(FATAL_ERROR "Minigame builds are single-threaded: set URHO3D_THREADING=OFF.")
+        endif ()
+        if (NOT URHO3D_LUA)
+            # The minigame host (Source/MinigamePlayer) drives game logic from Lua; a build
+            # without the scripting subsystem would not produce a usable package.
+            message(FATAL_ERROR "Minigame builds require URHO3D_LUA=ON: the minigame host drives game logic from Lua.")
+        endif ()
     endif ()
 endif ()
 

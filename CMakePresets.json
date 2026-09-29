@@ -242,6 +242,37 @@
       }
     },
     {
+      "name": "minigame-base",
+      "hidden": true,
+      "description": "Emscripten minigame target (Douyin/WeChat): single-threaded, all engine features enabled. Package size trimming is planned separately. Requires the emsdk version pinned in .github/workflows/build.yml.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build/${presetName}",
+      "installDir": "${sourceDir}/cmake-build/${presetName}/install",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "EMSCRIPTEN_ROOT_PATH": "$env{EMSDK}/upstream/emscripten/",
+        "URHO3D_MINIGAME": "ON",
+        "URHO3D_THREADING": "OFF",
+        "URHO3D_ENABLE_ALL": "ON",
+        "URHO3D_TESTING": "OFF",
+        "URHO3D_SAMPLES": "OFF",
+        "URHO3D_PLAYER": "OFF",
+        "URHO3D_EDITOR": "OFF"
+      }
+    },
+    {
+      "name": "minigame-douyin",
+      "inherits": "minigame-base"
+    },
+    {
+      "name": "minigame-douyin-compatible",
+      "inherits": "minigame-base",
+      "cacheVariables": {
+        "URHO3D_MINIGAME_LEGACY": "ON"
+      }
+    },
+    {
       "name": "ios-clang-arm-lib",
       "generator": "Xcode",
       "inherits": ["base-lib", "cmake-prefix-path-macos"],
@@ -541,6 +572,16 @@
       "configurePreset": "web-emscripten-wasm-lib",
       "displayName": "release",
       "inherits": "web-release-base"
+    },
+    {
+      "name": "minigame-douyin-release",
+      "configurePreset": "minigame-douyin",
+      "displayName": "release"
+    },
+    {
+      "name": "minigame-douyin-compatible-release",
+      "configurePreset": "minigame-douyin-compatible",
+      "displayName": "release"
     },
     {
       "name": "ios-clang-arm-lib-debug",

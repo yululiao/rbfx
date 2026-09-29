@@ -547,6 +547,28 @@ function (create_pak PAK_DIR PAK_FILE)
     )
 endfunction ()
 
+function (link_datachannel_wasm TARGET)
+    # The C API of libdatachannel-wasm (rtc*) is authored in JavaScript rather than in the
+    # static library: wasm/js/webrtc.js and wasm/js/websocket.js are Emscripten JS libraries
+    # the linker must consume, or the wasm link fails on undefined rtc* symbols. Call on a
+    # web target after add_executable().
+    if (NOT URHO3D_NETWORK)
+        return ()
+    endif ()
+    set (LIBDATACHANNEL_WASM_DIR "")
+    if (EXISTS "${Urho3D_PACKAGE_ROOT}/include/libdatachannel-wasm/wasm/js/webrtc.js")
+        set (LIBDATACHANNEL_WASM_DIR "${Urho3D_PACKAGE_ROOT}/include/libdatachannel-wasm")
+    elseif (DEFINED rbfx_SOURCE_DIR AND EXISTS "${rbfx_SOURCE_DIR}/Source/ThirdParty/libdatachannel-wasm/wasm/js/webrtc.js")
+        set (LIBDATACHANNEL_WASM_DIR "${rbfx_SOURCE_DIR}/Source/ThirdParty/libdatachannel-wasm")
+    endif ()
+    if (LIBDATACHANNEL_WASM_DIR)
+        target_link_options(${TARGET} PRIVATE
+            "SHELL:--js-library ${LIBDATACHANNEL_WASM_DIR}/wasm/js/webrtc.js"
+            "SHELL:--js-library ${LIBDATACHANNEL_WASM_DIR}/wasm/js/websocket.js"
+        )
+    endif ()
+endfunction ()
+
 function (web_executable TARGET)
     # TARGET target_name                            - A name of target.
     # THREADING                                     - Whether to enable multithreading for this target.
@@ -557,25 +579,14 @@ function (web_executable TARGET)
     if (WEB)
         set_target_properties (${TARGET} PROPERTIES SUFFIX .html)
         target_link_libraries(${TARGET} PRIVATE -sNO_EXIT_RUNTIME=1 -sFORCE_FILESYSTEM=1 -sASSERTIONS=0 -lidbfs.js)
-        target_compile_options(${TARGET} PRIVATE -pthread)
-        target_link_options(${TARGET} PRIVATE -pthread -sUSE_PTHREADS=1)
+        if (URHO3D_THREADING)
+            target_compile_options(${TARGET} PRIVATE -pthread)
+            target_link_options(${TARGET} PRIVATE -pthread -sUSE_PTHREADS=1)
+        endif ()
         if (BUILD_SHARED_LIBS)
             target_link_libraries(${TARGET} PRIVATE -sMAIN_MODULE=1)
         endif ()
-        set (LIBDATACHANNEL_WASM_DIR "")
-        if (URHO3D_NETWORK)
-            if (EXISTS "${Urho3D_PACKAGE_ROOT}/include/libdatachannel-wasm/wasm/js/webrtc.js")
-                set (LIBDATACHANNEL_WASM_DIR "${Urho3D_PACKAGE_ROOT}/include/libdatachannel-wasm")
-            elseif (DEFINED rbfx_SOURCE_DIR AND EXISTS "${rbfx_SOURCE_DIR}/Source/ThirdParty/libdatachannel-wasm/wasm/js/webrtc.js")
-                set (LIBDATACHANNEL_WASM_DIR "${rbfx_SOURCE_DIR}/Source/ThirdParty/libdatachannel-wasm")
-            endif ()
-        endif ()
-        if (LIBDATACHANNEL_WASM_DIR)
-            target_link_options(${TARGET} PRIVATE
-                "SHELL:--js-library ${LIBDATACHANNEL_WASM_DIR}/wasm/js/webrtc.js"
-                "SHELL:--js-library ${LIBDATACHANNEL_WASM_DIR}/wasm/js/websocket.js"
-            )
-        endif ()
+        link_datachannel_wasm (${TARGET})
         if (WEB_EXECUTABLE_THREADING)
             target_link_libraries (${TARGET} PRIVATE "-sPTHREAD_POOL_SIZE=\"!!globalThis.SharedArrayBuffer && self.crossOriginIsolated ? navigator.hardwareConcurrency - 1 : 0\"")
         endif ()

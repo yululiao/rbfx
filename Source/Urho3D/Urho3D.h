@@ -126,6 +126,12 @@
     #define URHO3D_PLATFORM_RASPBERRY_PI 1
 #elif defined(__EMSCRIPTEN__)
     #define URHO3D_PLATFORM_WEB 1
+    // Minigame hosts (Douyin/WeChat) run Emscripten output inside a vendor runtime instead of a
+    // browser: no DOM, no IDBFS, no guaranteed SharedArrayBuffer. The refinement below lets
+    // platform code target the host while everything written against WEB keeps working.
+    #if defined(URHO3D_MINIGAME)
+        #define URHO3D_PLATFORM_MINIGAME 1
+    #endif
 #elif defined(__linux__)
     #define URHO3D_PLATFORM_LINUX 1
 #else

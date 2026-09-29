@@ -27,6 +27,14 @@ extern const ea::string DataPackageName;
 extern const ea::string CoreDataPackageName;
 extern const ea::string HostName;
 extern const ea::string EngineLibraryName;
+/// The Emscripten module a minigame platform packages instead of the complete host application.
+extern const ea::string MinigameHostName;
+/// Subpackage names of a minigame package: the engine wasm and the game data. Shared between the
+/// platform (which stages the data into one of them), the assembler (which writes the manifests
+/// around them) and the runtime, so the three cannot drift apart.
+/// @{
+extern const ea::string MinigameWasmSubpackageName;
+extern const ea::string MinigameDataSubpackageName;
 /// @}
 
 /// Backslashes to forward slashes; the staging tree is addressed with forward slashes everywhere.
@@ -145,21 +153,27 @@ public:
     /// web mount beside the page or executable; Android mounts inside the generated project's assets.
     virtual ea::string ResolveResourceDir(const ea::string& outputDir) const { return outputDir; }
     /// Let the platform prepend whatever the engine compile needs before the shared "--build"
-    /// arguments. Web injects the emsdk environment the toolchain's scripts expect, reading the cache
-    /// named by 'buildTree'. Returning false aborts the build with the reason.
+    /// arguments. The emscripten-backed platforms inject the emsdk environment the toolchain's
+    /// scripts expect, reading the cache named by 'buildTree'. Returning false aborts the build
+    /// with the reason.
     virtual bool ConfigureEngineBuildArgs(ea::vector<ea::string>& /*arguments*/, const ea::string& /*cmakeCommand*/,
         const ea::string& /*buildTree*/, ea::string& /*message*/) const
     {
         return true;
     }
+    /// CMake target the engine-compile stage drives. The default is the complete host application
+    /// every desktop-like platform packages; a platform whose payload is a different embedder
+    /// overrides this.
+    virtual ea::string GetEngineBuildTarget() const { return HostName; }
     /// Prove the engine compile produced this platform's host artifacts before packaging relies on
     /// them. Default is the desktop pair: the host binary and the engine library.
     virtual bool VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const;
     /// The terminal packaging step for this platform: copy host binaries (desktop), assemble the wasm
     /// package (web), or write the gradle project (Android).
     virtual ea::unique_ptr<BuildStep> MakeRuntimeStep() = 0;
-    /// Interpreter to run the emsdk python scripts with, preferring the python emsdk ships. Only web
-    /// has one; others answer with a PATH fallback so a caller that asks still gets something.
+    /// Interpreter to run python scripts with. The emscripten-backed platforms answer with the
+    /// interpreter emsdk ships; others fall back to whatever is on PATH so a caller that asks still
+    /// gets something.
     virtual ea::string ResolveEmsdkPython() const;
     /// Whether the autoRunAfterBuild switch can do anything here. Android has no host binary to
     /// launch from the machine that built it, so it declines.
@@ -249,29 +263,66 @@ public:
     void LaunchAfterBuild(const ea::string& /*outputDir*/) const override { }
 };
 
-/// Web: builds the wasm host through emsdk, bundles the packages with file_packager into a preload
-/// archive, and drops a serve.py beside the page (wasm only loads over http, never file://).
-class WebBuildPlatform : public BuildPlatform
+/// Base of the platforms whose engine host is compiled by emsdk, one variant platform per vendor
+/// runtime. Owns the probing the subclasses and their terminal steps lean on - resolving the
+/// toolchain root, injecting the environment its scripts expect, and preferring the interpreter
+/// the sdk ships - so a second emsdk-based platform reuses all of it instead of cloning it.
+class EmscriptenBuildPlatform : public BuildPlatform
 {
 public:
-    explicit WebBuildPlatform(Context* context)
-        : BuildPlatform(context)
-    {
-    }
+    using BuildPlatform::BuildPlatform;
 
     bool ConfigureEngineBuildArgs(ea::vector<ea::string>& arguments, const ea::string& cmakeCommand,
         const ea::string& buildTree, ea::string& message) const override;
-    bool VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const override;
-    ea::unique_ptr<BuildStep> MakeRuntimeStep() override;
     ea::string ResolveEmsdkPython() const override;
-    void LaunchAfterBuild(const ea::string& outputDir) const override;
 
-    // Reached by the web runtime step, which downcasts the BuildStep owner to get here.
+    // Reached by the terminal steps of the derived platforms, which downcast the BuildStep owner.
     /// Root of the emscripten toolchain that owns file_packager.py, resolved from the platform, the
-    /// emsdk environment variables, or the CMake cache of the web build - whichever answers first.
+    /// emsdk environment variables, or the CMake cache of the build tree - whichever answers first.
     ea::string ResolveEmscriptenRoot(ea::string& message) const;
     /// Interpreter shipped inside an emsdk root ("<emsdk>/python/<version>/python.exe"), or empty.
     ea::string FindBundledPython(const ea::string& emsdkRoot) const;
+};
+
+/// Web: builds the wasm host through the shared emsdk toolchain, bundles the packages with
+/// file_packager into a preload archive, and drops a serve.py beside the page (wasm only loads
+/// over http, never file://).
+class WebBuildPlatform : public EmscriptenBuildPlatform
+{
+public:
+    explicit WebBuildPlatform(Context* context)
+        : EmscriptenBuildPlatform(context)
+    {
+    }
+
+    bool VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const override;
+    ea::unique_ptr<BuildStep> MakeRuntimeStep() override;
+    void LaunchAfterBuild(const ea::string& outputDir) const override;
+};
+
+/// Douyin minigame: the same emsdk toolchain as web, but the compile target and the payload are the
+/// vendor's - the engine module rides in its own subpackage next to a data subpackage, and the
+/// vendor manifests are generated around both (see DouyinRuntimeStep). Nothing on this machine can
+/// launch the result; the vendor devtool does.
+class DouyinBuildPlatform : public EmscriptenBuildPlatform
+{
+public:
+    explicit DouyinBuildPlatform(Context* context)
+        : EmscriptenBuildPlatform(context)
+    {
+    }
+
+    /// The game files are exported straight into the subpackage root the runtime downloads them
+    /// from, not beside an executable: the vendor caps the main package well below the size of the
+    /// game data.
+    ea::string ResolveResourceDir(const ea::string& outputDir) const override;
+    /// The module, not the desktop host.
+    ea::string GetEngineBuildTarget() const override { return MinigameHostName; }
+    /// The module pair the embedder consists of.
+    bool VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const override;
+    ea::unique_ptr<BuildStep> MakeRuntimeStep() override;
+    bool SupportsAutoRun() const override { return false; }
+    void LaunchAfterBuild(const ea::string& /*outputDir*/) const override { }
 };
 
 /// Resolve the platform of the build platform named 'platformName' to its backend, or null when no such

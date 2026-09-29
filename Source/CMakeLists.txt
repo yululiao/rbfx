@@ -44,6 +44,11 @@ if (URHO3D_LUA)
     # Standalone Lua-game host depends on the shared RbfxLuaScript module.
     add_subdirectory (LuaGamePlayer)
 endif ()
+if (MINIGAME)
+    # The minigame host is a Lua host by construction (URHO3D_LUA=ON is enforced for
+    # minigame builds in UrhoOptions.cmake).
+    add_subdirectory (MinigamePlayer)
+endif ()
 add_subdirectory (Tools)
 add_subdirectory (Samples)
 add_subdirectory (LuaSamples)

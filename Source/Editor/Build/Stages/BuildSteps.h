@@ -8,6 +8,7 @@
 #include "../BuildPlatform.h"
 
 #include <EASTL/string.h>
+#include <EASTL/unordered_map.h>
 #include <EASTL/vector.h>
 
 namespace Urho3D
@@ -228,6 +229,48 @@ private:
     bool WriteServeScript(ea::string& message);
 
     class WebBuildPlatform& web_;
+};
+
+/// Douyin minigame: assemble the vendor package from the minigame build tree. The bootstrap scripts
+/// move to the package root, each wasm subpackage gets the module pair beside its entry script, and
+/// the manifests the vendor runtime and the engine file layer read (game.json, project.config.json,
+/// rbfx_files.json) are regenerated around the subpackages this build actually produced. The staged
+/// game files are already in place: the platform exported them into the data subpackage root.
+class DouyinRuntimeStep : public BuildStep
+{
+public:
+    using BuildStep::BuildStep;
+    const char* Name() const override { return "Assemble Douyin package"; }
+    bool Run(ea::string& message) override;
+
+private:
+    /// Copy the main-package bootstrap scripts out of the build tree to the package root, where the
+    /// vendor runtime looks for its entry document.
+    bool StageBootstrap(const ea::string& bin, ea::string& message);
+    /// Copy one wasm subpackage: its entry script as staged by the build, plus the module pair the
+    /// entry requires beside itself.
+    bool StageWasmSubpackage(const ea::string& bin, const ea::string& name, ea::string& message);
+    /// Regenerate rbfx_game_config.js around the subpackages this build actually produced; the
+    /// template beside it names both variants, which is only true for a merged package.
+    bool WriteGameConfig(const ea::vector<ea::string>& wasmSubpackages, ea::string& message);
+    /// Rename every package file whose extension the vendor tool would drop on import; the file
+    /// manifest generated right after carries the mapping back to the engine-visible names. The
+    /// return value is the rename map (package-relative name after -> before) for that manifest.
+    bool RenameForVendorCompatibility(ea::unordered_map<ea::string, ea::string>& vendorRenames,
+        ea::string& message);
+    /// Map every staged game file from its engine-visible name to its physical subpackage root
+    /// (rbfx_files.json), and list the subpackages in the vendor manifest (game.json).
+    bool WriteFileManifest(const ea::unordered_map<ea::string, ea::string>& vendorRenames,
+        ea::string& message);
+    /// Give the data subpackage the game.js entry every vendor subpackage root must carry; it is a
+    /// no-op - the subpackage ships files, not code - but the developer tool rejects a package
+    /// whose subpackage lacks the file.
+    bool EnsureDataSubpackageEntry(ea::string& message);
+    bool WriteGameManifest(const ea::vector<ea::string>& wasmSubpackages, ea::string& message);
+    /// The developer-tool project descriptor (appid, project name); runtime ignores it.
+    bool WriteProjectConfig(ea::string& message);
+    /// Byte sizes of the main package and every subpackage, checked against the vendor budgets.
+    void ReportPackageSizes() const;
 };
 
 } // namespace Urho3D

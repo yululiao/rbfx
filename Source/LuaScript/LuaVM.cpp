@@ -287,6 +287,7 @@ void LuaVM::RegisterEngineBindings()
     RegisterNavigationBindings(*luaState_, context_);
     RegisterNetworkBindings(*luaState_, context_);
     RegisterRmlUIBindings(*luaState_, context_);
+    RegisterMinigameBindings(*luaState_, context_);
 
     // Event data wrapper: parameters are looked up by name via dynamic indexing,
     // e.g. data.TimeStep, data.Node.

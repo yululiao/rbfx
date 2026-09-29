@@ -41,6 +41,15 @@ URHO3D_EVENT(E_CONSOLEURICLICK, ConsoleUriClick)
     URHO3D_PARAM(P_PROTOCOL, Protocol);            // String
 }
 
+/// Virtual file system has finished its own mounting, but engine initialization is not finished
+/// yet. Hosts that cannot be served by the standard directory/package mounts (a minigame package
+/// read through a platform file API, for example) mount their own mount points now, so the rest
+/// of the initialization - config files, subsystem defaults, renderer - already sees them.
+URHO3D_EVENT(E_VIRTUALFILESYSTEMINITIALIZED, VirtualFileSystemInitialized)
+{
+    URHO3D_PARAM(P_NUMMOUNTPOINTS, NumMountPoints);  // int
+}
+
 /// Engine finished initialization, but Application::Start() was not called yet.
 URHO3D_EVENT(E_ENGINEINITIALIZED, EngineInitialized)
 {
