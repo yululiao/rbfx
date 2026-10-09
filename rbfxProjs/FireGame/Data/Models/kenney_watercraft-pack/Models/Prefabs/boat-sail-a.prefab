@@ -1,0 +1,35 @@
+{
+	"nodes": [
+		{
+			"attributes": [
+				{
+					"name": "Scale",
+					"type": "Vector3",
+					"value": "1 1 1"
+				}
+			],
+			"components": [
+				{
+					"_typeName": "StaticModel",
+					"attributes": [
+						{
+							"name": "Model",
+							"type": "ResourceRef",
+							"value": "Model;Models/kenney_watercraft-pack/Models/Fbx/boat-sail-a.fbx.d/Models/boat-sail-a.mdl"
+						},
+						{
+							"name": "Material",
+							"type": "ResourceRefList",
+							"value": "Material;Models/kenney_watercraft-pack/Models/Materials/boat.material"
+						},
+						{
+							"name": "Cast Shadows",
+							"type": "Bool",
+							"value": true
+						}
+					]
+				}
+			]
+		}
+	]
+}

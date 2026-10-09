@@ -1,0 +1,31 @@
+<!--
+    命中金属：加色火花，四散 + 强重力，寿命极短。
+    用 ParticleAdd（additive）而不是 ParticleSoft：火花要"自己发光"才像金属反光，
+    alpha 混合只会糊成一片灰。一次性喷发的约定见 Particle/HitFlesh.xml。
+-->
+<particleeffect>
+    <material name="Materials/ParticleAdd.xml" />
+    <numparticles value="22" />
+    <updateinvisible enable="false" />
+    <relative enable="false" />
+    <scaled enable="true" />
+    <sorted enable="false" />
+    <emittertype value="Sphere" />
+    <emittersize value="0.04 0.04 0.04" />
+    <direction min="-1 -0.2 -1" max="1 1.2 1" />
+    <constantforce value="0 -14.0 0" />
+    <dampingforce value="0.05" />
+    <activetime value="0.04" />
+    <inactivetime value="0" />
+    <emissionrate min="480" max="560" />
+    <particlesize min="0.03 0.09" max="0.05 0.16" />
+    <timetolive min="0.18" max="0.34" />
+    <velocity min="3.0" max="6.0" />
+    <rotation min="0" max="360" />
+    <rotationspeed min="-240" max="240" />
+    <sizedelta add="-0.03" mul="1.0" />
+    <faceCameraMode value="Direction" />
+    <colorfade color="1.0 0.92 0.62 1" time="0" />
+    <colorfade color="1.0 0.55 0.16 1" time="0.16" />
+    <colorfade color="0 0 0 0" time="0.34" />
+</particleeffect>

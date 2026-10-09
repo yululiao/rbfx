@@ -1,0 +1,21 @@
+<!--
+    软粒子材质（alpha 混合）：血雾、木屑、沙尘、水花都用这一份。
+
+    为什么不用引擎自带的 Materials/Smoke.xml / Particle.xml：它们引用
+    Textures/Smoke.dds、Textures/Flare.dds，而那两张图和材质本身都在引擎的示例 Data
+    目录（msvc/bin/Data）里，打包时只带 CoreData 与工程 Data —— 编辑器里看着好好的，
+    抖音真机上粒子会静默消失。所以贴图用自己的 Textures/Dot.png（635 字节，
+    python_utils/make_particle_dot.py 生成的白底 alpha 径向衰减圆点）。
+
+    技术用 CoreData 的 DiffUnlitParticleAlpha（已在抖音包里，含 UnlitParticle 着色器）：
+    不光照 + alpha 混合 + depthwrite=false，颜色由粒子效果 XML 的 <colorfade> 通过
+    顶点色传入，所以一张白点图能染成任何颜色。
+
+    cull none：billboard 的朝向由相机决定，两面都可能朝外。
+-->
+<material>
+    <technique name="Techniques/DiffUnlitParticleAlpha.xml" />
+    <texture slot="Albedo" name="Textures/Dot.png" />
+    <parameter name="MatDiffColor" value="1 1 1 1" />
+    <cull value="none" />
+</material>

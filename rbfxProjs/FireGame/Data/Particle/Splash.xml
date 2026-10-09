@@ -1,0 +1,29 @@
+<!--
+    水花：向上 cone 喷出、受重力回落的白沫，用于子弹打水面与船沉没。
+    粒子偏大、寿命偏长，看起来才像水而不是烟。约定见 Particle/HitFlesh.xml。
+-->
+<particleeffect>
+    <material name="Materials/ParticleSoft.xml" />
+    <numparticles value="28" />
+    <updateinvisible enable="false" />
+    <relative enable="false" />
+    <scaled enable="true" />
+    <sorted enable="true" />
+    <emittertype value="Sphere" />
+    <emittersize value="0.25 0.05 0.25" />
+    <direction min="-0.45 1 -0.45" max="0.45 1.4 0.45" />
+    <constantforce value="0 -7.0 0" />
+    <dampingforce value="0.1" />
+    <activetime value="0.10" />
+    <inactivetime value="0" />
+    <emissionrate min="240" max="300" />
+    <particlesize min="0.16 0.16" max="0.30 0.30" />
+    <timetolive min="0.45" max="0.80" />
+    <velocity min="1.8" max="3.6" />
+    <rotation min="0" max="360" />
+    <rotationspeed min="-40" max="40" />
+    <sizedelta add="0.10" mul="1.0" />
+    <colorfade color="0.85 0.93 0.98 0.75" time="0" />
+    <colorfade color="0.55 0.72 0.82 0.35" time="0.35" />
+    <colorfade color="0.40 0.60 0.72 0" time="0.80" />
+</particleeffect>

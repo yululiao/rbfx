@@ -1,0 +1,88 @@
+{
+	"Platforms": [
+		{
+			"Android": {},
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Windows",
+			"OutputDir": "Build/Windows",
+			"Platform": "WindowsDesktop",
+			"TextureCompression": {
+				"ColorFormatAlpha": "BC3",
+				"ColorFormatNoAlpha": "BC1",
+				"Container": "dds",
+				"NormalFormat": "BC5"
+			}
+		},
+		{
+			"Android": {
+				"ApplicationId": "com.example.firegame"
+			},
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Android",
+			"OutputDir": "Build/Android",
+			"Platform": "Android",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			}
+		},
+		{
+			"Android": {},
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/web/bin/Release",
+			"EmsdkRoot": "D:/openSrc/emsdk",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Web",
+			"OutputDir": "Build/Web",
+			"Platform": "Web",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			}
+		},
+		{
+			"Android": {},
+			"DisabledEngineModules": [
+				"URHO3D_PHYSICS",
+				"URHO3D_PHYSICS2D",
+				"URHO3D_NAVIGATION",
+				"URHO3D_IK",
+				"URHO3D_UI",
+				"URHO3D_SYSTEMUI"
+			],
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
+			"EngineBuild": "Never",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Douyin",
+			"OutputDir": "Build/Douyin",
+			"PackData": false,
+			"Platform": "Douyin",
+			"AssetFilter": {
+				"Include": [
+					"Models/Quaternius_pirate-kit",
+					"Models/Quaternius_Player",
+					"Materials",
+					"Particle",
+					"Textures",
+					"Sound/kenney_impact-sounds",
+					"Sound/kenney_voiceover-pack-fighter"
+				]
+			},
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			}
+		}
+	]
+}

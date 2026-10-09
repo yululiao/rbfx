@@ -1,0 +1,10 @@
+<rml>
+  <head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+  </head>
+  <body style="display: block; width: 96px; height: 96px;">
+    <div id="knob_cap" style="position: absolute; left: 0px; top: 0px; width: 96px; height: 96px; border-radius: 48px; background-color: #ffffff8c;"></div>
+  </body>
+</rml>

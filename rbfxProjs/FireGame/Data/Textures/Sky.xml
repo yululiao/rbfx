@@ -1,0 +1,21 @@
+<!--
+    天空立方体贴图。
+
+    图不是找的，是 python_utils/make_sky_cubemap.py 画的：64x64 一面、6 面横排拼成
+    384x64，PNG 只有 670 字节。改颜色就重跑那个脚本，不要手工编辑 png。
+
+    layout 必须写 horizontal，对应 rbfx 的 CML_HORIZONTAL；这个拼法的从左到右面序是
+    +Z, +X, -Z, -X, +Y, -Y（ImageCube.cpp:118-126），和 NVIDIA 那套（+X 开头）不一样，
+    写错 layout 天空会四个方向颜色错位。
+
+    srgb 打开：图里的颜色是按屏幕色（sRGB）挑的，采样时要解码回线性空间，否则经过
+    曝光与色调映射后天空会偏灰偏亮，和海面的雾色对不上。
+
+    不写 <sh calculate="true" />：那是给反射探针/环境光从天空烘 SH 用的，本工程的环境光
+    由 Global Zone 手工指定，算了也用不上，白费加载时间。
+-->
+<cubemap>
+    <srgb enable="true" />
+    <image name="Sky.png" layout="horizontal" />
+    <filter mode="bilinear" />
+</cubemap>

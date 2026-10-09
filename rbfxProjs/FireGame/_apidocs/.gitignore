@@ -1,0 +1,8 @@
+# LuaLS definition stubs (engine.d.lua, editor.d.lua) are generated offline by the
+# ApiDocGen tool from the sol3 binding sources, then committed here so a fresh clone
+# has completions without building or running anything:
+#   python Source/Tools/ApiDocGen/generate_api_docs.py --src Source/LuaScript             --out rbfxProjs/EmptyTest/_apidocs/engine.d.lua
+#   python Source/Tools/ApiDocGen/generate_api_docs.py --src Source/Editor/EditorLuaScript --out rbfxProjs/EmptyTest/_apidocs/editor.d.lua
+# Regenerate after adding or renaming bindings. They are kept out of the resource tree on
+# purpose so the packer never ships them; Data/Scripts and EditorScripts .luarc.json pull
+# this directory in through workspace.library.

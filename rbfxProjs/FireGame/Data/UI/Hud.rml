@@ -1,0 +1,15 @@
+<rml>
+  <head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+  </head>
+  <body class="fullscreen">
+    <div id="stick_ring" style="position: absolute; left: 40px; bottom: 40px; width: 224px; height: 224px; border-radius: 112px; background-color: #ffffff2e;">
+      <div id="stick_ring_core" style="position: absolute; left: 24px; top: 24px; width: 176px; height: 176px; border-radius: 88px; background-color: #00000040;"></div>
+    </div>
+    <div id="action_button" style="position: absolute; right: 48px; bottom: 64px; width: 160px; height: 160px; border-radius: 80px; background-color: #ff50504d;"></div>
+    <div id="wave_bar" style="position: absolute; left: 24px; top: 24px; width: 240px; height: 16px; border-radius: 8px; background-color: #00000059;"></div>
+    <div id="score_panel" style="position: absolute; right: 24px; top: 24px; width: 160px; height: 64px; border-radius: 12px; background-color: #00000059;"></div>
+  </body>
+</rml>

@@ -1,0 +1,87 @@
+<!--
+    GameHud.rml —— 玩法 HUD。动态值走数据模型绑定，Lua 侧改值后 MarkDirty(name) 刷新。
+    绑定节点必须包在 <div data-model="{{__data_model_id}}"> 里（rbfx LuaRmlUIComponent 硬要求，见 107_HelloRmlUI）。
+
+    数据绑定的三种合法写法（照 107_HelloRmlUI 与官方 Data/UI 样例，实测只有这三种）：
+      * 文本：元素内容里写 {{name}}（BindReadonlyProperty 返回 string/number）。
+      * 进度条：<progress data-value="name"/>，name 绑定 0..1 的数值 getter；填充样式来自 default.rcss 的 progress/progress fill。
+      * 条件显隐：data-if="name"，name 绑定 bool getter；false 时元素整个不进渲染树。
+
+    不支持的写法（会报 "Syntax error parsing property declaration"）：内联 style 里塞 {{name}}，
+    例如 style="width: {{pct}}" / opacity / background-color / display —— RCSS 解析器直接吃到 {{ 就崩。
+    所以血条用 <progress data-value>、hitmarker 与结算面板用 data-if，绝不在 style 里绑定。
+
+    约定：
+      * head 同时 link rml.rcss / layout.rcss（拿到 .fullscreen 与默认字体）+ default.rcss（主题、progress 样式）。
+      * body class="fullscreen"，内部一律绝对定位，单位是设计像素（context scale 整体缩放）。
+      * 颜色统一 RRGGBBAA 八位十六进制，不用 rgba()（会被 atoi 截断，见 RCSS 配色坑）。
+      * 左下 #stick_ring 的几何（left40/bottom40/224x224）与 main.lua 的 STICK 常量、
+        core/Joystick 的抓取判定是同一套，改这里必须同步改那里。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+    <style>
+        .bar_track { position: relative; background-color: #00000066; border-radius: 6px; overflow: hidden; }
+        .label { color: #ffffffd9; font-size: 22px; }
+        .big { color: #ffffffff; font-size: 64px; font-weight: bold; }
+    </style>
+</head>
+<body class="fullscreen">
+<div data-model="{{__data_model_id}}">
+
+    <!-- 左上：波次 + 防线血条 -->
+    <div style="position: absolute; left: 28px; top: 24px; width: 300px;">
+        <div class="label">WAVE {{wave}}</div>
+        <progress class="horizontal" data-value="defense" style="display: block; margin-top: 8px; width: 260px; height: 14px;"/>
+        <div class="label" style="margin-top: 6px; font-size: 18px; color: #ffffff99;">{{narrate}}</div>
+    </div>
+
+    <!-- 右上：分数 + combo -->
+    <div style="position: absolute; right: 28px; top: 24px; width: 220px; text-align: right;">
+        <div class="big">{{score}}</div>
+        <div class="label" style="font-size: 30px; color: #ffd24dff;">{{comboText}}</div>
+    </div>
+
+    <!-- 准星已移除：改为王者式自动吸附开火（见 Shooting.lua），命中确认靠下面的 hitmarker。 -->
+
+    <!-- 中央 hitmarker：普通命中(白) / 强命中(红)，靠 data-if 二选一显示（不支持内联 opacity 绑定） -->
+    <div data-if="hitNormal" style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
+        <div style="position: absolute; left: -18px; top: -2px; width: 36px; height: 4px; background-color: #ffffffd9; transform: rotate(45deg);"></div>
+        <div style="position: absolute; left: -18px; top: -2px; width: 36px; height: 4px; background-color: #ffffffd9; transform: rotate(-45deg);"></div>
+    </div>
+    <div data-if="hitStrong" style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
+        <div style="position: absolute; left: -20px; top: -3px; width: 40px; height: 6px; background-color: #ff4d4dff; transform: rotate(45deg);"></div>
+        <div style="position: absolute; left: -20px; top: -3px; width: 40px; height: 6px; background-color: #ff4d4dff; transform: rotate(-45deg);"></div>
+    </div>
+
+    <!-- 右下：攻击键（王者式普攻，点一下自动吸附最近敌人开火；data-event-click 见 Hud.lua/Shooting.lua） -->
+    <div data-event-click="attack" style="position: absolute; right: 44px; bottom: 150px; width: 132px; height: 132px; border-radius: 66px; background-color: #d94b3ae6; text-align: center;">
+        <div style="position: relative; top: 46px; color: #ffffffff; font-size: 40px; font-weight: bold;">攻击</div>
+    </div>
+
+    <!-- 右下：弹药 + 装弹条 -->
+    <div style="position: absolute; right: 40px; bottom: 64px; width: 200px; text-align: right;">
+        <div class="big">{{ammo}}</div>
+        <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6px; margin-left: 40px; width: 160px; height: 10px;"/>
+    </div>
+
+    <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改） -->
+    <div id="stick_ring" style="position: absolute; left: 40px; bottom: 40px; width: 224px; height: 224px; border-radius: 112px; background-color: #ffffff2e;">
+        <div id="stick_ring_core" style="position: absolute; left: 24px; top: 24px; width: 176px; height: 176px; border-radius: 88px; background-color: #00000040;"></div>
+    </div>
+
+    <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
+    <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center;">
+        <div style="position: relative; top: 320px;">
+            <div style="color: #ffffffff; font-size: 72px; font-weight: bold;">{{endTitle}}</div>
+            <div class="label" style="margin-top: 16px; font-size: 34px;">SCORE {{endScore}}</div>
+            <button data-event-click="restart" style="margin-top: 48px; padding: 18px 48px; font-size: 30px; background-color: #d94b3aff; color: #ffffffff; border-radius: 12px;">再来一局</button>
+        </div>
+    </div>
+
+</div>
+</body>
+</rml>

@@ -1,0 +1,31 @@
+<!--
+    爆炸：加色的橙黄火球，初速大、阻尼小、粒子大，一帧之内炸开后迅速暗下去。
+    火球之后的烟柱由 Particle/Smoke.xml 另起一个发射器（加色混不出黑烟）。
+    约定见 Particle/HitFlesh.xml。
+-->
+<particleeffect>
+    <material name="Materials/ParticleAdd.xml" />
+    <numparticles value="48" />
+    <updateinvisible enable="false" />
+    <relative enable="false" />
+    <scaled enable="true" />
+    <sorted enable="false" />
+    <emittertype value="Sphere" />
+    <emittersize value="0.30 0.30 0.30" />
+    <direction min="-1 -0.4 -1" max="1 1.2 1" />
+    <constantforce value="0 -2.0 0" />
+    <dampingforce value="0.25" />
+    <activetime value="0.12" />
+    <inactivetime value="0" />
+    <emissionrate min="380" max="420" />
+    <particlesize min="0.40 0.40" max="0.90 0.90" />
+    <timetolive min="0.35" max="0.70" />
+    <velocity min="4.0" max="9.0" />
+    <rotation min="0" max="360" />
+    <rotationspeed min="-120" max="120" />
+    <sizedelta add="0.60" mul="1.0" />
+    <colorfade color="1.0 0.95 0.70 1" time="0" />
+    <colorfade color="1.0 0.55 0.12 1" time="0.18" />
+    <colorfade color="0.45 0.12 0.03 0.6" time="0.45" />
+    <colorfade color="0 0 0 0" time="0.70" />
+</particleeffect>

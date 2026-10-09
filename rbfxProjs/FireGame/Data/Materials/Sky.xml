@@ -1,0 +1,19 @@
+<!--
+    天空盒材质，结构照抄 CoreData/Materials/DefaultSkybox.xml（那份是引擎验证过的范式）。
+
+    技术必须是 DiffSkybox：它的 pass 是 postopaque + depthwrite=false，天空在不透明物体
+    之后画且不写深度，所以永远衬在场景后面；换成普通 LitOpaque 会和几何体抢深度。
+
+    cull none：相机在盒子内部看，正面朝向是反的，不关背面剔除就什么都看不见。
+    shadowcull ccw 同样照抄，避免天空盒被算进阴影投射者。
+
+    贴图走工程自己那张 670 字节的渐变（见 Data/Textures/Sky.xml），不用 CoreData 的
+    DefaultSkybox.dds（近乎纯色，看不出地平线），也不用 Data/Textures/Skybox.xml
+    （BrightDay1_*.dds 共 8MB 且在引擎示例目录里，不会进小游戏包）。
+-->
+<material>
+    <technique name="Techniques/DiffSkybox.xml" />
+    <texture slot="Albedo" name="Textures/Sky.xml" />
+    <cull value="none" />
+    <shadowcull value="ccw" />
+</material>

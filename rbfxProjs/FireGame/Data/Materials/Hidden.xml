@@ -1,0 +1,27 @@
+<!--
+    "什么都别画"材质：alpha 全 0 的透明材质，用来藏掉模型里不想要的 geometry。
+
+    Character_Soldier.fbx 有 67 个 geometry：0..7 是本体（带 TEXCOORD），8..66 是随包
+    附上的一堆散落道具（只有顶点色，落在角色前方 0.1~2.1m、腰胸高度，是资产作者摆出来
+    展示配件用的）。进游戏就是一团漂浮杂物，正好糊在狙击视线上。Lua 侧没有隐藏单个
+    geometry 的接口，但 StaticModel:SetMaterial(index, mat) 有逐 geometry 的重载，
+    于是给 8..66 号统一挂这份全透明材质（见 Player.lua 与 Config.PLAYER_BODY_GEOMETRIES）。
+
+    技术选 UnlitTransparent（M_Default + alpha 混合 + depthwrite=false），不选
+    NoTextureUnlitAlpha：后者走老的 Unlit 着色器，本工程其余部分都在 M_Default/PBR
+    这条路上，不必多引一条着色器分支到 wasm。
+
+    两个代价都可接受：① 它仍是一个 batch，59 个 geometry 就是 59 次 draw call，但主角
+    只有一个且 alpha=0 的片元极便宜；② 透明技术带 shadow pass，所以挂它的模型必须
+    SetCastShadows(false)，否则会投出一团看不见的影子（Player.lua 已处理）。
+
+    射线仍会打到这些看不见的 geometry，所以 Shooting.lua 里有"命中主角自己就穿过去
+    继续查"的规则，两处要一起看。
+
+    换正式主角资源时把 Config.PLAYER_BODY_GEOMETRIES 设成 nil 即可停用这套隐藏逻辑。
+-->
+<material>
+    <technique name="Techniques/UnlitTransparent.xml" />
+    <parameter name="MatDiffColor" value="0 0 0 0" />
+    <parameter name="MatSpecColor" value="0 0 0 1" />
+</material>

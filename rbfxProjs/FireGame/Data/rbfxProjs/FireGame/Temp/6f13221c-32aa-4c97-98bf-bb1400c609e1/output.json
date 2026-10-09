@@ -1,0 +1,30 @@
+[
+	{
+		"hasValue": true,
+		"value": {
+			"appliedTransformers": [
+				"ModelImporter"
+			],
+			"dependencyModificationTimes": [],
+			"modifiedResourceNames": [],
+			"outputResourceNames": [
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier.mdl",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureDeath.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureDuck.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureHitReact.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureIdle.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureIdle_Shoot.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureJump.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureJump_Idle.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureJump_Land.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureNo.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmaturePunch.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureRun.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureRun_Gun.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureWave.ani",
+				"Models/Quaternius_Player/Fbx/Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmatureYes.ani"
+			],
+			"sourceModified": false
+		}
+	}
+]

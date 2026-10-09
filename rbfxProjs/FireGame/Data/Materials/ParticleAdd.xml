@@ -1,0 +1,16 @@
+<!--
+    加色粒子材质（additive）：火花、爆炸、枪口焰。
+
+    与 ParticleSoft.xml 同一张贴图（Textures/Dot.png，工程自带，理由见那份的注释），
+    区别只在混合方式：add 是"越叠越亮"，所以火花和爆炸能自发亮、能盖过场景光；
+    alpha 混合只会越叠越实，做不出那种发光感。
+
+    代价是 add 不受雾影响（雾是乘法，加色会把雾也加亮），所以远处的爆炸会偏亮 ——
+    在本游戏里爆炸都发生在近处海面上，可以接受。
+-->
+<material>
+    <technique name="Techniques/DiffUnlitParticleAdd.xml" />
+    <texture slot="Albedo" name="Textures/Dot.png" />
+    <parameter name="MatDiffColor" value="1 1 1 1" />
+    <cull value="none" />
+</material>

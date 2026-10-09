@@ -1,0 +1,32 @@
+<!--
+    烟柱：爆炸之后另起一个发射器用这个。
+    必须用 alpha 混合的 ParticleSoft 而不是 ParticleAdd —— additive 只会让烟变成发亮的灰白
+    一团，混不出"挡光"的黑烟。烟的特征是：初速小、往上飘（constantforce 为正）、
+    阻尼大（几乎没有横向飞行）、寿命长、粒子随时间明显变大（sizedelta add 大）。
+    一次性喷发的约定见 Particle/HitFlesh.xml。
+-->
+<particleeffect>
+    <material name="Materials/ParticleSoft.xml" />
+    <numparticles value="32" />
+    <updateinvisible enable="false" />
+    <relative enable="false" />
+    <scaled enable="true" />
+    <sorted enable="true" />
+    <emittertype value="Sphere" />
+    <emittersize value="0.35 0.10 0.35" />
+    <direction min="-0.35 1 -0.35" max="0.35 1 0.35" />
+    <constantforce value="0 2.2 0" />
+    <dampingforce value="1.2" />
+    <activetime value="0.30" />
+    <inactivetime value="0" />
+    <emissionrate min="70" max="95" />
+    <particlesize min="0.45 0.45" max="0.85 0.85" />
+    <timetolive min="1.20" max="2.00" />
+    <velocity min="0.8" max="2.0" />
+    <rotation min="0" max="360" />
+    <rotationspeed min="-25" max="25" />
+    <sizedelta add="0.90" mul="1.0" />
+    <colorfade color="0.16 0.15 0.14 0.55" time="0" />
+    <colorfade color="0.32 0.30 0.28 0.35" time="0.45" />
+    <colorfade color="0.55 0.55 0.56 0" time="2.00" />
+</particleeffect>

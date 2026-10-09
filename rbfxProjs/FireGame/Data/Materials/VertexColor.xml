@@ -1,0 +1,17 @@
+<!--
+    顶点色材质。
+
+    Character_Soldier 的 18 个 geometry 分两类：本体（头/身）带 TEXCOORD 不带 COLOR，
+    随包散落的道具（背包、枪械、箱子等，落在角色身后 1~2m 处）只有 UBYTE4_NORM:COLOR
+    没有 UV。导入走 -nm -nt 丢掉了 FBX 里那 11 个纯色材质，所以要手写。
+
+    技术选 NoTextureVCol（参与光照、不采贴图、直接吃顶点色），不用 DiffVCol：后者带
+    DIFFMAP 定义，无贴图时会去采默认白纹理，属于多此一举。
+
+    本体的那几个 geometry 由 game/Materials.lua 在运行时按 geometry 索引另配纯色材质
+    （StaticModel:SetMaterial(index, mat) 有逐 geometry 的重载），否则整只角色会一半白
+    一半彩。
+-->
+<material>
+    <technique name="Techniques/NoTextureVCol.xml" />
+</material>
