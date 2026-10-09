@@ -86,6 +86,11 @@ extern ea::vector<ea::string> nonSkinningBoneExcludes_;
 extern float importStartTime_;
 extern float importEndTime_;
 extern unsigned lastImportContentFlags_;
+// Host-side multiplier applied to every converted position on top of the FBX's own unit scale, from
+// the "-is" option (the per-asset import scale, i.e. the Inspector's "Scale"). Escape hatch for
+// assets whose declared unit does not match how they were authored. Defined in AssetImporter.cpp
+// next to the other shared globals.
+extern float importScale_;
 
 namespace Urho3D
 {
@@ -120,6 +125,19 @@ static Vector3 ToVector3(const ufbx_vec3& v)
     return Vector3((float)v.x, (float)v.y, (float)-v.z);
 }
 
+// Unit scale applied to every position converted from the FBX: the file's own unit declaration
+// (scene->settings.unit_meters, 0.01 for the usual centimeter-authored Blender export) times the
+// host's import scale override (decided in ImportFbx below). rbfx works in meters, so an asset lands
+// at its real-world size and prefabs can keep a unit node scale. Rotations and scale factors are
+// unitless and stay untouched; local points and matrix translations are both multiplied, which is
+// the conjugation S * M * S^-1 and therefore stays consistent under composition and inversion.
+static float g_positionScale = 1.0f;
+
+static Vector3 ToPosition3(const ufbx_vec3& v)
+{
+    return ToVector3(v) * g_positionScale;
+}
+
 static Vector2 ToVector2(const ufbx_vec2& v)
 {
     return Vector2((float)v.x, (float)v.y);
@@ -136,12 +154,13 @@ static Quaternion ToQuaternion(const ufbx_quat& q)
 static Matrix3x4 ToMatrix3x4(const ufbx_matrix& m)
 {
     // Mz * M * Mz: negate the third row and third column (except the m22 diagonal);
-    // the translation column holds a point, so its z is negated as well.
+    // the translation column holds a point, so its z is negated as well and the whole
+    // column is scaled by g_positionScale (see the comment on ToPosition3).
     // Element (i,j) becomes Mz[i][i] * m_ij * Mz[j][j].
     return Matrix3x4(
-        (float)m.m00, (float)m.m01, (float)-m.m02, (float)m.m03,
-        (float)m.m10, (float)m.m11, (float)-m.m12, (float)m.m13,
-        (float)-m.m20, (float)-m.m21, (float)m.m22, (float)-m.m23
+        (float)m.m00, (float)m.m01, (float)-m.m02, (float)m.m03 * g_positionScale,
+        (float)m.m10, (float)m.m11, (float)-m.m12, (float)m.m13 * g_positionScale,
+        (float)-m.m20, (float)-m.m21, (float)m.m22, (float)-m.m23 * g_positionScale
     );
 }
 
@@ -247,6 +266,22 @@ bool ImportFbx(const ea::string& inFile, const ea::string& outFile, const ea::st
         return false;
     }
 
+    // rbfx works in meters, FBX in centimeters by SDK convention: the file declares its unit as
+    // GlobalSettings!UnitScaleFactor (centimeters per unit), which ufbx pre-converts into
+    // scene->settings.unit_meters (0.01 for the usual Blender export). Every position is multiplied
+    // by it, times the host's per-asset import scale for assets that need an extra correction.
+    //
+    // Verified against real packs: Kenney watercraft and Quaternius characters both declare 1.0 and
+    // both are genuinely centimeter authored (a 2.7 m rowboat stored as 274 units, a 2 m character
+    // with its head at y ~ 200) - Blender puts the meter -> centimeter factor into the node
+    // transforms, not into the vertex data. Consequently, reading raw FBX "Vertices" yields
+    // local-space values only and misreports such files as meter authored; measure the imported
+    // .mdl (or apply the node transforms) when judging an asset's real-world size.
+    g_positionScale = (float)(scene->settings.unit_meters > 0.0 ? scene->settings.unit_meters : 1.0) * importScale_;
+    if (g_positionScale != 1.0f)
+        PrintLine(Format("Position scale {}: FBX unit {} meters per unit, import scale {}",
+            g_positionScale, scene->settings.unit_meters, importScale_));
+
     ufbx_node* rootNode = scene->root_node;
     if (!rootNodeName.empty())
     {
@@ -341,7 +376,7 @@ static void FbxDumpNodes(ufbx_node* node, ufbx_node* rootNode, unsigned level)
         return;
 
     const ea::string indent(static_cast<ea::string::size_type>(level * 2), ' ');
-    const Vector3 pos = ToVector3(node->local_transform.translation);
+    const Vector3 pos = ToPosition3(node->local_transform.translation);
 
     PrintLine(Format("{}Node {} pos {}", indent, ea::string(node->name.data), pos.ToString()));
 
@@ -606,7 +641,7 @@ static void FbxBuildBoneCollisionInfo(FbxModel& model, ufbx_scene* scene)
                         // S-converted (see ToMatrix3x4/ToVector3), so the result matches the
                         // converted bone frame used for the skeleton
                         const Vector3 vertex = ToMatrix3x4(cluster->geometry_to_bone)
-                            * ToVector3(mesh->vertices.data[vertexIndex]);
+                            * ToPosition3(mesh->vertices.data[vertexIndex]);
                         float radius = vertex.Length();
                         if (radius > model.boneRadii_[boneIndex])
                             model.boneRadii_[boneIndex] = radius;
@@ -884,15 +919,19 @@ static void FbxProcessMeshPart(
 
         // Position - use logical vertex index
         uint32_t vertexIndex = mesh->vertex_indices.data[idx];
-        rv.position = vertexTransform * ToVector3(mesh->vertex_position.values.data[mesh->vertex_position.indices.data[idx]]);
+        rv.position = vertexTransform * ToPosition3(mesh->vertex_position.values.data[mesh->vertex_position.indices.data[idx]]);
 
         // Normal
         if (mesh->vertex_normal.exists)
             rv.normal = normalTransform * ToVector3(mesh->vertex_normal.values.data[mesh->vertex_normal.indices.data[idx]]);
 
-        // UVs
+        // UVs. FBX stores V bottom-up (Autodesk convention) while the engine samples V top-down,
+        // so flip at import time. glTF is already top-down and its importer must not flip.
         for (unsigned s = 0; s < numUVSets; ++s)
+        {
             rv.uvs[s] = ToVector2(mesh->uv_sets.data[s].vertex_uv.values.data[mesh->uv_sets.data[s].vertex_uv.indices.data[idx]]);
+            rv.uvs[s].y_ = 1.0f - rv.uvs[s].y_;
+        }
 
         // Colors
         for (unsigned s = 0; s < numColorSets; ++s)
@@ -910,6 +949,8 @@ static void FbxProcessMeshPart(
             // The S mirror flips the cross product, so the handedness sign is recomputed
             // correctly from the converted vectors below
             float w = (tan.CrossProduct(norm).DotProduct(bitan) < 0.5f) ? -1.0f : 1.0f;
+            // V was flipped above, so the bitangent consistent with engine UVs is negated
+            w = -w;
             rv.tangent = Vector4(tan.x_, tan.y_, tan.z_, w);
         }
 
@@ -1227,7 +1268,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
             newBone.name_ = ea::string(boneNode->name.data);
 
             ufbx_transform t = boneNode->local_transform;
-            newBone.initialPosition_ = ToVector3(t.translation);
+            newBone.initialPosition_ = ToPosition3(t.translation);
             newBone.initialRotation_ = ToQuaternion(t.rotation);
             newBone.initialScale_ = ToScale(t.scale);
 
@@ -1459,7 +1500,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
 
                     AnimationKeyFrame kf;
                     kf.time_ = t - thisImportStartTime;
-                    kf.position_ = ToVector3(xform.translation);
+                    kf.position_ = ToPosition3(xform.translation);
                     kf.rotation_ = ToQuaternion(xform.rotation);
                     kf.scale_ = ToScale(xform.scale);
                     track->keyFrames_.push_back(kf);
@@ -1524,7 +1565,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                 {
                     transforms[ki] = ufbx_evaluate_transform(anim, boneNode, (double)keyTimes[ki]);
 
-                    if (!hasPos && !ToVector3(transforms[ki].translation).Equals(ToVector3(restTransform.translation)))
+                    if (!hasPos && !ToPosition3(transforms[ki].translation).Equals(ToPosition3(restTransform.translation)))
                         hasPos = true;
                     if (!hasRot && !ToQuaternion(transforms[ki].rotation).Equals(ToQuaternion(restTransform.rotation)))
                         hasRot = true;
@@ -1578,13 +1619,13 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                     if (model && boneNode == model->rootBone_ && boneNode != model->rootNode_)
                     {
                         // Build transform matrix and make relative to model root
-                        Matrix3x4 boneLocal(ToVector3(xform.translation), ToQuaternion(xform.rotation), ToScale(xform.scale));
+                        Matrix3x4 boneLocal(ToPosition3(xform.translation), ToQuaternion(xform.rotation), ToScale(xform.scale));
                         // Walk parent chain from root bone to model root
                         Matrix3x4 derivedTransform = boneLocal;
                         ufbx_node* parent = boneNode->parent;
                         while (parent && parent != model->rootNode_)
                         {
-                            Matrix3x4 parentLocal(ToVector3(parent->local_transform.translation),
+                            Matrix3x4 parentLocal(ToPosition3(parent->local_transform.translation),
                                 ToQuaternion(parent->local_transform.rotation),
                                 ToScale(parent->local_transform.scale));
                             derivedTransform = parentLocal * derivedTransform;
@@ -1597,7 +1638,7 @@ static void FbxBuildAndSaveAnimations(ufbx_scene* scene, FbxModel* model)
                     }
                     else
                     {
-                        kf.position_ = ToVector3(xform.translation);
+                        kf.position_ = ToPosition3(xform.translation);
                         kf.rotation_ = ToQuaternion(xform.rotation);
                         kf.scale_ = ToScale(xform.scale);
                     }
@@ -1765,7 +1806,7 @@ static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* 
     {
         Node* outNode = outScene->CreateChild(nodeName);
         ufbx_transform t = srcNode->local_transform;
-        outNode->SetTransform(ToVector3(t.translation), ToQuaternion(t.rotation), ToScale(t.scale));
+        outNode->SetTransform(ToPosition3(t.translation), ToQuaternion(t.rotation), ToScale(t.scale));
         nodeMapping[srcNode] = outNode;
         return outNode;
     }
@@ -1777,7 +1818,7 @@ static Node* FbxCreateSceneNode(Scene* outScene, ufbx_node* srcNode, ufbx_node* 
         Node* parent = nodeMapping[srcNode->parent];
         Node* outNode = parent->CreateChild(nodeName);
         ufbx_transform t = srcNode->local_transform;
-        outNode->SetTransform(ToVector3(t.translation), ToQuaternion(t.rotation), ToScale(t.scale));
+        outNode->SetTransform(ToPosition3(t.translation), ToQuaternion(t.rotation), ToScale(t.scale));
         nodeMapping[srcNode] = outNode;
         return outNode;
     }

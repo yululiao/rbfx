@@ -110,6 +110,10 @@ ea::vector<ea::string> nonSkinningBoneExcludes_;
 // For subset animation import usage
 float importStartTime_ = 0.0f;
 float importEndTime_ = 0.0f;
+// Multiplier applied to every converted position on top of the FBX's own unit scale, from "-is".
+// Escape hatch for assets whose declared unit does not match how they were authored, so that rbfx's
+// 1 unit = 1 meter still holds. Consumed by FbxImporter.
+float importScale_ = 1.0f;
 // Bitmask of AssetImporterContentType detected by the last "import" run. Set by ImportFbx in
 // FbxImporter.cpp (through the extern contract) and exposed via AssetImporterGetLastImportContent.
 unsigned lastImportContentFlags_ = 0;
@@ -149,6 +153,7 @@ void Run(const ea::vector<ea::string>& arguments)
     nonSkinningBoneExcludes_.clear();
     importStartTime_ = 0.0f;
     importEndTime_ = 0.0f;
+    importScale_ = 1.0f;
     lastImportContentFlags_ = 0;
 
     // Reuse the host process context (see AcquireImportContext),
@@ -193,6 +198,9 @@ void Run(const ea::vector<ea::string>& arguments)
             "-ct         Check and do not overwrite if texture exists\n"
             "-ctn        Check and do not overwrite if texture has newer timestamp\n"
             "-am         Export all meshes even if identical (scene mode only)\n"
+            "-is <scale> Multiply every position by <scale>, on top of the FBX unit scale.\n"
+            "            Escape hatch for assets whose declared unit does not match how they were\n"
+            "            authored, so that 1 rbfx unit still means 1 meter\n"
             "-split <start> <end> (animation model only)\n"
             "            Split animation, will only import from start frame to end frame\n"
         );
@@ -270,6 +278,13 @@ void Run(const ea::vector<ea::string>& arguments)
             else if (argument == "r" && !value.empty())
             {
                 rootNodeName = value;
+                ++i;
+            }
+            else if (argument == "is" && !value.empty())
+            {
+                importScale_ = ToFloat(value);
+                if (importScale_ <= 0.0f)
+                    importScale_ = 1.0f;
                 ++i;
             }
             else if (argument == "s")

@@ -51,11 +51,188 @@ bool MergeDirectory(FileSystem* fs, const ea::string& source, const ea::string& 
     return true;
 }
 
+// --- Asset filter matching. Paths are staged-relative, forward slashes, compared case-insensitively.
+// --- A game that loads its assets from Lua by runtime-concatenated names cannot be pruned by static
+// --- reference analysis, so inclusion is a hand-authored allowlist (see AssetFilterSettings).
+
+/// ASCII lowercase; resource paths are ASCII, other bytes pass through untouched.
+inline char LowerAscii(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+bool IEquals(const ea::string& a, const ea::string& b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i != a.size(); ++i)
+        if (LowerAscii(a[i]) != LowerAscii(b[i]))
+            return false;
+    return true;
+}
+
+bool IStartsWith(const ea::string& a, const ea::string& prefix)
+{
+    if (a.size() < prefix.size())
+        return false;
+    for (size_t i = 0; i != prefix.size(); ++i)
+        if (LowerAscii(a[i]) != LowerAscii(prefix[i]))
+            return false;
+    return true;
+}
+
+/// Recursive glob over a path. '*' matches within one segment (never crosses '/'), '?' matches one
+/// non-'/' char, '**' matches across segments. 'si'/'pi' are cursors into subject/pattern.
+bool GlobFrom(const ea::string& s, size_t si, const ea::string& p, size_t pi)
+{
+    while (pi < p.size())
+    {
+        const char pc = p[pi];
+        if (pc == '*')
+        {
+            const bool dbl = (pi + 1 < p.size() && p[pi + 1] == '*');
+            if (dbl)
+            {
+                pi += 2;
+                if (pi < p.size() && p[pi] == '/') // "**/" also matches the empty span
+                    ++pi;
+                for (size_t k = si;; ++k)
+                {
+                    if (GlobFrom(s, k, p, pi))
+                        return true;
+                    if (k >= s.size())
+                        return false;
+                }
+            }
+            ++pi;
+            for (size_t k = si;; ++k)
+            {
+                if (GlobFrom(s, k, p, pi))
+                    return true;
+                if (k >= s.size() || s[k] == '/') // single '*' stays inside the segment
+                    return false;
+            }
+        }
+        else if (pc == '?')
+        {
+            if (si >= s.size() || s[si] == '/')
+                return false;
+            ++si;
+            ++pi;
+        }
+        else
+        {
+            if (si >= s.size() || LowerAscii(s[si]) != LowerAscii(pc))
+                return false;
+            ++si;
+            ++pi;
+        }
+    }
+    return si == s.size();
+}
+
+/// One rule against one relative path. A pattern with no wildcard is a directory prefix (whole
+/// subtree); otherwise it is a glob. Backslashes and a trailing slash in the pattern are normalized.
+bool MatchRule(const ea::string& rel, ea::string pattern)
+{
+    pattern.replace("\\", "/");
+    while (!pattern.empty() && pattern.back() == '/')
+        pattern.pop_back();
+    if (pattern.empty())
+        return false;
+    if (pattern.find('*') == ea::string::npos && pattern.find('?') == ea::string::npos)
+    {
+        if (IEquals(rel, pattern))
+            return true;
+        return rel.size() > pattern.size() && rel[pattern.size()] == '/' && IStartsWith(rel, pattern);
+    }
+    return GlobFrom(rel, 0, pattern, 0);
+}
+
+/// The scaffolding that always ships regardless of the allowlist, so a filter cannot brick the game:
+/// root-level *.json entry configs (Game.json) and the Scenes/, Scripts/, UI/ roots.
+bool IsProtectedRoot(const ea::string& rel)
+{
+    if (rel.find('/') == ea::string::npos)
+    {
+        static const ea::string jsonExt = ".json";
+        return rel.size() >= jsonExt.size() && IEquals(rel.substr(rel.size() - jsonExt.size()), jsonExt);
+    }
+    return IStartsWith(rel, "Scenes/") || IStartsWith(rel, "Scripts/") || IStartsWith(rel, "UI/");
+}
+
+/// Bytes of a file, or zero when it cannot be opened. Only used to size a dropped file for the report.
+unsigned long long FileSizeOf(Context* context, const ea::string& path)
+{
+    File file(context, path, FILE_READ);
+    return file.IsOpen() ? static_cast<unsigned long long>(file.GetSize()) : 0ULL;
+}
+
+/// Tally of one staging pass: what the filter dropped, and which Include entries actually matched.
+struct FilterStats
+{
+    unsigned dropped = 0;
+    unsigned long long droppedBytes = 0ULL;
+    ea::vector<char> includeHit; // parallel to filter.include_
+};
+
+/// Keep-or-drop a staged relative path. 'absPath' sizes a dropped file for the report. Protected roots
+/// win over everything; an empty Include means the filter is off and everything is kept.
+bool ShouldKeep(const ea::string& relIn, const ea::string& absPath, Context* context,
+    const AssetFilterSettings& filter, FilterStats& stats)
+{
+    ea::string rel = relIn;
+    rel.replace("\\", "/");
+
+    // Record the matching Include entry even when a protected root keeps the file anyway, so a
+    // redundant "Scripts/**" in the allowlist does not raise a spurious zero-match warning.
+    int hit = -1;
+    if (filter.IsEnabled())
+    {
+        for (size_t i = 0; i != filter.include_.size(); ++i)
+        {
+            if (MatchRule(rel, filter.include_[i]))
+            {
+                hit = static_cast<int>(i);
+                break;
+            }
+        }
+        if (hit >= 0 && hit < static_cast<int>(stats.includeHit.size()))
+            stats.includeHit[hit] = 1;
+    }
+
+    if (IsProtectedRoot(rel))
+        return true;
+    if (!filter.IsEnabled())
+        return true;
+
+    auto drop = [&]() {
+        ++stats.dropped;
+        stats.droppedBytes += FileSizeOf(context, absPath);
+    };
+
+    if (hit < 0)
+    {
+        drop();
+        return false;
+    }
+    for (const ea::string& ex : filter.exclude_)
+    {
+        if (MatchRule(rel, ex))
+        {
+            drop();
+            return false;
+        }
+    }
+    return true;
+}
+
 /// The merge MergeDirectory cannot do: FileSystem::CopyDir never skips a file, and the staged Data/
 /// must leave cooking-only sources behind (IsCookingSourceFile). Merge semantics are otherwise the
 /// same; directories are created around each surviving file rather than copied up front, so a folder
 /// that held nothing but sources does not resurface empty in the package.
-bool MergeProjectData(FileSystem* fs, const ea::string& source, const ea::string& destination, ea::string& message)
+bool MergeProjectData(FileSystem* fs, Context* context, const ea::string& source, const ea::string& destination,
+    const AssetFilterSettings& filter, FilterStats& stats, ea::string& message)
 {
     if (!fs->DirExists(source))
     {
@@ -74,6 +251,9 @@ bool MergeProjectData(FileSystem* fs, const ea::string& source, const ea::string
             ++skipped;
             continue;
         }
+        // The directory allowlist carves the staged tree down to what the game actually ships.
+        if (!ShouldKeep(relative, source + relative, context, filter, stats))
+            continue;
 
         const ea::string target = destination + relative;
         if (!fs->CreateDirsRecursive(GetPath(target)))
@@ -201,11 +381,17 @@ bool StageDataStep::Run(ea::string& message)
 
     const ea::string staged = owner_.stagingDir() + DataDirName;
 
+    // Everything below is gated by the platform's directory allowlist. An empty Include leaves the
+    // filter off, so the whole tree ships exactly as before. The tally spans both staging passes.
+    const AssetFilterSettings& filter = owner_.platform()->assetFilter_;
+    FilterStats stats;
+    stats.includeHit.assign(filter.include_.size(), 0);
+
     // The project's Data/ is the only source of this tree: engine sample resources are not the
     // game's, and the engine's own contribution to a package is CoreData/, staged separately. A
     // project that needs an engine sample copies it into its own Data/. Cooking-only sources stay
     // behind: nothing resolves the .fbx after the import, only the .mdl staged from the Cache.
-    if (!MergeProjectData(fs, NormalizeDir(project->GetDataPath()), staged, message))
+    if (!MergeProjectData(fs, owner_.context(), NormalizeDir(project->GetDataPath()), staged, filter, stats, message))
         return false;
 
     // Imported assets cook their runtime-format products (the .mdl/.ani behind a source .fbx) into the
@@ -225,6 +411,10 @@ bool StageDataStep::Run(ea::string& message)
                     "Cache. Re-import the asset before shipping.", source);
                 return false;
             }
+            // The same allowlist governs cooked outputs as Data/ files: they share the relative key
+            // space, so an excluded model's cooked products never reach the package either.
+            if (!ShouldKeep(output, source, owner_.context(), filter, stats))
+                continue;
             const ea::string destination = staged + output;
             if (!fs->CreateDirsRecursive(GetPath(destination)))
             {
@@ -235,6 +425,22 @@ bool StageDataStep::Run(ea::string& message)
             {
                 message = Format("Could not stage cooked output '{}'.", destination);
                 return false;
+            }
+        }
+    }
+
+    if (filter.IsEnabled())
+    {
+        URHO3D_LOGINFO("[Build] Asset filter active: dropped {} file(s), {} bytes not staged", stats.dropped,
+            stats.droppedBytes);
+        // An Include entry that matched nothing is almost always a typo or a moved folder; without
+        // this it would silently ship nothing for that line and the breakage surfaces only at runtime.
+        for (size_t i = 0; i != filter.include_.size(); ++i)
+        {
+            if (i >= stats.includeHit.size() || !stats.includeHit[i])
+            {
+                URHO3D_LOGWARNING("[Build] Asset filter Include '{}' matched nothing - check the path "
+                    "(staged-relative, forward slashes, no typos).", filter.include_[i]);
             }
         }
     }

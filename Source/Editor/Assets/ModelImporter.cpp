@@ -248,15 +248,18 @@ bool ModelImporter::IsApplicable(const AssetTransformerInput& input)
 bool ModelImporter::Execute(
     const AssetTransformerInput& input, AssetTransformerOutput& output, const AssetTransformerVector& transformers)
 {
-    // FBX files no longer go through the external FBX2glTF -> GLTF route; import them in-process
-    // with the embedded ufbx backend and let the base pipeline store the result in the cache.
-    if (IsFileNameFBX(input.resourceName_))
-        return ImportFBXEmbedded(input);
-
     const ea::string paramsFileName = GetParametersFileName(input.inputFileName_);
     TransformerParams params;
     if (LoadParameters(params, paramsFileName))
         AddDependency(input, output, paramsFileName);
+
+    // FBX files no longer go through the external FBX2glTF -> GLTF route; import them in-process
+    // with the embedded ufbx backend and let the base pipeline store the result in the cache. The
+    // per-asset parameters are loaded above for this path as well, so the Inspector's "Scale" (or
+    // the "<asset>.fbx.d/ModelImporter.json" override) means the same thing for FBX as for glTF.
+    if (IsFileNameFBX(input.resourceName_))
+        return ImportFBXEmbedded(input, params);
+
     params.assetName_ = GetFileName(input.originalInputFileName_);
 
     const GLTFFileHandle handle = LoadData(input.inputFileName_, params, input.tempPath_);
@@ -266,7 +269,7 @@ bool ModelImporter::Execute(
     return ImportGLTF(handle, params, input, output, transformers);
 }
 
-bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input)
+bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input, const TransformerParams& params)
 {
     auto* project = GetSubsystem<Project>();
     if (!project)
@@ -291,6 +294,14 @@ bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input)
     // AssetManager::MarkCacheDirty, so manual and automatic imports share a single code path.
     const ea::string satelliteDir = AddTrailingSlash(input.outputFileName_);
     StringVector arguments{"import", input.inputFileName_, satelliteDir, "-nm", "-nt"};
+    // The ufbx importer multiplies this with the FBX's own unit scale (0.01 for the usual
+    // centimeter authored Blender export), so an asset authored at yet another scale can still land
+    // in rbfx meters and let its prefab keep a unit node scale.
+    if (params.scale_ > 0.0f && params.scale_ != 1.0f)
+    {
+        arguments.push_back("-is");
+        arguments.push_back(ToString("%g", params.scale_));
+    }
     if (!RunAssetImporter(input.inputFileName_, arguments))
     {
         URHO3D_LOGERROR("Failed to import FBX asset '{}'.", input.resourceName_);

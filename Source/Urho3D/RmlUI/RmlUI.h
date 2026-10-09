@@ -111,6 +111,10 @@ public:
     bool IsInputCaptured() const;
     /// Returns true if any window of this UI context is hovered by mouse.
     bool IsHovered() const;
+    /// Returns size of the canvas this UI covers, in device pixels. It is the render target size when one is set
+    /// (editor game view renders into a backbuffer of its own) and the window size otherwise. Scripts that author
+    /// documents in design pixels need this to convert pointer positions without guessing the host window size.
+    IntVector2 GetCanvasSize() const { return GetDesiredCanvasSize(); }
     /// Update the UI logic. Called by HandlePostUpdate().
     void Update(float timeStep);
     /// Render UI.

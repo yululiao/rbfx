@@ -73,6 +73,28 @@ struct DouyinBuildSettings
     void SerializeInBlock(Archive& archive);
 };
 
+/// Directory-level asset filter applied at staging time to the project's Data/ tree and the cooked
+/// Cache outputs. Absent (Include empty) means everything ships - exactly the behaviour from before
+/// this feature, so an old Build.json is byte-for-byte unaffected. Once Include is populated it
+/// becomes an allowlist: only paths matching an Include entry ship, minus anything Exclude carves
+/// back out. Code/UI/scene scaffolding is always kept regardless (the protected roots in
+/// StageDataStep), so a misconfigured filter cannot brick the package - a game that loads its assets
+/// from Lua by runtime-concatenated names cannot be pruned by static reference analysis, so the list
+/// is authored by hand.
+struct AssetFilterSettings
+{
+    /// Directory prefixes (no wildcard = whole subtree) or globs ('*' within a segment, '**' across
+    /// segments, '?') that ship. Matched against the staged relative path, forward slashes,
+    /// case-insensitive. Empty = filter off, everything ships.
+    ea::vector<ea::string> include_;
+    /// Prefixes or globs carved back out of the Include set. Never overrides a protected root.
+    ea::vector<ea::string> exclude_;
+
+    bool IsEnabled() const { return !include_.empty(); }
+
+    void SerializeInBlock(Archive& archive);
+};
+
 /// Per-platform texture compression parameters, applied at build time by the offline PVRTexTool.
 ///
 /// Every string field treats "" as "use the platform default", resolved by
@@ -178,6 +200,8 @@ struct BuildPlatformData
     AndroidBuildSettings android_;
     DouyinBuildSettings douyin_;
     TextureCompressionSettings textureCompression_;
+    /// Directory allowlist for the packaged Data/ and Cache outputs. Empty (default) ships everything.
+    AssetFilterSettings assetFilter_;
 
     void SerializeInBlock(Archive& archive);
 

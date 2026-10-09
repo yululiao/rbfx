@@ -106,7 +106,8 @@ private:
 
     /// Import an FBX file with the embedded ufbx backend, writing the produced Model into
     /// the temporary output folder. The base pipeline then copies it to the cache and registers it.
-    bool ImportFBXEmbedded(const AssetTransformerInput& input);
+    /// Honors the per-asset import parameters (currently the scale) just like the glTF path does.
+    bool ImportFBXEmbedded(const AssetTransformerInput& input, const TransformerParams& params);
 
     ea::string GetParametersFileName(const ea::string& fileName) const;
     bool LoadParameters(TransformerParams& params, const ea::string& paramsFileName) const;

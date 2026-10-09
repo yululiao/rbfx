@@ -185,6 +185,15 @@ void TextureCompressionSettings::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "Mipmaps", mipmaps_, true);
 }
 
+void AssetFilterSettings::SerializeInBlock(Archive& archive)
+{
+    // The two vectors default to empty and only get written when populated, which is what lets a
+    // Build.json that never mentions the filter (or an "AssetFilter": {} block) read back as
+    // "filter off" and ship everything.
+    SerializeOptionalValue(archive, "Include", include_, ea::vector<ea::string>{});
+    SerializeOptionalValue(archive, "Exclude", exclude_, ea::vector<ea::string>{});
+}
+
 void BuildPlatformData::SerializeInBlock(Archive& archive)
 {
     SerializeOptionalValue(archive, "Name", name_);
@@ -211,6 +220,7 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "Android", android_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "Douyin", douyin_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "TextureCompression", textureCompression_, AlwaysSerialize{});
+    SerializeOptionalValue(archive, "AssetFilter", assetFilter_, AlwaysSerialize{});
 }
 
 ea::string BuildPlatformData::ResolveOutputDir(const ea::string& projectPath) const

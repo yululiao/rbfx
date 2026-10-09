@@ -283,6 +283,7 @@ void RegisterRmlUIBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC(ReloadFonts)
             LUA_MEMBER_FUNC(SetScale)
             LUA_MEMBER_FUNC(GetScale)
+            LUA_MEMBER_FUNC(GetCanvasSize)
             LUA_MEMBER_FUNC(IsInputCaptured)
             LUA_MEMBER_FUNC(IsHovered)
         );
