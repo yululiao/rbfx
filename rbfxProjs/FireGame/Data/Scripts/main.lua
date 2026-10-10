@@ -216,13 +216,18 @@ SubscribeToEvent("Update", function(data)
     player:Move(-stickX, stickY, dt)
     player:Update(dt)
 
-    -- 载具交互：步行且靠近船→显示登船；驾船且靠岸→显示下船；其余隐藏
-    if not player.inBoat and player:IsNearBoat() then
+    -- 载具交互：两个按钮独立判定、互斥显示（条件本身互斥，显式双保险防止
+    -- 遗留显示——旧版 if/elseif 只在 else 里隐藏，下船瞬间走不到 else，
+    -- disembark 会和弹出的 board 同屏）。步行且靠近船→登船；在船上→下船（
+    -- 不限制位置，随时可下）。
+    if (not player.inBoat) and player:IsNearBoat() then
         hud:ShowButton("board")
-    elseif player.inBoat and player.spot.z > Config.LANDING_Z then
-        hud:ShowButton("disembark")
     else
         hud:HideButton("board")
+    end
+    if player.inBoat then
+        hud:ShowButton("disembark")
+    else
         hud:HideButton("disembark")
     end
 

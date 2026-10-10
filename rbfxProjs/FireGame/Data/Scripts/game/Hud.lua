@@ -27,7 +27,7 @@ local function clamp01(v)
 end
 
 ---@param scene Scene
----@param handlers { onRestart: fun()|nil, onAttack: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil }|nil
+---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -81,12 +81,6 @@ function Hud.Build(scene, handlers)
             w:BindEvent("restart", function()
                 if handlers.onRestart then
                     handlers.onRestart()
-                end
-            end)
-            -- 王者式普攻：攻击键走 data-event-click="attack"，回调触发自动吸附开火
-            w:BindEvent("attack", function()
-                if handlers.onAttack then
-                    handlers.onAttack()
                 end
             end)
             -- 载具交互：登船/下船

@@ -57,12 +57,7 @@
         <div style="position: absolute; left: -20px; top: -3px; width: 40px; height: 6px; background-color: #ff4d4dff; transform: rotate(-45deg);"></div>
     </div>
 
-    <!-- 右下：攻击键（王者式普攻，点一下自动吸附最近敌人开火；data-event-click 见 Hud.lua/Shooting.lua） -->
-    <div data-event-click="attack" style="position: absolute; right: 44px; bottom: 150px; width: 132px; height: 132px; border-radius: 66px; background-color: #d94b3ae6; text-align: center;">
-        <div style="position: relative; top: 46px; color: #ffffffff; font-size: 40px; font-weight: bold;">攻击</div>
-    </div>
-
-    <!-- 右下（攻击键左上侧）：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=驾船靠岸），见 main.lua/Hud.lua -->
+    <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua -->
     <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196px; bottom: 168px; width: 96px; height: 96px; border-radius: 48px; background-color: #2e8b8be6; text-align: center;">
         <div style="position: relative; top: 32px; color: #ffffffff; font-size: 30px; font-weight: bold;">登船</div>
     </div>

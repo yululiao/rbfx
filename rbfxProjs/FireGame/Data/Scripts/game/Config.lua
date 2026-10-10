@@ -207,9 +207,7 @@ Config.BOAT_INTERACT_DIST = 5.0      -- 角色与船水平距离小于此值可�
 Config.SEA_MIN_X = -60.0
 Config.SEA_MAX_X = 60.0
 Config.SEA_MIN_Z = -80.0             -- 往海方向能开很远
-Config.SEA_MAX_Z = Config.SHORE_Z + 3.0   -- 靠岸余量，可下船
--- 下船条件：船头 z 大于此值（靠岸）才允许弃船
-Config.LANDING_Z = Config.SHORE_Z + 3.0
+Config.SEA_MAX_Z = Config.SHORE_Z + 3.0   -- 靠岸余量（下船不限制位置，随时可下）
 
 ----------------------------------------------------------------------
 -- 计分、连击、防线

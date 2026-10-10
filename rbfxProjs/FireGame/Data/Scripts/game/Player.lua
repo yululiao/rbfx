@@ -54,28 +54,15 @@ local STATE_ANIM = {
     run_shoot  = "Run_Gun",
 }
 
---- 逐 geometry 给 Soldier 上材质。全显示，一个都不藏。
----
---- Character_Soldier.mdl 有 67 个 geometry（GEOM i 用 VB i，1:1）。按 parse_mdl 实测的顶点语义分派：
----   0..7 与 61..66 带 TEXCOORD → 贴图集材质（头盔/头/靴等装备件）
----   8..45 与 50..52 带 UBYTE4_NORM:COLOR → 顶点色材质（躯干/衣服/四肢，身体主体）
----   46..49 与 53..60 两者皆无（皮肤/手持件）→ 也归贴图集，缺 UV 时采样图集角标，至少可见
----   空缓冲（0/2/3/26/33/55/62，无顶点）不上材质，SetMaterial 也无害。
+--- 给 Soldier 上材质。导入器已把 FBX 材质色烘进顶点色（FbxImporter 的
+--- FbxBakeMaterialColors：所有材质槽都无 diffuse 贴图的 mesh，每段顶点色 =
+--- 材质 Diffuse 色），因此全身一个顶点色材质即可，显示 Quaternius 原厂纯色
+--- 设计（Skin 肤色、Character_Main 军绿、Grey/Black 装备……）。
+--- 旧版按“有无 COLOR 语义”逐 geometry 分派图集/顶点色两套材质，那是
+--- 烘焙能力落地前的过时方案。
 ---@param model AnimatedModel
 local function ApplyBodyMaterials(model)
-    local pirate = Materials.Pirate()
-    local vcol = Materials.VertexColor()
-    local total = model:GetModel() and model:GetModel():GetNumGeometries() or 0
-    if total == 0 then
-        model:SetMaterial(pirate)
-        return
-    end
-
-    for i = 0, total - 1 do
-        -- 身体主体是顶点色那批；其余（贴图集装备件 + 无 color 无 UV 的件）走贴图集
-        local isVCol = (i >= 8 and i <= 45) or (i >= 50 and i <= 52)
-        model:SetMaterial(i, isVCol and vcol or pirate)
-    end
+    model:SetMaterial(Materials.VertexColor())
 end
 
 --- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做越肩相机。
@@ -307,10 +294,11 @@ function Player:BoardBoat()
 end
 
 --- 下船：角色回到场景根，落在船旁的岸上（落在可步行矩形之内）。
+--- Scene 本身就是根 Node（Lua 绑定没有 GetRoot，直接挂回 scene）。
 function Player:LeaveBoat()
     if not self.inBoat then return end
     self.inBoat = false
-    self.node:SetParent(self.scene:GetRoot())
+    self.node:SetParent(self.scene)
     local bp = self.boatNode:GetPosition()
     local x = clamp(bp.x + 3.0, Config.WALK_MIN_X, Config.WALK_MAX_X)
     local z = clamp(math.max(bp.z, Config.WALK_MIN_Z), Config.WALK_MIN_Z, Config.WALK_MAX_Z)
