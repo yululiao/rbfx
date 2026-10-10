@@ -86,7 +86,7 @@ function Waves:Update(dt)
         end
     end
 
-    if self.phase == "ended" then
+    if self.phase == "ended" or self.phase == "freeRoam" then
         return
     elseif self.phase == "intermission" then
         self.phaseT = self.phaseT - dt
@@ -188,19 +188,20 @@ end
 ----------------------------------------------------------------------
 
 function Waves:Win()
-    if self.phase == "ended" then
+    if self.phase == "ended" or self.phase == "freeRoam" then
         return
     end
-    self.phase = "ended"
+    -- 通关不再弹全屏结算面板挡住画面（那会盖住摇杆/登船按钮且不会自动消失），
+    -- 而是进入“自由探索”态：停止刷怪，玩家可走动/登船出海（本期载具玩法的入口）。
+    -- 分数/combo/防线仍显在 HUD 上；只有防线被攻破（Lose）才弹真正的结算面板。
+    self.phase = "freeRoam"
+    self.allFired = true
     self.audio:Voice(Config.Voice.win)
     if self.defenseHp >= Config.DEFENSE_HP then
         self.audio:Voice(Config.Voice.flawless)
     end
-    if self.hud and self.hud.ShowEnd then
-        self.hud:ShowEnd(true, self.score)
-    end
-    if self.onGameOver then
-        self.onGameOver("win", self.score)
+    if self.hud and self.hud.Narrate then
+        self.hud:Narrate("海盗已清空，出海自由探索吧！", 4.0)
     end
 end
 

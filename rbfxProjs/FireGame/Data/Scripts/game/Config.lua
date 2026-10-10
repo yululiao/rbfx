@@ -161,8 +161,8 @@ Config.MAG_SIZE = 5
 Config.RELOAD_TIME = 1.2
 Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔
 Config.RAY_MAX_DISTANCE = 240.0
-Config.AIM_SENSITIVITY = 0.155       -- 每设计像素拖拽转多少度
-Config.TAP_MOVE_THRESHOLD = 15.0     -- 位移小于这个（设计像素）算点按开火，否则算转视角
+Config.AIM_SENSITIVITY = 0.155       -- 每画布像素拖拽转多少度
+Config.TAP_MOVE_THRESHOLD = 15.0     -- 位移小于这个（画布像素）算点按开火，否则算转视角
 Config.MAGNET_RADIUS_PX = 48.0       -- 磁吸瞄准：射线打空时，准星这个半径内最近的敌人算命中
 Config.MAGNET_MAX_DISTANCE = 110.0
 Config.HEADSHOT_TOP_RATIO = 0.16     -- 命中点落在包围盒顶部这么高的比例内算爆头
@@ -179,6 +179,29 @@ Config.WALK_MIN_X = -18.0
 Config.WALK_MAX_X = 18.0
 Config.WALK_MIN_Z = 1.5              -- 别走进水里（水线 z=-0.5，留余量）
 Config.WALK_MAX_Z = 22.0             -- 别绕到塔后村子里
+
+----------------------------------------------------------------------
+-- 载具（玩家专属船：靠近码头按交互键登船，摇杆改驱动船在海域自由探索）
+----------------------------------------------------------------------
+Config.BOAT_SPAWN = Vector3(-6.0, Config.SEA_Y, 5.0)   -- 船停在码头旁水面上
+-- 角色坐船的局部高度（相对船节点）。Ship_Small 实测包围盒 y[-0.01,1.98]（原点在船底、甲板靠顶），
+-- 坐太低会被船舷从俯视相机角度看进“舱里”看不见，故抬到甲板附近。
+Config.BOAT_SEAT_Y = 1.6
+-- 船上双炮（船头左右两侧）：每发在两舷间轮换，子弹从对应炮位出膛
+Config.BOAT_GUN_FORWARD = 2.4      -- 沿船头方向前探（米）
+Config.BOAT_GUN_LATERAL = 1.1      -- 沿左右舷横向偏移（米）
+Config.BOAT_GUN_Y = 2.0            -- 炮口高度（相对船节点）
+-- 注意：不要复用 Config.BOAT_SPEED（那是敌人船速，见 Enemy.lua），玩家船速单独命名
+Config.PLAYER_BOAT_SPEED = 8.0       -- 米/秒，比走路快
+Config.PLAYER_BOAT_TURN = 3.0        -- 船转向速率（弧度/秒），比人物慢，做出惯性
+Config.BOAT_INTERACT_DIST = 5.0      -- 角色与船水平距离小于此值可登船
+-- 海域可行走矩形（驾船时）：比沙滩大得多，但不能开上沙滩
+Config.SEA_MIN_X = -60.0
+Config.SEA_MAX_X = 60.0
+Config.SEA_MIN_Z = -80.0             -- 往海方向能开很远
+Config.SEA_MAX_Z = Config.SHORE_Z + 3.0   -- 靠岸余量，可下船
+-- 下船条件：船头 z 大于此值（靠岸）才允许弃船
+Config.LANDING_Z = Config.SHORE_Z + 3.0
 
 ----------------------------------------------------------------------
 -- 计分、连击、防线

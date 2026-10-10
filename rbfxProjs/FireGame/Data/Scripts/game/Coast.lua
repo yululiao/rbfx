@@ -284,6 +284,21 @@ local function BuildScenery(root)
 end
 
 ----------------------------------------------------------------------
+-- 玩家专属船（载具）
+----------------------------------------------------------------------
+
+--- 在码头旁放一条属于玩家的船（Ship_Small），供 Player:BoardBoat 接管驱动。
+--- 与敌人船无关：这条标 noShoot，不会被命中结算/爆炸波及。
+---@param root Node
+---@return Node
+local function BuildPlayerBoat(root)
+    local boat = Place(root, "PlayerBoat", Config.PirateModel("Ship_Small"), Materials.Pirate(),
+        Config.BOAT_SPAWN, nil, Config.BOAT_YAW, true)
+    boat:SetVar("noShoot", true)
+    return boat
+end
+
+----------------------------------------------------------------------
 -- 对外接口
 ----------------------------------------------------------------------
 
@@ -311,6 +326,7 @@ function Coast.Build(scene)
     BuildPalisade(root)
     BuildDock(root)
     BuildScenery(root)
+    local playerBoat = BuildPlayerBoat(root)
 
     local sun = BuildSun(scene)
     BuildZone(scene)
@@ -328,6 +344,8 @@ function Coast.Build(scene)
         deck = deck,
         -- 主角站位：平台上表面中心。脚底 y = PLATFORM_Y，别把角色原点当脚底用。
         playerSpot = Config.TOWER_POS + Vector3(0.0, Config.PLATFORM_Y, 0.0),
+        -- 玩家专属船节点（载具），main.lua 传给 Player
+        playerBoat = playerBoat,
     }
 end
 

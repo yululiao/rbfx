@@ -13,9 +13,9 @@
 
     约定：
       * head 同时 link rml.rcss / layout.rcss（拿到 .fullscreen 与默认字体）+ default.rcss（主题、progress 样式）。
-      * body class="fullscreen"，内部一律绝对定位，单位是设计像素（context scale 整体缩放）。
+      * body class="fullscreen"，内部一律绝对定位，单位是画布像素（px 不随 SetScale 缩放）。
       * 颜色统一 RRGGBBAA 八位十六进制，不用 rgba()（会被 atoi 截断，见 RCSS 配色坑）。
-      * 左下 #stick_ring 的几何（left40/bottom40/224x224）与 main.lua 的 STICK 常量、
+      * 左下 #stick_ring 的几何（left40/bottom40/176x176）与 main.lua 的 STICK 常量、
         core/Joystick 的抓取判定是同一套，改这里必须同步改那里。
 -->
 <rml>
@@ -62,16 +62,24 @@
         <div style="position: relative; top: 46px; color: #ffffffff; font-size: 40px; font-weight: bold;">攻击</div>
     </div>
 
+    <!-- 右下（攻击键左上侧）：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=驾船靠岸），见 main.lua/Hud.lua -->
+    <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196px; bottom: 168px; width: 96px; height: 96px; border-radius: 48px; background-color: #2e8b8be6; text-align: center;">
+        <div style="position: relative; top: 32px; color: #ffffffff; font-size: 30px; font-weight: bold;">登船</div>
+    </div>
+    <div data-if="showDisembark" data-event-click="disembark" style="position: absolute; right: 196px; bottom: 168px; width: 96px; height: 96px; border-radius: 48px; background-color: #8b6b2ee6; text-align: center;">
+        <div style="position: relative; top: 32px; color: #ffffffff; font-size: 30px; font-weight: bold;">下船</div>
+    </div>
+
     <!-- 右下：弹药 + 装弹条 -->
     <div style="position: absolute; right: 40px; bottom: 64px; width: 200px; text-align: right;">
         <div class="big">{{ammo}}</div>
         <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6px; margin-left: 40px; width: 160px; height: 10px;"/>
     </div>
 
-    <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改） -->
-    <div id="stick_ring" style="position: absolute; left: 40px; bottom: 40px; width: 224px; height: 224px; border-radius: 112px; background-color: #ffffff2e;">
-        <div id="stick_ring_core" style="position: absolute; left: 24px; top: 24px; width: 176px; height: 176px; border-radius: 88px; background-color: #00000040;"></div>
-    </div>
+    <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。
+         会动的只有 Knob.rml 那颗帽（Lua 逐帧 SetPosition）。这里原先套过一个深色内圆，
+         看起来像帽却永远不动，极易被误认为“帽不跟手”，已移除。 -->
+    <div id="stick_ring" style="position: absolute; left: 40px; bottom: 40px; width: 176px; height: 176px; border-radius: 88px; background-color: #ffffff2e;"></div>
 
     <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
     <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center;">

@@ -23,24 +23,21 @@ local Waves = require("game.Waves")
 local Shooting = require("game.Shooting")
 
 ----------------------------------------------------------------------
--- HUD 几何：设计分辨率与摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量）
+-- HUD 几何：摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量，单位都是画布像素）
+-- 注意：RmlUi 的 px 不随 SetScale 缩放（SetDensityIndependentPixelRatio 只影响
+-- dp 单位与媒体查询，见 RmlUi ComputeProperty.cpp 的 ComputeLength），布局空间
+-- 恒等于画布尺寸，所以不存在"设计分辨率/缩放系数"这一层，全部直接用画布像素。
 ----------------------------------------------------------------------
-local DESIGN = { w = 768.0, h = 1024.0 }
 local STICK = {
     inset = 40.0,        -- GameHud.rml: #stick_ring 的 left / bottom
-    size = 224.0,        -- width / height
-    travel = 64.0,       -- 帽行程
+    size = 176.0,        -- width / height（半径 88 = 行程 40 + 帽半宽 48，满偏时帽外缘恰贴环边）
+    travel = 40.0,       -- 帽行程
     knobHalf = 48.0,     -- Knob.rml 是 96x96
 }
 STICK.cx = STICK.inset + STICK.size * 0.5
 
 -- 画布尺寸必须问 RmlUI 要：编辑器 GameView 里 RmlUi 的 context 是那块 backbuffer，
--- 而 Graphics:GetWidth 是整个编辑器窗口。用窗口尺寸算 scale 会把 HUD 放大到画面外，
--- 换算出来的设计坐标也够不到底锚的环（浏览器/抖音里两者相等，兜底分支才用窗口）。
-local uiScale = 1.0
-local designW = DESIGN.w
-local designH = DESIGN.h
-
+-- 而 Graphics:GetWidth 是整个编辑器窗口（浏览器/抖音里两者相等，兜底分支才用窗口）。
 local function CanvasSize()
     local ui = GetSubsystem("RmlUI")
     if ui and ui.GetCanvasSize then
@@ -56,26 +53,23 @@ local function CanvasSize()
     return 0.0, 0.0
 end
 
--- 等比缩放（横竖取小的那个，圆环才不会变椭圆）+ 可见设计尺寸。
-local function SyncUiScale()
-    local width, height = CanvasSize()
-    if width <= 0 or height <= 0 then
-        return false
-    end
-    local scale = math.min(width / DESIGN.w, height / DESIGN.h)
-    local ui = GetSubsystem("RmlUI")
-    if ui and math.abs(ui:GetScale() - scale) > 0.0005 then
-        ui:SetScale(scale)
-    end
-    uiScale = scale
-    designW = width / scale
-    designH = height / scale
-    return true
+-- 环心（画布像素）：与 GameHud.rml 里 #stick_ring 的 left/bottom 锚位同一个公式。
+-- 环按 bottom 锚边，Y 随画布高度变，调用方每帧重算。
+local function StickCenter(canvasH)
+    return STICK.cx, canvasH - STICK.cx
 end
 
--- 环心：与 GameHud.rml 里 #stick_ring 的 left/bottom 锚位同一个公式
-local function StickCenter()
-    return STICK.cx, designH - STICK.cx
+----------------------------------------------------------------------
+-- 中文字体：默认 Noto Sans 无 CJK 字形，中文画不出来。
+-- 把 Noto Sans SC 注册为全局回退字体（fallback=true）：主字体缺字时自动落到它，
+-- 英文数字仍用 Noto Sans，中英混排自然。
+-- 出包前再子集化（扫描用字 → pyftsubset，子集是构建派生物，源库永远放全量），
+-- 开发期直接用全量，UI 随便加字不会缺字。
+-- 必须在 HUD 文档打开前完成。
+----------------------------------------------------------------------
+local rmlUi = GetSubsystem("RmlUI")
+if rmlUi and not rmlUi:LoadFont("Fonts/NotoSansSC-Regular.otf", true) then
+    print("FireGame MARK font fallback FAILED: Fonts/NotoSansSC-Regular.otf")
 end
 
 ----------------------------------------------------------------------
@@ -117,13 +111,24 @@ local function OnGameOver(outcome, score)
     print(string.format("FireGame MARK game over: %s score=%d", tostring(outcome), score or 0))
 end
 
+-- 载具交互（HUD 按钮回调）：登船/下船（player 在下方装配后才存在，这里是闭包运行时才解引用）
+local function OnBoard()
+    if player then player:BoardBoat() end
+end
+
+local function OnDisembark()
+    if player then player:LeaveBoat() end
+end
+
 coast = Coast.Build(scene)
-player = Player.Build(scene, coast.playerSpot)
+player = Player.Build(scene, coast.playerSpot, coast.playerBoat)
 fx = Fx.Build(scene)
 audio = Audio.Build(scene)
 audio:PlayBGM("Sound/back_ground/mixkit-fright-night-871.ogg", 0.25)
 hud = Hud.Build(scene, {
     onRestart = RestartGame,
+    onBoard = OnBoard,
+    onDisembark = OnDisembark,
 })
 enemy = Enemy.Build({
     scene = scene, fx = fx, audio = audio, player = player,
@@ -136,22 +141,38 @@ shooting = Shooting.Build({
     enemies = enemy, onScore = OnScore,
 })
 
--- 摇杆帽：单独一份文档，元素级样式 Lua 改不了，文档级 SetPosition 可以。
--- 左摇杆驱动主角走位（见下方 player:Move）；该区域的触摸不参与瞄准，所以拖它只动人不转视角。
+-- 摇杆帽：单独一份文档，元素级样式 Lua 改不了，只能用文档级 SetPosition。
+-- 注意：SetPosition 实质是写文档根元素的 left/top，所以 Knob.rml 的 body 必须带
+-- position: absolute；static 下 left/top 会被布局直接忽略（每帧 SetPosition 静默失效，帽不跟手）。
+-- 左摇杆驱动主角走位（见下方 player:Move）；该区域的触摸不参与射击锁定，所以拖它只动人不转视角。
 knob = scene:CreateComponent("RmlUIComponent")
 knob:SetResource("UI/Knob.rml")
 
-SyncUiScale()
-local stickCx, stickCy = StickCenter()
+local canvasW, canvasH = CanvasSize()
+local stickCx, stickCy = StickCenter(canvasH)
 joystick = Joystick:New({ cx = stickCx, cy = stickCy, radius = STICK.travel })
 
 local input = GetSubsystem("Input")
 local time = GetSubsystem("Time")
 
-local canvasW, canvasH = CanvasSize()
-print(string.format("FireGame MARK boot: scale=%.3f canvas=%.0fx%.0f design=%.0fx%.0f tower=(%.1f,%.1f,%.1f)",
-    uiScale, canvasW, canvasH, designW, designH,
+print(string.format("FireGame MARK boot: canvas=%.0fx%.0f tower=(%.1f,%.1f,%.1f)",
+    canvasW, canvasH,
     Config.TOWER_POS.x, Config.TOWER_POS.y, Config.TOWER_POS.z))
+
+----------------------------------------------------------------------
+-- PC / 编辑器验证用键盘走位：WASD + 方向键，与左摇杆同一出口。
+-- 注意：编辑器 GameView 必须先在其内部点一下抢占输入，游戏才收得到键鼠。
+-- 触屏/抖音真机无键盘，KeyboardVector 恒返回 0，不影响摇杆。
+----------------------------------------------------------------------
+local function KeyboardVector()
+    if not (KEY and input) then return 0.0, 0.0 end
+    local x, y = 0.0, 0.0
+    if input:GetKeyDown(KEY.D) or input:GetKeyDown(KEY.RIGHT) then x = x + 1 end
+    if input:GetKeyDown(KEY.A) or input:GetKeyDown(KEY.LEFT) then x = x - 1 end
+    if input:GetKeyDown(KEY.S) or input:GetKeyDown(KEY.DOWN) then y = y + 1 end
+    if input:GetKeyDown(KEY.W) or input:GetKeyDown(KEY.UP) then y = y - 1 end
+    return x, y
+end
 
 ----------------------------------------------------------------------
 -- 帧循环
@@ -159,13 +180,20 @@ print(string.format("FireGame MARK boot: scale=%.3f canvas=%.0fx%.0f design=%.0f
 SubscribeToEvent("Update", function(data)
     local dt = data.TimeStep
 
-    if SyncUiScale() then
-        joystick:SetCenter(StickCenter())
+    -- 环底锚，画布高度可能随 GameView 拖拽变化，每帧重算环心
+    local cw, ch = CanvasSize()
+    if cw > 0 then
+        joystick:SetCenter(StickCenter(ch))
     end
 
     -- 摇杆（视觉 + 抓取区判定）
-    joystick:Update(input, uiScale)
+    joystick:Update(input)
     local stickX, stickY = joystick:GetVector()
+    -- 键盘走位优先覆盖摇杆（PC/编辑器验证用）
+    local kx, ky = KeyboardVector()
+    if kx ~= 0.0 or ky ~= 0.0 then
+        stickX, stickY = kx, ky
+    end
 
     -- 全自动开火 + 装弹计时
     shooting:Update(dt)
@@ -174,14 +202,26 @@ SubscribeToEvent("Update", function(data)
     enemy:Update(dt)
     waves:Update(dt)
     fx:Update(dt)
-    -- 左摇杆走位（屏幕绝对方向），重算俯视相机位置
-    player:Move(stickX, stickY, dt)
+    -- 左摇杆走位（屏幕绝对方向），重算俯视相机位置。
+    -- 相机看向 -z，屏幕右对应世界 -x，故水平输入取反；竖直不反（屏幕上=朝海 -z，与 stickY<0 一致）。
+    player:Move(-stickX, stickY, dt)
     player:Update(dt)
+
+    -- 载具交互：步行且靠近船→显示登船；驾船且靠岸→显示下船；其余隐藏
+    if not player.inBoat and player:IsNearBoat() then
+        hud:ShowButton("board")
+    elseif player.inBoat and player.spot.z > Config.LANDING_Z then
+        hud:ShowButton("disembark")
+    else
+        hud:HideButton("board")
+        hud:HideButton("disembark")
+    end
+
     hud:Update(dt)
 
-    -- 摇杆帽回写
-    local cx, cy = StickCenter()
-    knob:SetPosition(Vector2(
-        cx + stickX * STICK.travel - STICK.knobHalf,
-        cy + stickY * STICK.travel - STICK.knobHalf))
+    -- 摇杆帽回写：浮动原点式，帽锚在“按下点”并按偏转量跟随指针（用未取反的 stickX，保证与鼠标同向）。
+    -- SetPosition 写的是帽文档左上角的画布像素，减去半宽让圆心落在“原点 + 偏转量*行程”上。
+    local ox, oy = joystick:GetOrigin()
+    knob:SetPosition(Vector2(ox + stickX * STICK.travel - STICK.knobHalf,
+        oy + stickY * STICK.travel - STICK.knobHalf))
 end)

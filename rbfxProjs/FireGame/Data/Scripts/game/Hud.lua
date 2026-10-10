@@ -27,7 +27,7 @@ local function clamp01(v)
 end
 
 ---@param scene Scene
----@param handlers { onRestart: fun()|nil, onAttack: fun()|nil }|nil
+---@param handlers { onRestart: fun()|nil, onAttack: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -49,6 +49,9 @@ function Hud.Build(scene, handlers)
     self.gameOver = false      -- data-if="gameOver"：结算面板显隐
     self.endTitle = ""
     self.endScore = 0
+    -- 登船/下船按钮显隐（data-if）：main.lua 帧循环里根据交互条件 Show/Hide
+    self.showBoard = false
+    self.showDisembark = false
 
     local comp = scene:CreateComponent("LuaRmlUIComponent")
     self.comp = comp
@@ -70,6 +73,8 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("hitNormal", function() return self.hitNormal end)
             w:BindReadonlyProperty("hitStrong", function() return self.hitStrong end)
             w:BindReadonlyProperty("gameOver", function() return self.gameOver end)
+            w:BindReadonlyProperty("showBoard", function() return self.showBoard end)
+            w:BindReadonlyProperty("showDisembark", function() return self.showDisembark end)
             w:BindReadonlyProperty("narrate", function() return self.narrate end)
             w:BindReadonlyProperty("endTitle", function() return self.endTitle end)
 
@@ -82,6 +87,17 @@ function Hud.Build(scene, handlers)
             w:BindEvent("attack", function()
                 if handlers.onAttack then
                     handlers.onAttack()
+                end
+            end)
+            -- 载具交互：登船/下船
+            w:BindEvent("board", function()
+                if handlers.onBoard then
+                    handlers.onBoard()
+                end
+            end)
+            w:BindEvent("disembark", function()
+                if handlers.onDisembark then
+                    handlers.onDisembark()
                 end
             end)
         end,
@@ -181,7 +197,38 @@ function Hud:HideEnd()
     self:Dirty("gameOver")
 end
 
---- 每帧：hitmarker 到点熄灭 + 旁白到期清除。
+--- 显/隐登船、下船按钮（id="board"/"disembark"）。main.lua 帧循环每帧调。
+---@param id string
+function Hud:ShowButton(id)
+    if id == "board" then
+        if not self.showBoard then
+            self.showBoard = true
+            self:Dirty("showBoard")
+        end
+    elseif id == "disembark" then
+        if not self.showDisembark then
+            self.showDisembark = true
+            self:Dirty("showDisembark")
+        end
+    end
+end
+
+---@param id string
+function Hud:HideButton(id)
+    if id == "board" then
+        if self.showBoard then
+            self.showBoard = false
+            self:Dirty("showBoard")
+        end
+    elseif id == "disembark" then
+        if self.showDisembark then
+            self.showDisembark = false
+            self:Dirty("showDisembark")
+        end
+    end
+end
+
+--- 每帧：hitmarker 到点自动关闭 + 旁白到期清除。
 ---@param dt number
 function Hud:Update(dt)
     if self.hitT > 0.0 then

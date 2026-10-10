@@ -1,8 +1,9 @@
 <?xml version="1.0"?>
 <resource _id="1">
 	<attributes>
-		<attribute name="Next Node ID" type="Int" value="15" />
-		<attribute name="Next Component ID" type="Int" value="22" />
+		<attribute name="Elapsed Time" type="Float" value="1.633224" />
+		<attribute name="Next Node ID" type="Int" value="5" />
+		<attribute name="Next Component ID" type="Int" value="14" />
 	</attributes>
 	<components>
 		<component _id="1" _typeName="Octree" />

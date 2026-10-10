@@ -59,8 +59,9 @@ end
 --- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做越肩相机。
 ---@param scene Scene
 ---@param spot Vector3 主角脚底世界坐标（Coast.Build 返回的 playerSpot）
+---@param playerBoat Node|nil 玩家专属船节点（载具），由 main.lua 从 Coast 传入
 ---@return Player
-function Player.Build(scene, spot)
+function Player.Build(scene, spot, playerBoat)
     local self = setmetatable({}, Player)
 
     -- 主角落地在沙滩上可走动（不再是塔上固定站位）；忽略传入的平台 spot，用配置的地面出生点
@@ -128,6 +129,12 @@ function Player.Build(scene, spot)
     self.facing = Vector3(0.0, 0.0, -1.0)
     self.nodeYaw = 0.0                          -- 人物自身航向（弧度），朝目标转；相机不用它
 
+    self.scene = scene
+    self.boatNode = playerBoat                  -- 玩家专属船节点（Coast 建，main 传入）
+    self.inBoat = false                         -- 载具状态：false=步行，true=驾船
+    self.boatYaw = 0.0                          -- 船航向（弧度），0=朝海(-z)
+    self.gunSide_ = -1                          -- 船上双炮轮换：每次开火翻到另一舷（+1/-1）
+
     self:UpdateCamera(0.0)
     return self
 end
@@ -136,6 +143,10 @@ end
 --- 但人物要朝打的方向，看着才像自己在开枪。
 ---@param worldPos Vector3
 function Player:FaceTowards(worldPos)
+    -- 船上：保持行驶朝向，子弹方向由枪口→目标自行计算，不改船头指向
+    if self.inBoat then
+        return
+    end
     local dx = worldPos.x - self.spot.x
     local dz = worldPos.z - self.spot.z
     if dx * dx + dz * dz < 1e-4 then
@@ -155,6 +166,31 @@ end
 ---@param stickY number -1..1，屏幕下为正（=朝岸 +z）
 ---@param dt number
 function Player:Move(stickX, stickY, dt)
+    -- 驾船分支：摇杆驱动船在海域矩形内移动，船朝移动方向缓慢转向（模拟排水惯性）
+    if self.inBoat then
+        local boatMoving = (stickX * stickX + stickY * stickY) > 0.0001
+        if boatMoving then
+            local dirX = stickX
+            local dirZ = stickY   -- stickY正=屏幕下=朝岸(+z)
+            local len = math.sqrt(dirX * dirX + dirZ * dirZ)
+            if len > 1.0 then dirX, dirZ = dirX / len, dirZ / len end
+
+            local nx = clamp(self.spot.x + dirX * Config.PLAYER_BOAT_SPEED * dt, Config.SEA_MIN_X, Config.SEA_MAX_X)
+            local nz = clamp(self.spot.z + dirZ * Config.PLAYER_BOAT_SPEED * dt, Config.SEA_MIN_Z, Config.SEA_MAX_Z)
+            self.spot = Vector3(nx, Config.SEA_Y, nz)
+            self.boatNode:SetPosition(self.spot)
+
+            -- 船朝移动方向转，速率比人物慢，做出惯性
+            local step = Config.PLAYER_BOAT_TURN * dt
+            local d = angDiff(self.boatYaw, math.atan(dirX, -dirZ))
+            self.boatYaw = self.boatYaw + clamp(d, -step, step)
+        end
+        -- Ship_Small 长轴沿模型原生 x，Coast 以 Config.BOAT_YAW 落位；boatYaw=0 时旋转回落到 Config.BOAT_YAW
+        -- 与出生姿态连续（不突跳）。若发现船是“倒着开”（船尾朝行驶方向），翻转本式的符号即可。
+        self.boatNode:SetRotation(Quaternion(Config.BOAT_YAW - math.deg(self.boatYaw), Vector3.UP))
+        return
+    end
+
     local moving = (stickX * stickX + stickY * stickY) > 0.0001
     if moving then
         -- 屏幕绝对方向：上推(stickY<0)=朝海(-z)，右推(stickX>0)=+x
@@ -191,6 +227,71 @@ function Player:PlayShoot()
     self.anim:Play(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.05)
     self.shooting_ = true
     self.shootT_ = 0.5
+end
+
+----------------------------------------------------------------------
+-- 载具（玩家专属船）
+----------------------------------------------------------------------
+
+--- 登船：角色重父到船节点下“坐”在船中部，相机/射击后续用 self.spot（已同步为船位）。
+--- 先重父再定变换：SetPosition 在重父后走局部坐标，角色才会跟着船走/转。
+function Player:BoardBoat()
+    if self.inBoat or not self.boatNode then return end
+    self.inBoat = true
+    self.node:SetParent(self.boatNode)
+    self.node:SetPosition(Vector3(0.0, Config.BOAT_SEAT_Y, 0.0))   -- 坐在甲板高度（纯 Y 偏移，不受船 yaw 影响）
+    self.node:SetRotation(Quaternion(0.0, Vector3.UP))
+    self.running_ = false
+    self.anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.15)
+    self.spot = self.boatNode:GetPosition()
+end
+
+--- 下船：角色回到场景根，落在船旁的岸上（落在可步行矩形之内）。
+function Player:LeaveBoat()
+    if not self.inBoat then return end
+    self.inBoat = false
+    self.node:SetParent(self.scene:GetRoot())
+    local bp = self.boatNode:GetPosition()
+    local x = clamp(bp.x + 3.0, Config.WALK_MIN_X, Config.WALK_MAX_X)
+    local z = clamp(math.max(bp.z, Config.WALK_MIN_Z), Config.WALK_MIN_Z, Config.WALK_MAX_Z)
+    self.spot = Vector3(x, self.groundY, z)
+    self.node:SetPosition(self.spot)
+    self.nodeYaw = 0.0
+    self.node:SetRotation(Quaternion(0.0, Vector3.UP))
+end
+
+--- 角色与船的水平距离是否小于交互阈值（可登船）。
+---@return boolean
+function Player:IsNearBoat()
+    if self.inBoat or not self.boatNode then return false end
+    local bp = self.boatNode:GetPosition()
+    local dx = self.spot.x - bp.x
+    local dz = self.spot.z - bp.z
+    return (dx * dx + dz * dz) < Config.BOAT_INTERACT_DIST * Config.BOAT_INTERACT_DIST
+end
+
+--- 射击原点（锁定/射程中心）：船上=船头中轴，步行=枪口。
+---@return Vector3
+function Player:GetFireOrigin()
+    if self.inBoat then
+        local f = Vector3(math.sin(self.boatYaw), 0.0, -math.cos(self.boatYaw))
+        return self.spot + Vector3(0.0, 2.2, 0.0) + f * 2.5
+    end
+    return self:GetMuzzleWorld()
+end
+
+--- 实弹炮口（轮换）：船上时每次调用翻一舷，从左/右船头炮位轮流出一发；步行时就是枪口。
+--- 与 GetFireOrigin 分开：锁定/射程用中心轴，子弹出膛用本函数的侧向炮位。
+---@return Vector3
+function Player:NextGunPos()
+    if not self.inBoat then
+        return self:GetMuzzleWorld()
+    end
+    self.gunSide_ = -self.gunSide_
+    local f = Vector3(math.sin(self.boatYaw), 0.0, -math.cos(self.boatYaw))       -- 船头方向
+    local r = Vector3(math.cos(self.boatYaw), 0.0, math.sin(self.boatYaw))        -- 左右舷（垂直于航向）
+    return self.spot + Vector3(0.0, Config.BOAT_GUN_Y, 0.0)
+        + f * Config.BOAT_GUN_FORWARD + r * (self.gunSide_ * Config.BOAT_GUN_LATERAL)
 end
 
 --- 每帧：衰减 kick + 重算相机轨道位置与朝向 + 同步 facing。
@@ -231,8 +332,10 @@ function Player:UpdateCamera()
     local lookAt = target + Vector3(0.0, 0.0, -Config.CAMERA_LOOK_AHEAD)
     self.cameraNode:LookAt(lookAt, Vector3.UP, TS.WORLD)
 
-    -- 人物节点朝 nodeYaw
-    self.node:SetRotation(Quaternion(-self.nodeYaw, Vector3.UP))
+    -- 人物节点朝 nodeYaw（船上时人物是船的子节点，由船带动旋转，不单独设）
+    if not self.inBoat then
+        self.node:SetRotation(Quaternion(-self.nodeYaw, Vector3.UP))
+    end
     -- facing 保持朝海（给旧接口 GetFacing 兼容）
     self.facing = Vector3(0.0, 0.0, -1.0)
 end

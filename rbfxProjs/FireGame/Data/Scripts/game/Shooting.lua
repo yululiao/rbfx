@@ -78,7 +78,7 @@ function Shooting:Update(dt)
         if self.ammo <= 0 then
             self:StartReload()
         else
-            local origin = self.player:GetNode():GetPosition()
+            local origin = self.player:GetFireOrigin()   -- 步行=枪口，船上=船头（角色在船上时是船子节点，不能用 GetNode 世界坐标）
             local unit, pos = self.enemies:NearestTarget(origin, Config.ATTACK_RANGE)
             if unit and pos then
                 self:FireAt(unit, pos)
@@ -106,7 +106,7 @@ function Shooting:FireAt(unit, targetPos)
     self.player:FaceTowards(targetPos)
     self.player:PlayShoot()
     self.audio:Play("shot")
-    local muzzle = self.player:GetMuzzleWorld()
+    local muzzle = self.player:NextGunPos()   -- 船上从船头左/右炮位轮换出膛；步行=枪口
     self.fx:Flash(muzzle, Color(1.0, 0.85, 0.5), 6.0, 0.05)
     if self.hud and self.hud.SetAmmo then
         self.hud:SetAmmo(self.ammo)

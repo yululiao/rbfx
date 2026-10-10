@@ -4,7 +4,10 @@
     <link type="text/rcss" href="layout.rcss"/>
     <link type="text/rcss" href="default.rcss"/>
   </head>
-  <body style="display: block; width: 96px; height: 96px;">
-    <div id="knob_cap" style="position: absolute; left: 0px; top: 0px; width: 96px; height: 96px; border-radius: 48px; background-color: #ffffff8c;"></div>
+  <!-- 虚拟摇杆帽（深色实心圆，即玩家眼中的“内圈”）：body 必须带 position:absolute，
+       否则 SetPosition 写入根元素的 left/top 会被布局当作 static 盒丢弃；
+       尺寸固定 96x96 画布像素，位置由 main.lua 每帧 SetPosition 驱动（同样走画布像素）。 -->
+  <body style="display: block; position: absolute; width: 96px; height: 96px;">
+    <div id="knob_cap" style="position: absolute; left: 0px; top: 0px; width: 96px; height: 96px; border-radius: 48px; background-color: #222831e6;"></div>
   </body>
 </rml>
