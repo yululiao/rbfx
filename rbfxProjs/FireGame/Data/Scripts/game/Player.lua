@@ -58,11 +58,25 @@ local STATE_ANIM = {
 --- FbxBakeMaterialColors：所有材质槽都无 diffuse 贴图的 mesh，每段顶点色 =
 --- 材质 Diffuse 色），因此全身一个顶点色材质即可，显示 Quaternius 原厂纯色
 --- 设计（Skin 肤色、Character_Main 军绿、Grey/Black 装备……）。
---- 旧版按“有无 COLOR 语义”逐 geometry 分派图集/顶点色两套材质，那是
---- 烘焙能力落地前的过时方案。
+--- 例外：FBX 里十余件武器道具（Revolver/Sniper/Pistol/SMG/Shotgun/
+--- RocketLauncher/Shovel/Knife 等）全部绑在右手食指链下同一位置堆叠，
+--- 全显出来就是一身兵器库。只留一把 AK（GEOM46-49，与全自动开火最配），
+--- 其余枪械、铲子、两把刀全部藏掉。段号来自 mdl 内嵌的 geometry 名
+--- （AssetImporter 的 SetGeometryName 写入“AK #0”等，二进制可直接读出），
+--- 并与顶点色指纹交叉验证（VB46-49 = Grey/DarkGrey/Grey2/Wood 恰为
+--- AK 四槽材质）。
 ---@param model AnimatedModel
 local function ApplyBodyMaterials(model)
     model:SetMaterial(Materials.VertexColor())
+    -- 藏 8..45（AK 之前的全部枪械）与 50..60（铲子 + 两把刀），保留
+    -- 0..7（身体/肩垫）、46..49（AK）、61..66（Body 躯干）
+    local hidden = Materials.Hidden()
+    for i = 8, 45 do
+        model:SetMaterial(i, hidden)
+    end
+    for i = 50, 60 do
+        model:SetMaterial(i, hidden)
+    end
 end
 
 --- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做越肩相机。
