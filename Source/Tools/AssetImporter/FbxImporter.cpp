@@ -805,10 +805,56 @@ static void FbxGetBlendData(FbxModel& model, ufbx_mesh* mesh, ufbx_node* meshNod
 }
 
 // ---------------------------------------------------------------------------
+// Untextured material color baking
+// ---------------------------------------------------------------------------
+
+// Material driving a mesh part: face_material[] maps each face into materials[]
+// (parallel to the per-node material list), and material_parts[] indexes the same
+// list, so an empty part falls back to its own index.
+static ufbx_material* FbxGetPartMaterial(ufbx_mesh* mesh, const ufbx_mesh_part* part)
+{
+    if (part->num_faces > 0 && part->face_indices.count > 0)
+    {
+        const uint32_t faceIndex = part->face_indices.data[0];
+        if (faceIndex < mesh->face_material.count)
+        {
+            const uint32_t materialIndex = mesh->face_material.data[faceIndex];
+            if (materialIndex < mesh->materials.count)
+                return mesh->materials.data[materialIndex];
+        }
+    }
+    // Empty part (or no face mapping): fall back to the parallel index
+    if (part->index < mesh->materials.count)
+        return mesh->materials.data[part->index];
+    return nullptr;
+}
+
+// A mesh whose every material slot lacks a diffuse texture gets the material diffuse
+// colors baked into vertex color channel 0, one solid color per geometry segment.
+// For such meshes vertex color is the only channel that can carry color at runtime:
+// they are either UV-less altogether, or they are rendered with untextured materials.
+// Any slot with a diffuse texture disables baking for the whole mesh, because a
+// textured material would multiply the baked vertex color into the texture sample.
+// Meshes without material parts carry no color information at all and are skipped.
+static bool FbxBakeMaterialColors(ufbx_mesh* mesh)
+{
+    if (mesh->material_parts.count == 0)
+        return false;
+    for (size_t i = 0; i < mesh->material_parts.count; ++i)
+    {
+        ufbx_material* material = FbxGetPartMaterial(mesh, &mesh->material_parts.data[i]);
+        if (!material || material->fbx.diffuse_color.texture)
+            return false;
+    }
+    PrintLine("Baking untextured material diffuse colors into vertex colors");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Vertex elements description
 // ---------------------------------------------------------------------------
 
-static ea::vector<VertexElement> FbxGetVertexElements(ufbx_mesh* mesh, bool isSkinned)
+static ea::vector<VertexElement> FbxGetVertexElements(ufbx_mesh* mesh, bool isSkinned, bool bakeMaterialColor)
 {
     ea::vector<VertexElement> ret;
 
@@ -817,8 +863,17 @@ static ea::vector<VertexElement> FbxGetVertexElements(ufbx_mesh* mesh, bool isSk
     if (mesh->vertex_normal.exists)
         ret.push_back(VertexElement(TYPE_VECTOR3, SEM_NORMAL));
 
-    for (unsigned i = 0; i < (unsigned)mesh->color_sets.count && i < MAX_CHANNELS; ++i)
-        ret.push_back(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR, i));
+    if (mesh->color_sets.count > 0)
+    {
+        for (unsigned i = 0; i < (unsigned)mesh->color_sets.count && i < MAX_CHANNELS; ++i)
+            ret.push_back(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR, i));
+    }
+    else if (bakeMaterialColor)
+    {
+        // No authored vertex colors, but an untextured material diffuse color is baked
+        // into channel 0 - emit the element so the vertex buffer has room for it
+        ret.push_back(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR, 0));
+    }
 
     for (unsigned i = 0; i < (unsigned)mesh->uv_sets.count && i < MAX_CHANNELS; ++i)
         ret.push_back(VertexElement(TYPE_VECTOR2, SEM_TEXCOORD, i));
@@ -906,6 +961,26 @@ static void FbxProcessMeshPart(
     unsigned numColorSets = Min((unsigned)mesh->color_sets.count, MAX_CHANNELS);
     bool hasTangents = mesh->vertex_tangent.exists && mesh->vertex_bitangent.exists;
 
+    // Untextured material color baking (see FbxBakeMaterialColors): one solid
+    // diffuse color per material slot, multiplied into vertex color channel 0
+    const bool bakeMaterialColor = FbxBakeMaterialColors(mesh);
+    Color materialColor = Color::WHITE;
+    if (bakeMaterialColor)
+    {
+        if (ufbx_material* material = FbxGetPartMaterial(mesh, part))
+        {
+            // Same diffuse/alpha interpretation as FbxBuildAndSaveMaterial
+            if (!noMaterialDiffuseColor_)
+            {
+                ufbx_vec4 dc = material->fbx.diffuse_color.value_vec4;
+                materialColor = Color((float)dc.x, (float)dc.y, (float)dc.z, 1.0f);
+            }
+            float transparency = (float)material->fbx.transparency_factor.value_real;
+            if (transparency > 0.0f && transparency < 1.0f)
+                materialColor.a_ = 1.0f - transparency;
+        }
+    }
+
     ea::vector<RawVertex> rawVertices;
     rawVertices.resize(numTriIndices);
 
@@ -938,6 +1013,15 @@ static void FbxProcessMeshPart(
         {
             ufbx_vec4 c = mesh->color_sets.data[s].vertex_color.values.data[mesh->color_sets.data[s].vertex_color.indices.data[idx]];
             rv.colors[s] = Color((float)c.x, (float)c.y, (float)c.z, (float)c.w);
+        }
+
+        // Bake the untextured material diffuse color into vertex color channel 0.
+        // Multiplication, not replacement: an authored vertex color survives (white
+        // is the identity), matching how DCCs display diffuse x vertex color by default
+        if (bakeMaterialColor)
+        {
+            const Color base = numColorSets > 0 ? rv.colors[0] : Color::WHITE;
+            rv.colors[0] = materialColor * base;
         }
 
         // Tangent + handedness
@@ -991,7 +1075,7 @@ static void FbxProcessMeshPart(
     // Create buffers if needed
     if (!combineBuffers || !vb)
     {
-        ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
+        ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned, bakeMaterialColor);
         vb = new VertexBuffer(context_);
         // DLL host may have a Graphics subsystem, shadow data is not automatic there
         vb->SetShadowed(true);
@@ -1020,7 +1104,6 @@ static void FbxProcessMeshPart(
     }
 
     // Write vertex data
-    ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
     unsigned vertexSize = vb->GetVertexSize();
     unsigned char* vertexData = vb->GetShadowData();
     auto* base = (float*)(vertexData + startVertexOffset * vertexSize);
@@ -1045,8 +1128,9 @@ static void FbxProcessMeshPart(
             *dest++ = rv.normal.z_;
         }
 
-        // Colors
-        for (unsigned s = 0; s < numColorSets; ++s)
+        // Colors. When baking, channel 0 exists even if the mesh has no color set
+        const unsigned numColorChannels = bakeMaterialColor ? Max(numColorSets, 1u) : numColorSets;
+        for (unsigned s = 0; s < numColorChannels; ++s)
         {
             *((unsigned*)dest) = rv.colors[s].ToUInt();
             ++dest;
@@ -1198,7 +1282,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                     // (a zero-size buffer skips the "no render device forces shadowing" path).
                     vb->SetShadowed(true);
                     ib->SetShadowed(true);
-                    ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned);
+                    ea::vector<VertexElement> elements = FbxGetVertexElements(mesh, isSkinned, FbxBakeMaterialColors(mesh));
                     vb->SetSize(0, elements);
                     ib->SetSize(0, false);
                     vbVector.push_back(vb);
