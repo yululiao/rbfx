@@ -1,0 +1,19 @@
+<rml>
+  <head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+  </head>
+  <!-- 击杀飘字（Juice.lua 的飘字池，每槽一份本文档）：+分数 在击杀位置世界锚定弹出上浮。
+       配方约束（同 Knob.rml / GameHud.rml，改前先看那两份的注释）：
+       * body 必须 position:absolute——SetPosition 写的是文档根的 left/top，static 布局
+         会静默丢弃；尺寸固定 200x44 画布像素，与 Juice.lua 的 POP_W/POP_H 一致。
+       * pointer-events:none——飘字可能飘到载具按钮上方，绝不能吃掉本属于 GameHud 的点击。
+       * 文本/显隐走数据绑定（{{text}} / data-if="visible"），不支持内联 style 绑定；
+         visible=false 时整棵不进渲染树，池里“闲置”的槽位零渲染开销。 -->
+  <body style="display: block; position: absolute; width: 200px; height: 44px; pointer-events: none;">
+    <div data-model="{{__data_model_id}}">
+      <div data-if="visible" style="width: 200px; text-align: center; color: #ffd24dff; font-size: 34px; font-weight: bold;">{{text}}</div>
+    </div>
+  </body>
+</rml>

@@ -21,6 +21,7 @@ local Hud = require("game.Hud")
 local Enemy = require("game.Enemy")
 local Waves = require("game.Waves")
 local Shooting = require("game.Shooting")
+local Juice = require("game.Juice")
 
 ----------------------------------------------------------------------
 -- HUD 几何：摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量，单位都是画布像素）
@@ -76,7 +77,7 @@ end
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, knob, joystick
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick
 
 local function RestartGame()
     if enemy then
@@ -89,21 +90,33 @@ local function RestartGame()
     if waves then
         waves:Reset()
     end
+    if juice then
+        juice:Reset()
+    end
     if hud then
         hud:HideEnd()
     end
 end
 
--- 计分/combo 集中到 Waves：玩家子弹（Shooting）与爆桶连锁（Enemy:Damage）两条路径共用
+-- 计分/combo 集中到 Waves：玩家子弹（Shooting）与爆桶连锁（Enemy:Damage）两条路径共用；
+-- 同一个汇入点也是打击感三件套的唯一触发口（击杀 = hit-stop + 震屏 + 飘字）。
 local function OnScore(result, unit, headshot)
     if waves then
         waves:AddKill(result, unit, headshot)
+    end
+    if juice and result and result.killed then
+        juice:OnKill(unit, result.score)
     end
 end
 
 local function OnDefenseHit(dmg)
     if waves then
         waves:DamageDefense(dmg)
+    end
+    -- 防线被砍：给一记轻震提示“有人在摸防线”，但不做 hit-stop（玩家没杀东西，
+    -- 停时间只会困惑）。
+    if juice then
+        juice:AddTrauma(0.3)
     end
 end
 
@@ -122,6 +135,12 @@ end
 
 coast = Coast.Build(scene)
 player = Player.Build(scene, coast.playerSpot, coast.playerBoat)
+-- 打击感三件套：要主角的相机（飘字投影 + 震屏偏移的宿主）与画布尺寸
+juice = Juice.Build(scene, {
+    camera = player.camera,
+    cameraNode = player.cameraNode,
+    canvasSize = CanvasSize,
+})
 fx = Fx.Build(scene)
 audio = Audio.Build(scene)
 audio:PlayBGM("Sound/back_ground/mixkit-dirty-thinkin-989.ogg", 0.25)
@@ -181,11 +200,15 @@ local seaScrollT = 0.0
 
 SubscribeToEvent("Update", function(data)
     local dt = data.TimeStep
+    -- 打击感帧首：推进 hit-stop 真实倒计时，拿到本帧世界 dt（定格期间被缩到 5%）。
+    -- 引擎侧骨骼动画/粒子不受它影响（走自己的 Frame::timeStep），定格里死亡动画
+    -- 照常播——这正是要的效果。世界 dt 只眼世界逻辑：海面滚动/开火/敌人/波次/主角。
+    local worldDt = juice:BeginFrame(dt)
 
     -- 海面波纹流动：滚动法线贴图 UV（xy 的平铺密度与 Water.xml 的 UOffset/VOffset 同源，
     -- 提成了 Config.SEA_TILE，改密度只动那一处；w 是平移量）。
     -- M_Default 没有内置滚动，这里是给“静态平铺”加上时间维度的全部代码。
-    seaScrollT = seaScrollT + dt
+    seaScrollT = seaScrollT + worldDt
     coast.seaMaterial:SetShaderParameter("UOffset", Vector4(Config.SEA_TILE, 0.0, 0.0, seaScrollT * Config.SEA_SCROLL_U))
     coast.seaMaterial:SetShaderParameter("VOffset", Vector4(0.0, Config.SEA_TILE, 0.0, seaScrollT * Config.SEA_SCROLL_V))
 
@@ -204,17 +227,23 @@ SubscribeToEvent("Update", function(data)
         stickX, stickY = kx, ky
     end
 
-    -- 全自动开火 + 装弹计时
-    shooting:Update(dt)
+    -- 全自动开火 + 装弹计时（世界 dt：定格期间不吐弹，弹与定格是同一套时间）
+    shooting:Update(worldDt)
 
     -- 玩法与世界
-    enemy:Update(dt)
-    waves:Update(dt)
+    enemy:Update(worldDt)
+    waves:Update(worldDt)
+    -- 粒子的模拟在引擎侧走真实 timeStep（Lua 改不了），所以寿命回收也用真实 dt 对齐，
+    -- 否则定格期间粒子播完了节点还被扣着不收。
     fx:Update(dt)
     -- 左摇杆走位（屏幕绝对方向），重算俯视相机位置。
     -- 相机看向 -z，屏幕右对应世界 -x，故水平输入取反；竖直不反（屏幕上=朝海 -z，与 stickY<0 一致）。
-    player:Move(-stickX, stickY, dt)
-    player:Update(dt)
+    player:Move(-stickX, stickY, worldDt)
+    player:Update(worldDt)
+
+    -- 打击感帧尾：飘字投影上屏 + 震屏叠加到相机（必须在 player:Update 摆好相机
+    -- 基础姿态之后，否则偏移被覆盖）。
+    juice:EndFrame(dt)
 
     -- 载具交互：两个按钮独立判定、互斥显示（条件本身互斥，显式双保险防止
     -- 遗留显示——旧版 if/elseif 只在 else 里隐藏，下船瞬间走不到 else，
