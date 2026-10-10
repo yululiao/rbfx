@@ -60,7 +60,7 @@
 			],
 			"Douyin": {},
 			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
-			"EngineBuild": "Never",
+			"EngineBuild": "Incremental",
 			"EngineData": "D:/openSrc/rbfx/msvc/bin",
 			"Name": "Douyin",
 			"OutputDir": "Build/Douyin",

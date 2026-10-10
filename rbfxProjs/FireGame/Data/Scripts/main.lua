@@ -163,9 +163,14 @@ print(string.format("FireGame MARK boot: scale=%.3f canvas=%.0fx%.0f design=%.0f
 ----------------------------------------------------------------------
 local elapsed = 0.0
 local firstFrame = true
+-- 真实时间基准（GetTimeSinceEpoch 走 C time()，与 dt 的 emscripten 时钟是两套），用于分诊“计时高估”还是“真低帧”
+local baseEpoch, baseGame, baseFrame = nil, 0.0, 0
 
 SubscribeToEvent("Update", function(data)
     local dt = data.TimeStep
+    -- 【临时限制】抖音 emscripten 计时被高估约 1000x（frequency 或 get_now 单位不匹配）。
+    -- 在引擎层根治之前，先限制到 1/60 让游戏速度正常。真机低帧场景可考虑放宽到 1/30。
+    if dt > 0.01667 then dt = 0.01667 end
     elapsed = elapsed + dt
 
     if SyncUiScale() then
@@ -196,15 +201,23 @@ SubscribeToEvent("Update", function(data)
 
     if firstFrame then
         firstFrame = false
+        baseEpoch = time:GetTimeSinceEpoch()
+        baseGame = elapsed
+        baseFrame = time:GetFrameNumber()
         print(string.format("FireGame MARK first frame at t=%.3fs", time:GetElapsedTime()))
     end
 
-    -- 稳态观测：每 2 秒一条，含同屏单位/威胁数（低端机降级前后的对照点）。
-    -- 注：rbfx 的 Renderer Lua 绑定没有暴露 draw call / batch 计数（只有 viewport/纹理设置），
-    -- 所以这里不打印 dc，只留真实可取的 fps/units/threats/ammo/score。
-    if math.floor(elapsed) > math.floor(elapsed - dt) and math.floor(elapsed) % 2 == 0 then
+    -- 稳态观测 + 分诊：按帧号每 90 帧一条。用 epoch 秒（真实时钟）与 elapsed（=Σdt 游戏时钟）对比：
+    --   ratio = game/real：≈ 1 说明速度正常（“快”只是低帧跳步错觉）；明显 >1 说明 dt 被高估。
+    --   rfps  = 真实帧率 = Δframe/real：若≈60 而 ratio≈6 => 计时高估（应修引擎 emscripten 时钟）；若≈10 且 ratio≈1 => 纯性能问题。
+    local frameNumber = time:GetFrameNumber()
+    if baseEpoch and frameNumber % 90 == 0 then
         local ammo = (shooting:GetAmmoState())
-        print(string.format("FireGame MARK fps=%.1f units=%d threats=%d ammo=%d score=%d",
-            time:GetFramesPerSecond(), enemy:AliveCount(), enemy:ThreatCount(), ammo, waves:GetScore()))
+        local real = time:GetTimeSinceEpoch() - baseEpoch
+        local game = elapsed - baseGame
+        local ratio = (real > 0) and (game / real) or 0
+        local rfps = (real > 0) and ((frameNumber - baseFrame) / real) or 0
+        print(string.format("FireGame MARK dt=%.5f fps=%.1f frame=%d real=%.0fs game=%.2fs ratio=%.2f rfps=%.1f units=%d threats=%d ammo=%d score=%d",
+            dt, time:GetFramesPerSecond(), frameNumber, real, game, ratio, rfps, enemy:AliveCount(), enemy:ThreatCount(), ammo, waves:GetScore()))
     end
 end)

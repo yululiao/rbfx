@@ -227,7 +227,14 @@ Engine::Engine(Context* context) :
     Object(context),
     timeStep_(0.0f),
     timeStepSmoothing_(2),
+#ifdef __EMSCRIPTEN__
+    // wasm hosts rely on rAF (~60Hz); clamp dt to 1/60 to guard against
+    // emscripten timer-source anomalies (frequency mismatch or
+    // non-standard get_now granularity inflating elapsed by ~1000x).
+    minFps_(60),
+#else
     minFps_(10),
+#endif
 #if defined(IOS) || defined(TVOS) || defined(__ANDROID__) || defined(__arm__) || defined(__aarch64__)
     maxFps_(60),
     maxInactiveFps_(10),
