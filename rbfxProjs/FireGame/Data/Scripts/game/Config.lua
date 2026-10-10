@@ -160,6 +160,8 @@ Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbaross
 Config.MAG_SIZE = 5
 Config.RELOAD_TIME = 1.2
 Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔
+Config.FIRE_WINDOW = 0.6             -- 开火后维持射击姿态/上半身对准目标的窗口（秒）：大于冷却
+                                     -- 保证连发期间不断档，装弹期间自然回落举枪
 Config.RAY_MAX_DISTANCE = 240.0
 Config.AIM_SENSITIVITY = 0.155       -- 每画布像素拖拽转多少度
 Config.TAP_MOVE_THRESHOLD = 15.0     -- 位移小于这个（画布像素）算点按开火，否则算转视角
@@ -174,6 +176,8 @@ Config.ATTACK_RANGE = 45.0           -- 普攻自动吸附：主角周围这个�
 ----------------------------------------------------------------------
 Config.MOVE_SPEED = 4.2              -- 米/秒
 Config.TURN_SPEED = 8.0              -- 人物转向速度（弧度/秒），朝移动方向转
+Config.AIM_MAX_TWIST = 1.75          -- 上半身相对身体朝向的最大扭转（弧度，约 100 度）
+Config.AIM_TURN_SPEED = 12.0         -- 上半身扭转的平滑速度（弧度/秒）
 Config.PLAYER_SPAWN = Vector3(0.0, Config.SAND_Y, 11.0)   -- 脚底出生点：防线前一点的地面，朝向海
 Config.WALK_MIN_X = -18.0
 Config.WALK_MAX_X = 18.0
@@ -294,7 +298,7 @@ function Config.PlayerModel()
     return PLAYER_DIR .. "Character_Soldier.fbx.d/Models/Character_Soldier.mdl"
 end
 
---- 主角动画栈：Idle_Shoot / Run_Gun / Idle / Duck / HitReact / Death（没有 Walk）
+--- 主角动画栈：Idle / Idle_Shoot / Run / Run_Gun / Duck / HitReact / Death / Jump 系列（没有 Walk）
 ---@param stack string
 ---@return string
 function Config.PlayerAnim(stack)

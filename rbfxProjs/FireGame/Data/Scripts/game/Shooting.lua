@@ -103,7 +103,7 @@ end
 function Shooting:FireAt(unit, targetPos)
     self.ammo = self.ammo - 1
     self.cooldown = Config.FIRE_COOLDOWN
-    self.player:FaceTowards(targetPos)
+    self.player:SetAimTarget(targetPos)
     self.player:PlayShoot()
     self.audio:Play("shot")
     local muzzle = self.player:NextGunPos()   -- 船上从船头左/右炮位轮换出膛；步行=枪口

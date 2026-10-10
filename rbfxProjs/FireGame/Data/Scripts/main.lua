@@ -225,3 +225,15 @@ SubscribeToEvent("Update", function(data)
     knob:SetPosition(Vector2(ox + stickX * STICK.travel - STICK.knobHalf,
         oy + stickY * STICK.travel - STICK.knobHalf))
 end)
+
+----------------------------------------------------------------------
+-- 上半身扭转（Player:ApplyAim）：必须踩在“动画已应用、蒙皮未计算”的窗口上，
+-- 即 Octree 更新完 drawable 的 SceneDrawableUpdateFinished——引擎注释钦定的
+-- 自定义动画/IK 时点（事件带 TimeStep）。放进上面的普通 Update 里会被动画每帧
+-- 覆写骨骼，扭转永远看不见。
+----------------------------------------------------------------------
+SubscribeToEvent("SceneDrawableUpdateFinished", function(_data)
+    if player then
+        player:ApplyAim()
+    end
+end)

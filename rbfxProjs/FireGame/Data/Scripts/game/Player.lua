@@ -1,8 +1,14 @@
 -- Scripts/game/Player.lua
 --
 -- 主角 + 俯视角相机（王者荣耀式）。主角是 Quaternius_Player 的 Character_Soldier，站在沙滩上
--- 用左摇杆四下走动（屏幕绝对方向：上=朝海、右=+x，矩形边界鈐制）。全自动开火时人物自动转向目标。
+-- 用左摇杆四下走动（屏幕绝对方向：上=朝海、右=+x，矩形边界内活动）。全自动开火。
 -- 相机在主角斜上方以高俯角俯瞰，固定屏幕上方=朝海，不随角色转向而旋转。
+--
+-- 朝向与姿态分三层管，别混：
+--   身体朝向 nodeYaw —— 移动时朝移动方向（Move 里平滑转），站定且在开火窗口内朝目标（Update 里转）；
+--   上半身扭转 aimTwist_ —— 身体与目标方向的残差由 Abdomen/Torso 两节骨骼分摊扭转（腿不动、
+--       枪口指向敌人），窗口外平滑回正；施加时机见 ApplyAim；
+--   动画状态机 animState_ —— idle / idle_shoot / run / run_shoot 四态，见文件顶部 STATE_ANIM。
 --
 -- 朝向约定：
 --   Soldier 模型原生朝 -z。nodeYaw=0 时主角面朝海面。相机永远在 +z 侧上方看回主角。
@@ -31,6 +37,22 @@ local function angDiff(a, b)
     end
     return d
 end
+
+----------------------------------------------------------------------
+-- 动画状态机：四态
+--   idle / idle_shoot / run / run_shoot
+-- 输入 = (是否移动, 是否处于开火窗口)，驾船时恒 idle。
+-- 映射动画栈：Idle / Idle_Shoot / Run / Run_Gun。
+-- 全文件只有 SetAnimState 一处碰动画：状态跳变才 PlayExclusive。
+--（旧版是 PlayShoot 每枪重播 Idle_Shoot 顶掉 Run_Gun、开火窗口结束又没人恢复，
+--  多入口抢播就是“边跑边僵直”的根源。）
+----------------------------------------------------------------------
+local STATE_ANIM = {
+    idle       = "Idle",
+    idle_shoot = "Idle_Shoot",
+    run        = "Run",
+    run_shoot  = "Run_Gun",
+}
 
 --- 逐 geometry 给 Soldier 上材质。全显示，一个都不藏。
 ---
@@ -92,11 +114,23 @@ function Player.Build(scene, spot, playerBoat)
     -- 远处降频用不上（主角永远在近处），但显式关掉不可见时更新，省一点蒙皮开销
     model:SetUpdateInvisible(false)
 
+    -- 上半身扭转用的骨骼节点：SetModel 时引擎把骨架建成真实子节点
+    -- （AnimatedModel::SetSkeleton 逐骨 CreateChild，层级 Root→Hips→Abdomen→Torso→Neck…），
+    -- 扭 Abdomen+Torso 两节即“腰以上带枪转向敌人”，腿不动。
+    local aimBoneNodes = {}
+    for _, boneName in ipairs({ "Abdomen", "Torso" }) do
+        local boneNode = node:GetChild(boneName, true)
+        if boneNode then
+            table.insert(aimBoneNodes, boneNode)
+        else
+            print("FireGame MARK aim bone missing: " .. boneName)
+        end
+    end
+
     local anim = node:GetComponent("AnimationController")
     if not anim then
         anim = node:CreateComponent("AnimationController")
     end
-    anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.0)
 
     -- 相机：复用场景里编辑器摆的 Camera Rig（有 Camera 组件与既定 viewport），
     -- 没有就自己建一个，保证 Lua 单独跑也有画面。
@@ -119,9 +153,16 @@ function Player.Build(scene, spot, playerBoat)
     self.cameraNode = cameraNode
     self.camera = camera
     self.spot = spot
-    self.running_ = false
-    self.shooting_ = false
-    self.shootT_ = 0
+    self.aimBoneNodes_ = aimBoneNodes
+
+    -- 状态机与射击姿态输入
+    self.animState_ = nil        -- 当前动画状态（nil 保证首次判定必然触发播放）
+    self.moving_ = false         -- 摇杆是否在驱动走位（驾船时恒 false，动画恒 idle）
+    self.fireT_ = 0.0            -- 开火窗口倒计时：窗口内姿态用 *_shoot、上半身朝目标扭
+    self.moveYaw_ = 0.0          -- 移动方向（弧度）
+    self.aimYaw_ = 0.0           -- 最近一次开火的目标方向（弧度）
+    self.aimValid_ = false
+    self.aimTwist_ = 0.0         -- 上半身当前扭转量（弧度，平滑值）
 
     self.aim = 0.0                              -- 度，正=右转（俯视角下固定 0，不再动态变化）
     self.pitch = Config.CAMERA_PITCH            -- 度，相机俯角（俯视约 55）
@@ -135,15 +176,16 @@ function Player.Build(scene, spot, playerBoat)
     self.boatYaw = 0.0                          -- 船航向（弧度），0=朝海(-z)
     self.gunSide_ = -1                          -- 船上双炮轮换：每次开火翻到另一舷（+1/-1）
 
+    self:SetAnimState("idle")                   -- 进游戏默认待机
     self:UpdateCamera(0.0)
     return self
 end
 
---- 开火时把人物瞬间转向目标（相机不动，仍固定朝海）。王者式自动吸附下玩家无需手动对准，
---- 但人物要朝打的方向，看着才像自己在开枪。
+--- 记录开火目标方向。不做瞬移转身：站定时身体在 Update 里平滑转向它，
+--- 移动中身体保持移动方向，残差交给上半身扭转（ApplyAim）补齐。
 ---@param worldPos Vector3
-function Player:FaceTowards(worldPos)
-    -- 船上：保持行驶朝向，子弹方向由枪口→目标自行计算，不改船头指向
+function Player:SetAimTarget(worldPos)
+    -- 船上：保持行驶朝向，子弹方向由炮位→目标自行计算，不参与扭转
     if self.inBoat then
         return
     end
@@ -152,7 +194,8 @@ function Player:FaceTowards(worldPos)
     if dx * dx + dz * dz < 1e-4 then
         return
     end
-    self.nodeYaw = math.atan(dx, -dz)
+    self.aimYaw_ = math.atan(dx, -dz)
+    self.aimValid_ = true
 end
 
 --- 开火后座：给相机一个瞬时上抬，随后 Update 里指数回落。
@@ -160,7 +203,7 @@ function Player:AddKick()
     self.kick = self.kick + Config.CAMERA_KICK
 end
 
---- 左摇杆走位：屏幕绝对方向（上=朝海 -z，右=+x），鈐在可行走矩形内。
+--- 左摇杆走位：屏幕绝对方向（上=朝海 -z，右=+x），限制在可行走矩形内。
 --- 俯视角下相机固定不转，所以方向不依赖任何相机基准。
 ---@param stickX number -1..1，右为正
 ---@param stickY number -1..1，屏幕下为正（=朝岸 +z）
@@ -168,6 +211,7 @@ end
 function Player:Move(stickX, stickY, dt)
     -- 驾船分支：摇杆驱动船在海域矩形内移动，船朝移动方向缓慢转向（模拟排水惯性）
     if self.inBoat then
+        self.moving_ = false    -- 人坐船不动，动画状态机恒 idle
         local boatMoving = (stickX * stickX + stickY * stickY) > 0.0001
         if boatMoving then
             local dirX = stickX
@@ -192,6 +236,7 @@ function Player:Move(stickX, stickY, dt)
     end
 
     local moving = (stickX * stickX + stickY * stickY) > 0.0001
+    self.moving_ = moving
     if moving then
         -- 屏幕绝对方向：上推(stickY<0)=朝海(-z)，右推(stickX>0)=+x
         local dirX = stickX
@@ -204,29 +249,45 @@ function Player:Move(stickX, stickY, dt)
         self.spot = Vector3(nx, self.groundY, nz)
         self.node:SetPosition(self.spot)
 
-        -- 人物朝移动方向转
+        -- 身体朝移动方向平滑转（动画状态在 Update 的状态机里管，这里不碰动画）
+        self.moveYaw_ = math.atan(dirX, -dirZ)
         local step = Config.TURN_SPEED * dt
-        local d = angDiff(self.nodeYaw, math.atan(dirX, -dirZ))
+        local d = angDiff(self.nodeYaw, self.moveYaw_)
         self.nodeYaw = self.nodeYaw + clamp(d, -step, step)
-    end
-
-    -- 移动/待机动画
-    if moving and not self.running_ then
-        self.anim:Play(Config.PlayerAnim("Run_Gun"), 0, true, 0.15)
-        self.running_ = true
-    elseif not moving and self.running_ then
-        self.running_ = false
-        if not self.shooting_ then
-            self.anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.15)
-        end
     end
 end
 
---- 开枪时切到持枪射击动画，播完自动回 Idle。
+--- 开火脉冲：延长开火窗口。窗口内状态机自动切 *_shoot 姿态、上半身朝目标扭，
+--- 窗口结束自然回落。不在这里碰动画——动画只归 SetAnimState 一个出口管。
 function Player:PlayShoot()
-    self.anim:Play(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.05)
-    self.shooting_ = true
-    self.shootT_ = 0.5
+    self.fireT_ = Config.FIRE_WINDOW
+end
+
+--- 状态机唯一动画出口：状态跳变才 PlayExclusive（同层其余动画淡出），平时不动。
+---@param state string idle|idle_shoot|run|run_shoot
+function Player:SetAnimState(state)
+    if self.animState_ == state then
+        return
+    end
+    self.animState_ = state
+    self.anim:PlayExclusive(Config.PlayerAnim(STATE_ANIM[state]), 0, true, 0.15)
+end
+
+--- 把 aimTwist_ 施加到上半身骨骼。必须在 SceneDrawableUpdateFinished 事件里调：
+--- 那是动画已应用到骨骼、蒙皮尚未计算的官方自定义动画时点（Octree.cpp 原注释
+--- "Custom animation (eg. IK) can be done at this point"）。动画每帧重写骨骼，
+--- 这里的修改永远建立在当帧动画姿态之上，不会跨帧累积。
+function Player:ApplyAim()
+    if self.inBoat or math.abs(self.aimTwist_) < 0.001 then
+        return
+    end
+    -- Abdomen、Torso 各扭一半：Torso 是 Abdomen 的子节点，前者的扭转会传导进后者的
+    -- 世界旋转，依次再扭一半后，肩/臂/头合成完整 aimTwist_，腰部过渡自然。
+    -- 符号：与节点朝向同约定——atan(dx,-dz) 系的角增加对应绕 UP 的旋转角减少。
+    local half = Quaternion(-math.deg(self.aimTwist_ * 0.5), Vector3.UP)
+    for _, boneNode in ipairs(self.aimBoneNodes_) do
+        boneNode:SetWorldRotation(half * boneNode:GetWorldRotation())
+    end
 end
 
 ----------------------------------------------------------------------
@@ -241,8 +302,7 @@ function Player:BoardBoat()
     self.node:SetParent(self.boatNode)
     self.node:SetPosition(Vector3(0.0, Config.BOAT_SEAT_Y, 0.0))   -- 坐在甲板高度（纯 Y 偏移，不受船 yaw 影响）
     self.node:SetRotation(Quaternion(0.0, Vector3.UP))
-    self.running_ = false
-    self.anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.15)
+    self:SetAnimState("idle")       -- 登船后进入 idle（船上恒 idle）
     self.spot = self.boatNode:GetPosition()
 end
 
@@ -294,19 +354,35 @@ function Player:NextGunPos()
         + f * Config.BOAT_GUN_FORWARD + r * (self.gunSide_ * Config.BOAT_GUN_LATERAL)
 end
 
---- 每帧：衰减 kick + 重算相机轨道位置与朝向 + 同步 facing。
+--- 每帧：开火窗口计时、站定时身体转向目标、上半身扭转平滑、衰减 kick、
+--- 重算相机轨道位置与朝向、推进动画状态机。
 ---@param dt number 秒
 function Player:Update(dt)
-    -- 开枪动画计时：播完回 Idle
-    if self.shooting_ then
-        self.shootT_ = self.shootT_ - dt
-        if self.shootT_ <= 0 then
-            self.shooting_ = false
-            if not self.running_ then
-                self.anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.15)
-            end
+    -- 开火窗口倒计时
+    if self.fireT_ > 0.0 then
+        self.fireT_ = self.fireT_ - dt
+        if self.fireT_ < 0.0 then
+            self.fireT_ = 0.0
         end
     end
+
+    -- 站定且在开火窗口内：身体平滑转向目标（移动中的转身由 Move 管）
+    if not self.inBoat and not self.moving_ and self.fireT_ > 0.0 and self.aimValid_ then
+        local step = Config.TURN_SPEED * dt
+        local d = angDiff(self.nodeYaw, self.aimYaw_)
+        self.nodeYaw = self.nodeYaw + clamp(d, -step, step)
+    end
+
+    -- 上半身扭转量（弧度）：窗口内补齐“身体朝向→目标方向”的残差（限幅），窗口外回正。
+    -- 只在这里平滑，施加到骨骼在 ApplyAim（动画应用之后，见其注释）。
+    local targetTwist = 0.0
+    if not self.inBoat and self.fireT_ > 0.0 and self.aimValid_ then
+        targetTwist = clamp(angDiff(self.nodeYaw, self.aimYaw_),
+            -Config.AIM_MAX_TWIST, Config.AIM_MAX_TWIST)
+    end
+    local twistStep = Config.AIM_TURN_SPEED * dt
+    self.aimTwist_ = self.aimTwist_ + clamp(targetTwist - self.aimTwist_, -twistStep, twistStep)
+
     if self.kick ~= 0.0 then
         -- 指数回落：kick *= e^(-decay*dt)，用一阶近似避免每帧 exp
         self.kick = self.kick - self.kick * Config.CAMERA_KICK_DECAY * dt
@@ -315,6 +391,17 @@ function Player:Update(dt)
         end
     end
     self:UpdateCamera(dt)
+
+    -- 动画状态机（放最后，用当帧最新的 moving_/fireT_ 判定）
+    local state
+    if self.inBoat then
+        state = "idle"                                    -- 驾船恒 idle
+    elseif self.moving_ then
+        state = (self.fireT_ > 0.0) and "run_shoot" or "run"
+    else
+        state = (self.fireT_ > 0.0) and "idle_shoot" or "idle"
+    end
+    self:SetAnimState(state)
 end
 
 --- 把俯视角相机放到主角斜上方，LookAt 主角位置。屏幕上方=朝海(-z)。
@@ -332,18 +419,22 @@ function Player:UpdateCamera()
     local lookAt = target + Vector3(0.0, 0.0, -Config.CAMERA_LOOK_AHEAD)
     self.cameraNode:LookAt(lookAt, Vector3.UP, TS.WORLD)
 
-    -- 人物节点朝 nodeYaw（船上时人物是船的子节点，由船带动旋转，不单独设）
+    -- 人物节点朝 nodeYaw（船上时人物是船的子节点，由船带动旋转，不单独设）。
+    -- Quaternion(angle, axis) 的 angle 是“度”，而 nodeYaw 全程是弧度——必须 math.deg
+    --（旧版直接塞弧度，视觉旋转被缩小 57 倍，人物几乎从不转身，等于一直朝前）。
     if not self.inBoat then
-        self.node:SetRotation(Quaternion(-self.nodeYaw, Vector3.UP))
+        self.node:SetRotation(Quaternion(-math.deg(self.nodeYaw), Vector3.UP))
     end
     -- facing 保持朝海（给旧接口 GetFacing 兼容）
     self.facing = Vector3(0.0, 0.0, -1.0)
 end
 
---- 枪口世界坐标：主角胸口沿 facing 前探一点，给枪口光/枪口粒子/音效定位用。
+--- 枪口世界坐标：胸口沿“身体朝向 + 上半身扭转”前探一点（开火窗口内即指向目标），
+--- 给枪口光/子弹出膛/音效定位用，保证出弹方向与视觉一致。
 ---@return Vector3
 function Player:GetMuzzleWorld()
-    local f = Vector3(math.sin(self.nodeYaw), 0.0, -math.cos(self.nodeYaw))
+    local yaw = self.nodeYaw + self.aimTwist_
+    local f = Vector3(math.sin(yaw), 0.0, -math.cos(yaw))
     return self.spot + Vector3(0.0, 1.30, 0.0) + f * 0.7
 end
 
