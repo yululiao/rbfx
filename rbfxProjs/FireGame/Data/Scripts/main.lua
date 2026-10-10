@@ -124,7 +124,7 @@ coast = Coast.Build(scene)
 player = Player.Build(scene, coast.playerSpot, coast.playerBoat)
 fx = Fx.Build(scene)
 audio = Audio.Build(scene)
-audio:PlayBGM("Sound/back_ground/mixkit-fright-night-871.ogg", 0.25)
+audio:PlayBGM("Sound/back_ground/mixkit-dirty-thinkin-989.ogg", 0.25)
 hud = Hud.Build(scene, {
     onRestart = RestartGame,
     onBoard = OnBoard,
@@ -177,8 +177,17 @@ end
 ----------------------------------------------------------------------
 -- 帧循环
 ----------------------------------------------------------------------
+local seaScrollT = 0.0
+
 SubscribeToEvent("Update", function(data)
     local dt = data.TimeStep
+
+    -- 海面波纹流动：滚动法线贴图 UV（xy 的平铺密度与 Water.xml 的 UOffset/VOffset 同源，
+    -- 提成了 Config.SEA_TILE，改密度只动那一处；w 是平移量）。
+    -- M_Default 没有内置滚动，这里是给“静态平铺”加上时间维度的全部代码。
+    seaScrollT = seaScrollT + dt
+    coast.seaMaterial:SetShaderParameter("UOffset", Vector4(Config.SEA_TILE, 0.0, 0.0, seaScrollT * Config.SEA_SCROLL_U))
+    coast.seaMaterial:SetShaderParameter("VOffset", Vector4(0.0, Config.SEA_TILE, 0.0, seaScrollT * Config.SEA_SCROLL_V))
 
     -- 环底锚，画布高度可能随 GameView 拖拽变化，每帧重算环心
     local cw, ch = CanvasSize()

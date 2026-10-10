@@ -1,0 +1,33 @@
+<!--
+    海面：PBR 不透明 + 法线贴图（波纹）+ 脚本滚动 UV（波光流动）。
+
+    为何不用引擎自带的水面 shader（Techniques/LitWater + M_Water.glsl）：
+    M_Water 把 albedo 置零（“水不吃漫反射光”），可见色全靠三样东西——环境立方图
+    反射、水下背景折射、菲涅尔加权高光。本场景三者皆缺（无环境贴图、海面下
+    没有海床可折射、俯视角菲涅尔≈0），实测整片漆黑。它适合“有水底 + 反射
+    探针”的水池，不适合开阔海面。
+
+    本配方的可见性通道：漫反射底色（与旧纯色方案同亮度同水色）+ 法线扰动调制的
+    太阳镜面高光（Roughness 0.05 出锐利波光）。波纹流动由 main.lua 每帧滚动
+    UOffset/VOffset 的 w 分量实现（M_Default 没有内置滚动，LitWater 的
+    NoiseSpeed 顶点滚动干的就是这件事，这里用脚本补上）。
+
+    WaterNoise.dds 拷自引擎 bin/Data/Textures；Plane.mdl 顶点自带 TANGENT，
+    NORMALMAP 技术可用。
+
+    可调旋钮（与 Config.SEA_TILE 联动：平铺密度改 Config，此处与 main.lua 同步）：
+    Roughness（波光锐度：小=针尖亮点“碎”，大=光斑宽但暗“闷”，现 0.2）、
+    NormalScale（法线扰动幅度：决定多少波峰能进高光锥，波光覆盖面，现 0.35）、
+    滚动速度在 Config.SEA_SCROLL_U/V（UV/秒）。
+-->
+<material>
+    <technique name="Techniques/LitOpaqueNormalMap.xml" />
+    <shader vsdefines="PBR" psdefines="PBR" />
+    <texture slot="Normal" name="Textures/WaterNoise.dds" />
+    <parameter name="MatDiffColor" value="0.10 0.28 0.40 1" />
+    <parameter name="Roughness" value="0.2" />
+    <parameter name="Metallic" value="0" />
+    <parameter name="NormalScale" value="0.35" />
+    <parameter name="UOffset" value="24 0 0 0" />
+    <parameter name="VOffset" value="0 24 0 0" />
+</material>

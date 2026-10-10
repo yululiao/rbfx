@@ -85,7 +85,8 @@ local function BuildSky(root)
 end
 
 --- 海面：一张放大到 400x400 的 Plane，+z 边贴住水线，所以内陆方向不会露出蓝面。
---- 低粗糙度纯色（Materials.Sea），靠太阳高光和雾做远近层次；真正的波浪水面不在 MVP 里。
+--- 水面材质见 Materials.Sea → Data/Materials/Water.xml（PBR + 法线波纹），
+--- 波纹流动由 main.lua 每帧滚动 UOffset/VOffset（海面只有一个用户，直接改共享材质）。
 ---@param root Node
 local function BuildSea(root)
     local node = Place(root, "Sea", Config.PLANE_MODEL, Materials.Sea(),
@@ -321,6 +322,7 @@ function Coast.Build(scene)
     local root = scene:CreateChild(ROOT_NAME)
     BuildSky(root)
     local sea = BuildSea(root)
+    local seaMaterial = Materials.Sea()
     local sand = BuildSand(root)
     local deck = BuildTower(root)
     BuildPalisade(root)
@@ -339,6 +341,8 @@ function Coast.Build(scene)
     return {
         root = root,
         sea = sea,
+        -- 海面材质（与 Sea 节点同源）：main.lua 每帧滚动它的 UOffset/VOffset 做波纹流动
+        seaMaterial = seaMaterial,
         sand = sand,
         sun = sun,
         deck = deck,

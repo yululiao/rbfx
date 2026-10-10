@@ -15,6 +15,10 @@ local Config = {}
 ----------------------------------------------------------------------
 Config.SEA_Y = -0.20                 -- 海平面高度
 Config.SEA_SIZE = 400.0              -- 海面 Plane 边长，够大到雾里消失
+Config.SEA_TILE = 24.0               -- 法线噪声平铺密度（400m 海面分 24 格，约 17m/格，舒缓涌浪；
+                                     -- 越大波纹越细碎，改动会同步 Water.xml 与 main.lua 滚动公式）
+Config.SEA_SCROLL_U = 0.03           -- 海面波纹 UV 滚动速度（UV/秒；米速 = 值×SEA_SIZE，现 12m/s）
+Config.SEA_SCROLL_V = 0.02           -- 两个轴取不同速避免波纹整体平移的“传送带”感
 -- 海面的 +z 边正好落在水线上（SHORE_Z - SEA_SIZE/2）。写成"往海里偏一点"的 -60 会让
 -- 海面一直铺到 z=+140，从塔上回头看内陆是一片蓝，所以这里必须贴住水线算。
 Config.SEA_CENTER_Z = -200.5
@@ -272,6 +276,7 @@ Config.MAT_VERTEX_COLOR = "Materials/VertexColor.xml"
 Config.MAT_WHITE = "Materials/DefaultWhite.xml"
 Config.MAT_SKY = "Materials/Sky.xml"
 Config.MAT_HIDDEN = "Materials/Hidden.xml"
+Config.MAT_WATER = "Materials/Water.xml"
 Config.PLANE_MODEL = "Models/Plane.mdl"
 Config.BOX_MODEL = "Models/Box.mdl"
 

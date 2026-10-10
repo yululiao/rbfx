@@ -53,20 +53,23 @@ function Materials.Pirate()
     return GetResource("Material", Config.MAT_PIRATE)
 end
 
---- 顶点色材质：给只有 UBYTE4_NORM:COLOR 没有 UV 的 geometry 用（Soldier 的散落道具）。
+--- 顶点色材质：给带 UBYTE4_NORM:COLOR 的 geometry 用。Soldier 的 FBX 是无贴图
+--- 纯色材质方案，导入器已把各材质 Diffuse 烘进顶点色，全身统一用它渲染。
 ---@return Material
 function Materials.VertexColor()
     return GetResource("Material", Config.MAT_VERTEX_COLOR)
 end
 
---- 海面材质：低粗糙度纯色，靠太阳高光与雾做出"远处融进天光"的效果。
+--- 海面材质：PBR 不透明 + 法线贴图波纹（配方在 Data/Materials/Water.xml）。
 ---
---- 没有用 CoreData 的 Materials/Showcase/LitWaterTiled.xml：它要 Textures/WaterNoise.dds
---- （本工程 Data 里没有这张图）外加一台反射相机与 ReflectionPlaneX/Y 参数（见 23_Water），
---- 对占位阶段太重，且在 wasm 上要多一个 render target。真要升级水面时再走那条路。
+--- 不用引擎的 LitWater/M_Water：它把 albedo 置零，可见色全靠环境立方图反射、
+--- 水下背景折射、菲涅尔高光——本场景三者皆缺，实测整片漆黑。
+--- 本配方走漫反射底色 + 法线扰动调制的太阳镜面高光（俯视角可见），
+--- 波纹流动由 main.lua 每帧滚动 UOffset/VOffset。水色内嵌 Water.xml
+--- （与旧 Config.Tint.water 同值），改水色去改那边。
 ---@return Material
 function Materials.Sea()
-    return Materials.Tint("water")
+    return GetResource("Material", Config.MAT_WATER)
 end
 
 --- 全透明材质：把不想看见的 geometry 藏起来。
