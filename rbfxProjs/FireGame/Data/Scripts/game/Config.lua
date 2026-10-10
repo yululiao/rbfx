@@ -26,7 +26,7 @@ Config.DEFENSE_Z = 9.0               -- 防线：海盗走到这里就攻击，�
 
 -- 主角阵地：四根 Dock_Pole 架一块木平台（不用 House2 当塔身——它 9.38m 高，
 -- 站在 4m 的平台上会被整个包在屋子里看不见）。塔后另摆几栋木屋当村落剪影。
-Config.TOWER_POS = Vector3(0.0, 0.0, 15.0)
+Config.TOWER_POS = Vector3(-12.0, 0.0, 15.0)
 Config.PLATFORM_Y = 4.0              -- 木平台上表面高度，主角站在这
 Config.PLATFORM_SIZE = Vector3(3.2, 0.22, 3.2)
 Config.TOWER_POLE_INSET = 1.30       -- 四根腿相对平台中心的内缩量
@@ -102,16 +102,17 @@ Config.PALISADE_POST = Vector3(0.26, 1.70, 0.26)
 ----------------------------------------------------------------------
 -- 相机（第三人称塔后越肩，绕主角球面轨道）
 ----------------------------------------------------------------------
-Config.CAMERA_DISTANCE = 4.6
-Config.CAMERA_TARGET_Y = 1.45        -- 轨道中心相对主角脚底的高度（胸口）
-Config.CAMERA_PITCH = 9.0            -- 初始俯角（度），相机在目标上方
-Config.CAMERA_PITCH_MIN = 1.0
-Config.CAMERA_PITCH_MAX = 34.0
-Config.CAMERA_YAW_LIMIT = 62.0       -- 左右各 62 度，防止绕到塔后面穿模
+Config.CAMERA_DISTANCE = 20.0
+Config.CAMERA_TARGET_Y = 1.45        -- 相机关注点相对主角脚底的高度
+Config.CAMERA_PITCH = 35.0           -- 俯角（度），斜后方朝海面倾斜俯视
+Config.CAMERA_LOOK_AHEAD = 6.0       -- 视线中心往海方向偏移，看到更大范围战场
+Config.CAMERA_PITCH_MIN = 30.0
+Config.CAMERA_PITCH_MAX = 70.0
+Config.CAMERA_YAW_LIMIT = 0.0        -- 俯视角固定朝海，不允许水平旋转
 Config.CAMERA_FOV = 42.0
 Config.CAMERA_FAR_CLIP = 260.0
-Config.CAMERA_KICK = 0.9             -- 开火时相机上抛的度数，随后指数回落
-Config.CAMERA_KICK_DECAY = 9.0
+Config.CAMERA_KICK = 0.3             -- 开火相机微小震动幅度
+Config.CAMERA_KICK_DECAY = 12.0
 -- 越肩侧移：相机向主角右侧偏这么多，把人物挪到画面左侧，屏幕中心的准星射线
 -- 才不会被主角自己挡住（否则从相机到准星的第一命中永远是主角）。设为 0 即回到肩后正中。
 Config.CAMERA_SHOULDER_OFFSET = 0.95
@@ -208,27 +209,27 @@ Config.WAVES = {
     {
         voice = "round_1",
         spawns = {
+            -- 先头 1
             { t = 1.0, kind = "boat", lane = 2 },
-            { t = 9.0, kind = "boat", lane = 3 },
-        },
-    },
-    {
-        voice = "round_2",
-        spawns = {
-            { t = 1.0, kind = "boat", lane = 1 },
-            { t = 7.0, kind = "boat", lane = 4 },
-            { t = 14.0, kind = "boat", lane = 2 },
-            { t = 21.0, kind = "boat", lane = 3 },
-        },
-    },
-    {
-        voice = "round_3",
-        spawns = {
-            { t = 1.0, kind = "bigboat", lane = 2 },
-            { t = 9.0, kind = "boat", lane = 1 },
-            { t = 16.0, kind = "boat", lane = 4 },
-            { t = 23.0, kind = "boat", lane = 3 },
-            { t = 30.0, kind = "boat", lane = 2 },
+            -- 第二批 3
+            { t = 3.0, kind = "boat", lane = 1 },
+            { t = 3.0, kind = "boat", lane = 3 },
+            { t = 3.0, kind = "boat", lane = 4 },
+            -- 第三批 3
+            { t = 5.5, kind = "boat", lane = 1 },
+            { t = 5.5, kind = "boat", lane = 2 },
+            { t = 5.5, kind = "boat", lane = 3 },
+            -- 第四批 3
+            { t = 8.0, kind = "boat", lane = 2 },
+            { t = 8.0, kind = "boat", lane = 3 },
+            { t = 8.0, kind = "boat", lane = 4 },
+            -- 第五批 3
+            { t = 10.5, kind = "boat", lane = 1 },
+            { t = 10.5, kind = "boat", lane = 2 },
+            { t = 10.5, kind = "boat", lane = 4 },
+            -- 第六批 2
+            { t = 13.0, kind = "boat", lane = 1 },
+            { t = 13.0, kind = "boat", lane = 3 },
         },
     },
 }
@@ -297,7 +298,7 @@ end
 
 --- 事件名 -> 变体列表。播放时随机取一个并微调音高，避免机关枪式的重复感。
 Config.Sfx = {
-    shot = Variants("impactPlate_heavy_", 5),
+    shot = { "Sound/gun_shot/shooting-single.ogg" },
     shotTail = Variants("impactMining_", 5),
     hitFlesh = Variants("impactPunch_medium_", 5),
     killFlesh = Variants("impactPunch_heavy_", 5),
@@ -361,6 +362,7 @@ Config.Tint = {
     defense = Color(0.75, 0.22, 0.18),
     water = Color(0.10, 0.28, 0.40),
     playerBody = Color(0.36, 0.42, 0.30),
+    bullet = Color(1.0, 0.12, 0.08),
 }
 
 -- 每种纯色的粗糙度（PBR）。DefaultWhite 的默认值 0.3 对沙子和木头太亮；
@@ -372,6 +374,7 @@ Config.Roughness = {
     tower = 0.80,
     defense = 0.85,
     water = 0.10,
+    bullet = 0.4,
     playerBody = 0.70,
 }
 

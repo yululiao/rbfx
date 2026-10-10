@@ -1,22 +1,16 @@
 -- Scripts/game/Player.lua
 --
--- 主角 + 第三人称越肩相机。主角是 Quaternius_Player 的 Character_Soldier，站在沙滩上可用左
--- 摇杆四下走动（相机相对方向，矩形边界钳制），默认 Idle_Shoot、走动切 Run_Gun（这个包没有
--- “单次射击”动画，后座感交给相机 kick 与枪口光）。
--- 相机绕主角胸口做球面轨道：aim 左右摆、pitch 上下俯，开火时 kick 上抬再指数回落。
+-- 主角 + 俯视角相机（王者荣耀式）。主角是 Quaternius_Player 的 Character_Soldier，站在沙滩上
+-- 用左摇杆四下走动（屏幕绝对方向：上=朝海、右=+x，矩形边界鈐制）。全自动开火时人物自动转向目标。
+-- 相机在主角斜上方以高俯角俯瞰，固定屏幕上方=朝海，不随角色转向而旋转。
 --
--- 为什么不用编辑器里的 Camera Rig 直接摆死：越肩相机每帧都要按 aim/pitch/kick 重算位置
--- 并 LookAt 主角，是运行时的东西；Camera Rig 节点只是拿来挂 Camera 组件与 viewport。
---
--- 朝向约定（照 C++ 的 R_y 推过，别再手推一遍）：
---   Soldier 模型原生朝 -z。定义 aim 正值为"向右转"，节点旋转 = Quaternion(-aim, UP)，
---   于是 facing = (sin aim, 0, -cos aim)（aim=0 时正对海面 -z，aim=+90° 时朝 +x）。
---   behind = -facing = (-sin aim, 0, cos aim)，相机在主角背后上方。
+-- 朝向约定：
+--   Soldier 模型原生朝 -z。nodeYaw=0 时主角面朝海面。相机永远在 +z 侧上方看回主角。
 
 local Config = require("game.Config")
 local Materials = require("game.Materials")
 
----@class Player 主角与越肩相机的运行时状态
+---@class Player 主角与俯视角相机的运行时状态
 local Player = {}
 Player.__index = Player
 
@@ -101,7 +95,7 @@ function Player.Build(scene, spot)
     if not anim then
         anim = node:CreateComponent("AnimationController")
     end
-    anim:Play(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.0)
+    anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.0)
 
     -- 相机：复用场景里编辑器摆的 Camera Rig（有 Camera 组件与既定 viewport），
     -- 没有就自己建一个，保证 Lua 单独跑也有画面。
@@ -125,12 +119,14 @@ function Player.Build(scene, spot)
     self.camera = camera
     self.spot = spot
     self.running_ = false
+    self.shooting_ = false
+    self.shootT_ = 0
 
-    self.aim = 0.0                              -- 度，正=右转
-    self.pitch = Config.CAMERA_PITCH            -- 度，相机在目标上方的俯角
-    self.kick = 0.0                             -- 开火上抬的瞬时量（度），指数回落
+    self.aim = 0.0                              -- 度，正=右转（俯视角下固定 0，不再动态变化）
+    self.pitch = Config.CAMERA_PITCH            -- 度，相机俯角（俯视约 55）
+    self.kick = 0.0                             -- 开火相机微小震动（度），指数回落
     self.facing = Vector3(0.0, 0.0, -1.0)
-    self.nodeYaw = 0.0                          -- 人物自身航向（弧度），朝移动方向/开火目标转；相机不用它
+    self.nodeYaw = 0.0                          -- 人物自身航向（弧度），朝目标转；相机不用它
 
     self:UpdateCamera(0.0)
     return self
@@ -153,19 +149,17 @@ function Player:AddKick()
     self.kick = self.kick + Config.CAMERA_KICK
 end
 
---- 左摇杆走位：沿"相机相对"的水平方向平移主角（摇杆上推=朝瞄准方向前进），
---- 钳在可行走矩形内。越肩相机每帧按 self.spot 重算轨道，所以相机会自动跟着人走。
---- 无物理模块，不做碰撞：棕榈/岩石会穿过去，占位阶段可接受。
+--- 左摇杆走位：屏幕绝对方向（上=朝海 -z，右=+x），鈐在可行走矩形内。
+--- 俯视角下相机固定不转，所以方向不依赖任何相机基准。
 ---@param stickX number -1..1，右为正
----@param stickY number -1..1，屏幕下为正（=向后）
+---@param stickY number -1..1，屏幕下为正（=朝岸 +z）
 ---@param dt number
 function Player:Move(stickX, stickY, dt)
     local moving = (stickX * stickX + stickY * stickY) > 0.0001
     if moving then
-        local aimRad = math.rad(self.aim)
-        -- facing=瞄准水平方向，right=facing 右手侧；摇杆上推(stickY<0)沿 facing 前进
-        local dirX = self.facing.x * (-stickY) + math.cos(aimRad) * stickX
-        local dirZ = self.facing.z * (-stickY) + math.sin(aimRad) * stickX
+        -- 屏幕绝对方向：上推(stickY<0)=朝海(-z)，右推(stickX>0)=+x
+        local dirX = stickX
+        local dirZ = stickY   -- stickY正=屏幕下=朝岸(+z)
         local len = math.sqrt(dirX * dirX + dirZ * dirZ)
         if len > 1.0 then dirX, dirZ = dirX / len, dirZ / len end
 
@@ -174,25 +168,44 @@ function Player:Move(stickX, stickY, dt)
         self.spot = Vector3(nx, self.groundY, nz)
         self.node:SetPosition(self.spot)
 
-        -- 人物朝移动方向转（相机固定朝海，不跟着转），短弧缓动避免瞬跳
+        -- 人物朝移动方向转
         local step = Config.TURN_SPEED * dt
         local d = angDiff(self.nodeYaw, math.atan(dirX, -dirZ))
         self.nodeYaw = self.nodeYaw + clamp(d, -step, step)
     end
 
-    -- 移动/待机动画：只在状态跳变时 Play，避免每帧重启；0.15s 交叉淡化
+    -- 移动/待机动画
     if moving and not self.running_ then
         self.anim:Play(Config.PlayerAnim("Run_Gun"), 0, true, 0.15)
         self.running_ = true
     elseif not moving and self.running_ then
-        self.anim:Play(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.15)
         self.running_ = false
+        if not self.shooting_ then
+            self.anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.15)
+        end
     end
+end
+
+--- 开枪时切到持枪射击动画，播完自动回 Idle。
+function Player:PlayShoot()
+    self.anim:Play(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.05)
+    self.shooting_ = true
+    self.shootT_ = 0.5
 end
 
 --- 每帧：衰减 kick + 重算相机轨道位置与朝向 + 同步 facing。
 ---@param dt number 秒
 function Player:Update(dt)
+    -- 开枪动画计时：播完回 Idle
+    if self.shooting_ then
+        self.shootT_ = self.shootT_ - dt
+        if self.shootT_ <= 0 then
+            self.shooting_ = false
+            if not self.running_ then
+                self.anim:Play(Config.PlayerAnim("Idle"), 0, true, 0.15)
+            end
+        end
+    end
     if self.kick ~= 0.0 then
         -- 指数回落：kick *= e^(-decay*dt)，用一阶近似避免每帧 exp
         self.kick = self.kick - self.kick * Config.CAMERA_KICK_DECAY * dt
@@ -203,37 +216,25 @@ function Player:Update(dt)
     self:UpdateCamera(dt)
 end
 
---- 把 aim/pitch/kick 换算成相机世界位置与朝向。
----
---- 关键：相机不是 LookAt 主角（那样屏幕中心的准星射线永远指向主角自己），而是
---- 沿"瞄准方向"（facing 下俯 pitch）看向前方，位置在主角背后上方并向右侧移（越肩）。
---- 于是 GetScreenRay(0.5,0.5) 得到的射线就是玩家真正瞄准的方向，能打到远处的敌人。
+--- 把俯视角相机放到主角斜上方，LookAt 主角位置。屏幕上方=朝海(-z)。
 function Player:UpdateCamera()
-    local aimRad = math.rad(self.aim)
     local pitchRad = math.rad(self.pitch + self.kick)
-    local sinA, cosA = math.sin(aimRad), math.cos(aimRad)
     local sinP, cosP = math.sin(pitchRad), math.cos(pitchRad)
-
-    -- 水平朝向（给枪口/磁吸用）与相机轨道基向量
-    self.facing = Vector3(sinA, 0.0, -cosA)
-    local behind = Vector3(-sinA, 0.0, cosA)     -- 主角背后
-    local right = Vector3(cosA, 0.0, sinA)       -- 主角右手侧（越肩偏移方向）
-    -- 瞄准方向 = facing 下俯 pitch（从塔上往下打地/海面的敌人）
-    local forward = Vector3(sinA * cosP, -sinP, -cosA * cosP)
-
-    -- 人物节点朝 nodeYaw（移动/开火转向），相机轨道仍用固定的 aim(=朝海)
-    self.node:SetRotation(Quaternion(-self.nodeYaw, Vector3.UP))
-
-    local target = self.spot + Vector3(0.0, Config.CAMERA_TARGET_Y, 0.0)
     local dist = Config.CAMERA_DISTANCE
-    local camPos = target
-        + behind * (dist * cosP)
-        + Vector3(0.0, dist * sinP, 0.0)
-        + right * Config.CAMERA_SHOULDER_OFFSET
+
+    -- 相机在主角 +z 后方上方（俯视时屏幕上方=朝海 -z）
+    local target = self.spot + Vector3(0.0, Config.CAMERA_TARGET_Y, 0.0)
+    local camPos = target + Vector3(0.0, dist * sinP, dist * cosP)
 
     self.cameraNode:SetPosition(camPos)
-    -- LookAt 绑定要三个参数（target, up, space）：朝瞄准方向的远处一点看，不给 space 会报参数个数不对。
-    self.cameraNode:LookAt(camPos + forward * 100.0, Vector3.UP, TS.WORLD)
+    -- 视线中心朝海(-z)前推 LOOK_AHEAD，看到更大范围战场而不是只盯脚下
+    local lookAt = target + Vector3(0.0, 0.0, -Config.CAMERA_LOOK_AHEAD)
+    self.cameraNode:LookAt(lookAt, Vector3.UP, TS.WORLD)
+
+    -- 人物节点朝 nodeYaw
+    self.node:SetRotation(Quaternion(-self.nodeYaw, Vector3.UP))
+    -- facing 保持朝海（给旧接口 GetFacing 兼容）
+    self.facing = Vector3(0.0, 0.0, -1.0)
 end
 
 --- 枪口世界坐标：主角胸口沿 facing 前探一点，给枪口光/枪口粒子/音效定位用。

@@ -14,7 +14,7 @@
 
 local Config = require("game.Config")
 
----@class Audio 音效/旁白播放：模块级，持有 scene
+---@class Audio 音效/旁白/BGM 播放：模块级，持有 scene
 local Audio = {}
 Audio.__index = Audio
 
@@ -23,7 +23,24 @@ Audio.__index = Audio
 function Audio.Build(scene)
     local self = setmetatable({}, Audio)
     self.scene = scene
+    self.bgmSource = nil
     return self
+end
+
+--- 播放背景音乐（循环，不自动回收，只播一次不叠加）。
+---@param path string Sound 资源路径
+---@param gain number|nil 音量，缺省 0.3
+function Audio:PlayBGM(path, gain)
+    if self.bgmSource then return end
+    local sound = GetResource("Sound", path)
+    if not sound then
+        print("Audio: missing BGM " .. tostring(path))
+        return
+    end
+    self.bgmSource = self.scene:CreateComponent("SoundSource")
+    self.bgmSource:SetGain(gain or 0.3)
+    sound:SetLooped(true)
+    self.bgmSource:Play(sound)
 end
 
 --- 播一个音效事件（从 Config.Sfx[event] 的变体里随机取一个）。
