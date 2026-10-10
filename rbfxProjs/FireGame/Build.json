@@ -73,7 +73,8 @@
 					"Materials",
 					"Particle",
 					"Textures",
-					"Sound/kenney_impact-sounds",
+					"Sound/back_ground",
+					"Sound/gun_shot",
 					"Sound/kenney_voiceover-pack-fighter"
 				]
 			},
