@@ -48,6 +48,16 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC(ShowRewardedAd)
             LUA_MEMBER_FUNC(Pay)
             LUA_MEMBER_FUNC(RequestPrivacyAuthorization)
+            // Voice clips: maxDurationSec defaults to 3, playbackRate (0.5..2.0) to 1.0.
+            LUA_MEMBER_FUNC_RAW(RecordVoice, [](MinigameSDK* sdk, const ea::string& slot,
+                sol::optional<int> maxDurationSec) -> int {
+                return sdk ? sdk->RecordVoice(slot, maxDurationSec.value_or(3)) : 0;
+            })
+            LUA_MEMBER_FUNC_RAW(PlayUserAudio, [](MinigameSDK* sdk, const ea::string& slot,
+                sol::optional<float> playbackRate) -> int {
+                return sdk ? sdk->PlayUserAudio(slot, playbackRate.value_or(1.0f)) : 0;
+            })
+            LUA_MEMBER_FUNC(StopUserAudio)
             LUA_MEMBER_FUNC_RET(IsAvailable, bool)
         );
     }
@@ -89,7 +99,10 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
         "SHARE", static_cast<int>(MinigameSDKRequestKind::Share),
         "REWARDED_AD", static_cast<int>(MinigameSDKRequestKind::RewardedAd),
         "PAYMENT", static_cast<int>(MinigameSDKRequestKind::Payment),
-        "PRIVACY_AUTHORIZATION", static_cast<int>(MinigameSDKRequestKind::PrivacyAuthorization));
+        "PRIVACY_AUTHORIZATION", static_cast<int>(MinigameSDKRequestKind::PrivacyAuthorization),
+        "RECORD_VOICE", static_cast<int>(MinigameSDKRequestKind::RecordVoice),
+        "PLAY_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayUserAudio),
+        "STOP_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopUserAudio));
 }
 
 } // namespace Urho3D

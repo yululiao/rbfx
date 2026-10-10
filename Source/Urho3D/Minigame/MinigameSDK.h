@@ -26,6 +26,14 @@ enum class MinigameSDKRequestKind
     Payment = 3,
     /// Ask the player to accept the privacy policy.
     PrivacyAuthorization = 4,
+    /// Record a short voice clip with the microphone and store it under a slot name
+    /// in the host's user data directory (file lifecycle fully owned by the host).
+    RecordVoice = 5,
+    /// Play back a previously recorded voice clip (optionally pitch-shifted) through
+    /// the host's audio system. The engine's Sound decoders are not involved.
+    PlayUserAudio = 6,
+    /// Stop the current user-audio playback immediately.
+    StopUserAudio = 7,
 };
 
 /// Bridge to the host SDK capabilities (login, share, rewarded ads, payment, privacy).
@@ -75,6 +83,17 @@ public:
     /// Ask the player to accept the privacy policy; required by the vendors before any
     /// personal data is touched.
     int RequestPrivacyAuthorization();
+
+    /// Record up to maxDurationSec seconds of microphone audio and store it under
+    /// slotName. The answer payload carries the vendor result (duration etc.). Recording
+    /// implies the microphone scope authorization prompt on first use.
+    int RecordVoice(const ea::string& slotName, int maxDurationSec);
+    /// Play the clip stored under slotName. playbackRate (0.5..2.0) pitch-shifts the
+    /// voice (voice-filter presets live in game code); the answer arrives when the
+    /// playback finishes or fails.
+    int PlayUserAudio(const ea::string& slotName, float playbackRate);
+    /// Stop the current user-audio playback immediately. Completes right away.
+    int StopUserAudio();
 
     /// Return whether the JavaScript SDK shim is attached.
     /// @property

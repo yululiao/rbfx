@@ -22,6 +22,7 @@ local Enemy = require("game.Enemy")
 local Waves = require("game.Waves")
 local Shooting = require("game.Shooting")
 local Juice = require("game.Juice")
+local Voice = require("game.Voice")
 
 ----------------------------------------------------------------------
 -- HUD 几何：摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量，单位都是画布像素）
@@ -77,7 +78,7 @@ end
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, voice, knob, joystick
 
 local function RestartGame()
     if enemy then
@@ -93,6 +94,10 @@ local function RestartGame()
     if juice then
         juice:Reset()
     end
+    -- 换局停掉上一局的语音回放（避免败局吐槽拖进新局）
+    if voice then
+        voice:Stop()
+    end
     if hud then
         hud:HideEnd()
     end
@@ -106,6 +111,17 @@ local function OnScore(result, unit, headshot)
     end
     if juice and result and result.killed then
         juice:OnKill(unit, result.score)
+    end
+    -- 连杀里程碑播玩家自录的战吼：combo 在 waves:AddKill 里已更新，读它即可（
+    -- 阈值表复用 COMBO_VOICE_AT，与系统旁白同刻触发，自录语音压在旁白后面）。没
+    -- 录过音时宿主回失败，Voice:Play 静默，不影响系统旁白。
+    if voice and result and result.killed and waves then
+        for _, threshold in ipairs(Config.COMBO_VOICE_AT) do
+            if waves.combo == threshold then
+                voice:Play(Config.VOICE_SLOT_KILLSTREAK)
+                break
+            end
+        end
     end
 end
 
@@ -122,6 +138,10 @@ end
 
 local function OnGameOver(outcome, score)
     print(string.format("FireGame MARK game over: %s score=%d", tostring(outcome), score or 0))
+    -- 败局播玩家的自录吐槽（没录过则静默）；胜利不播（胜利旁白已够）
+    if voice and outcome == "lose" then
+        voice:Play(Config.VOICE_SLOT_LOSE)
+    end
 end
 
 -- 载具交互（HUD 按钮回调）：登船/下船（player 在下方装配后才存在，这里是闭包运行时才解引用）
@@ -131,6 +151,37 @@ end
 
 local function OnDisembark()
     if player then player:LeaveBoat() end
+end
+
+-- 自定义语音面板的 HUD 回调（按钮事件 → Voice 编排）
+local function OnVoiceOpen()
+    if hud and voice then
+        hud:SetVoicePanel(true)
+    end
+end
+
+local function OnVoiceClose()
+    if hud then
+        hud:SetVoicePanel(false)
+    end
+end
+
+local function OnVoiceRecord(slot)
+    if voice then
+        voice:Record(slot)
+    end
+end
+
+local function OnVoicePreview()
+    if voice then
+        voice:Preview()
+    end
+end
+
+local function OnVoiceFilter()
+    if voice and hud then
+        hud:SetVoiceFilterName(voice:CycleFilter())
+    end
 end
 
 coast = Coast.Build(scene)
@@ -148,6 +199,11 @@ hud = Hud.Build(scene, {
     onRestart = RestartGame,
     onBoard = OnBoard,
     onDisembark = OnDisembark,
+    onVoiceOpen = OnVoiceOpen,
+    onVoiceClose = OnVoiceClose,
+    onVoiceRecord = OnVoiceRecord,
+    onVoicePreview = OnVoicePreview,
+    onVoiceFilter = OnVoiceFilter,
 })
 enemy = Enemy.Build({
     scene = scene, fx = fx, audio = audio, player = player,
@@ -155,6 +211,11 @@ enemy = Enemy.Build({
 })
 enemy:SpawnStaticBarrels()
 waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver })
+-- 自定义语音：要 hud（结果状态行）与 SDK 子系统；编辑器宿主无 SDK 时入口按钮隐藏
+voice = Voice.Build(scene, { hud = hud })
+if hud then
+    hud:SetVoiceAvailable(voice:IsAvailable())
+end
 shooting = Shooting.Build({
     scene = scene, player = player, fx = fx, audio = audio, hud = hud,
     enemies = enemy, onScore = OnScore,

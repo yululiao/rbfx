@@ -27,7 +27,7 @@ local function clamp01(v)
 end
 
 ---@param scene Scene
----@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil }|nil
+---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil, onVoiceOpen: fun()|nil, onVoiceClose: fun()|nil, onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil, onVoiceFilter: fun()|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -52,6 +52,13 @@ function Hud.Build(scene, handlers)
     -- 登船/下船按钮显隐（data-if）：main.lua 帧循环里根据交互条件 Show/Hide
     self.showBoard = false
     self.showDisembark = false
+    -- 自定义语音面板（data-if）：入口按钮只在宿主 SDK 可用时显示（编辑器隐藏）；
+    -- 状态行/录音中提示/音色名都是纯文本或 bool 绑定（不支持内联 style 绑定）
+    self.voiceAvailable = false
+    self.voicePanel = false
+    self.voiceRecording = false
+    self.voiceFilterName = "原声"
+    self.voiceStatus = ""
 
     local comp = scene:CreateComponent("LuaRmlUIComponent")
     self.comp = comp
@@ -77,6 +84,11 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("showDisembark", function() return self.showDisembark end)
             w:BindReadonlyProperty("narrate", function() return self.narrate end)
             w:BindReadonlyProperty("endTitle", function() return self.endTitle end)
+            w:BindReadonlyProperty("voiceAvailable", function() return self.voiceAvailable end)
+            w:BindReadonlyProperty("voicePanel", function() return self.voicePanel end)
+            w:BindReadonlyProperty("voiceRecording", function() return self.voiceRecording end)
+            w:BindReadonlyProperty("voiceFilterName", function() return self.voiceFilterName end)
+            w:BindReadonlyProperty("voiceStatus", function() return self.voiceStatus end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -92,6 +104,38 @@ function Hud.Build(scene, handlers)
             w:BindEvent("disembark", function()
                 if handlers.onDisembark then
                     handlers.onDisembark()
+                end
+            end)
+            -- 自定义语音：入口/面板内按钮。槽位参数直接拆成两个事件（lose/killstreak），
+            -- 避免给 BindEvent 传参的额外约定。
+            w:BindEvent("voiceOpen", function()
+                if handlers.onVoiceOpen then
+                    handlers.onVoiceOpen()
+                end
+            end)
+            w:BindEvent("voiceClose", function()
+                if handlers.onVoiceClose then
+                    handlers.onVoiceClose()
+                end
+            end)
+            w:BindEvent("voiceRecordLose", function()
+                if handlers.onVoiceRecord then
+                    handlers.onVoiceRecord("lose")
+                end
+            end)
+            w:BindEvent("voiceRecordKillstreak", function()
+                if handlers.onVoiceRecord then
+                    handlers.onVoiceRecord("killstreak")
+                end
+            end)
+            w:BindEvent("voicePreview", function()
+                if handlers.onVoicePreview then
+                    handlers.onVoicePreview()
+                end
+            end)
+            w:BindEvent("voiceFilter", function()
+                if handlers.onVoiceFilter then
+                    handlers.onVoiceFilter()
                 end
             end)
         end,
@@ -222,6 +266,48 @@ function Hud:HideButton(id)
     end
 end
 
+----------------------------------------------------------------------
+-- 自定义语音面板
+----------------------------------------------------------------------
+
+--- 语音入口可用性（编辑器宿主无 SDK，藏入口按钮）。装配后调一次。
+function Hud:SetVoiceAvailable(v)
+    self.voiceAvailable = v and true or false
+    self:Dirty("voiceAvailable")
+end
+
+--- 面板开/关（voiceOpen/voiceClose 事件经 main.lua 回调进来）。
+function Hud:SetVoicePanel(open)
+    self.voicePanel = open and true or false
+    if not self.voicePanel then
+        -- 关面板时连带清状态，下次打开是干净面板
+        self.voiceRecording = false
+        self.voiceStatus = ""
+        self:Dirty("voiceRecording")
+        self:Dirty("voiceStatus")
+    end
+    self:Dirty("voicePanel")
+end
+
+--- 录音中标志（true 时面板提示“录音中”，按钮被 Voice 侧闸住重入）。
+function Hud:SetVoiceRecording(v)
+    self.voiceRecording = v and true or false
+    self:Dirty("voiceRecording")
+end
+
+--- 音色名（循环切换按钮的文本）。
+function Hud:SetVoiceFilterName(name)
+    self.voiceFilterName = name or "原声"
+    self:Dirty("voiceFilterName")
+end
+
+--- 状态行（录音/试听结果提示，几秒后由 Update 自动清）。
+function Hud:SetVoiceStatus(text)
+    self.voiceStatus = text or ""
+    self.voiceStatusT = 3.0
+    self:Dirty("voiceStatus")
+end
+
 --- 每帧：hitmarker 到点自动关闭 + 旁白到期清除。
 ---@param dt number
 function Hud:Update(dt)
@@ -242,6 +328,13 @@ function Hud:Update(dt)
         if self.narrateT <= 0.0 and self.narrate ~= "" then
             self.narrate = ""
             self:Dirty("narrate")
+        end
+    end
+    if self.voiceStatusT and self.voiceStatusT > 0.0 then
+        self.voiceStatusT = self.voiceStatusT - dt
+        if self.voiceStatusT <= 0.0 and self.voiceStatus ~= "" then
+            self.voiceStatus = ""
+            self:Dirty("voiceStatus")
         end
     end
 end

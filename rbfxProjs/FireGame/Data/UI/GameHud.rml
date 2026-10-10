@@ -71,6 +71,46 @@
         <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6px; margin-left: 40px; width: 160px; height: 10px;"/>
     </div>
 
+    <!-- 右中：自定义语音入口（data-if="voiceAvailable"，编辑器宿主无 SDK 时隐藏）。
+         放在摇杆与弹药之间右侧留白处，不挡操作。 -->
+    <div data-if="voiceAvailable" data-event-click="voiceOpen" style="position: absolute; right: 44px; bottom: 300px; width: 84px; height: 84px; border-radius: 42px; background-color: #6a4b9ee6; text-align: center;">
+        <div style="position: relative; top: 24px; color: #ffffffff; font-size: 26px; font-weight: bold;">配音</div>
+    </div>
+
+    <!-- 自定义语音面板（data-if="voicePanel"）：居中卡片。槽位两个（失败吐槽/连杀战吼），
+         录音中提示与状态行都是绑定文本；音色按钮文本随循环切换。 -->
+    <div data-if="voicePanel" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #00000080;">
+        <div style="position: absolute; left: 50%; top: 50%; width: 600px; height: 520px;">
+            <div style="position: absolute; left: -300px; top: -260px; width: 600px; height: 520px; background-color: #222831f2; border-radius: 20px;">
+                <div style="position: relative; margin-top: 36px; text-align: center; color: #ffffffff; font-size: 40px; font-weight: bold;">自定义语音</div>
+                <div style="position: relative; margin-top: 14px; text-align: center; color: #ffffffb3; font-size: 22px;">录一句话，防线被破/连杀时用你的声音播</div>
+
+                <div style="position: relative; margin-top: 36px; margin-left: 60px;">
+                    <div style="color: #ffffffd9; font-size: 26px;">失败吐槽（防线被破时播）</div>
+                    <button data-event-click="voiceRecordLose" style="margin-top: 10px; padding: 14px 36px; font-size: 26px; background-color: #d94b3aff; color: #ffffffff; border-radius: 10px;">录一句</button>
+                </div>
+
+                <div style="position: relative; margin-top: 30px; margin-left: 60px;">
+                    <div style="color: #ffffffd9; font-size: 26px;">连杀战吼（三杀及以上播）</div>
+                    <button data-event-click="voiceRecordKillstreak" style="margin-top: 10px; padding: 14px 36px; font-size: 26px; background-color: #d94b3aff; color: #ffffffff; border-radius: 10px;">录一句</button>
+                </div>
+
+                <div data-if="voiceRecording" style="position: relative; margin-top: 24px; margin-left: 60px; color: #ffd24dff; font-size: 26px;">录音中…（最多几秒，说完自动停）</div>
+
+                <div style="position: relative; margin-top: 28px; margin-left: 60px;">
+                    <button data-event-click="voiceFilter" style="padding: 14px 32px; font-size: 26px; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10px;">音色：{{voiceFilterName}}</button>
+                    <button data-event-click="voicePreview" style="margin-left: 20px; padding: 14px 32px; font-size: 26px; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10px;">试听</button>
+                </div>
+
+                <div style="position: relative; margin-top: 20px; margin-left: 60px; height: 34px; color: #ffffff99; font-size: 22px;">{{voiceStatus}}</div>
+
+                <div style="position: relative; margin-top: 8px; text-align: center;">
+                    <button data-event-click="voiceClose" style="padding: 14px 48px; font-size: 26px; background-color: #45586bcb; color: #ffffffff; border-radius: 10px;">完成</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。
          会动的只有 Knob.rml 那颗帽（Lua 逐帧 SetPosition）。这里原先套过一个深色内圆，
          看起来像帽却永远不动，极易被误认为“帽不跟手”，已移除。 -->

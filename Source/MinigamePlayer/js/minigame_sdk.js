@@ -22,7 +22,10 @@
         share: 1,
         rewarded_ad: 2,
         payment: 3,
-        privacy: 4
+        privacy: 4,
+        record_voice: 5,
+        play_user_audio: 6,
+        stop_user_audio: 7
     };
 
     function complete(request_id, success, payload) {
@@ -183,6 +186,132 @@
             success: function () { complete(request_id, true, "{}"); },
             fail: function (error) { complete(request_id, false, fail_text(error, "privacy authorization failed")); }
         });
+    };
+
+    // ---------- voice (record / play / stop) ----------
+    // Clips live entirely on the host side: the recorder writes mp3 files into the
+    // user data directory under rbfx_voice_<slot>.mp3, playback goes through
+    // InnerAudioContext. The engine never decodes these (its Sound loaders only
+    // know ogg/wav); the slot name is the only contract between both worlds.
+
+    function user_data_path() {
+        return (wx_tt && wx_tt.env && wx_tt.env.USER_DATA_PATH) || "";
+    }
+
+    function voice_file_path(slot) {
+        return user_data_path() + "/rbfx_voice_" + String(slot || "default") + ".mp3";
+    }
+
+    var recorder_manager = null;
+    var recording_request = 0;
+
+    function get_recorder_manager() {
+        if (recorder_manager)
+            return recorder_manager;
+        recorder_manager = wx_tt.getRecorderManager();
+        recorder_manager.onStop(function (res) {
+            var request_id = recording_request;
+            recording_request = 0;
+            if (!request_id)
+                return;
+            if (!res || !res.tempFilePath)
+                return complete(request_id, false, "recorder returned no file");
+            var fs = wx_tt.getFileSystemManager();
+            var target = recorder_manager.__voice_target;
+            // Remove a stale clip first: saveFile refuses to overwrite existing files.
+            try { fs.unlinkSync(target); } catch (e) { /* not there yet, fine */ }
+            fs.saveFile({
+                tempFilePath: res.tempFilePath,
+                filePath: target,
+                success: function () {
+                    complete(request_id, true, JSON.stringify({ durationMs: res.duration || 0 }));
+                },
+                fail: function (error) {
+                    complete(request_id, false, fail_text(error, "saving the clip failed"));
+                }
+            });
+        });
+        recorder_manager.onError(function (error) {
+            var request_id = recording_request;
+            recording_request = 0;
+            if (request_id)
+                complete(request_id, false, fail_text(error, "recording failed"));
+        });
+        return recorder_manager;
+    }
+
+    handlers[KIND.record_voice] = function (request_id, payload) {
+        if (!wx_tt || typeof wx_tt.getRecorderManager !== "function")
+            return complete(request_id, false, "recording is not supported by the host");
+        if (recording_request)
+            return complete(request_id, false, "a recording is already in progress");
+
+        var args = parse_payload(payload);
+        var slot = args.slot ? String(args.slot) : "default";
+        var duration = Math.max(1000, Math.min(args.maxDurationMs | 0 || 3000, 60000));
+
+        var manager = get_recorder_manager();
+        manager.__voice_target = voice_file_path(slot);
+        recording_request = request_id;
+        try {
+            manager.start({ duration: duration, format: "mp3" });
+        } catch (error) {
+            // A synchronous throw would otherwise leak recording_request and block
+            // every future recording with "already in progress".
+            recording_request = 0;
+            return complete(request_id, false, fail_text(error, "recording failed"));
+        }
+        // The completion arrives through onStop/onError above; start() itself is
+        // fire-and-forget. A missing authorization surfaces through onError.
+    };
+
+    var voice_audio = null;
+
+    function stop_voice_audio() {
+        if (!voice_audio)
+            return;
+        var audio = voice_audio;
+        voice_audio = null;
+        // Settle the running request before tearing the instance down: destroy()
+        // detaches the listeners, so relying on onStop alone could drop the
+        // completion of a playback that is being replaced.
+        try { if (audio.__settle) audio.__settle(false, "playback stopped"); } catch (e) { /* ignore */ }
+        try { audio.stop(); } catch (e) { /* already stopped */ }
+        try { audio.destroy(); } catch (e) { /* already destroyed */ }
+    }
+
+    handlers[KIND.play_user_audio] = function (request_id, payload) {
+        if (!wx_tt || typeof wx_tt.createInnerAudioContext !== "function")
+            return complete(request_id, false, "audio playback is not supported by the host");
+
+        var args = parse_payload(payload);
+        var slot = args.slot ? String(args.slot) : "default";
+        // Documented rate steps are 0.5 / 0.8 / 1.0 / 1.25 / 1.5 / 2.0 on both
+        // vendors; other values get snapped by the host. Game code passes the steps.
+        var rate = Number(args.rate) || 1.0;
+
+        // One audio instance at a time: a new playback replaces the previous one and
+        // completes its request as "stopped" so no callback leaks.
+        stop_voice_audio();
+        voice_audio = wx_tt.createInnerAudioContext();
+        voice_audio.src = voice_file_path(slot);
+        voice_audio.playbackRate = rate;
+        var settled = false;
+        var settle = function (ok, text) {
+            if (settled)
+                return;
+            settled = true;
+            complete(request_id, ok, text || "{}");
+        };
+        voice_audio.__settle = settle;
+        voice_audio.onEnded(function () { settle(true); });
+        voice_audio.onError(function (error) { settle(false, fail_text(error, "playback failed")); });
+        voice_audio.play();
+    };
+
+    handlers[KIND.stop_user_audio] = function (request_id) {
+        stop_voice_audio();
+        complete(request_id, true, "{}");
     };
 
     // ---------- publish ----------

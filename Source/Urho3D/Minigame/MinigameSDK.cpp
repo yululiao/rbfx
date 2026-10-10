@@ -8,6 +8,8 @@
 #include "Urho3D/IO/Log.h"
 #include "Urho3D/Minigame/MinigameEvents.h"
 
+#include <algorithm>
+
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #endif
@@ -223,6 +225,59 @@ int MinigameSDK::Pay(const ea::string& orderJson)
 int MinigameSDK::RequestPrivacyAuthorization()
 {
     return Invoke(MinigameSDKRequestKind::PrivacyAuthorization, EMPTY_STRING);
+}
+
+int MinigameSDK::RecordVoice(const ea::string& slotName, int maxDurationSec)
+{
+    // The slot name becomes part of the stored file name on the host; keep it
+    // conservative (letters/digits/underscore) so exotic game-side names cannot
+    // escape the user data directory.
+    ea::string safeSlot;
+    for (char ch : slotName)
+    {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+            || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+        safeSlot += ok ? ch : '_';
+    }
+    if (safeSlot.empty())
+        safeSlot = "default";
+
+    ea::string payload;
+    payload += "{\"slot\":";
+    payload += EscapeJson(safeSlot);
+    payload += ",\"maxDurationMs\":";
+    payload += ea::to_string(std::max(maxDurationSec, 1) * 1000);
+    payload += '}';
+    return Invoke(MinigameSDKRequestKind::RecordVoice, payload);
+}
+
+int MinigameSDK::PlayUserAudio(const ea::string& slotName, float playbackRate)
+{
+    ea::string safeSlot;
+    for (char ch : slotName)
+    {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+            || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+        safeSlot += ok ? ch : '_';
+    }
+    if (safeSlot.empty())
+        safeSlot = "default";
+
+    // Clamp to the rate range the vendors document (0.5..2.0); 1.0 is the natural pitch.
+    const float rate = std::min(std::max(playbackRate, 0.5f), 2.0f);
+
+    ea::string payload;
+    payload += "{\"slot\":";
+    payload += EscapeJson(safeSlot);
+    payload += ",\"rate\":";
+    payload += ea::to_string(rate);
+    payload += '}';
+    return Invoke(MinigameSDKRequestKind::PlayUserAudio, payload);
+}
+
+int MinigameSDK::StopUserAudio()
+{
+    return Invoke(MinigameSDKRequestKind::StopUserAudio, "{}");
 }
 
 int MinigameSDK::Invoke(MinigameSDKRequestKind kind, const ea::string& payloadJson)
