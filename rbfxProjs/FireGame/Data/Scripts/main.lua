@@ -1,9 +1,9 @@
 -- Scripts/main.lua
 --
--- FireGame 入口：第三人称塔后越肩"狙击海盗"垂直切片。
+-- FireGame 入口：第三人称俯视角"狙击海盗"垂直切片（全自动开火，玩家只负责走位）。
 -- 本文件不含玩法逻辑，只负责按依赖顺序装配各模块并驱动帧循环：
---   Config → Coast（海岸布景）→ Player（主角+越肩相机）→ Fx/Audio（反馈）
---   → Hud（数据绑定 HUD）→ Enemy（单位管理）→ Waves（波次导演）→ Shooting（瞄准开火）
+--   Config → Coast（海岸布景）→ Player（主角+俯视相机）→ Fx/Audio（反馈）
+--   → Hud（数据绑定 HUD）→ Enemy（单位管理）→ Waves（波次导演）→ Shooting（自动开火）
 --
 -- 宿主约定：三个宿主（编辑器 GameView Play / MinigamePlayer / LuaGamePlayer）都在 C++ 侧
 --   注入全局 `scene` 后再执行本脚本；场景根节点必须挂 LuaGameScript 且 Script Path 指向

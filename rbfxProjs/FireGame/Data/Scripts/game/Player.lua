@@ -79,7 +79,7 @@ local function ApplyBodyMaterials(model)
     end
 end
 
---- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做越肩相机。
+--- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做俯视相机。
 ---@param scene Scene
 ---@param spot Vector3 主角脚底世界坐标（Coast.Build 返回的 playerSpot）
 ---@param playerBoat Node|nil 玩家专属船节点（载具），由 main.lua 从 Coast 传入

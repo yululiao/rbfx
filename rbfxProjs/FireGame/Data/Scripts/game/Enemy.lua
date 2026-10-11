@@ -60,7 +60,7 @@ function Enemy.Build(deps)
     return self
 end
 
----@return table[] 存活与待移除的单位（Shooting 磁吸只挑 alive 的）
+---@return table[] 存活与待移除的单位（Shooting 自动吸附只挑 alive 的）
 function Enemy:GetUnits()
     return self.units
 end

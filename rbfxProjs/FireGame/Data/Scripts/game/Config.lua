@@ -104,22 +104,16 @@ Config.PALISADE_SPAN_X = 40.0        -- 总宽，桩位在 ±SPAN_X/2 之间等�
 Config.PALISADE_POST = Vector3(0.26, 1.70, 0.26)
 
 ----------------------------------------------------------------------
--- 相机（第三人称塔后越肩，绕主角球面轨道）
+-- 相机（俯视角固定朝海，吊在主角正后上方；抖音小游戏刻意不需要玩家手动转视角）
 ----------------------------------------------------------------------
 Config.CAMERA_DISTANCE = 20.0
 Config.CAMERA_TARGET_Y = 1.45        -- 相机关注点相对主角脚底的高度
 Config.CAMERA_PITCH = 35.0           -- 俯角（度），斜后方朝海面倾斜俯视
 Config.CAMERA_LOOK_AHEAD = 6.0       -- 视线中心往海方向偏移，看到更大范围战场
-Config.CAMERA_PITCH_MIN = 30.0
-Config.CAMERA_PITCH_MAX = 70.0
-Config.CAMERA_YAW_LIMIT = 0.0        -- 俯视角固定朝海，不允许水平旋转
 Config.CAMERA_FOV = 42.0
 Config.CAMERA_FAR_CLIP = 260.0
 Config.CAMERA_KICK = 0.3             -- 开火相机微小震动幅度
 Config.CAMERA_KICK_DECAY = 12.0
--- 越肩侧移：相机向主角右侧偏这么多，把人物挪到画面左侧，屏幕中心的准星射线
--- 才不会被主角自己挡住（否则从相机到准星的第一命中永远是主角）。设为 0 即回到肩后正中。
-Config.CAMERA_SHOULDER_OFFSET = 0.95
 
 ----------------------------------------------------------------------
 -- 敌人
@@ -159,21 +153,15 @@ Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako"
 Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbarossa" }
 
 ----------------------------------------------------------------------
--- 武器与命中
+-- 武器（全自动开火：射程内取最近敌人自动射击，玩家只管走位——抖音小游戏的刻意简化）
+-- 注：没有手动射线/准星/磁吸/爆头——这些都是早期“手动狙击”设想留下的残留配置，已随之清除。
 ----------------------------------------------------------------------
 Config.MAG_SIZE = 5
 Config.RELOAD_TIME = 1.2
 Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔
 Config.FIRE_WINDOW = 0.6             -- 开火后维持射击姿态/上半身对准目标的窗口（秒）：大于冷却
                                      -- 保证连发期间不断档，装弹期间自然回落举枪
-Config.RAY_MAX_DISTANCE = 240.0
-Config.AIM_SENSITIVITY = 0.155       -- 每画布像素拖拽转多少度
-Config.TAP_MOVE_THRESHOLD = 15.0     -- 位移小于这个（画布像素）算点按开火，否则算转视角
-Config.MAGNET_RADIUS_PX = 48.0       -- 磁吸瞄准：射线打空时，准星这个半径内最近的敌人算命中
-Config.MAGNET_MAX_DISTANCE = 110.0
-Config.HEADSHOT_TOP_RATIO = 0.16     -- 命中点落在包围盒顶部这么高的比例内算爆头
-Config.RECOIL_SPREAD_DEG = 0.0       -- 预留：连发散布，MVP 不开
-Config.ATTACK_RANGE = 45.0           -- 普攻自动吸附：主角周围这个半径内取最近敌人（王者射手式，无需手动对准）
+Config.ATTACK_RANGE = 45.0           -- 自动吸附半径：主角周围这个半径内取最近敌人开火（无需手动对准）
 
 ----------------------------------------------------------------------
 -- 打击感三件套（hit-stop / 震屏 / 飘字）：统一由 game/Juice.lua 驱动，
