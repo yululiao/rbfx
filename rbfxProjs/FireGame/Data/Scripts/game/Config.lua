@@ -261,6 +261,8 @@ Config.BARREL_CHAIN_DELAY = 0.12     -- 连锁引爆的递延，让爆炸看起�
 ----------------------------------------------------------------------
 -- 波次：每波一张 {t=秒, kind=船型, lane=航道下标} 的生成时间表
 -- kind: "boat" 小艇（3 人）/ "bigboat" 大船（5 人）
+-- lane: Config.LANES 的下标（1..4）。同一 t 用不同 lane 错开，直线推进无碰撞，
+--       同航道同时刻会互相穿模。
 ----------------------------------------------------------------------
 Config.WAVE_INTERMISSION = 5.0
 Config.WAVES = {
@@ -288,6 +290,53 @@ Config.WAVES = {
             -- 第六批 2
             { t = 13.0, kind = "boat", lane = 1 },
             { t = 13.0, kind = "boat", lane = 3 },
+        },
+    },
+    -- 第二波：首次投入大船（5 人 / 8 血 / 慢速），小艇护航。节奏比首波松一寸，
+    -- 让玩家先学会优先集火大船再清杂兵；大船吐的人多，摸防线的压力也上一个台阶。
+    {
+        voice = "round_2",
+        spawns = {
+            -- 开场大船压中路
+            { t = 1.0, kind = "bigboat", lane = 2 },
+            -- 第一梯队小艇铺两侧
+            { t = 3.5, kind = "boat", lane = 1 },
+            { t = 3.5, kind = "boat", lane = 3 },
+            { t = 3.5, kind = "boat", lane = 4 },
+            -- 第二艘大船走右路
+            { t = 7.0, kind = "bigboat", lane = 3 },
+            -- 第二梯队
+            { t = 9.5, kind = "boat", lane = 1 },
+            { t = 9.5, kind = "boat", lane = 2 },
+            { t = 9.5, kind = "boat", lane = 4 },
+            -- 收尾零敲
+            { t = 12.5, kind = "boat", lane = 1 },
+            { t = 12.5, kind = "boat", lane = 4 },
+        },
+    },
+    -- 第三波（终局高潮）：三艘大船 + 四航道同时压制。双大船同刻开局逼玩家分心，
+    -- 大船沉没的长定格 + 强震屏（Juice bigboat 档）正是这波的打击感爆点。
+    {
+        voice = "round_3",
+        spawns = {
+            -- 双大船开局（中、右两路）
+            { t = 1.0, kind = "bigboat", lane = 2 },
+            { t = 1.0, kind = "bigboat", lane = 3 },
+            -- 四航道小艇齐射
+            { t = 4.0, kind = "boat", lane = 1 },
+            { t = 4.0, kind = "boat", lane = 2 },
+            { t = 4.0, kind = "boat", lane = 3 },
+            { t = 4.0, kind = "boat", lane = 4 },
+            -- 第三艘大船压左路
+            { t = 7.0, kind = "bigboat", lane = 1 },
+            -- 中段补杂兵
+            { t = 9.5, kind = "boat", lane = 2 },
+            { t = 9.5, kind = "boat", lane = 4 },
+            { t = 12.0, kind = "boat", lane = 1 },
+            { t = 12.0, kind = "boat", lane = 3 },
+            -- 末段
+            { t = 15.0, kind = "boat", lane = 2 },
+            { t = 15.0, kind = "boat", lane = 3 },
         },
     },
 }
