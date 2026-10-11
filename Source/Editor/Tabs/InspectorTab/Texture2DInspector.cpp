@@ -185,6 +185,10 @@ void Texture2DInspector::RenderExtraInspectorContent()
     // the metadata file never carries a combination the cook would have to override silently.
     Widgets::ItemLabel("Texture Type");
     {
+        // EditVariant draws an unlabelled combo, so its popup ID is GetID(""). Scope the ID here
+        // (the same convention the attribute inspector uses per row) or every combo in this panel
+        // shares one ID and the dropdowns stop opening on click.
+        const IdScopeGuard guard{"Texture Type"};
         Variant value{static_cast<int>(cachedParams_.textureType_)};
         if (Widgets::EditVariant(value, Widgets::EditVariantOptions{}.Enum(textureTypeNames)))
         {
@@ -208,6 +212,7 @@ void Texture2DInspector::RenderExtraInspectorContent()
     // Color space. One decision for cook and runtime alike; normal maps are always Linear.
     Widgets::ItemLabel("Color Space");
     {
+        const IdScopeGuard guard{"Color Space"};
         const bool colorSpaceLocked = cachedParams_.textureType_ == TextureImportType::NormalMap;
         ui::BeginDisabled(colorSpaceLocked);
         Variant value{static_cast<int>(colorSpaceLocked ? TextureImportColorSpace::Linear : cachedParams_.colorSpace_)};
@@ -227,6 +232,7 @@ void Texture2DInspector::RenderExtraInspectorContent()
     // Mipmaps. The runtime can only drop baked levels, never regenerate them.
     Widgets::ItemLabel("Mipmaps");
     {
+        const IdScopeGuard guard{"Mipmaps"};
         Variant value{static_cast<int>(cachedParams_.mipmapMode_)};
         if (Widgets::EditVariant(value, Widgets::EditVariantOptions{}.Enum(mipmapModeNames)))
         {
@@ -242,6 +248,7 @@ void Texture2DInspector::RenderExtraInspectorContent()
     // Sampler overrides. 'Default' leaves the engine default in place.
     Widgets::ItemLabel("Filter Mode");
     {
+        const IdScopeGuard guard{"Filter Mode"};
         const int currentFilter = cachedParams_.filterMode_ ? 1 + static_cast<int>(*cachedParams_.filterMode_) : 0;
         Variant value{currentFilter};
         if (Widgets::EditVariant(value, Widgets::EditVariantOptions{}.Enum(filterModeNames)))
@@ -257,6 +264,7 @@ void Texture2DInspector::RenderExtraInspectorContent()
 
     Widgets::ItemLabel("U Address");
     {
+        const IdScopeGuard guard{"U Address"};
         const int currentAddress = cachedParams_.addressModeU_ ? 1 + static_cast<int>(*cachedParams_.addressModeU_) : 0;
         Variant value{currentAddress};
         if (Widgets::EditVariant(value, Widgets::EditVariantOptions{}.Enum(addressModeNames)))
@@ -272,6 +280,7 @@ void Texture2DInspector::RenderExtraInspectorContent()
 
     Widgets::ItemLabel("V Address");
     {
+        const IdScopeGuard guard{"V Address"};
         const int currentAddress = cachedParams_.addressModeV_ ? 1 + static_cast<int>(*cachedParams_.addressModeV_) : 0;
         Variant value{currentAddress};
         if (Widgets::EditVariant(value, Widgets::EditVariantOptions{}.Enum(addressModeNames)))
