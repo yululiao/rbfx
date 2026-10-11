@@ -79,3 +79,7 @@ d:\openSrc\rbfx\rbfxProjs\EmptyTest\Build\Douyin
 当前包的 project.config.json 里 appid 是空的（出包时留空是合法设计）。导入时如提示绑定 appid：
 在抖音开放平台免费注册一个小游戏应用即可拿到（个人开发者可注册）；
 拿到后可以填进编辑器 Build 面板的 Douyin → Application id，重新出包时 project.config.json 就会自动带上，不用每次导入再填。
+
+免费游戏资源网站：
+Kenney
+Quaternius
