@@ -42,40 +42,45 @@ end
 -- 动画状态机：四态
 --   idle / idle_shoot / run / run_shoot
 -- 输入 = (是否移动, 是否处于开火窗口)，驾船时恒 idle。
--- 映射动画栈：Idle / Idle_Shoot / Run / Run_Gun。
+-- 映射动画栈：Idle / Idle_Gun / Run / Run_Gun。
 -- 全文件只有 SetAnimState 一处碰动画：状态跳变才 PlayExclusive。
 --（旧版是 PlayShoot 每枪重播 Idle_Shoot 顶掉 Run_Gun、开火窗口结束又没人恢复，
 --  多入口抢播就是“边跑边僵直”的根源。）
 ----------------------------------------------------------------------
 local STATE_ANIM = {
     idle       = "Idle",
-    idle_shoot = "Idle_Shoot",
+    idle_shoot = "Idle_Gun",
     run        = "Run",
     run_shoot  = "Run_Gun",
 }
 
---- 给 Soldier 上材质。导入器已把 FBX 材质色烘进顶点色（FbxImporter 的
---- FbxBakeMaterialColors：所有材质槽都无 diffuse 贴图的 mesh，每段顶点色 =
---- 材质 Diffuse 色），因此全身一个顶点色材质即可，显示 Quaternius 原厂纯色
---- 设计（Skin 肤色、Character_Main 军绿、Grey/Black 装备……）。
---- 例外：FBX 里十余件武器道具（Revolver/Sniper/Pistol/SMG/Shotgun/
---- RocketLauncher/Shovel/Knife 等）全部绑在右手食指链下同一位置堆叠，
---- 全显出来就是一身兵器库。只留一把 AK（GEOM46-49，与全自动开火最配），
---- 其余枪械、铲子、两把刀全部藏掉。段号来自 mdl 内嵌的 geometry 名
---- （AssetImporter 的 SetGeometryName 写入“AK #0”等，二进制可直接读出），
---- 并与顶点色指纹交叉验证（VB46-49 = Grey/DarkGrey/Grey2/Wood 恰为
---- AK 四槽材质）。
+--- 只保留主体与一把枪，其余手持道具隐藏。键是 .mdl 内嵌的 geometry 基名
+--- （AssetImporter 的 SetGeometryName 写入源网格名；同网格多材质段会是 "Lis #0"，
+--- 下面取 # 前基名再比对）。
+local PLAYER_KEEP_GEOMETRIES = { Lis = true, Shoulder = true, Rifle = true }
+
+--- 给主角 Characters_Lis 上材质。这个包与 pirate-kit 同路数：导入走 -nm -nt 不产材质，
+--- 但它是真正的贴图角色（非 Soldier 的顶点色方案），全身（含所有手持道具）共用一张
+--- Zombie_Atlas.png，所以整体挂手写的图集材质 Materials.Character()。
+--- 例外：FBX 把十件手持武器道具（Guitar/Axe/Spear/Pistol/Rifle/Shotgun/SMG/
+--- WoodenBat_Barbed/WoodenBat_Saw/Knife）全绑在左手 Middle1.L 同一处，显出来就是一身
+--- 兵器库。按 geometry 名只留主体 Lis、左肩甲 Shoulder 与唯一保留的武器 Rifle，其余逐个
+--- SetMaterial(index, Hidden) 藏掉（不再硬编码段号，靠 Model:GetGeometryName 逐段判定）。
 ---@param model AnimatedModel
 local function ApplyBodyMaterials(model)
-    model:SetMaterial(Materials.VertexColor())
-    -- 藏 8..45（AK 之前的全部枪械）与 50..60（铲子 + 两把刀），保留
-    -- 0..7（身体/肩垫）、46..49（AK）、61..66（Body 躯干）
-    local hidden = Materials.Hidden()
-    for i = 8, 45 do
-        model:SetMaterial(i, hidden)
+    model:SetMaterial(Materials.Character())
+    local mdl = GetResource("Model", Config.PlayerModel())
+    if not mdl then
+        return
     end
-    for i = 50, 60 do
-        model:SetMaterial(i, hidden)
+    local hidden = Materials.Hidden()
+    for i = 0, mdl:GetNumGeometries() - 1 do
+        -- 去掉多材质段的 " #N" 后缀取基名，再与保留集比对
+        local name = mdl:GetGeometryName(i)
+        local base = name:match("^(.-)%s*#") or name
+        if not PLAYER_KEEP_GEOMETRIES[base] then
+            model:SetMaterial(i, hidden)
+        end
     end
 end
 
@@ -136,6 +141,17 @@ function Player.Build(scene, spot, playerBoat)
         end
     end
 
+    -- 右手扶枪 IK 用到的骨骼：右大臂/右小臂/右手指根（腕代理） + 左手中指根（步枪挂点=握把目标）。
+    local armR = {
+        upper = node:GetChild("UpperArm.R", true),
+        lower = node:GetChild("LowerArm.R", true),
+        wrist = node:GetChild("Middle1.R", true),
+        grip  = node:GetChild("Middle1.L", true),
+    }
+    if Config.GUN_HOLD.enable and not (armR.upper and armR.lower and armR.wrist and armR.grip) then
+        print("FireGame MARK gun-hold bone missing (右臂扶枪 IK 失效)")
+    end
+
     local anim = node:GetComponent("AnimationController")
     if not anim then
         anim = node:CreateComponent("AnimationController")
@@ -163,6 +179,8 @@ function Player.Build(scene, spot, playerBoat)
     self.camera = camera
     self.spot = spot
     self.aimBoneNodes_ = aimBoneNodes
+    self.armR_ = armR                    -- 右手扶枪 IK 用的骨骼句柄
+    self.gunBlend_ = 0.0                 -- 扶枪权重 0..1，在 Update 里按枪态 ramp，在 GunHold 里消费
 
     -- 状态机与射击姿态输入
     self.animState_ = nil        -- 当前动画状态（nil 保证首次判定必然触发播放）
@@ -287,6 +305,8 @@ end
 --- "Custom animation (eg. IK) can be done at this point"）。动画每帧重写骨骼，
 --- 这里的修改永远建立在当帧动画姿态之上，不会跨帧累积。
 function Player:ApplyAim()
+    -- 右手扶枪：与本帧上半身扭转无关，只要处于枪态就叠加（自己按 enable/blend/inBoat 归零）
+    self:GunHold()
     if self.inBoat or math.abs(self.aimTwist_) < 0.001 then
         return
     end
@@ -297,6 +317,94 @@ function Player:ApplyAim()
     for _, boneNode in ipairs(self.aimBoneNodes_) do
         boneNode:SetWorldRotation(half * boneNode:GetWorldRotation())
     end
+end
+
+--- 右手扶枪 2 骨 IK（纯 Lua、轴无关）：把右臂解析地摆到步枪握把。必须在 ApplyAim 里调
+--- （动画已应用、蒙皮未算的自定义动画时点），故建立在当帧动画姿态之上、不跨帧累积。
+--- 做法：以左手中指骨（步枪挂点）为腕目标 T，先用余弦定理在“肩-肘-腕”链上解出肘的落点 E2
+--- （pole 取当前肘相对肩→目标线的垂向，保持动画里既有的弯向），用 Quaternion(from,to)
+--- 把 UpperArm.R 的“肩→肘”转到“肩→E2”；再在旋转后重读肘/腕，把 LowerArm.R 的“肘→腕”
+--- 转到“肘→Teff”。strength*gunBlend 做 slerp 混入，0 退回纯动画、1 手精确贴枪。
+function Player:GunHold()
+    local cfg = Config.GUN_HOLD
+    if not cfg.enable or self.inBoat or self.gunBlend_ < 0.001 then
+        return
+    end
+    local a = self.armR_
+    if not (a and a.upper and a.lower and a.wrist and a.grip) then
+        return
+    end
+
+    local S = a.upper:GetWorldPosition()                -- 右肩
+    local E = a.lower:GetWorldPosition()                -- 右肘
+    local W = a.wrist:GetWorldPosition()                -- 右手（指根代理腕点）
+    local T = a.grip:GetWorldPosition() + cfg.gripOffset -- 目标：左手上的步枪握把
+
+    local upper = E - S
+    local fore = W - E
+    local a1 = upper:Length()
+    local b1 = fore:Length()
+    if a1 < 1e-4 or b1 < 1e-4 then
+        return
+    end
+
+    local toT = T - S
+    local dist = toT:Length()
+    if dist < 1e-4 then
+        return
+    end
+    local dirST = toT / dist
+    -- 夹住可达距离：留 minBend 余量避免完全伸直；下限防折叠
+    local maxReach = (a1 + b1) * (1.0 - cfg.minBend)
+    local minReach = math.abs(a1 - b1) + (a1 + b1) * 0.02
+    local d = clamp(dist, minReach, maxReach)
+    local Teff = S + dirST * d
+
+    local u = (a1 * a1 - b1 * b1 + d * d) / (2.0 * d)
+    local h = math.sqrt(math.max(a1 * a1 - u * u, 0.0))
+    -- pole：当前上臂在垂直于肩→目标线方向上的分量，保住既有弯向（肘不乱翻）
+    local perp = upper - dirST * upper:DotProduct(dirST)
+    local plen = perp:Length()
+    local pole
+    if plen > 1e-3 then
+        pole = perp / plen
+    else
+        local ref = Vector3.UP
+        if math.abs(dirST:DotProduct(ref)) > 0.9 then
+            ref = Vector3.FORWARD
+        end
+        pole = dirST:CrossProduct(ref)
+        local pl = pole:Length()
+        pole = pl > 1e-3 and (pole / pl) or Vector3.RIGHT
+    end
+    local E2 = S + dirST * u + pole * h
+
+    local w = cfg.strength * self.gunBlend_
+    local dE = E2 - S
+    local dElen = dE:Length()
+    if dElen < 1e-4 then
+        return
+    end
+    local q1 = Quaternion(upper / a1, dE / dElen)
+    if w < 1.0 then
+        q1 = Quaternion.IDENTITY:Slerp(q1, w)
+    end
+    a.upper:SetWorldRotation(q1 * a.upper:GetWorldRotation())
+
+    -- 旋转大臂后重读肘/腕（子节点世界变换随之更新），再转小臂把手送到目标
+    local E2p = a.lower:GetWorldPosition()
+    local W2 = a.wrist:GetWorldPosition()
+    local curW = W2 - E2p
+    local dW = Teff - E2p
+    local curWlen, dWlen = curW:Length(), dW:Length()
+    if curWlen < 1e-4 or dWlen < 1e-4 then
+        return
+    end
+    local q2 = Quaternion(curW / curWlen, dW / dWlen)
+    if w < 1.0 then
+        q2 = Quaternion.IDENTITY:Slerp(q2, w)
+    end
+    a.lower:SetWorldRotation(q2 * a.lower:GetWorldRotation())
 end
 
 ----------------------------------------------------------------------
@@ -399,6 +507,12 @@ function Player:Update(dt)
     local twistStep = Config.AIM_TURN_SPEED * dt
     self.aimTwist_ = self.aimTwist_ + clamp(targetTwist - self.aimTwist_, -twistStep, twistStep)
 
+    -- 右手扶枪权重：仅枪态（idle_shoot/run_shoot）抬起右手贴枪，其余状态回落。
+    -- 真正的骨骼解算在 ApplyAim→GunHold（自定义动画时点）。
+    local gunTarget = (self.animState_ == "idle_shoot" or self.animState_ == "run_shoot") and 1.0 or 0.0
+    local gk = Config.GUN_HOLD.ramp * dt
+    self.gunBlend_ = self.gunBlend_ + clamp(gunTarget - self.gunBlend_, -gk, gk)
+
     if self.kick ~= 0.0 then
         -- 指数回落：kick *= e^(-decay*dt)，用一阶近似避免每帧 exp
         self.kick = self.kick - self.kick * Config.CAMERA_KICK_DECAY * dt
@@ -488,9 +602,9 @@ function Player:OnHurt()
     self.invulnT = Config.PLAYER_INVULN
     -- 后仰：给相机一个负向 kick（与开火后座上抬反向），瞬时“被推一把”
     self.kick = self.kick - Config.CAMERA_KICK * 3.0
-    -- 受击姿势：借举枪动画当“吃痛后仰”，短暂独占后回到当前状态机
+    -- 受击姿势：Lis 自带 HitReact 受击动画，短暂独占后回到当前状态机
     if not self.inBoat and not self.dying then
-        self.anim:PlayExclusive(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.08)
+        self.anim:PlayExclusive(Config.PlayerAnim("HitReact"), 0, true, 0.08)
         self.animState_ = nil   -- 强制下帧状态机重新判定并播回正确动画
     end
 end

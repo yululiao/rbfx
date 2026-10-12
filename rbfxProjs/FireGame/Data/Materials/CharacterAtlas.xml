@@ -1,0 +1,16 @@
+<!--
+    主角 Characters_Lis 的图集材质：主体、肩甲、所有手持道具共用一张 Zombie_Atlas.png。
+    与 pirate-kit 同路数：导入走 -nm -nt（不产材质、不产贴图引用），模型进 rbfx 后没有材质可用，
+    这里手写一份。Lis 是真贴图角色（几何带 TEXCOORD），必须采贴图而非吃顶点色。
+    走 PBR（LitOpaque + PBR defines），与场景其余材质同一条光照路径；结构照搬 PirateAtlas.xml。
+    Roughness 0.9、Metallic 0；UV 的 V 朝向已由 FbxImporter 导入期翻转，材质侧不需 VOffset。
+-->
+<material>
+    <technique name="Techniques/LitOpaque.xml" />
+    <shader vsdefines="PBR" psdefines="PBR" />
+    <texture slot="Albedo" name="Models/Characters-001/Zombie_Atlas.png" />
+    <parameter name="MatDiffColor" value="1 1 1 1" />
+    <parameter name="MatSpecColor" value="1 1 1 1" />
+    <parameter name="Roughness" value="0.9" />
+    <parameter name="Metallic" value="0" />
+</material>

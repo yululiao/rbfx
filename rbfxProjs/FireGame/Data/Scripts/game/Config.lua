@@ -251,6 +251,18 @@ Config.MOVE_SPEED = 4.2              -- 米/秒
 Config.TURN_SPEED = 8.0              -- 人物转向速度（弧度/秒），朝移动方向转
 Config.AIM_MAX_TWIST = 1.75          -- 上半身相对身体朝向的最大扭转（弧度，约 100 度）
 Config.AIM_TURN_SPEED = 12.0         -- 上半身扭转的平滑速度（弧度/秒）
+
+-- 右手扶枪（程序化 IK）：Characters_Lis 的 _Gun 动画（Idle_Gun/Run_Gun）里右臂是自然下垂的
+-- （这个姿态烘在 FBX 资片里，不是接线引入的）。这里在自定义动画时点（ApplyAim→GunHold）把
+-- 右臂两节骨骼 UpperArm.R/LowerArm.R 解析地摆到步枪握把（左手中指骨 Middle1.L，步枪的挂点）。
+-- 调参全靠目视：手不到位→加大 strength；肘朝外/穿模→改 pole 侧或调 gripOffset；拖动→降 ramp。
+Config.GUN_HOLD = {
+    enable = true,
+    strength = 0.9,        -- 0=完全跟随动画(手垂着)，1=手精确贴到枪上
+    ramp = 12.0,           -- 进/出枪态时权重淡入淡出速度（每秒）
+    minBend = 0.10,        -- 肘部最小余量(占满臂长比例)，防完全伸直奇点
+    gripOffset = Vector3(0.0, 0.0, 0.0),  -- 相对 Middle1.L 的世界系握把目标微调
+}
 Config.PLAYER_SPAWN = Vector3(0.0, Config.SAND_Y, 11.0)   -- 脚底出生点：防线前一点的地面，朝向海
 Config.WALK_MIN_X = -18.0
 Config.WALK_MAX_X = 18.0
@@ -384,9 +396,11 @@ Config.WAVES = {
 -- 资源路径
 ----------------------------------------------------------------------
 local PIRATE_DIR = "Models/Quaternius_pirate-kit/Fbx/"
-local PLAYER_DIR = "Models/Quaternius_Player/Fbx/"
+local PLAYER_DIR = "Models/Characters-001/Fbx/"
+local PLAYER_MODEL = "Characters_Lis"
 
 Config.MAT_PIRATE = "Materials/PirateAtlas.xml"
+Config.MAT_CHARACTER = "Materials/CharacterAtlas.xml"
 Config.MAT_VERTEX_COLOR = "Materials/VertexColor.xml"
 Config.MAT_WHITE = "Materials/DefaultWhite.xml"
 Config.MAT_SKY = "Materials/Sky.xml"
@@ -395,8 +409,10 @@ Config.MAT_WATER = "Materials/Water.xml"
 Config.PLANE_MODEL = "Models/Plane.mdl"
 Config.BOX_MODEL = "Models/Box.mdl"
 
--- Character_Soldier.mdl 有 67 个 geometry：主体是带顶点色的那批（躯干/四肢），装备件带 TEXCOORD。
--- 全显示、不做隐藏/裁剪（占位资源，体积优化不在本次范围）；逐 geometry 的材质分派见 Player.lua。
+-- Characters_Lis.mdl 有 12 个 geometry：主体蒙皮 Lis + 左肩甲 Shoulder + 一堆挂在左手 Middle1.L 的
+-- 手持道具（Guitar/Axe/Spear/Pistol/Rifle/Shotgun/SMG/WoodenBat_Barbed/WoodenBat_Saw/Knife）。全身
+-- 共用一张 Zombie_Atlas 图集（导入 -nm -nt 无材质，材质手写见 Materials/CharacterAtlas.xml）；只留
+-- Rifle、其余道具按 geometry 名隐藏，逐段材质分派见 Player.lua。
 
 --- pirate-kit 的模型资源名。这个包没有 prefab（导入时只产了 mdl/ani），一律直接取 Model。
 ---@param name string 不含扩展名的资产名，如 "Ship_Small"
@@ -415,14 +431,15 @@ end
 
 ---@return string
 function Config.PlayerModel()
-    return PLAYER_DIR .. "Character_Soldier.fbx.d/Models/Character_Soldier.mdl"
+    return PLAYER_DIR .. PLAYER_MODEL .. ".fbx.d/Models/" .. PLAYER_MODEL .. ".mdl"
 end
 
---- 主角动画栈：Idle / Idle_Shoot / Run / Run_Gun / Duck / HitReact / Death / Jump 系列（没有 Walk）
+--- 主角动画栈（Characters_Lis）：Idle / Idle_Gun / Run / Run_Gun / Walk / Walk_Gun / HitReact /
+--- Death / Duck / Jump 系列 / Punch / Slash / Stab 等（没有 Idle_Shoot，举枪待机用 Idle_Gun）
 ---@param stack string
 ---@return string
 function Config.PlayerAnim(stack)
-    return PLAYER_DIR .. "Character_Soldier.fbx.d/Models/Character_Soldier_CharacterArmature" .. stack .. ".ani"
+    return PLAYER_DIR .. PLAYER_MODEL .. ".fbx.d/Models/" .. PLAYER_MODEL .. "_CharacterArmature" .. stack .. ".ani"
 end
 
 ----------------------------------------------------------------------

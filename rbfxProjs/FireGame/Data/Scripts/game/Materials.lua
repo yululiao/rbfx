@@ -53,6 +53,13 @@ function Materials.Pirate()
     return GetResource("Material", Config.MAT_PIRATE)
 end
 
+--- 主角 Characters_Lis 的图集材质：主体 + 肩甲 + 手持道具共用一张 Zombie_Atlas.png。
+--- 与 pirate 同因（导入 -nm -nt 不产材质）手写，配方见 Data/Materials/CharacterAtlas.xml。
+---@return Material
+function Materials.Character()
+    return GetResource("Material", Config.MAT_CHARACTER)
+end
+
 --- 顶点色材质：给带 UBYTE4_NORM:COLOR 的 geometry 用。Soldier 的 FBX 是无贴图
 --- 纯色材质方案，导入器已把各材质 Diffuse 烘进顶点色，全身统一用它渲染。
 ---@return Material

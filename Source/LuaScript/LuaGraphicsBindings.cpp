@@ -435,6 +435,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC(SetBoundingBox)
             LUA_MEMBER_FUNC(GetNumGeometries)
             LUA_MEMBER_FUNC(GetGeometry)
+            LUA_MEMBER_FUNC(GetGeometryName)
             LUA_MEMBER_FUNC_RAW(Clone, [](Model* model) -> SharedPtr<Model> {
                 return model ? SharedPtr<Model>(model->Clone()) : nullptr;
             })
