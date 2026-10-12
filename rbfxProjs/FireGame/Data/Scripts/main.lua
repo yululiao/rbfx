@@ -23,6 +23,7 @@ local Waves = require("game.Waves")
 local Shooting = require("game.Shooting")
 local Juice = require("game.Juice")
 local Voice = require("game.Voice")
+local Grow = require("game.Grow")
 
 ----------------------------------------------------------------------
 -- HUD 几何：摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量，单位都是画布像素）
@@ -78,7 +79,7 @@ end
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, voice, knob, joystick
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, voice, knob, joystick, grow
 
 local function RestartGame()
     if enemy then
@@ -87,6 +88,12 @@ local function RestartGame()
     end
     if shooting then
         shooting:Reset()
+    end
+    if player then
+        player:Reset()   -- 满血、解除死亡/无敌态（阵亡动画是终态，不自动恢复）
+    end
+    if grow then
+        grow:Reset()
     end
     if waves then
         waves:Reset()
@@ -112,6 +119,11 @@ local function OnScore(result, unit, headshot)
     if juice and result and result.killed then
         juice:OnKill(unit, result.score)
     end
+    -- 击杀喂经验→驱动局内成长（扇形弹丸数/伤害爬升）。grow 内部会经 onWeapon
+    -- 把新武器数值推回 shooting、并升级时播旁白/震屏，这里只管喂。
+    if grow and result and result.killed then
+        grow:AddKill(unit and unit.kind)
+    end
     -- 连杀里程碑播玩家自录的战吼：combo 在 waves:AddKill 里已更新，读它即可（
     -- 阈值表复用 COMBO_VOICE_AT，与系统旁白同刻触发，自录语音压在旁白后面）。没
     -- 录过音时宿主回失败，Voice:Play 静默，不影响系统旁白。
@@ -133,6 +145,27 @@ local function OnDefenseHit(dmg)
     -- 停时间只会困惑）。
     if juice then
         juice:AddTrauma(0.3)
+    end
+end
+
+-- 突袭型海盗砍到主角：扣主角血（经 Waves 统一裁决败局）+ 受击反馈。这一击是玩家自己
+-- 遭殃，给足创伤（比防线受击重）。“砍死”则定格主角阵亡动画，否则播受击后仰。
+local function OnPlayerHit(dmg)
+    if waves then
+        waves:DamagePlayer(dmg)
+    end
+    if juice then
+        juice:AddTrauma(0.7)
+    end
+    if audio then
+        audio:Play("hitFlesh")
+    end
+    if player then
+        if waves and waves.playerHp > 0 then
+            player:OnHurt()
+        else
+            player:Die()
+        end
     end
 end
 
@@ -207,7 +240,7 @@ hud = Hud.Build(scene, {
 })
 enemy = Enemy.Build({
     scene = scene, fx = fx, audio = audio, player = player,
-    onScore = OnScore, onDefenseHit = OnDefenseHit,
+    onScore = OnScore, onDefenseHit = OnDefenseHit, onPlayerHit = OnPlayerHit,
 })
 enemy:SpawnStaticBarrels()
 waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver })
@@ -219,6 +252,21 @@ end
 shooting = Shooting.Build({
     scene = scene, player = player, fx = fx, audio = audio, hud = hud,
     enemies = enemy, onScore = OnScore,
+})
+-- 局内成长：Build 会调 Reset 推一次开局武器数值（1 发 1 伤）；之后每次升级回调
+grow = Grow.Build({
+    hud = hud,
+    onWeapon = function(snapshot, isInitial)
+        shooting:SetWeaponStats(snapshot.pellets, snapshot.damage)
+        if hud then
+            hud:SetWeaponText("弹丸 x" .. snapshot.pellets)
+            -- 开局不提醒；真正升级时把"变强"做成一次可听可见的反馈（飘字旁白 + 轻震）
+            if not isInitial and grow and grow.level > 1 then
+                hud:Narrate("升级！弹丸 x" .. snapshot.pellets, 2.0)
+                if juice then juice:AddTrauma(0.4) end
+            end
+        end
+    end,
 })
 
 -- 摇杆帽：单独一份文档，元素级样式 Lua 改不了，只能用文档级 SetPosition。
@@ -298,8 +346,11 @@ SubscribeToEvent("Update", function(data)
     -- 否则定格期间粒子播完了节点还被扣着不收。
     fx:Update(dt)
     -- 左摇杆走位（屏幕绝对方向），重算俯视相机位置。
+    -- 阵亡后锁住走位（player:Move 会把人拉回直立，与阵亡定格冲突）。
     -- 相机看向 -z，屏幕右对应世界 -x，故水平输入取反；竖直不反（屏幕上=朝海 -z，与 stickY<0 一致）。
-    player:Move(-stickX, stickY, worldDt)
+    if not player.dying then
+        player:Move(-stickX, stickY, worldDt)
+    end
     player:Update(worldDt)
 
     -- 打击感帧尾：飘字投影上屏 + 震屏叠加到相机（必须在 player:Update 摆好相机

@@ -40,6 +40,7 @@ function Hud.Build(scene, handlers)
     self.ammo = Config.MAG_SIZE
     self.reload = 0.0          -- 0..1，绑定 <progress data-value="reload">
     self.defense = 1.0         -- 0..1，绑定 <progress data-value="defense">
+    self.player = 1.0          -- 0..1，主角血量，绑定 <progress data-value="playerHp">
     self.narrate = ""
     self.narrateT = 0.0
     -- hitmarker 靠两个 bool + data-if 二选一显示（内联 style 绑不了 opacity/color）
@@ -59,6 +60,11 @@ function Hud.Build(scene, handlers)
     self.voiceRecording = false
     self.voiceFilterName = "原声"
     self.voiceStatus = ""
+    -- 局内成长（game/Grow.lua 推）：等级 + 经验条进度(0..1) + 武器文本（“弹丸 xN”，
+    -- 力量可见增长的直读回报）
+    self.level = 1
+    self.xpProg = 0.0
+    self.weaponText = "弹丸 x1"
 
     local comp = scene:CreateComponent("LuaRmlUIComponent")
     self.comp = comp
@@ -75,6 +81,7 @@ function Hud.Build(scene, handlers)
             end)
             -- progress 条：0..1 数值，RmlUi <progress data-value> 直接吃
             w:BindReadonlyProperty("defense", function() return clamp01(self.defense) end)
+            w:BindReadonlyProperty("playerHp", function() return clamp01(self.player) end)
             w:BindReadonlyProperty("reload", function() return clamp01(self.reload) end)
             -- data-if 显隐：bool
             w:BindReadonlyProperty("hitNormal", function() return self.hitNormal end)
@@ -89,6 +96,10 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("voiceRecording", function() return self.voiceRecording end)
             w:BindReadonlyProperty("voiceFilterName", function() return self.voiceFilterName end)
             w:BindReadonlyProperty("voiceStatus", function() return self.voiceStatus end)
+            -- 局内成长：等级、经验条(0..1)、武器文本
+            w:BindReadonlyProperty("level", function() return self.level end)
+            w:BindReadonlyProperty("xp", function() return clamp01(self.xpProg) end)
+            w:BindReadonlyProperty("weaponText", function() return self.weaponText end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -187,6 +198,13 @@ function Hud:SetDefense(cur, max)
     self:Dirty("defense")
 end
 
+--- 主角血量（当前值 + 上限），内部换算成 0..1。
+function Hud:SetPlayer(cur, max)
+    max = (max and max > 0) and max or Config.PLAYER_HP
+    self.player = clamp01((cur or 0) / max)
+    self:Dirty("playerHp")
+end
+
 --- 命中标记闪一下。strong（爆头/击杀）时显红色那组，否则白色。~0.15s 后由 Update 自动灭。
 function Hud:FlashHit(strong)
     self.hitStrong = strong and true or false
@@ -221,9 +239,10 @@ end
 --- 结算面板。
 ---@param win boolean
 ---@param score number
-function Hud:ShowEnd(win, score)
+---@param title string|nil 可选自定义标题（如“主角阵亡”）；缺省按胜/败给默认
+function Hud:ShowEnd(win, score, title)
     self.gameOver = true
-    self.endTitle = win and "胜利!" or "防线失守"
+    self.endTitle = title or (win and "胜利!" or "防线失守")
     self.endScore = score or 0
     self:Dirty("gameOver")
     self:Dirty("endTitle")
@@ -306,6 +325,28 @@ function Hud:SetVoiceStatus(text)
     self.voiceStatus = text or ""
     self.voiceStatusT = 3.0
     self:Dirty("voiceStatus")
+end
+
+----------------------------------------------------------------------
+-- 局内成长（game/Grow.lua 推）
+----------------------------------------------------------------------
+
+--- 等级数字。
+function Hud:SetLevel(v)
+    self.level = v or 1
+    self:Dirty("level")
+end
+
+--- 经验条进度 0..1（当前级到下一级的百分比）。
+function Hud:SetXpProgress(v)
+    self.xpProg = clamp01(v or 0.0)
+    self:Dirty("xp")
+end
+
+--- 武器文本（“弹丸 xN”），升级时随当前弹丸数刷新。
+function Hud:SetWeaponText(text)
+    self.weaponText = text or ""
+    self:Dirty("weaponText")
 end
 
 --- 每帧：hitmarker 到点自动关闭 + 旁白到期清除。

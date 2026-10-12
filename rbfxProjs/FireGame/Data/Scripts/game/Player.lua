@@ -91,6 +91,14 @@ function Player.Build(scene, spot, playerBoat)
     spot = Config.PLAYER_SPAWN
     self.groundY = spot.y
 
+    -- 主角生命：海盗不再只冲防线，会有一部分直接扑向主角（见 Enemy 突袭型），
+    -- 走位第一次有了真实代价。血量数值住在这里，但“掉血→败局”的统一裁决在 Waves
+    -- （main.lua 的 OnPlayerHit 里扣血 + 判死），这里只管受击表现与死亡姿态。
+    self.hp = Config.PLAYER_HP
+    self.maxHp = Config.PLAYER_HP
+    self.invulnT = 0.0          -- 受击后硬直/无敌计时（防贴身怪一帧多刀秒融）
+    self.dying = false
+
     -- 主角节点
     local node = scene:GetChild("Player", true)
     if not node then
@@ -368,6 +376,12 @@ function Player:Update(dt)
         end
     end
 
+    -- 受击无敌帧倒计时（到点自动清 0，供 IsInvuln 判定）
+    if self.invulnT > 0.0 then
+        self.invulnT = self.invulnT - dt
+        if self.invulnT < 0.0 then self.invulnT = 0.0 end
+    end
+
     -- 站定且在开火窗口内：身体平滑转向目标（移动中的转身由 Move 管）
     if not self.inBoat and not self.moving_ and self.fireT_ > 0.0 and self.aimValid_ then
         local step = Config.TURN_SPEED * dt
@@ -395,15 +409,18 @@ function Player:Update(dt)
     self:UpdateCamera(dt)
 
     -- 动画状态机（放最后，用当帧最新的 moving_/fireT_ 判定）
-    local state
-    if self.inBoat then
-        state = "idle"                                    -- 驾船恒 idle
-    elseif self.moving_ then
-        state = (self.fireT_ > 0.0) and "run_shoot" or "run"
-    else
-        state = (self.fireT_ > 0.0) and "idle_shoot" or "idle"
+    -- 阵亡态是终态：不能再被状态机重算成 idle/run，否则会把 Death 动画顶掉。
+    if not self.dying then
+        local state
+        if self.inBoat then
+            state = "idle"                                    -- 驾船恒 idle
+        elseif self.moving_ then
+            state = (self.fireT_ > 0.0) and "run_shoot" or "run"
+        else
+            state = (self.fireT_ > 0.0) and "idle_shoot" or "idle"
+        end
+        self:SetAnimState(state)
     end
-    self:SetAnimState(state)
 end
 
 --- 把俯视角相机放到主角斜上方，LookAt 主角位置。屏幕上方=朝海(-z)。
@@ -453,6 +470,48 @@ end
 ---@return Camera
 function Player:GetCamera()
     return self.camera
+end
+
+----------------------------------------------------------------------
+-- 生命与受击（突袭型海盗近战砍主角时调用；掉血/扣 HP/败局由 main→Waves 裁决）
+----------------------------------------------------------------------
+
+---@return boolean 是否处于受击无敌帧（是则本次攻击应被忽略）
+function Player:IsInvuln()
+    return self.invulnT > 0.0
+end
+
+--- 受击反馈：镜头猛震(juice 在 main 里加)、上半身后仰、进入无敌帧。
+--- 不在此扣血（血量归 Waves 统一裁决），也不在此播音（Player 不持 audio 实例，
+--- 中弹音由 main.lua 的 OnPlayerHit 播）。只做“挨了一下”的姿态与硬直表现。
+function Player:OnHurt()
+    self.invulnT = Config.PLAYER_INVULN
+    -- 后仰：给相机一个负向 kick（与开火后座上抬反向），瞬时“被推一把”
+    self.kick = self.kick - Config.CAMERA_KICK * 3.0
+    -- 受击姿势：借举枪动画当“吃痛后仰”，短暂独占后回到当前状态机
+    if not self.inBoat and not self.dying then
+        self.anim:PlayExclusive(Config.PlayerAnim("Idle_Shoot"), 0, true, 0.08)
+        self.animState_ = nil   -- 强制下帧状态机重新判定并播回正确动画
+    end
+end
+
+--- 主角阵亡：定格在 Death 动画、不再受击。真正的结算面板由 Waves 触发。
+function Player:Die()
+    self.dying = true
+    self.moving_ = false
+    self.node:SetRotation(Quaternion(0.0, Vector3.UP))
+    self.anim:PlayExclusive(Config.PlayerAnim("Death"), 0, false, 0.1)
+    self.animState_ = "dead"
+end
+
+--- 新一局复位：满血、解除无敌/后仰/死亡态（阵亡动画是终态，不自动恢复，必须靠此复位）。
+function Player:Reset()
+    self.hp = self.maxHp
+    self.invulnT = 0.0
+    self.dying = false
+    self.kick = 0.0
+    self.animState_ = nil
+    self:SetAnimState("idle")
 end
 
 return Player

@@ -32,10 +32,16 @@
 <body class="fullscreen">
 <div data-model="{{__data_model_id}}">
 
-    <!-- 左上：波次 + 防线血条 -->
+    <!-- 左上：波次 + 主角血 + 防线血 + 局内成长（等级/经验条）。两条血条靠标签区分（
+         progress 填充色来自主题 default.rcss，不能内联改色，只能用文本标签辨别）。 -->
     <div style="position: absolute; left: 28px; top: 24px; width: 300px;">
         <div class="label">WAVE {{wave}}</div>
-        <progress class="horizontal" data-value="defense" style="display: block; margin-top: 8px; width: 260px; height: 14px;"/>
+        <div class="label" style="margin-top: 8px; font-size: 18px; color: #ff6b6bff;">HP</div>
+        <progress class="horizontal" data-value="playerHp" style="display: block; margin-top: 2px; width: 260px; height: 14px;"/>
+        <div class="label" style="margin-top: 8px; font-size: 18px; color: #ffffffb3;">防线</div>
+        <progress class="horizontal" data-value="defense" style="display: block; margin-top: 2px; width: 260px; height: 14px;"/>
+        <div class="label" style="margin-top: 10px; font-size: 24px; color: #ffd24dff;">LV {{level}}</div>
+        <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4px; width: 260px; height: 10px;"/>
         <div class="label" style="margin-top: 6px; font-size: 18px; color: #ffffff99;">{{narrate}}</div>
     </div>
 
@@ -65,10 +71,11 @@
         <div style="position: relative; top: 32px; color: #ffffffff; font-size: 30px; font-weight: bold;">下船</div>
     </div>
 
-    <!-- 右下：弹药 + 装弹条 -->
+    <!-- 右下：弹药 + 装弹条 + 当前武器（弹丸数，随成长变化） -->
     <div style="position: absolute; right: 40px; bottom: 64px; width: 200px; text-align: right;">
         <div class="big">{{ammo}}</div>
         <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6px; margin-left: 40px; width: 160px; height: 10px;"/>
+        <div class="label" style="margin-top: 6px; font-size: 20px; color: #9fe0ffd9;">{{weaponText}}</div>
     </div>
 
     <!-- 右中：自定义语音入口（data-if="voiceAvailable"，编辑器宿主无 SDK 时隐藏）。

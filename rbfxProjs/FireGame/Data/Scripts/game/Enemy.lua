@@ -38,6 +38,14 @@ local function pickSkin()
     return Config.PIRATE_SKINS[math.random(#Config.PIRATE_SKINS)]
 end
 
+--- 突袭型专用皮：固定从稀有皮（骷髅/船长）里挑，给玩家一个“这东西是冲我来的”视觉信号。
+local function pickRaiderSkin()
+    if #Config.PIRATE_SKIN_RARE > 0 then
+        return Config.PIRATE_SKIN_RARE[math.random(#Config.PIRATE_SKIN_RARE)]
+    end
+    return Config.PIRATE_SKINS[math.random(#Config.PIRATE_SKINS)]
+end
+
 ----------------------------------------------------------------------
 -- 管理器
 ----------------------------------------------------------------------
@@ -52,11 +60,14 @@ function Enemy.Build(deps)
     self.player = deps.player
     self.onScore = deps.onScore
     self.onDefenseHit = deps.onDefenseHit
+    self.onPlayerHit = deps.onPlayerHit
     self.root = deps.scene:CreateChild("Enemies")
     ---@type table[]
     self.units = {}
     ---@type { t: number, fn: function }[]
     self.timers = {}
+    ---@type { ball: Node, mark: Node, from: Vector3, to: Vector3, t: number, dur: number }[]
+    self.projectiles = {}   -- 大船炮台的在飞炮弹（抛物线 + 落点预警盘）
     return self
 end
 
@@ -128,6 +139,14 @@ function Enemy:NearestTarget(fromPos, maxDist)
     for _, u in ipairs(self.units) do
         if u.alive and u.node and (u.kind == "pirate" or u.kind == "boat" or u.kind == "bigboat") then
             local p = u.node:GetWorldPosition()
+            -- 单位 node 原点都在“脚下/船底”（脚底与水面下），直接拿它当瞄点会让子弹打脚、
+            -- 命中特效也喷在脚底（船更甚：扎进水里被水面盖住）。按 kind 抬到躯干/甲板：选择仍
+            -- 按 XZ 距离（下面只用 dx/dz），y 抬高不影响挑谁，只把弹道与 hitPos 提到身体中段。
+            if u.kind == "pirate" then
+                p.y = p.y + Config.PIRATE_HIT_HEIGHT
+            else
+                p.y = p.y + Config.BOAT_HIT_HEIGHT
+            end
             local dx, dz = p.x - fromPos.x, p.z - fromPos.z
             local d = math.sqrt(dx * dx + dz * dz)
             if d <= bestD then
@@ -245,12 +264,31 @@ function Enemy:SpawnBoat(kind, laneIndex)
     unit.unloadT = 0.0
     unit.state = "sail"
     unit.laneX = laneX
+    unit.big = big                                   -- 大船才架炮台
+    if big then
+        unit.cannonT = Config.BOAT_CANNON_FIRST      -- 靠岸后首发炮弹倒计（只在 unload/bombard 里计时）
+    end
+
+    --- 大船炮台计时开火：到点从甲板抛一发炮弹向岸上随机落点。
+    function unit:TickCannon(dt)
+        self.cannonT = self.cannonT - dt
+        if self.cannonT <= 0.0 then
+            self.cannonT = randSpread(Config.BOAT_CANNON_INTERVAL, Config.BOAT_CANNON_INTERVAL_SPREAD)
+            local deck = self.node:GetWorldPosition()
+            deck.y = deck.y + Config.BOAT_HIT_HEIGHT   -- 从甲板高度出膛，不要从船底
+            self.mgr:FireCannon(deck)
+        end
+    end
 
     function unit:Update(dt)
         if self.state == "sail" then
             local p = self.node:GetPosition()
             p.z = p.z + self.speed * dt
             self.node:SetPosition(p)
+            -- 大船一出场就边驶边炮击（不等靠岸，否则大半在途中就被集火掉、看不到开炮）
+            if self.big then
+                self:TickCannon(dt)
+            end
             if p.z >= Config.BOAT_STOP_Z then
                 self.state = "unload"
                 self.unloadT = 0.0
@@ -263,9 +301,24 @@ function Enemy:SpawnBoat(kind, laneIndex)
                 local p = self.node:GetPosition()
                 self.mgr:SpawnPirate(Vector3(p.x + randSpread(0.0, 1.2), 0.0, p.z))
                 if self.remaining <= 0 then
-                    -- 吐完人，船离开（占位阶段直接移除，不做驶离动画）
-                    startRemove(self, 0.0)
+                    if self.big then
+                        -- 大船卸完兵不立即走，转 bombard 滞留往岸上炮击（先打大船的战术理由）
+                        self.state = "bombard"
+                        self.departT = Config.BOAT_CANNON_LINGER
+                    else
+                        startRemove(self, 0.0)
+                    end
                 end
+            end
+            if self.big then
+                self:TickCannon(dt)
+            end
+        elseif self.state == "bombard" then
+            self:TickCannon(dt)
+            self.departT = self.departT - dt
+            if self.departT <= 0.0 then
+                -- 炮击够了，离开（占位阶段直接移除，不做驶离动画）
+                startRemove(self, 0.0)
             end
         elseif self.state == "sinking" then
             -- 下沉 + 侧倾，给击沉一点分量（removeT 由管理器统一递减，这里不碰）
@@ -295,7 +348,11 @@ end
 ---@param spawnPos Vector3 x/z 用得上，y 由涉水/上岸逻辑接管
 ---@param skin string|nil 缺省随机
 function Enemy:SpawnPirate(spawnPos, skin)
-    skin = skin or pickSkin()
+    -- 突袭型按概率摇中；未显式指定皮肤时，突袭型用稀有皮做视觉区分。
+    local raider = math.random() < Config.PIRATE_RAIDER_CHANCE
+    if not skin then
+        skin = raider and pickRaiderSkin() or pickSkin()
+    end
     local node = self.root:CreateChild("Pirate")
     local y = Config.SEA_Y + Config.PIRATE_WADE_DEPTH
     node:SetPosition(Vector3(spawnPos.x, y, spawnPos.z))
@@ -312,7 +369,8 @@ function Enemy:SpawnPirate(spawnPos, skin)
     anim:Play(Config.PirateAnim(skin, "Run"), 0, true, 0.2)
 
     local unit = newUnit(self, "pirate", node)
-    unit.hp = Config.PIRATE_HP
+    unit.hp = raider and Config.PIRATE_RAIDER_HP or Config.PIRATE_HP
+    unit.raider = raider           -- 突袭型：Update 里转追主角而非直冲防线
     unit.skin = skin
     unit.anim = anim
     unit.speed = randSpread(Config.PIRATE_SPEED, Config.PIRATE_SPEED_SPREAD)
@@ -322,19 +380,65 @@ function Enemy:SpawnPirate(spawnPos, skin)
     function unit:Update(dt)
         if self.state == "advance" then
             local p = self.node:GetPosition()
-            p.z = p.z + self.speed * dt
-            -- 涉水时抬高一点，上岸落到沙面
-            p.y = (p.z < Config.SHORE_Z) and (Config.SEA_Y + Config.PIRATE_WADE_DEPTH) or Config.SAND_Y
-            self.node:SetPosition(p)
-            if p.z >= Config.DEFENSE_Z then
-                self.state = "attack"
-                self.attackT = Config.PIRATE_ATTACK_TIME
-                self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+            local player = self.mgr.player
+            -- 可追击：突袭型 & 主角在陆地（未上船出海、未阵亡）。主角一旦上船，突袭型
+            -- 够不着，退回直冲防线分支（载具因此对突袭型有天然闪避价值）。
+            local chase = self.raider and player and (not player.inBoat) and player.hp > 0
+            if chase then
+                -- 转追主角实时位置（走位变真决策：风筝 / 边退边打 / 绕位）
+                local pp = player.spot
+                local dx, dz = pp.x - p.x, pp.z - p.z
+                local dist = math.sqrt(dx * dx + dz * dz)
+                if dist <= Config.PIRATE_MELEE_RANGE then
+                    self.state = "attack"
+                    self.attackT = Config.PIRATE_ATTACK_TIME
+                    self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+                else
+                    local step = self.speed * dt
+                    p.x = p.x + dx / dist * step
+                    p.z = p.z + dz / dist * step
+                    p.y = (p.z < Config.SHORE_Z) and (Config.SEA_Y + Config.PIRATE_WADE_DEPTH) or Config.SAND_Y
+                    self.node:SetPosition(p)
+                    -- 面向主角（角色模型原生朝 -z，与 Player 同一 yaw 约定）
+                    local yaw = math.atan(dx, -dz)
+                    self.node:SetRotation(Quaternion(-math.deg(yaw), Vector3.UP))
+                end
+            else
+                -- 冲滩型（或主角已上船/阵亡）：直线 +z 朝防线，到 DEFENSE_Z 砍防线
+                p.z = p.z + self.speed * dt
+                p.y = (p.z < Config.SHORE_Z) and (Config.SEA_Y + Config.PIRATE_WADE_DEPTH) or Config.SAND_Y
+                self.node:SetPosition(p)
+                if p.z >= Config.DEFENSE_Z then
+                    self.state = "attack"
+                    self.attackT = Config.PIRATE_ATTACK_TIME
+                    self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+                end
             end
         elseif self.state == "attack" then
             self.attackT = self.attackT - dt
-            if self.attackT <= 0.0 then
-                -- 砍到防线：防线掉血，海盗也随之"阵亡"（占位：不做回撤）
+            local player = self.mgr.player
+            if self.raider then
+                -- 突袭型：目标不可达（上船/阵亡）→ 退回直冲防线；被风筝拉开 → 退回追击。
+                -- 否则每 PIRATE_ATTACK_TIME 砍一刀并循环（不自杀，必须玩家主动点掉）。
+                local reachable = player and (not player.inBoat) and player.hp > 0
+                if not reachable then
+                    self.state = "advance"
+                else
+                    local p = self.node:GetPosition()
+                    local dx, dz = player.spot.x - p.x, player.spot.z - p.z
+                    local leash = Config.PIRATE_MELEE_RANGE * 1.9
+                    if dx * dx + dz * dz > leash * leash then
+                        self.state = "advance"
+                    elseif self.attackT <= 0.0 then
+                        self.attackT = Config.PIRATE_ATTACK_TIME
+                        self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+                        if self.mgr.onPlayerHit and not player:IsInvuln() then
+                            self.mgr.onPlayerHit(Config.PIRATE_PLAYER_DAMAGE)
+                        end
+                    end
+                end
+            elseif self.attackT <= 0.0 then
+                -- 冲滩型：一刀砍防线即与防线同归于尽（占位：不做回撤）
                 if self.mgr.onDefenseHit then
                     self.mgr.onDefenseHit(Config.LEAK_DAMAGE)
                 end
@@ -411,6 +515,93 @@ function Enemy:SpawnStaticBarrels()
 end
 
 ----------------------------------------------------------------------
+-- 大船炮台：炮弹（抛物线 + 落点预警）
+----------------------------------------------------------------------
+
+--- 从 fromPos 向岸上随机落点开一炮：建炮弹实体 + 地面预警盘，登记到 projectiles。
+--- 落点在主角可走沙滩矩形内随机（“方向随机”=覆盖式炮击，不瞭准主角）。
+---@param fromPos Vector3 炮口世界坐标（甲板）
+function Enemy:FireCannon(fromPos)
+    local tx = Config.WALK_MIN_X + math.random() * (Config.WALK_MAX_X - Config.WALK_MIN_X)
+    local tz = Config.WALK_MIN_Z + math.random() * (Config.WALK_MAX_Z - Config.WALK_MIN_Z)
+    local toPos = Vector3(tx, Config.SAND_Y, tz)
+
+    -- 开炮反馈：炮口光 + 炮声（专用 cannonShot，由 powerful-cannon-shot 转码而来）
+    self.fx:Flash(fromPos, Color(1.0, 0.8, 0.4), 8.0, 0.08)
+    self.audio:Play("cannonShot")
+
+    -- 炮弹实体（与子弹同款：实体球 + 纯色材质）
+    local ball = self.scene:CreateChild("CannonBall")
+    ball:SetPosition(fromPos)
+    local sm = ball:CreateComponent("StaticModel")
+    sm:SetModel(GetResource("Model", "Models/Sphere.mdl"))
+    sm:SetMaterial(Materials.Tint("cannon"))
+    sm:SetCastShadows(false)
+    ball:SetScale(Config.CANNON_BALL_SCALE)
+
+    -- 落点预警盘：扁 Box 铺在沙滩上，随炮弹逼近放大（提示“别站在这”）。
+    -- 尺寸故意不小于杀伤盘：玩家只要离开橙色盘就一定安全。
+    local mark = self.scene:CreateChild("CannonWarn")
+    mark:SetPosition(Vector3(tx, Config.SAND_Y + 0.05, tz))
+    local msm = mark:CreateComponent("StaticModel")
+    msm:SetModel(GetResource("Model", Config.BOX_MODEL))
+    msm:SetMaterial(Materials.Tint("cannonWarn"))
+    msm:SetCastShadows(false)
+    mark:SetScale(Vector3(0.5, 0.08, 0.5))
+
+    self.projectiles[#self.projectiles + 1] = {
+        ball = ball, mark = mark, from = fromPos, to = toPos, t = 0.0, dur = Config.CANNON_FLIGHT_TIME,
+    }
+end
+
+--- 每帧推进在飞炮弹：沿抛物线插值 + 预警盘长大；到时结算落地。
+---@param dt number
+function Enemy:UpdateProjectiles(dt)
+    local list = self.projectiles
+    for i = #list, 1, -1 do
+        local pr = list[i]
+        pr.t = pr.t + dt
+        local u = pr.t / pr.dur
+        if u >= 1.0 then
+            self:CannonImpact(pr)
+            list[i] = list[#list]
+            list[#list] = nil
+        else
+            -- 水平线性、竖直抛物：4u(1-u) 在 u=0.5 取峰 1，峰值恰为 LOB_HEIGHT，u=1 回到落点 y。
+            local x = pr.from.x + (pr.to.x - pr.from.x) * u
+            local z = pr.from.z + (pr.to.z - pr.from.z) * u
+            local y = pr.from.y + (pr.to.y - pr.from.y) * u + Config.CANNON_LOB_HEIGHT * 4.0 * u * (1.0 - u)
+            pr.ball:SetPosition(Vector3(x, y, z))
+            local s = 0.3 + 0.7 * u
+            pr.mark:SetScale(Vector3(Config.CANNON_SPLASH_RADIUS * 2.0 * s, 0.08, Config.CANNON_SPLASH_RADIUS * 2.0 * s))
+        end
+    end
+end
+
+--- 炮弹落地：爆炸特效 + 音效，并对杀伤半径内的主角结算大伤（XZ 水平距离，对齐项目语义）。
+---@param pr table
+function Enemy:CannonImpact(pr)
+    pr.ball:Remove()
+    pr.mark:Remove()
+    local ip = pr.to
+    self.fx:Spawn("explosion", Vector3(ip.x, Config.SAND_Y + 0.4, ip.z))
+    self.fx:Spawn("smoke", Vector3(ip.x, Config.SAND_Y + 0.6, ip.z))
+    self.fx:Flash(Vector3(ip.x, Config.SAND_Y + 0.5, ip.z), Color(1.0, 0.6, 0.25), 14.0, 0.14)
+    self.audio:Play("cannonBlast")
+
+    local player = self.player
+    if player and player.hp and player.hp > 0 and not player.dying and not player:IsInvuln() then
+        local dx = player.spot.x - ip.x
+        local dz = player.spot.z - ip.z
+        if dx * dx + dz * dz <= Config.CANNON_SPLASH_RADIUS * Config.CANNON_SPLASH_RADIUS then
+            if self.onPlayerHit then
+                self.onPlayerHit(Config.CANNON_PLAYER_DAMAGE)
+            end
+        end
+    end
+end
+
+----------------------------------------------------------------------
 -- 帧更新
 ----------------------------------------------------------------------
 
@@ -444,6 +635,9 @@ function Enemy:Update(dt)
             end
         end
     end
+
+    -- 大船炮台的在飞炮弹（独立于 units：船开走/沉没，已发射的炮弹照样落地）
+    self:UpdateProjectiles(dt)
 end
 
 --- 清空所有单位与计时器（换局/停止）。
@@ -455,6 +649,11 @@ function Enemy:Clear()
     end
     self.units = {}
     self.timers = {}
+    for _, pr in ipairs(self.projectiles) do
+        if pr.ball then pr.ball:Remove() end
+        if pr.mark then pr.mark:Remove() end
+    end
+    self.projectiles = {}
 end
 
 return Enemy

@@ -43,6 +43,11 @@ function Shooting.Build(deps)
     self.reloadT = 0.0
     self.cooldown = 0.0
     self.bullets = {}   -- 活跃子弹列表
+    -- 武器数值（扇形弹丸数 / 单发伤害）：开局 1 发 1 伤，由 game/Grow.lua 经
+    -- SetWeaponStats 随成长爬升（main.lua 接线）。放在 bullets 之后、Reset 之前，
+    -- 因为 Reset 不清它（重开由 grow:Reset 重新推 1 级形态）。
+    self.pellets = 1
+    self.damage = 1
 
     if self.hud and self.hud.SetAmmo then
         self.hud:SetAmmo(self.ammo)
@@ -97,6 +102,15 @@ function Shooting:StartReload()
     self.audio:Play("reload")
 end
 
+--- 成长系统推来的武器数值：扇形弹丸数 + 单发伤害。由 game/Grow.lua 的 onWeapon
+--- 经 main.lua 调用（开局一次 + 每次升级）。弹匣容量不变（扇形一次只扣 1 发）。
+---@param pellets number
+---@param damage number
+function Shooting:SetWeaponStats(pellets, damage)
+    self.pellets = pellets or 1
+    self.damage = damage or 1
+end
+
 --- 对锁定目标开一枪：扣弹/冷却/kick/人物转向/枪口光/音效，生成子弹实体飞向目标。
 ---@param unit any
 ---@param targetPos Vector3
@@ -112,48 +126,80 @@ function Shooting:FireAt(unit, targetPos)
         self.hud:SetAmmo(self.ammo)
     end
 
-    -- 创建子弹实体
-    local bulletNode = self.scene:CreateChild("Bullet")
-    bulletNode:SetPosition(muzzle)
-    local sm = bulletNode:CreateComponent("StaticModel")
-    sm:SetModel(GetResource("Model", BULLET_MODEL))
-    sm:SetMaterial(Materials.Tint("bullet"))
-    bulletNode:SetScale(BULLET_SCALE)
+    -- 扇形喷出 pellets 颗（一次扳机只扣 1 发弹药）。单发时沿锁定方向直射（与旧手感
+    -- 一致）；多发时以锁定方向为中心、在 SCATTER_SPREAD_DEG 张角内左右均匀铺开，
+    -- 每颗各自直线飞出、撞到航道上任一敌人即结算（见 UpdateBullets 的扫掠命中）。
     local dist = (targetPos - muzzle):Length()
     local dir = (targetPos - muzzle):Normalized()
-
-    table.insert(self.bullets, {
-        node = bulletNode,
-        dir = dir,
-        speed = BULLET_SPEED,
-        target = unit,
-        targetPos = targetPos,
-        traveled = 0.0,
-        maxDist = dist,
-    })
+    local pellets = self.pellets or 1
+    local spread = Config.SCATTER_SPREAD_DEG
+    for i = 1, pellets do
+        local dx, dy, dz = dir.x, dir.y, dir.z
+        if pellets > 1 then
+            -- 绕 Y 轴在 XZ 平面旋转（俯视下的左右扇面）；dy 保持直射仰角不变
+            local a = math.rad(-spread * 0.5 + spread * (i - 0.5) / pellets)
+            local c, s = math.cos(a), math.sin(a)
+            dx = dir.x * c - dir.z * s
+            dz = dir.x * s + dir.z * c
+        end
+        local bulletNode = self.scene:CreateChild("Bullet")
+        bulletNode:SetPosition(muzzle)
+        local sm = bulletNode:CreateComponent("StaticModel")
+        sm:SetModel(GetResource("Model", BULLET_MODEL))
+        sm:SetMaterial(Materials.Tint("bullet"))
+        bulletNode:SetScale(BULLET_SCALE)
+        table.insert(self.bullets, {
+            node = bulletNode,
+            dir = Vector3(dx, dy, dz),
+            speed = BULLET_SPEED,
+            traveled = 0.0,
+            maxDist = dist,
+        })
+    end
 
     if self.ammo <= 0 then
         self:StartReload()
     end
 end
 
---- 子弹飞行与命中检测。
+--- 子弹飞行与扫掠命中。子弹不再"飞到锁定目标才结算"，而是每帧沿方向推进后，检查
+--- 航道上是否有敌人进入 BULLET_HIT_RADIUS——撞到即对该敌人结算并消耗这颗子弹。
+--- 于是扇形散射 = 一次喷出的多颗子弹各扫一条线上的敌人（命中广度的来源）。
+--- 无物理模块，故用距离遍历而非射线查询（同屏 ≤ 十余单位，成本可忽）。
 ---@param dt number
 function Shooting:UpdateBullets(dt)
+    local r2 = Config.BULLET_HIT_RADIUS * Config.BULLET_HIT_RADIUS
+    local units = self.enemies:GetUnits()
     for i = #self.bullets, 1, -1 do
         local b = self.bullets[i]
         local step = b.speed * dt
         local pos = b.node:GetPosition()
-        b.node:SetPosition(pos + b.dir * step)
+        local np = pos + b.dir * step
+        b.node:SetPosition(np)
         b.traveled = b.traveled + step
 
-        -- 到达目标距离：结算伤害并销毁
-        if b.traveled >= b.maxDist then
-            if b.target and b.target.alive then
-                -- 用目标当前位置（敌人可能在动）
-                local hitPos = b.target.node:GetPosition()
-                self:DamageUnit(b.target, hitPos, false)
+        -- 扫掠：撞到第一个非爆桶单位即结算（爆桶不自动当靶，保留"只在连锁中炸"的语义）。
+        -- 用 XZ 水平距离（与 NearestTarget 同口径）：子弹平飞在枪口高度、敌人节点常记在
+        -- 脚底，若算进 dy 会白白吃掉半径导致漏判。
+        local hitUnit = nil
+        for _, u in ipairs(units) do
+            if u.alive and u.node and u.kind ~= "barrel" then
+                local up = u.node:GetWorldPosition()
+                local ddx = up.x - np.x
+                local ddz = up.z - np.z
+                if ddx * ddx + ddz * ddz <= r2 then
+                    hitUnit = u
+                    break
+                end
             end
+        end
+
+        if hitUnit then
+            self:DamageUnit(hitUnit, np, false)
+            b.node:Remove()
+            table.remove(self.bullets, i)
+        elseif b.traveled >= b.maxDist then
+            -- 未命中且飞满射程 → 销毁（落空的散射弹视觉上就是"喷过头"）
             b.node:Remove()
             table.remove(self.bullets, i)
         end
@@ -163,7 +209,7 @@ end
 --- 打中单位：结算伤害 + 反馈。
 function Shooting:DamageUnit(unit, hitPos, headshot)
     if not unit.alive then return end
-    local result = unit:TakeDamage(1, hitPos, false)
+    local result = unit:TakeDamage(self.damage or 1, hitPos, false)
     local fb = FEEDBACK[unit.kind] or FEEDBACK.pirate
     local killed = result and result.killed
     local pick = killed and fb.kill or fb.hit

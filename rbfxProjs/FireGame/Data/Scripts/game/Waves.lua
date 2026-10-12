@@ -34,6 +34,7 @@ function Waves:Reset()
     self.combo = 0
     self.comboT = 0.0
     self.defenseHp = Config.DEFENSE_HP
+    self.playerHp = Config.PLAYER_HP    -- 主角生命（突袭型海盗砍的是这条）
     self.waveIndex = 0                 -- 已开始的波数；当前波 = Config.WAVES[waveIndex]
     self.phase = "intermission"        -- intermission -> active -> ended
     self.phaseT = Config.WAVE_INTERMISSION
@@ -46,6 +47,7 @@ function Waves:Reset()
         if self.hud.SetCombo then self.hud:SetCombo(0) end
         if self.hud.SetWave then self.hud:SetWave(1) end
         if self.hud.SetDefense then self.hud:SetDefense(self.defenseHp, Config.DEFENSE_HP) end
+        if self.hud.SetPlayer then self.hud:SetPlayer(self.playerHp, Config.PLAYER_HP) end
     end
     self.audio:Voice(Config.Voice.prepare)
 end
@@ -114,8 +116,11 @@ function Waves:Update(dt)
         end
     end
 
-    if self.defenseHp <= 0 and self.phase ~= "ended" then
-        self:Lose()
+    if self.phase == "ended" or self.phase == "freeRoam" then return end
+    if self.defenseHp <= 0 then
+        self:Lose("defense")
+    elseif self.playerHp <= 0 then
+        self:Lose("hero")
     end
 end
 
@@ -183,6 +188,18 @@ function Waves:DamageDefense(dmg)
     end
 end
 
+--- 突袭型海盗砍到主角。
+---@param dmg number
+function Waves:DamagePlayer(dmg)
+    if self.phase == "ended" then
+        return
+    end
+    self.playerHp = math.max(0, self.playerHp - (dmg or 0))
+    if self.hud and self.hud.SetPlayer then
+        self.hud:SetPlayer(self.playerHp, Config.PLAYER_HP)
+    end
+end
+
 ----------------------------------------------------------------------
 -- 结算
 ----------------------------------------------------------------------
@@ -205,14 +222,15 @@ function Waves:Win()
     end
 end
 
-function Waves:Lose()
+function Waves:Lose(reason)
     if self.phase == "ended" then
         return
     end
     self.phase = "ended"
     self.audio:Voice(Config.Voice.lose)
+    local title = (reason == "hero") and "主角阵亡" or "防线失守"
     if self.hud and self.hud.ShowEnd then
-        self.hud:ShowEnd(false, self.score)
+        self.hud:ShowEnd(false, self.score, title)
     end
     if self.onGameOver then
         self.onGameOver("lose", self.score)

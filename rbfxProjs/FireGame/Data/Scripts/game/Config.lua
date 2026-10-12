@@ -124,10 +124,14 @@ Config.LANES = { -13.0, -4.5, 4.5, 13.0 }
 -- 把这个数改成 90.0 即可（说明模型船头在 -x）。
 Config.BOAT_YAW = -90.0
 Config.BOAT_DRAFT = 0.45             -- 吃水：船体底面沉到水面下这么多，看着才像浮着
+-- 船的 combat 瞄点抬高度（相对船 node 原点=船底）。船 node 在水面下，需抬到甲板附近：
+-- Ship_Small 包围盒 y[-0.01,1.98]，1.2 落在上层建筑附近，且保证命中点高于水面（SEA_Y）。
+Config.BOAT_HIT_HEIGHT = 1.2
 Config.BOAT_SPAWN_Z = -44.0
 Config.BOAT_STOP_Z = -6.5            -- 停船位置，海盗从这里下水
-Config.BOAT_SPEED = 4.0
-Config.BOAT_BIG_SPEED = 2.9
+-- 船速/血：维持基线（不靠堆血量制造压力，已定案教训），只用略快的航速减少在射程里空转的时间。
+Config.BOAT_SPEED = 4.2
+Config.BOAT_BIG_SPEED = 3.0
 Config.BOAT_UNLOAD_TIME = 0.55       -- 每吐一个海盗的间隔
 Config.BOAT_HP = 3
 Config.BOAT_BIG_HP = 8
@@ -135,18 +139,42 @@ Config.BOAT_CARRY = 3
 Config.BOAT_BIG_CARRY = 5
 Config.BOAT_SINK_TIME = 2.2          -- 沉船动画时长，之后移除节点
 
+----------------------------------------------------------------------
+-- 大船炮台（仅 bigboat）：靠岸卸完兵后不立即离开，而是滞留往沙滩上抛炮弹。
+-- 落点在主角可走的矩形内随机（“方向随机”=覆盖式炮击，不是瞄准主角），
+-- 抛物线慢速 + 地面预警盘，给玩家看见并走位躲的时间；炸到主角掉大血。
+----------------------------------------------------------------------
+Config.BOAT_CANNON_FIRST = 1.0           -- 停船后首发射迟（秒）
+Config.BOAT_CANNON_INTERVAL = 3.0        -- 两发间隔（秒）
+Config.BOAT_CANNON_INTERVAL_SPREAD = 0.8 -- 间隔随机 ±
+Config.BOAT_CANNON_LINGER = 9.0          -- 卸完兵后大船滞留炮击的时长（秒），到点开走
+Config.CANNON_BALL_SCALE = 0.55          -- 炮弹实体大小（复用 Sphere.mdl）
+Config.CANNON_FLIGHT_TIME = 2.2          -- 炮弹飞行时长（秒）：慢，留躲避时间
+Config.CANNON_LOB_HEIGHT = 9.0           -- 抛物线拱高（米，峰在轨迹中点上方）
+Config.CANNON_SPLASH_RADIUS = 3.2        -- 落点杀伤半径（米）
+Config.CANNON_PLAYER_DAMAGE = 30         -- 炸到主角的大血量（对比突袭型 melee 10）
+
 Config.PIRATE_SPAWN_Z = -4.5         -- 下水点（浅水里，看着像涉水冲滩）
 -- Quaternius 角色模型原生朝 -z（Soldier 的散落道具在 z 负侧就是"正前方"），
 -- 海盗要朝 +z（防线/塔）行进，所以偏航 180 度。若进游戏发现海盗倒着走，改成 0。
 Config.PIRATE_YAW = 180.0
-Config.PIRATE_SPEED = 2.3
+Config.PIRATE_SPEED = 2.6
 Config.PIRATE_SPEED_SPREAD = 0.5     -- 每个海盗速度随机 ±，避免排队齐步走
-Config.PIRATE_HP = 1
+Config.PIRATE_HP = 1                 -- 一发死：保住割草爽感的根。压迫靠数量/来速，不靠肉。
+-- 海盗 combat 瞄点抬高度（相对 node 原点=脚底）。角色模型原点在脚底，抬到躯干中段
+-- 才能让子弹打身子、命中特效不喷在脚底。Quaternius 角色约 1.5~1.8 高，0.9 落在胸口附近。
+Config.PIRATE_HIT_HEIGHT = 0.9
 Config.PIRATE_ATTACK_TIME = 1.1      -- 到防线后挥刀的时长，然后结算掉血
 Config.PIRATE_DEATH_TIME = 1.6       -- 死亡动画播多久后移除
 Config.PIRATE_HITREACT_TIME = 0.28
 Config.PIRATE_WADE_DEPTH = 0.35      -- 涉水时把模型抬高一点，别半截埋在水里
-Config.MAX_ALIVE_UNITS = 14          -- 同屏单位闸：超了就延后生成（58 骨骼蒙皮不便宜）
+-- 突袭型海盗：不按航道直冲防线，而是转追主角、近身后反复砍主角（走位压力的来源）。
+-- 生成时按概率标记，用稀有皮（骷髅/船长）做视觉区分；hp 更肉一点避免一发带走。
+Config.PIRATE_RAIDER_CHANCE = 0.6    -- 每个海盗是突袭型（追主角）的概率。分流阀：调高→追你的多、冲海岸的自动少（总数不变）
+Config.PIRATE_RAIDER_HP = 3          -- 突袭型血量（普通型走 PIRATE_HP=1）：追身的略肉一点避免一发带走
+Config.PIRATE_MELEE_RANGE = 1.7      -- 与主角水平距离小于此值即停下挥刀
+Config.PIRATE_PLAYER_DAMAGE = 10     -- 突袭型一刀砍主角多少血
+Config.MAX_ALIVE_UNITS = 16          -- 同屏单位闸：超了就延后生成。比原 14 略高制造潮水感（真机卡就回调）
 Config.FAR_UNIT_DISTANCE = 55.0      -- 超过这个距离的单位关掉不可见时也更新
 
 Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako", "Characters_Sharky" }
@@ -162,6 +190,30 @@ Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔
 Config.FIRE_WINDOW = 0.6             -- 开火后维持射击姿态/上半身对准目标的窗口（秒）：大于冷却
                                      -- 保证连发期间不断档，装弹期间自然回落举枪
 Config.ATTACK_RANGE = 45.0           -- 自动吸附半径：主角周围这个半径内取最近敌人开火（无需手动对准）
+
+----------------------------------------------------------------------
+-- 扇形散射 + 局内成长（割草爽感的两个相乘因子：命中广度 × 力量可见增长）。
+-- 一次扳机扣 1 发弹药（弹匣是“扳机数”不是“弹丸数”），沿 SCATTER_SPREAD_DEG 扇形
+-- 喷出 pellets 颗；子弹改为沿线扫掠命中（撞到航道上第一个敌人即结算并消耗），
+-- 所以散射 = 一次清一条航道若干人，多点同时炸。pellets/damage 由 game/Grow.lua
+-- 按 GROWTH 曲线随击杀经验爬升。
+----------------------------------------------------------------------
+Config.SCATTER_SPREAD_DEG = 26.0     -- 扇形总张角（度，多弹沿此弧均匀铺开）
+Config.BULLET_HIT_RADIUS = 1.3       -- 子弹扫掠命中半径（米）
+Config.GROW_XP = { pirate = 1, boat = 6, bigboat = 20, barrel = 2 }  -- 各类击杀喂的经验
+-- 成长曲线：每项 { xp=达到该级所需累计经验, pellets=扇形弹丸数, damage=单发伤害 }。
+-- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。数值按三波全清的
+-- 经验总量（约 380）标定，通关刚好爬到 5 发附近，不会溢出到封顶。
+-- pellets 永远取奇数（1/3/5）：扇形按 spread*(i-0.5)/pellets 均匀铺开，只有奇数发才
+-- 有一颗处于 a=0° 的正中弹直射锁定目标。偶数发（如 2）正中是空的，两颗对称夹住
+-- 小船（船体仅 ~1.3m 宽）会刚好从缝里漏掉——故不用 2/4。
+Config.GROWTH = {
+    { xp = 0,   pellets = 1, damage = 1 },
+    { xp = 60,  pellets = 3, damage = 1 },
+    { xp = 140, pellets = 3, damage = 2 },
+    { xp = 240, pellets = 5, damage = 2 },
+    { xp = 360, pellets = 5, damage = 3 },
+}
 
 ----------------------------------------------------------------------
 -- 打击感三件套（hit-stop / 震屏 / 飘字）：统一由 game/Juice.lua 驱动，
@@ -239,6 +291,9 @@ Config.COMBO_BONUS_STEP = 10         -- 每级 combo 额外加的分
 Config.COMBO_VOICE_AT = { 3, 5, 8 }  -- 达到这些连击数播 combo / multi_kill 旁白
 Config.DEFENSE_HP = 100
 Config.LEAK_DAMAGE = 10              -- 一个海盗摸到防线扣多少
+-- 主角生命：突袭型海盗砍的是这条血。掉到 0 = 主角阵亡（与防线失守同为败局）。
+Config.PLAYER_HP = 100
+Config.PLAYER_INVULN = 0.6           -- 受击后无敌帧（秒），防贴身多刀在同一帧秒融
 
 -- 爆桶：无物理模块（抖音包禁用 URHO3D_PHYSICS），所以用距离遍历而不是球形查询
 Config.BARREL_HP = 1
@@ -257,57 +312,53 @@ Config.WAVES = {
     {
         voice = "round_1",
         spawns = {
-            -- 先头 1
+            -- 先头 2
             { t = 1.0, kind = "boat", lane = 2 },
-            -- 第二批 3
+            { t = 1.0, kind = "boat", lane = 3 },
+            -- 第一批三航道
             { t = 3.0, kind = "boat", lane = 1 },
             { t = 3.0, kind = "boat", lane = 3 },
             { t = 3.0, kind = "boat", lane = 4 },
-            -- 第三批 3
+            -- 四航道齐射（一次扳机只能扫一条道，其余趁隙逼近）
             { t = 5.5, kind = "boat", lane = 1 },
             { t = 5.5, kind = "boat", lane = 2 },
             { t = 5.5, kind = "boat", lane = 3 },
-            -- 第四批 3
+            { t = 5.5, kind = "boat", lane = 4 },
+            -- 收尾
             { t = 8.0, kind = "boat", lane = 2 },
-            { t = 8.0, kind = "boat", lane = 3 },
             { t = 8.0, kind = "boat", lane = 4 },
-            -- 第五批 3
-            { t = 10.5, kind = "boat", lane = 1 },
-            { t = 10.5, kind = "boat", lane = 2 },
-            { t = 10.5, kind = "boat", lane = 4 },
-            -- 第六批 2
-            { t = 13.0, kind = "boat", lane = 1 },
-            { t = 13.0, kind = "boat", lane = 3 },
+            { t = 10.0, kind = "boat", lane = 1 },
+            { t = 10.0, kind = "boat", lane = 3 },
         },
     },
-    -- 第二波：首次投入大船（5 人 / 8 血 / 慢速），小艇护航。节奏比首波松一寸，
-    -- 让玩家先学会优先集火大船再清杂兵；大船吐的人多，摸防线的压力也上一个台阶。
+    -- 第二波：首次投入大船（吐 5 人 / 慢速），小艇护航。双大船同压逼玩家分兵。
     {
         voice = "round_2",
         spawns = {
-            -- 开场大船压中路
+            -- 开场双大船压中、右两路
             { t = 1.0, kind = "bigboat", lane = 2 },
+            { t = 1.0, kind = "bigboat", lane = 3 },
             -- 第一梯队小艇铺两侧
             { t = 3.5, kind = "boat", lane = 1 },
-            { t = 3.5, kind = "boat", lane = 3 },
             { t = 3.5, kind = "boat", lane = 4 },
-            -- 第二艘大船走右路
-            { t = 7.0, kind = "bigboat", lane = 3 },
+            -- 四航道小艇齐射
+            { t = 6.5, kind = "boat", lane = 1 },
+            { t = 6.5, kind = "boat", lane = 2 },
+            { t = 6.5, kind = "boat", lane = 3 },
+            { t = 6.5, kind = "boat", lane = 4 },
             -- 第二梯队
-            { t = 9.5, kind = "boat", lane = 1 },
             { t = 9.5, kind = "boat", lane = 2 },
             { t = 9.5, kind = "boat", lane = 4 },
             -- 收尾零敲
-            { t = 12.5, kind = "boat", lane = 1 },
-            { t = 12.5, kind = "boat", lane = 4 },
+            { t = 12.0, kind = "boat", lane = 1 },
+            { t = 12.0, kind = "boat", lane = 3 },
         },
     },
-    -- 第三波（终局高潮）：三艘大船 + 四航道同时压制。双大船同刻开局逼玩家分心，
-    -- 大船沉没的长定格 + 强震屏（Juice bigboat 档）正是这波的打击感爆点。
+    -- 第三波（终局高潮）：三艘大船 + 一次四航道齐射。密度比前两波高，但不再堆到打不过。
     {
         voice = "round_3",
         spawns = {
-            -- 双大船开局（中、右两路）
+            -- 双大船开局（中、右）
             { t = 1.0, kind = "bigboat", lane = 2 },
             { t = 1.0, kind = "bigboat", lane = 3 },
             -- 四航道小艇齐射
@@ -323,8 +374,8 @@ Config.WAVES = {
             { t = 12.0, kind = "boat", lane = 1 },
             { t = 12.0, kind = "boat", lane = 3 },
             -- 末段
-            { t = 15.0, kind = "boat", lane = 2 },
-            { t = 15.0, kind = "boat", lane = 3 },
+            { t = 14.5, kind = "boat", lane = 2 },
+            { t = 14.5, kind = "boat", lane = 3 },
         },
     },
 }
@@ -395,6 +446,8 @@ end
 --- 事件名 -> 变体列表。播放时随机取一个并微调音高，避免机关枪式的重复感。
 Config.Sfx = {
     shot = { "Sound/gun_shot/shooting-single.ogg" },
+    cannonShot = { "Sound/gun_shot/powerful-cannon-shot.ogg" },   -- 大船炮台开炮专用
+    cannonBlast = { "Sound/gun_shot/cannon-blast.ogg" },          -- 大船炮弹落地爆炸专用
     shotTail = Variants("impactMining_", 5),
     hitFlesh = Variants("impactPunch_medium_", 5),
     killFlesh = Variants("impactPunch_heavy_", 5),
@@ -459,6 +512,8 @@ Config.Tint = {
     water = Color(0.10, 0.28, 0.40),
     playerBody = Color(0.36, 0.42, 0.30),
     bullet = Color(1.0, 0.12, 0.08),
+    cannon = Color(0.14, 0.14, 0.16),       -- 炮弹：深铁色
+    cannonWarn = Color(1.0, 0.42, 0.10),    -- 落点预警盘：醒目橙
 }
 
 -- 每种纯色的粗糙度（PBR）。DefaultWhite 的默认值 0.3 对沙子和木头太亮；
@@ -471,6 +526,8 @@ Config.Roughness = {
     defense = 0.85,
     water = 0.10,
     bullet = 0.4,
+    cannon = 0.5,
+    cannonWarn = 0.9,
     playerBody = 0.70,
 }
 
