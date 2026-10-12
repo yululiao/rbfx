@@ -289,6 +289,8 @@ Config.DOG = {
     barkCooldown = 1.1,     -- 追击期间两次吠叫的最小间隔（秒）
     idleBarkMin = 5.0,      -- 闲逛时随机吠叫的最小间隔（秒）
     idleBarkMax = 11.0,     -- 闲逛时随机吠叫的最大间隔（秒）
+    restDuration = 10.0,    -- 一波清完后狗原地趴卧休息的时长（秒），期间播喘气、不移动不索敌
+    restArriveRadius = 2.5, -- 波次清完“跑回主角身边”后、判定已到位可休息的水平半径（米）
     -- 被炮弹炸飞：纯 Lua 抛物线积分 + 多轴翻滚（抖音包无物理，绝不做刚体）
     launch = {
         upSpeed = 14.0,      -- 初始上升速度（米/秒）
@@ -512,6 +514,7 @@ Config.Sfx = {
     cannonShot = { "Sound/gun_shot/powerful-cannon-shot.ogg" },   -- 大船炮台开炮专用
     cannonBlast = { "Sound/gun_shot/cannon-blast.ogg" },          -- 大船炮弹落地爆炸专用
     dogBark = { "Sound/gun_shot/dog-bark.ogg" },                  -- 宠物狗吠（追击时反复叫、被弹炸飞时叫一声）
+    dogPant = { "Sound/gun_shot/dog-panting.ogg" },               -- 宠物狗喘气（一波清完原地休息时播）
     shotTail = Variants("impactMining_", 5),
     hitFlesh = Variants("impactPunch_medium_", 5),
     killFlesh = Variants("impactPunch_heavy_", 5),

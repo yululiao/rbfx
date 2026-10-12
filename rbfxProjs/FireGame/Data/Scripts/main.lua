@@ -251,7 +251,8 @@ enemy:SpawnStaticBarrels()
 -- 故在两者之后建；建完回填 enemy.dog，使大船炮弹落地时能把狗炸飞（Enemy:CannonImpact）。
 dog = Dog.Build({ scene = scene, player = player, enemies = enemy, audio = audio })
 enemy.dog = dog
-waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver })
+waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver,
+    onWaveCleared = function() if dog then dog:GoRest() end end })
 -- 自定义语音：要 hud（结果状态行）与 SDK 子系统；编辑器宿主无 SDK 时入口按钮隐藏
 voice = Voice.Build(scene, { hud = hud })
 if hud then

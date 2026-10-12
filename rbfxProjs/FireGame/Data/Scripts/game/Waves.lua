@@ -23,6 +23,7 @@ function Waves.Build(deps)
     self.audio = deps.audio
     self.hud = deps.hud
     self.onGameOver = deps.onGameOver
+    self.onWaveCleared = deps.onWaveCleared   -- 一波清完的回调（main.lua 传入：让宠物狗原地休息）
     self.totalWaves = #Config.WAVES
     self:Reset()
     return self
@@ -107,6 +108,9 @@ function Waves:Update(dt)
         self:ProcessQueue()
         if self.allFired and self.enemy:ThreatCount() == 0 then
             -- 本波清完
+            if self.onWaveCleared then
+                self.onWaveCleared(self.waveIndex)
+            end
             if self.waveIndex >= self.totalWaves then
                 self:Win()
             else

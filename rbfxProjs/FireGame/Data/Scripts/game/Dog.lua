@@ -15,6 +15,7 @@
 
 local Config = require("game.Config")
 local Materials = require("game.Materials")
+local DogLaunch = require("game.DogLaunch")
 
 ---@class Dog 宠物狗（行为 + 生命周期）
 local Dog = {}
@@ -47,9 +48,10 @@ function Dog.Build(deps)
 
     self.anim = node:CreateComponent("AnimationController")
 
-    -- 地面 XZ（self.x/self.z）+ 离地高度 self.h（正常 0，被炸飞时走抛物线）。狗 node 原点
-    -- 在四脚底面，贴沙面 SAND_Y；追击时海盗多已在滩头，咬涉水海盗靠 XZ 判距，狗不必真下海。
-    self.x, self.z, self.h = 0.0, 0.0, 0.0
+    -- 地面 XZ（self.x/self.z）。狗 node 原点在四脚底面，贴沙面 SAND_Y；追击时海盗多已在
+    -- 滩头，咬涉水海盗靠 XZ 判距，狗不必真下海。离地高度与“被炸飞/落地起身”整段生命周期
+    -- 已拆进 game/DogLaunch.lua（self.launchCtl），Dog 不再持有 self.h。
+    self.x, self.z = 0.0, 0.0
     self.yaw = 0.0
     self.state = "wander"
     self.biteT = 0.0        -- 咬击冷却
@@ -58,8 +60,9 @@ function Dog.Build(deps)
     self.wanderT = 0.0      -- 当前游荡目标点的停留/重选倒计时
     self.wx, self.wz = 0.0, 0.0
     self.curAnim = nil      -- 当前循环动画名，避免每帧重复 Play
-    self.launch = nil       -- 非 nil 表示在空中：{ vy, dirx, dirz, axis }
-    self.recoverT = 0.0     -- 落地起身计时
+    self.restT = 0.0        -- 就地休息计时（>0 时不移动不索敌）
+    self.restReturn = false -- 波次清完：是否正在“跑回主角身边准备休息”
+    self.launchCtl = DogLaunch.New(self)   -- 炸飞/起身的独立状态机（见 game/DogLaunch.lua）
 
     self:PlaceAtSpawn()
     self:EnsureAnim("Idle")
@@ -71,7 +74,6 @@ function Dog:PlaceAtSpawn()
     local p = (self.player and self.player.spot) or Config.PLAYER_SPAWN
     self.x = p.x + self.cfg.spawnOffset.x
     self.z = p.z + self.cfg.spawnOffset.z
-    self.h = 0.0
     self:ClampXZ()
     self.yaw = Config.PIRATE_YAW   -- 默认朝海（与主角出生朝向一致）
     self.node:SetPosition(Vector3(self.x, Config.SAND_Y, self.z))
@@ -114,7 +116,9 @@ end
 function Dog:EnsureAnim(name)
     if self.curAnim == name then return end
     self.curAnim = name
-    self.anim:Play(Config.DogAnim(name), 0, true, 0.15)
+    -- PlayExclusive：同层其余动画淡出。切勿用 Play——循环态（Idle/Walk/Run/Idle_2）不会
+    -- 自然结束，Play 不关旧态会让多个循环动画叠在一起满权重混播（休息后走动仍显 Idle_2）。
+    self.anim:PlayExclusive(Config.DogAnim(name), 0, true, 0.15)
 end
 
 --- 吠一声（狗无 audio 实例时静默，不影响主流程）。
@@ -128,6 +132,33 @@ end
 function Dog:SeedIdleBark()
     local c = self.cfg
     self.idleBarkT = c.idleBarkMin + math.random() * (c.idleBarkMax - c.idleBarkMin)
+end
+
+--- 喘气一声（一波清完休息时播；无 audio 实例时静默）。
+function Dog:Pant()
+    if self.audio then
+        self.audio:Play("dogPant")
+    end
+end
+
+--- 波次清完的入口：狗先跑回主角身边，到位后由 Update 的 restReturn 分支调用 StartRest 就地
+--- 休息。空中/起身期间不插队（等落地后主状态机自然接管，这波就不休息了）。
+function Dog:GoRest()
+    if self.launchCtl:IsActive() then return end
+    self.restReturn = true
+end
+
+--- 就地休息 restDuration 秒，播一次喘气（跑回主角身边到位后调用）。
+function Dog:StartRest()
+    if self.launchCtl:IsActive() then return end
+    self.restT = self.cfg.restDuration
+    self.state = "rest"
+    self:SetGround()
+    -- 强制起播 Idle：不走 EnsureAnim 的 curAnim 守卫。上一段可能刚播完一次性 Attack（bite）
+    -- 或从 recover 收尾出来，curAnim 记账与实际播放状态不同步，走守卫会让它不真正起播。
+    self.curAnim = "Idle"
+    self.anim:PlayExclusive(Config.DogAnim("Idle"), 0, true, 0.1)
+    self:Pant()
 end
 
 --- 视野内最近的存活海盗。只挑 kind=="pirate"（不咬船、不碰爆桶），返回 unit 与抬到躯干
@@ -155,18 +186,48 @@ end
 
 ---@param dt number
 function Dog:Update(dt)
-    if self.launch then
-        self:UpdateLaunch(dt)
+    -- 在空中/落地起身期间由 launch 状态机整体接管（推进位移/翻滚/回正），主状态机让路。
+    if self.launchCtl:Update(dt) then
         return
     end
-    if self.recoverT > 0.0 then
-        self:UpdateRecover(dt)
+
+    local c = self.cfg
+
+    -- 波次刚清完：先跑回主角身边，到位再就地休息。途中若冒出新海盗，放弃“回家休息”转去撕咬。
+    if self.restReturn then
+        local p = (self.player and self.player.spot) or Config.PLAYER_SPAWN
+        local d = distXZ(self.x, self.z, p.x, p.z)
+        if d <= c.restArriveRadius then
+            self.restReturn = false
+            self:StartRest()
+            return
+        end
+        if self:FindPirate() then
+            self.restReturn = false          -- 有新目标：落到下面正常索敌/撕咬
+        else
+            local step = c.speed * dt
+            local inv = step / d
+            self.x = self.x + (p.x - self.x) * inv
+            self.z = self.z + (p.z - self.z) * inv
+            self:ClampXZ()
+            self:FaceDir(p.x - self.x, p.z - self.z)
+            self:SetGround()
+            self:EnsureAnim("Run")
+            return
+        end
+    end
+
+    -- 已到位休息：钉在原地、待机、不索敌不移动，计时到了自动恢复溜达/追击。
+    if self.restT > 0.0 then
+        self.restT = self.restT - dt
+        self.state = "rest"
+        self:SetGround()
+        self:EnsureAnim("Idle")
         return
     end
 
     self.biteT = self.biteT - dt
     self.barkT = self.barkT - dt
-    local c = self.cfg
     local target, tpos = self:FindPirate()
 
     if target then
@@ -177,7 +238,7 @@ function Dog:Update(dt)
             self:SetGround()
             if self.biteT <= 0.0 then
                 self.biteT = c.biteInterval
-                self.anim:Play(Config.DogAnim(c.biteAnim), 0, false, 0.05)
+                self.anim:PlayExclusive(Config.DogAnim(c.biteAnim), 0, false, 0.05)
                 self.curAnim = nil                       -- 让下段移动重新起循环动画
                 target:TakeDamage(c.biteDamage, tpos, false)   -- 静默击杀：不走 onScore
             end
@@ -251,82 +312,14 @@ function Dog:UpdateWander(dt)
 end
 
 ----------------------------------------------------------------------
--- 被炮弹炸飞（程序化抛物线 + 多轴翻滚）
+-- 被炮弹炸飞（程序化抛物线 + 多轴翻滚 + 落地起身）：整段生命周期见 game/DogLaunch.lua。
+-- Enemy:CannonImpact 仍打到 Dog:HitByExplosion，这里只转发给内部的 launch 状态机；
+-- blastPos 为炮弹落点（世界，y 传地面即可），radius 为杀伤半径。
 ----------------------------------------------------------------------
-
---- 由 Enemy:CannonImpact 调用：blastPos 为炮弹落点（世界，y 传地面即可），radius 为杀伤半径。
---- 只有水平距离在半径内、且此刻不在空中/不在起身时才被掀飞。
 ---@param blastPos Vector3
 ---@param radius number
 function Dog:HitByExplosion(blastPos, radius)
-    if self.launch or self.recoverT > 0.0 then return end
-    if distXZ(self.x, self.z, blastPos.x, blastPos.z) <= radius then
-        self:Launch(blastPos)
-    end
-end
-
-function Dog:Launch(blastPos)
-    local lc = self.cfg.launch
-    -- 弹出方向 = 由爆炸点指向狗（被气浪推开），取不到方向就随机一个
-    local dx, dz = self.x - blastPos.x, self.z - blastPos.z
-    local d = math.sqrt(dx * dx + dz * dz)
-    if d < 1e-4 then
-        local a = math.random() * math.pi * 2.0
-        dx, dz, d = math.cos(a), math.sin(a), 1.0
-    end
-    self.launch = {
-        vy = lc.upSpeed,
-        dirx = dx / d * lc.forwardKick,
-        dirz = dz / d * lc.forwardKick,
-        -- 斜翻轴：不是纯水平/纯竖直，滚起来像被甩飞而非原地打转
-        axis = Vector3(0.8, 0.35, 0.6):Normalized(),
-    }
-    self.state = "launched"
-    self.biteT = 0.0
-    self.curAnim = nil
-    self.anim:Play(Config.DogAnim("Run_Jump"), 0, true, 0.05)
-    self:Bark()   -- 被炸飞时惨叫一声
-end
-
-function Dog:UpdateLaunch(dt)
-    local lc = self.cfg.launch
-    local l = self.launch
-    -- 竖直：上升→重力回落，回到 h<=0 即落地
-    l.vy = l.vy - lc.gravity * dt
-    self.h = self.h + l.vy * dt
-    -- 水平：沿弹出方向位移，带阻尼衰减（气浪推一下就停）
-    self.x = self.x + l.dirx * dt
-    self.z = self.z + l.dirz * dt
-    local damp = 1.0 - 2.0 * dt
-    if damp < 0.0 then damp = 0.0 end
-    l.dirx, l.dirz = l.dirx * damp, l.dirz * damp
-    self:ClampXZ()
-
-    if self.h <= 0.0 then
-        self.h = 0.0
-        self.launch = nil
-        self.recoverT = lc.recoverTime
-        self:SetGround()
-        return
-    end
-
-    self.node:SetPosition(Vector3(self.x, Config.SAND_Y + self.h, self.z))
-    -- 绕世界斜轴叠加一个小角增量 → 连续翻滚（不累积误差，每帧在当前朝向上前乘）
-    local delta = Quaternion(lc.spinSpeed * dt, l.axis)
-    self.node:SetRotation(delta * self.node:GetWorldRotation())
-end
-
---- 落地起身：把翻滚留下的朝向平滑滚回四脚着地（回正到 self.yaw），期间待机动画。
-function Dog:UpdateRecover(dt)
-    self.recoverT = self.recoverT - dt
-    local up = Quaternion(self.yaw, Vector3.UP)
-    self.node:SetRotation(self.node:GetWorldRotation():Slerp(up, math.min(1.0, dt * 6.0)))
-    self:SetGround()
-    self:EnsureAnim("Idle")
-    if self.recoverT <= 0.0 then
-        self.node:SetRotation(Quaternion(self.yaw, Vector3.UP))
-        self.state = "wander"
-    end
+    self.launchCtl:HitByExplosion(blastPos, radius)
 end
 
 ----------------------------------------------------------------------
@@ -334,8 +327,9 @@ end
 ----------------------------------------------------------------------
 
 function Dog:Reset()
-    self.launch = nil
-    self.recoverT = 0.0
+    self.launchCtl:Reset()
+    self.restT = 0.0
+    self.restReturn = false
     self.biteT = 0.0
     self.barkT = 0.0
     self.wanderT = 0.0
