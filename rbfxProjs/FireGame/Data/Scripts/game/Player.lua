@@ -5,7 +5,9 @@
 -- 相机在主角斜上方以高俯角俯瞰，固定屏幕上方=朝海，不随角色转向而旋转。
 --
 -- 朝向与姿态分三层管，别混：
---   身体朝向 nodeYaw —— 移动时朝移动方向（Move 里平滑转），站定且在开火窗口内朝目标（Update 里转）；
+--   身体朝向 nodeYaw —— 非射击时朝移动方向（Move 里平滑转）；一旦进入开火窗口，转身权交给 Update
+--       去贴目标，遥杆只驱动位移不驱动转身（往后走=横移/太空步，腿跑动画、上身始终对敌），
+--       避免“朝移动方向”与“朝目标”两股相反的力叠加把上半身拧乱；
 --   上半身扭转 aimTwist_ —— 身体与目标方向的残差由 Abdomen/Torso 两节骨骼分摊扭转（腿不动、
 --       枪口指向敌人），窗口外平滑回正；施加时机见 ApplyAim；
 --   动画状态机 animState_ —— idle / idle_shoot / run / run_shoot 四态，见文件顶部 STATE_ANIM。
@@ -279,11 +281,15 @@ function Player:Move(stickX, stickY, dt)
         self.spot = Vector3(nx, self.groundY, nz)
         self.node:SetPosition(self.spot)
 
-        -- 身体朝移动方向平滑转（动画状态在 Update 的状态机里管，这里不碰动画）
+        -- 身体朝移动方向平滑转（动画状态在 Update 的状态机里管，这里不碰动画）。
+        -- 但射击状态下（开火窗口内且有有效目标）不抢转身：身体朝向由 Update 统一贴目标，
+        -- 遥杆此时只驱动上面的位移。避免往后走时“身体朝移动方向 + 上半身朝目标”叠成乱扭。
         self.moveYaw_ = math.atan(dirX, -dirZ)
-        local step = Config.TURN_SPEED * dt
-        local d = angDiff(self.nodeYaw, self.moveYaw_)
-        self.nodeYaw = self.nodeYaw + clamp(d, -step, step)
+        if not (self.fireT_ > 0.0 and self.aimValid_) then
+            local step = Config.TURN_SPEED * dt
+            local d = angDiff(self.nodeYaw, self.moveYaw_)
+            self.nodeYaw = self.nodeYaw + clamp(d, -step, step)
+        end
     end
 end
 
@@ -493,8 +499,9 @@ function Player:Update(dt)
         if self.invulnT < 0.0 then self.invulnT = 0.0 end
     end
 
-    -- 站定且在开火窗口内：身体平滑转向目标（移动中的转身由 Move 管）
-    if not self.inBoat and not self.moving_ and self.fireT_ > 0.0 and self.aimValid_ then
+    -- 开火窗口内：身体平滑转向目标（不分移动/站定——移动时即横移走位，遥杆不抢身体朝向，
+    -- 与 Move 里的射击分支条件互补，保证每帧只有一个转身写入者）
+    if not self.inBoat and self.fireT_ > 0.0 and self.aimValid_ then
         local step = Config.TURN_SPEED * dt
         local d = angDiff(self.nodeYaw, self.aimYaw_)
         self.nodeYaw = self.nodeYaw + clamp(d, -step, step)
