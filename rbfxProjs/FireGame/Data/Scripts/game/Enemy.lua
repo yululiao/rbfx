@@ -61,6 +61,7 @@ function Enemy.Build(deps)
     self.onScore = deps.onScore
     self.onDefenseHit = deps.onDefenseHit
     self.onPlayerHit = deps.onPlayerHit
+    self.dog = deps.dog          -- 宠物狗引用（main.lua 在 Dog.Build 后回填）：大船炮弹炸到它就把它掀飞
     self.root = deps.scene:CreateChild("Enemies")
     ---@type table[]
     self.units = {}
@@ -598,6 +599,12 @@ function Enemy:CannonImpact(pr)
                 self.onPlayerHit(Config.CANNON_PLAYER_DAMAGE)
             end
         end
+    end
+
+    -- 同一次爆炸若罩住宠物狗（独立于 units 的友方伴随单位），把狗炸飞上天翻滚。狗不死，
+    -- 纯搞笑反馈；判定与上面主角一致用 XZ 水平距离、复用同一杀伤半径。
+    if self.dog then
+        self.dog:HitByExplosion(Vector3(ip.x, Config.SAND_Y, ip.z), Config.CANNON_SPLASH_RADIUS)
     end
 end
 

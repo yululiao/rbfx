@@ -111,6 +111,9 @@ function Player.Build(scene, spot, playerBoat)
     end
     node:SetPosition(spot)
     node:SetRotation(Quaternion(0.0, Vector3.UP))
+    -- 主角模型整体放大（Config.PLAYER_MODEL_SCALE）：骨骼子节点都挂在本节点下，脚底原点为锚
+    -- 往上长，不动 spot/走位/相机关注高；只把画面里的角变高。
+    node:SetScale(Config.PLAYER_MODEL_SCALE)
     -- noShoot：Shooting 的射线打到自己/塔面时要穿过去续查，靠这个变量识别（见 Shooting.lua）
     node:SetVar("noShoot", true)
 

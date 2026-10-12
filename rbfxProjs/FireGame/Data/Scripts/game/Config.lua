@@ -264,10 +264,40 @@ Config.GUN_HOLD = {
     gripOffset = Vector3(0.0, 0.0, 0.0),  -- 相对 Middle1.L 的世界系握把目标微调
 }
 Config.PLAYER_SPAWN = Vector3(0.0, Config.SAND_Y, 11.0)   -- 脚底出生点：防线前一点的地面，朝向海
+-- 主角模型整体放大倍数（对 Player 节点 SetScale）。模型/骨骼都在脚底原点之下，以脚为锚
+-- 往上长，不影响出生点与走位；GunHold 的 IK 读骨骼世界坐标（同比缩放）故仍自洽。
+Config.PLAYER_MODEL_SCALE = 1.5
 Config.WALK_MIN_X = -18.0
 Config.WALK_MAX_X = 18.0
 Config.WALK_MIN_Z = 1.5              -- 别走进水里（水线 z=-0.5，留余量）
 Config.WALK_MAX_Z = 22.0             -- 别绕到塔后村子里
+
+-- 宠物狗（见 game/Dog.lua）：友方伴随单位，独立于 enemy.units（玩家子弹扫不到它、波次
+-- 清怪不含它、爆桶连锁不误伤它）。平时在主角身边溜达，视野内有海盗就冲上去咬（静默击杀，
+-- 不进 onScore）；海盗不主动攻击狗；只有大船炮弹能把狗炸飞上天翻滚，狗不死（无血量）。
+Config.DOG = {
+    spawnOffset = Vector3(1.6, 0.0, 1.2),  -- 出生/重开时相对主角脚底的偏移
+    speed = 4.0,           -- 追击/回家的移动速度（米/秒，须快过海盗 2.3~2.6 才追得上）
+    wanderSpeed = 1.7,     -- 身边溜达的速度
+    followRadius = 6.0,    -- 离主角超过这个距离就先跑回身边
+    wanderRadius = 4.0,    -- 在主角周围这么大范围内随机乱逛
+    aggroRadius = 11.0,    -- 看到这个半径内的存活海盗就去咬
+    biteRange = 1.1,       -- 与海盗水平距离小于此值即下口
+    biteDamage = 2,        -- 每口伤害（普通海盗 HP=1 一口秒，突袭型 HP=3 需两口）
+    biteInterval = 0.7,    -- 两次下口的间隔（秒）
+    biteAnim = "Attack",   -- 咬击动画栈名
+    barkCooldown = 1.1,     -- 追击期间两次吠叫的最小间隔（秒）
+    idleBarkMin = 5.0,      -- 闲逛时随机吠叫的最小间隔（秒）
+    idleBarkMax = 11.0,     -- 闲逛时随机吠叫的最大间隔（秒）
+    -- 被炮弹炸飞：纯 Lua 抛物线积分 + 多轴翻滚（抖音包无物理，绝不做刚体）
+    launch = {
+        upSpeed = 14.0,      -- 初始上升速度（米/秒）
+        gravity = 20.0,      -- 回落加速度（米/秒²）：比真重力大，飞得起落得快、节奏紧凑
+        spinSpeed = 720.0,   -- 翻滚角速度（度/秒），绕斜轴拧着翻
+        forwardKick = 3.2,   -- 沿“爆炸→狗”水平方向的弹出初速（米/秒），带阻尼衰减
+        recoverTime = 0.6,   -- 落地后滚回四脚着地的起身时长（秒）
+    },
+}
 
 ----------------------------------------------------------------------
 -- 载具（玩家专属船：靠近码头按交互键登船，摇杆改驱动船在海域自由探索）
@@ -398,6 +428,7 @@ Config.WAVES = {
 local PIRATE_DIR = "Models/Quaternius_pirate-kit/Fbx/"
 local PLAYER_DIR = "Models/Characters-001/Fbx/"
 local PLAYER_MODEL = "Characters_Lis"
+local DOG_MODEL = "Characters_Dog"
 
 Config.MAT_PIRATE = "Materials/PirateAtlas.xml"
 Config.MAT_CHARACTER = "Materials/CharacterAtlas.xml"
@@ -442,6 +473,21 @@ function Config.PlayerAnim(stack)
     return PLAYER_DIR .. PLAYER_MODEL .. ".fbx.d/Models/" .. PLAYER_MODEL .. "_CharacterArmature" .. stack .. ".ani"
 end
 
+--- 宠物狗模型（Characters-001/Characters_Dog，与主角同目录、共用 Zombie_Atlas 图集，
+--- 材质沿用 Materials.Character()）。狗是单一体网格，无手持道具，不需按名隐藏。
+---@return string
+function Config.DogModel()
+    return PLAYER_DIR .. DOG_MODEL .. ".fbx.d/Models/" .. DOG_MODEL .. ".mdl"
+end
+
+--- 狗动画栈（骨架名是 AnimalArmature，非主角的 CharacterArmature）：
+--- Idle / Idle_2 / Walk / Run / Run_Jump / Attack / Death / Idle_HitReact_Left|Right。
+---@param stack string
+---@return string
+function Config.DogAnim(stack)
+    return PLAYER_DIR .. DOG_MODEL .. ".fbx.d/Models/" .. DOG_MODEL .. "_AnimalArmature" .. stack .. ".ani"
+end
+
 ----------------------------------------------------------------------
 -- 音效
 ----------------------------------------------------------------------
@@ -465,6 +511,7 @@ Config.Sfx = {
     shot = { "Sound/gun_shot/shooting-single.ogg" },
     cannonShot = { "Sound/gun_shot/powerful-cannon-shot.ogg" },   -- 大船炮台开炮专用
     cannonBlast = { "Sound/gun_shot/cannon-blast.ogg" },          -- 大船炮弹落地爆炸专用
+    dogBark = { "Sound/gun_shot/dog-bark.ogg" },                  -- 宠物狗吠（追击时反复叫、被弹炸飞时叫一声）
     shotTail = Variants("impactMining_", 5),
     hitFlesh = Variants("impactPunch_medium_", 5),
     killFlesh = Variants("impactPunch_heavy_", 5),

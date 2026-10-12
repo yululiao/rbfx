@@ -24,6 +24,7 @@ local Shooting = require("game.Shooting")
 local Juice = require("game.Juice")
 local Voice = require("game.Voice")
 local Grow = require("game.Grow")
+local Dog = require("game.Dog")
 
 ----------------------------------------------------------------------
 -- HUD 几何：摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量，单位都是画布像素）
@@ -79,7 +80,7 @@ end
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, voice, knob, joystick, grow
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, voice, knob, joystick, grow, dog
 
 local function RestartGame()
     if enemy then
@@ -94,6 +95,9 @@ local function RestartGame()
     end
     if grow then
         grow:Reset()
+    end
+    if dog then
+        dog:Reset()   -- 宠物狗回身边、清掉在空中/起身态（狗不死，不重生）
     end
     if waves then
         waves:Reset()
@@ -243,6 +247,10 @@ enemy = Enemy.Build({
     onScore = OnScore, onDefenseHit = OnDefenseHit, onPlayerHit = OnPlayerHit,
 })
 enemy:SpawnStaticBarrels()
+-- 宠物狗：友方伴随单位，独立于 enemy.units（不被玩家子弹/波次/爆桶波及）。需 player+enemy，
+-- 故在两者之后建；建完回填 enemy.dog，使大船炮弹落地时能把狗炸飞（Enemy:CannonImpact）。
+dog = Dog.Build({ scene = scene, player = player, enemies = enemy, audio = audio })
+enemy.dog = dog
 waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver })
 -- 自定义语音：要 hud（结果状态行）与 SDK 子系统；编辑器宿主无 SDK 时入口按钮隐藏
 voice = Voice.Build(scene, { hud = hud })
@@ -341,6 +349,7 @@ SubscribeToEvent("Update", function(data)
 
     -- 玩法与世界
     enemy:Update(worldDt)
+    dog:Update(worldDt)
     waves:Update(worldDt)
     -- 粒子的模拟在引擎侧走真实 timeStep（Lua 改不了），所以寿命回收也用真实 dt 对齐，
     -- 否则定格期间粒子播完了节点还被扣着不收。
