@@ -53,20 +53,21 @@ function Dog.Build(deps)
     -- 已拆进 game/DogLaunch.lua（self.launchCtl），Dog 不再持有 self.h。
     self.x, self.z = 0.0, 0.0
     self.yaw = 0.0
+    self.dt = 0.0           -- 本帧 dt，供 FaceDir 限速转向用（Update 每帧刷新）
     self.state = "wander"
     self.biteT = 0.0        -- 咬击冷却
-    self.barkT = 0.0        -- 吠叫冷却（防转向时刷叫）
-    self.idleBarkT = 0.0    -- 闲逛随机吠叫倒计时
+    self.barkT = 0.0        -- 吠叫冷却（仅追击/攻击海盗时刷，防过频）
     self.wanderT = 0.0      -- 当前游荡目标点的停留/重选倒计时
     self.wx, self.wz = 0.0, 0.0
+    self.lockedTarget = nil  -- 目标粘滞：当前锁定要咬的海盗 unit，防止等距横跳
     self.curAnim = nil      -- 当前循环动画名，避免每帧重复 Play
     self.restT = 0.0        -- 就地休息计时（>0 时不移动不索敌）
     self.restReturn = false -- 波次清完：是否正在“跑回主角身边准备休息”
+    self.returning = false  -- 跟随溜达：是否处于“正在跑回主角身边”（followRadius/followStopRadius 迟滞）
     self.launchCtl = DogLaunch.New(self)   -- 炸飞/起身的独立状态机（见 game/DogLaunch.lua）
 
     self:PlaceAtSpawn()
     self:EnsureAnim("Idle")
-    self:SeedIdleBark()
     return self
 end
 
@@ -105,11 +106,26 @@ function Dog:SetGround()
     self.node:SetPosition(Vector3(self.x, Config.SAND_Y, self.z))
 end
 
---- 朝 (dx,dz) 方向即时转身（与海盗同一套 yaw 约定），并记下来供起身时回正。
+--- 朝 (dx,dz) 方向转向（与海盗同一 yaw 约定），沿最短弧限速逼近，不瞬切。
+--- 三层防抖：
+---   * 死区 faceMinDist：极近距下 atan 输入是亚分米噪声向量，直接不更新；
+---   * faceTurnEps：已对准目标时不再微调，消除对准后的微幅摆抖；
+---   * faceTurnRate 限速：即便某帧 desired 在 0/±180 边界跳变（目标与狗近乎正前/正后共线），
+---     也只转有限角度，把“瞬时反向”摊成平滑转身，不再逐帧来回乱切。
 function Dog:FaceDir(dx, dz)
     if dx == 0.0 and dz == 0.0 then return end
-    local yaw = math.atan(dx, -dz)
-    self.yaw = -math.deg(yaw)
+    if dx * dx + dz * dz < self.cfg.faceMinDist * self.cfg.faceMinDist then return end
+    local desired = -math.deg(math.atan(dx, -dz))
+    -- 最短弧：把 desired 相对当前 yaw 折到 [-180,180)，避免绕远路
+    local delta = ((desired - self.yaw + 180) % 360) - 180
+    if math.abs(delta) < self.cfg.faceTurnEps then return end
+    local maxTurn = self.cfg.faceTurnRate * (self.dt or 0)
+    if delta > maxTurn then
+        delta = maxTurn
+    elseif delta < -maxTurn then
+        delta = -maxTurn
+    end
+    self.yaw = ((self.yaw + delta + 180) % 360) - 180
     self.node:SetRotation(Quaternion(self.yaw, Vector3.UP))
 end
 
@@ -121,17 +137,11 @@ function Dog:EnsureAnim(name)
     self.anim:PlayExclusive(Config.DogAnim(name), 0, true, 0.15)
 end
 
---- 吠一声（狗无 audio 实例时静默，不影响主流程）。
+--- 吠一声（仅在追击/攻击海盗时触发；狗无 audio 实例时静默，不影响主流程）。
 function Dog:Bark()
     if self.audio then
         self.audio:Play("dogBark")
     end
-end
-
---- 重新排下一次闲逛吠叫的时间点（[idleBarkMin, idleBarkMax] 均匀随机）。
-function Dog:SeedIdleBark()
-    local c = self.cfg
-    self.idleBarkT = c.idleBarkMin + math.random() * (c.idleBarkMax - c.idleBarkMin)
 end
 
 --- 喘气一声（一波清完休息时播；无 audio 实例时静默）。
@@ -163,6 +173,8 @@ end
 
 --- 视野内最近的存活海盗。只挑 kind=="pirate"（不咬船、不碰爆桶），返回 unit 与抬到躯干
 --- 中段的命中世界点（伤害/特效都打胸口，与 Enemy:NearestTarget 同一套 combat 瞄点约定）。
+--- 目标粘滞：若当前 lockedTarget 仍存活且在范围内，除非新目标明显更近（距离×stickFactor
+--- 仍比锁定目标距离小），否则保持锁定，防止两个等距海盗引发逐帧 A↔B 横跳。
 ---@return table|nil, Vector3|nil
 function Dog:FindPirate()
     local best, bestD, bestPos = nil, self.cfg.aggroRadius, nil
@@ -177,6 +189,21 @@ function Dog:FindPirate()
             end
         end
     end
+
+    -- 粘滞判定：锁定目标仍有效时，仅当新目标明显更近才切换
+    local locked = self.lockedTarget
+    if locked and locked.alive and locked.node and best and locked ~= best then
+        local lp = locked.node:GetWorldPosition()
+        local ld = distXZ(self.x, self.z, lp.x, lp.z)
+        if ld <= self.cfg.aggroRadius and ld * self.cfg.stickFactor <= bestD then
+            -- 锁定目标仍在范围且“折算后”不算太远（未被子击穿）→ 保持锁定
+            best = locked
+            bestD = ld
+            bestPos = Vector3(lp.x, lp.y + Config.PIRATE_HIT_HEIGHT, lp.z)
+        end
+    end
+
+    self.lockedTarget = best
     return best, bestPos
 end
 
@@ -192,7 +219,7 @@ function Dog:Update(dt)
     end
 
     local c = self.cfg
-
+    self.dt = dt   -- 供 FaceDir 按 faceTurnRate*dt 限速转向用
     -- 波次刚清完：先跑回主角身边，到位再就地休息。途中若冒出新海盗，放弃“回家休息”转去撕咬。
     if self.restReturn then
         local p = (self.player and self.player.spot) or Config.PLAYER_SPAWN
@@ -266,16 +293,19 @@ end
 function Dog:UpdateWander(dt)
     local c = self.cfg
     self.state = "wander"
-    -- 平时溜达：隔一阵随机叫几声（计时到就吠一声并重排下一次）
-    self.idleBarkT = self.idleBarkT - dt
-    if self.idleBarkT <= 0.0 then
-        self:SeedIdleBark()
-        self:Bark()
-    end
     local p = (self.player and self.player.spot) or Config.PLAYER_SPAWN
     local dHome = distXZ(self.x, self.z, p.x, p.z)
 
-    if dHome > c.followRadius then
+    -- 跟随/溜达两模式的迟滞：超过 followRadius 才启动“回家”，一旦启动就连续跑、直到距主角
+    -- 小于 followStopRadius 才放开。否则在 followRadius 边界会逐帧在“朝主人跑(朝内)”与“朝
+    -- 漫游点走(朝外)”间切换，两个朝向几乎相反——这正是快速来回乱切的一个成因。
+    if self.returning then
+        if dHome <= c.followStopRadius then self.returning = false end
+    elseif dHome > c.followRadius then
+        self.returning = true
+    end
+
+    if self.returning then
         local step = c.speed * dt
         local inv = step / dHome
         self.x = self.x + (p.x - self.x) * inv
@@ -287,16 +317,32 @@ function Dog:UpdateWander(dt)
         return
     end
 
+    -- 只在计时到期时重选漫游目标点：到达后先原地待机等到点再挑下一个。旧代码把“与目标点距离<0.5”
+    -- 也当成重选触发条件，而新点是绕主角按 0..wanderRadius 任意半径抽的——一旦抽到离狗很近的点
+    -- （<0.5），下一帧又判“到达”再抽，FaceDir 每帧被甩向全新的随机方向，表现为快速来回乱切。
     self.wanderT = self.wanderT - dt
-    if self.wanderT <= 0.0 or distXZ(self.x, self.z, self.wx, self.wz) < 0.5 then
-        local a = math.random() * math.pi * 2.0
-        local r = math.random() * c.wanderRadius
-        self.wx, self.wz = self:ClampPair(p.x + math.cos(a) * r, p.z + math.sin(a) * r)
+    if self.wanderT <= 0.0 then
+        local picked = false
+        for _ = 1, 8 do
+            local a = math.random() * math.pi * 2.0
+            local r = c.wanderMinDist + math.random() * (c.wanderRadius - c.wanderMinDist)
+            local nx, nz = self:ClampPair(p.x + math.cos(a) * r, p.z + math.sin(a) * r)
+            -- 新点需离狗当前位置足够远，否则走两步即“到达”、几乎立刻翻面
+            if distXZ(self.x, self.z, nx, nz) >= c.wanderMinDist then
+                self.wx, self.wz = nx, nz
+                picked = true
+                break
+            end
+        end
+        if not picked then
+            -- 主角贴墙/角落、8 次都抽不到足够远的点时的兜底：给一个固定的侧向目标，避免空转
+            self.wx, self.wz = self:ClampPair(self.x - c.wanderMinDist, self.z)
+        end
         self.wanderT = 2.0 + math.random() * 3.0
     end
 
     local d = distXZ(self.x, self.z, self.wx, self.wz)
-    if d > 0.3 then
+    if d > c.wanderArrive then
         local step = c.wanderSpeed * dt
         local inv = step / d
         self.x = self.x + (self.wx - self.x) * inv
@@ -330,14 +376,15 @@ function Dog:Reset()
     self.launchCtl:Reset()
     self.restT = 0.0
     self.restReturn = false
+    self.returning = false
     self.biteT = 0.0
     self.barkT = 0.0
     self.wanderT = 0.0
+    self.lockedTarget = nil
     self.curAnim = nil
     self.state = "wander"
     self:PlaceAtSpawn()
     self:EnsureAnim("Idle")
-    self:SeedIdleBark()
 end
 
 return Dog
