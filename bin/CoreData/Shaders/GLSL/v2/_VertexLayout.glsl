@@ -31,6 +31,15 @@ VERTEX_INPUT(vec4 iPos)
     VERTEX_INPUT(vec4 iTangent)
 #endif
 
+#ifdef URHO3D_GEOMETRY_VAT
+    // Vertex Animation Texture lookup UV. Stored in SEM_TEXCOORD index 2 of the baked VAT geometry.
+    // x = (vertexIndex + 0.5) / vatWidth, y unused.
+    // NOTE: The engine binds vertex attributes by parsing the variable name into a
+    // semantic (see RenderAPIUtils::ParseVertexAttribute), so this MUST be named iTexCoordN.
+    VERTEX_INPUT(vec2 iTexCoord2)
+    #define iVatUV iTexCoord2
+#endif
+
 #endif // URHO3D_VERTEX_SHADER
 
 #endif // _VERTEX_LAYOUT_GLSL_

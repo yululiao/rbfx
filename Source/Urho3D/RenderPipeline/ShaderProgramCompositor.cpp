@@ -204,6 +204,7 @@ void ShaderProgramCompositor::ApplyGeometryVertexDefines(ShaderProgramDesc& resu
         "URHO3D_GEOMETRY_TRAIL_FACE_CAMERA ",
         "URHO3D_GEOMETRY_TRAIL_BONE ",
         "URHO3D_GEOMETRY_STATIC ",
+        "URHO3D_GEOMETRY_VAT ",
     };
 
     const auto geometryTypeIndex = static_cast<int>(geometryType);
@@ -364,6 +365,7 @@ ea::pair<bool, bool> ShaderProgramCompositor::IsNormalAndTangentAvailable(
     case GEOM_STATIC:
     case GEOM_SKINNED:
     case GEOM_INSTANCED:
+    case GEOM_INSTANCED_VAT:
     case GEOM_STATIC_NOINSTANCING:
         return {vertexBuffer->HasElement(SEM_NORMAL), vertexBuffer->HasElement(SEM_TANGENT)};
     default:

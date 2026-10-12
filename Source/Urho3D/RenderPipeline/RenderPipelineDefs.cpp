@@ -136,18 +136,23 @@ void RenderPipelineSettings::PropagateImpliedSettings()
     if (instancingBuffer_.enableInstancing_)
     {
         instancingBuffer_.firstInstancingTexCoord_ = 4;
+        unsigned base = 0;
         switch (sceneProcessor_.ambientMode_)
         {
         case DrawableAmbientMode::Constant:
-            instancingBuffer_.numInstancingTexCoords_ = 3;
+            base = 3;
             break;
         case DrawableAmbientMode::Flat:
-            instancingBuffer_.numInstancingTexCoords_ = 3 + 1;
+            base = 3 + 1;
             break;
         case DrawableAmbientMode::Directional:
-            instancingBuffer_.numInstancingTexCoords_ = 3 + 7;
+            base = 3 + 7;
             break;
         }
+        // Reserve one trailing per-instance vec4 for VAT animation params
+        // (InstancedVATModel writes vec4(animTime, 0,0,0) here via SourceBatch::instancingData_;
+        // non-VAT instanced shaders leave it unconsumed).
+        instancingBuffer_.numInstancingTexCoords_ = base + 1;
     }
 }
 

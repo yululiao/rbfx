@@ -25,7 +25,11 @@
 
 #include "../Project/AssetManager.h"
 
+#include <Urho3D/Graphics/Animation.h>
+#include <Urho3D/Graphics/Model.h>
+#include <Urho3D/Graphics/VATBaker.h>
 #include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/PrefabResource.h>
 
@@ -57,6 +61,75 @@ ea::optional<ea::string> TryAdjustPathOnRename(const ea::string& path, const ea:
     }
     return ea::nullopt;
 }
+
+/// Return true when the resource extension denotes a mesh the VAT baker can consume (source or cooked).
+bool IsBakeableModelExtension(const ea::string& extension)
+{
+    return extension == ".mdl" || extension == ".fbx" || extension == ".glb" || extension == ".gltf" || extension == ".dae";
+}
+
+/// Editor-side driver of the VAT bake: resolve the entry to a cooked Model, pick a sibling animation clip,
+/// run the engine VATBaker and persist the baked frame data to a ".vat" archive beside the model. All
+/// failures are logged rather than silent so the operator can see what the C++ core rejected.
+void BakeVertexAnimationForEntry(Context* context, const ea::string& resourceName, const ea::string& absolutePath)
+{
+    ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+    if (!cache || resourceName.empty())
+        return;
+
+    const ea::string extension = GetExtension(resourceName);
+    ea::string modelResourceName = resourceName;
+    if (extension != ".mdl")
+        modelResourceName = ReplaceExtension(resourceName, ".mdl");
+
+    Model* model = cache->GetResource<Model>(modelResourceName);
+    if (!model)
+    {
+        URHO3D_LOGERROR("Bake Vertex Animation: could not resolve a Model resource from '{}'", modelResourceName);
+        return;
+    }
+
+    // Find the first animation clip living next to the model.
+    const ea::string directory = GetParentPath(modelResourceName);
+    ea::vector<ea::string> animations;
+    cache->Scan(animations, directory, "*.ani", SCAN_FILES);
+    cache->Scan(animations, directory, "*.anim", SCAN_FILES);
+    if (animations.empty())
+    {
+        URHO3D_LOGERROR("Bake Vertex Animation: no '.ani'/'.anim' clip found next to '{}'", modelResourceName);
+        return;
+    }
+
+    Animation* animation = cache->GetResource<Animation>(animations[0]);
+    if (!animation)
+    {
+        URHO3D_LOGERROR("Bake Vertex Animation: failed to load animation '{}'", animations[0]);
+        return;
+    }
+
+    VATBaker baker(context);
+    if (!baker.Bake(model, animation, 30.0f, 0.0f))
+    {
+        URHO3D_LOGERROR("Bake Vertex Animation failed: {}", baker.GetLastError());
+        return;
+    }
+
+    ea::string outputPath = absolutePath;
+    if (extension != ".mdl")
+        outputPath = ReplaceExtension(absolutePath, ".mdl");
+    outputPath += ".vat";
+
+    ea::string error;
+    if (!baker.SaveVAT(outputPath, error))
+    {
+        URHO3D_LOGERROR("Bake Vertex Animation save failed: {}", error);
+        return;
+    }
+
+    URHO3D_LOGINFO("Bake Vertex Animation: wrote {} slot(s), {} frame(s) for '{}' (clip '{}') -> '{}'",
+        baker.GetNumSlots(), baker.GetFrames(), modelResourceName, animations[0], outputPath);
+}
+
 
 bool IsPayloadMovable(const ResourceDragDropPayload& payload)
 {
@@ -473,6 +546,13 @@ void ResourceBrowserTab::RenderEntryContextMenuItems(const FileSystemEntry& entr
 
     if (ui::MenuItem("Copy Resource Name"))
         ui::SetClipboardText(entry.resourceName_.c_str());
+
+    // VAT bake operates on model assets (source or cooked). Produces a ".vat" archive beside the model.
+    if (entry.isFile_ && !IsEntryFromCache(entry) && IsBakeableModelExtension(GetExtension(entry.resourceName_)))
+    {
+        if (ui::MenuItem("Bake Vertex Animation..."))
+            BakeVertexAnimationForEntry(GetProject()->GetContext(), entry.resourceName_, entry.absolutePath_);
+    }
 
     ui::Separator();
 

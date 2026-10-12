@@ -137,7 +137,7 @@ public:
     /// Return whether the geometry can be rendered using instancing buffer.
     bool IsInstanced(GeometryType geometryType) const
     {
-        return (geometryType == GEOM_STATIC || geometryType == GEOM_INSTANCED)
+        return (geometryType == GEOM_STATIC || geometryType == GEOM_INSTANCED || geometryType == GEOM_INSTANCED_VAT)
             && indexBuffer_ != nullptr;
     }
 

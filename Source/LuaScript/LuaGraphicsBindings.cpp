@@ -32,6 +32,8 @@
 #include "../Urho3D/Graphics/Skybox.h"
 #include "../Urho3D/Graphics/StaticModel.h"
 #include "../Urho3D/Graphics/StaticModelGroup.h"
+#include "../Urho3D/Graphics/InstancedVATModel.h"
+#include "../Urho3D/Graphics/VATBaker.h"
 #include "../Urho3D/Graphics/RibbonTrail.h"
 #include "../Urho3D/Graphics/Technique.h"
 #include "../Urho3D/Graphics/Terrain.h"
@@ -86,6 +88,8 @@ template <> struct is_automagical<Urho3D::Billboard> : std::false_type {};
 template <> struct is_automagical<Urho3D::DecalSet> : std::false_type {};
 template <> struct is_automagical<Urho3D::Terrain> : std::false_type {};
 template <> struct is_automagical<Urho3D::StaticModelGroup> : std::false_type {};
+template <> struct is_automagical<Urho3D::InstancedVATModel> : std::false_type {};
+template <> struct is_automagical<Urho3D::VATBaker> : std::false_type {};
 template <> struct is_automagical<Urho3D::RibbonTrail> : std::false_type {};
 template <> struct is_automagical<Urho3D::VertexBuffer> : std::false_type {};
 template <> struct is_automagical<Urho3D::IndexBuffer> : std::false_type {};
@@ -563,6 +567,58 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<StaticModelGroup>();
+
+    // InstancedVATModel: many GPU-instanced VAT characters sharing one baked mesh,
+    // drawn in a single batch. Each instance carries a world transform and a normalized
+    // animation time [0,1) advanced on the CPU by playSpeed / duration.
+    {
+        using LUA_THIS = InstancedVATModel;
+        LUA_CLASS(InstancedVATModel,
+            sol::no_constructor
+            LUA_BASES(Drawable, Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetGeometry)
+            LUA_MEMBER_FUNC(GetGeometry)
+            LUA_MEMBER_FUNC(SetMaterial)
+            LUA_MEMBER_FUNC(GetMaterial)
+            LUA_MEMBER_FUNC_RAW(AddInstance, static_cast<unsigned (InstancedVATModel::*)(const Matrix3x4&, float, float)>(&InstancedVATModel::AddInstance))
+            LUA_MEMBER_FUNC(AddInstanceTRS)
+            LUA_MEMBER_FUNC(RemoveInstance)
+            LUA_MEMBER_FUNC(ClearInstances)
+            LUA_MEMBER_FUNC(GetNumInstances)
+            LUA_MEMBER_FUNC(SetInstanceTransform)
+            LUA_MEMBER_FUNC(SetInstanceAnimTime)
+            LUA_MEMBER_FUNC(GetInstanceAnimTime)
+            LUA_MEMBER_FUNC(SetInstancePlaySpeed)
+            LUA_MEMBER_FUNC(SetAnimationDuration)
+            LUA_MEMBER_FUNC(GetAnimationDuration)
+            LUA_MEMBER_FUNC(SetLocalBoundingBox)
+        );
+    }
+    RegisterLuaObjectWrapper<InstancedVATModel>();
+
+    // VATBaker: bakes a skinned Model + one Animation clip into Vertex-Animation-Texture
+    // resources (baked geometry + position/normal VAT textures + material) for InstancedVATModel.
+    {
+        using LUA_THIS = VATBaker;
+        LUA_CLASS(VATBaker,
+            sol::call_constructor, sol::factories(
+                [context]() { return SharedPtr<VATBaker>(new VATBaker(context)); })
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC(Bake)
+            LUA_MEMBER_FUNC(GetLastError)
+            LUA_MEMBER_FUNC_RAW(SaveVAT, static_cast<bool (VATBaker::*)(const ea::string&)>(&VATBaker::SaveVAT))
+            LUA_MEMBER_FUNC_RAW(LoadVAT, static_cast<bool (VATBaker::*)(Model*, const ea::string&)>(&VATBaker::LoadVAT))
+            LUA_MEMBER_FUNC(Reset)
+            LUA_MEMBER_FUNC(GetNumSlots)
+            LUA_MEMBER_FUNC(GetGeometry)
+            LUA_MEMBER_FUNC(GetPositionTexture)
+            LUA_MEMBER_FUNC(GetNormalTexture)
+            LUA_MEMBER_FUNC(GetMaterial)
+            LUA_MEMBER_FUNC(GetFrames)
+            LUA_MEMBER_FUNC(GetDuration)
+            LUA_MEMBER_FUNC(GetLocalBoundingBox)
+        );
+    }
 
     // RibbonTrail: trail rendered behind a moving node (44_RibbonTrailDemo).
     {

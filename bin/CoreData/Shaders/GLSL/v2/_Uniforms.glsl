@@ -266,6 +266,21 @@ UNIFORM_BUFFER_END(4, Material)
         VERTEX_INPUT(half4 iTexCoord7)
         #define cAmbient iTexCoord7
     #endif
+
+        #ifdef URHO3D_GEOMETRY_VAT
+            // Per-instance VAT animation params (trailing instancing texcoord slot):
+            // x = normalized animation time in [0,1). Index follows world(4..6) + ambient.
+            #ifdef URHO3D_AMBIENT_DIRECTIONAL
+                VERTEX_INPUT(vec4 iTexCoord14)
+                #define cVatAnimParams iTexCoord14
+            #elif defined(URHO3D_AMBIENT_FLAT)
+                VERTEX_INPUT(vec4 iTexCoord8)
+                #define cVatAnimParams iTexCoord8
+            #else
+                VERTEX_INPUT(vec4 iTexCoord7)
+                #define cVatAnimParams iTexCoord7
+            #endif
+        #endif
     #else
         UNIFORM_BUFFER_BEGIN(5, Object)
             UNIFORM_HIGHP(mat4 cModel)
@@ -290,6 +305,14 @@ UNIFORM_BUFFER_END(4, Material)
             UNIFORM_HIGHP(vec4 cSkinMatrices[URHO3D_MAXBONES * 3])
         #endif
         UNIFORM_BUFFER_END(5, Object)
+    #endif
+
+    #ifdef URHO3D_GEOMETRY_VAT
+        // Vertex Animation Textures: object-space skinned position & normal, one texel per
+        // (vertex, frame). width = texel count, height = baked frame count. Bound from the
+        // material textures "VatPosition" / "VatNormal" (VS-only samplers, distinct slots).
+        SAMPLER(11, sampler2D sVatPosition)
+        SAMPLER(12, sampler2D sVatNormal)
     #endif
 #endif // URHO3D_VERTEX_SHADER
 

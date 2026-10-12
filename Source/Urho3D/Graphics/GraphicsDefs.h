@@ -46,6 +46,9 @@ enum GeometryType
     MAX_GEOMETRYTYPES = 7,
     // This is not a real geometry type for VS, but used to mark objects that do not desire to be instanced
     GEOM_STATIC_NOINSTANCING = 7,
+    // Vertex-animation-texture (VAT) instanced mesh: a statically-baked mesh whose skeletal animation
+    // is sampled from a vertex-animation texture in the vertex shader, drawn through the instancing path.
+    GEOM_INSTANCED_VAT = 8,
 };
 
 /// Vertex/index buffer lock state.

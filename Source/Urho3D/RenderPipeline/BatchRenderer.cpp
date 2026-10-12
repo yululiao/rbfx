@@ -161,13 +161,27 @@ public:
     {
         instancingBuffer.AddInstance();
         instancingBuffer.SetElements(&sourceBatch.worldTransform_[instanceIndex], 0, 3);
+        unsigned element = 3;
         if (ambientEnabled_)
         {
             if (ambientMode_ == DrawableAmbientMode::Flat)
-                instancingBuffer.SetElements(&ambientValueFlat_, 3, 1);
+            {
+                instancingBuffer.SetElements(&ambientValueFlat_, element, 1);
+                element += 1;
+            }
             else if (ambientMode_ == DrawableAmbientMode::Directional)
-                instancingBuffer.SetElements(ambientValueSH_, 3, 7);
+            {
+                instancingBuffer.SetElements(ambientValueSH_, element, 7);
+                element += 7;
+            }
         }
+        // Trailing per-instance VAT animation params slot (vec4(animTime, ...)).
+        // Drawables that do not use VAT leave instancingData_ null -> zero-filled, unconsumed.
+        static const Vector4 kZeroAnimParams{};
+        const Vector4* animParams = sourceBatch.instancingData_
+            ? static_cast<const Vector4*>(sourceBatch.instancingData_) + instanceIndex
+            : &kZeroAnimParams;
+        instancingBuffer.SetElements(animParams, element, 1);
     }
 
     /// Add uniforms to draw queue for non-instanced batch.
@@ -783,6 +797,7 @@ private:
         }
 
         const unsigned numBatchInstances = pipelineBatch.geometryType_ == GEOM_STATIC
+            || pipelineBatch.geometryType_ == GEOM_INSTANCED_VAT
             ? sourceBatch.numWorldTransforms_ : 1u;
 
         const bool resetInstancingGroup = instancingGroup_.count_ == 0 || dirty_.IsAnythingDirty();

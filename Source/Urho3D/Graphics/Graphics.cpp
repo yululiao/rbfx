@@ -31,6 +31,8 @@
 #include "../Graphics/CameraOperator.h"
 #include "../Graphics/Geometry.h"
 #include "../Graphics/CustomGeometry.h"
+#include "../Graphics/InstancedVATModel.h"
+#include "../Graphics/VATBaker.h"
 #include "../Graphics/DebugRenderer.h"
 #include "../Graphics/DecalSet.h"
 #include "../Graphics/GlobalIllumination.h"
@@ -705,6 +707,8 @@ void RegisterGraphicsLibrary(Context* context)
     GlobalIllumination::RegisterObject(context);
     StaticModel::RegisterObject(context);
     StaticModelGroup::RegisterObject(context);
+    InstancedVATModel::RegisterObject(context);
+    VATBaker::RegisterObject(context);
     Skybox::RegisterObject(context);
     AnimatedModel::RegisterObject(context);
     AnimationController::RegisterObject(context);

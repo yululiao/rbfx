@@ -159,6 +159,42 @@ mat4 GetModelMatrix()
 
         return result;
     }
+#elif defined(URHO3D_GEOMETRY_VAT)
+    VertexTransform GetVertexTransform()
+    {
+        mat4 modelMatrix = GetModelMatrix();
+
+        // Pick the frame from the per-instance normalized animation time. Frame count is
+        // derived from the VAT texture height so no extra uniform is needed.
+        const float frameCount = float(textureSize(sVatPosition, 0).y);
+        float fi = floor(fract(cVatAnimParams.x) * frameCount);
+        vec2 vatUV = vec2(iVatUV.x, (fi + 0.5) / frameCount);
+
+        // Skinned position in object space straight from the VAT.
+        vec3 vatPos = texture(sVatPosition, vatUV).xyz;
+
+        VertexTransform result;
+        result.position = vec4(vatPos, 1.0) * modelMatrix;
+
+        #ifdef URHO3D_VERTEX_NEED_NORMAL
+            mediump mat3 normalMatrix = GetNormalMatrix(modelMatrix);
+            vec3 vatNormal = texture(sVatNormal, vatUV).xyz;
+            result.normal = normalize(vatNormal * normalMatrix);
+
+            ApplyShadowNormalOffset(result.position, result.normal);
+
+            #ifdef URHO3D_VERTEX_NEED_TANGENT
+                // No baked tangents yet: reconstruct a stable object-space frame from the VAT normal.
+                vec3 on = normalize(vatNormal);
+                vec3 ref = abs(on.z) < 0.99 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+                vec3 ot = normalize(cross(ref, on));
+                result.tangent = normalize(ot * normalMatrix);
+                result.bitangent = cross(result.tangent, result.normal);
+            #endif
+        #endif
+
+        return result;
+    }
 #elif defined(URHO3D_GEOMETRY_BILLBOARD)
     VertexTransform GetVertexTransform()
     {
