@@ -48,6 +48,7 @@ function Shooting.Build(deps)
     -- 因为 Reset 不清它（重开由 grow:Reset 重新推 1 级形态）。
     self.pellets = 1
     self.damage = 1
+    self.pierce = 1   -- 一颗子弹能贯穿的单位数（1=命中即消亡，旧行为）；随 GROWTH 爬升
 
     if self.hud and self.hud.SetAmmo then
         self.hud:SetAmmo(self.ammo)
@@ -102,13 +103,15 @@ function Shooting:StartReload()
     self.audio:Play("reload")
 end
 
---- 成长系统推来的武器数值：扇形弹丸数 + 单发伤害。由 game/Grow.lua 的 onWeapon
+--- 成长系统推来的武器数值：扇形弹丸数 + 单发伤害 + 穿透。由 game/Grow.lua 的 onWeapon
 --- 经 main.lua 调用（开局一次 + 每次升级）。弹匣容量不变（扇形一次只扣 1 发）。
 ---@param pellets number
 ---@param damage number
-function Shooting:SetWeaponStats(pellets, damage)
+---@param pierce number|nil
+function Shooting:SetWeaponStats(pellets, damage, pierce)
     self.pellets = pellets or 1
     self.damage = damage or 1
+    self.pierce = pierce or 1
 end
 
 --- 对锁定目标开一枪：扣弹/冷却/kick/人物转向/枪口光/音效，生成子弹实体飞向目标。
@@ -132,6 +135,9 @@ function Shooting:FireAt(unit, targetPos)
     local dist = (targetPos - muzzle):Length()
     local dir = (targetPos - muzzle):Normalized()
     local pellets = self.pellets or 1
+    local pierce = self.pierce or 1
+    -- 穿透弹要能一路飞过整条航道，故射程用 ATTACK_RANGE（非穿透时维持旧锁点距离）。
+    local bulletRange = pierce > 1 and Config.ATTACK_RANGE or dist
     local spread = Config.SCATTER_SPREAD_DEG
     for i = 1, pellets do
         local dx, dy, dz = dir.x, dir.y, dir.z
@@ -153,7 +159,9 @@ function Shooting:FireAt(unit, targetPos)
             dir = Vector3(dx, dy, dz),
             speed = BULLET_SPEED,
             traveled = 0.0,
-            maxDist = dist,
+            maxDist = bulletRange,
+            hitsLeft = pierce,   -- 还能结算几个单位（降到 0 就销毁这颗子弹）
+            hit = {},            -- 本颗已命中过的单位集合，防穿透时对同一单位逐帧重复结算
         })
     end
 
@@ -162,10 +170,11 @@ function Shooting:FireAt(unit, targetPos)
     end
 end
 
---- 子弹飞行与扫掠命中。子弹不再"飞到锁定目标才结算"，而是每帧沿方向推进后，检查
---- 航道上是否有敌人进入 BULLET_HIT_RADIUS——撞到即对该敌人结算并消耗这颗子弹。
---- 于是扇形散射 = 一次喷出的多颗子弹各扫一条线上的敌人（命中广度的来源）。
---- 无物理模块，故用距离遍历而非射线查询（同屏 ≤ 十余单位，成本可忽）。
+--- 子弹飞行与扫掠命中。子弹每帧沿方向推进后，检查航道上是否有未命中过的敌人进入
+--- BULLET_HIT_RADIUS——撞到即结算。穿透（hitsLeft>1）时不销毁、继续飞，靠 b.hit 集记
+--- 得避免同一单位被重复结算；hitsLeft 耗尽或飞满射程才销毁。于是扇形 + 穿透 =
+--- 一次喷出的多颗子弹各串穿一整条线上的敌人（命中广度 × 贯穿深度的乘积）。
+--- 无物理模块，故用距离遍历而非射线查询。
 ---@param dt number
 function Shooting:UpdateBullets(dt)
     local r2 = Config.BULLET_HIT_RADIUS * Config.BULLET_HIT_RADIUS
@@ -178,12 +187,12 @@ function Shooting:UpdateBullets(dt)
         b.node:SetPosition(np)
         b.traveled = b.traveled + step
 
-        -- 扫掠：撞到第一个非爆桶单位即结算（爆桶不自动当靶，保留"只在连锁中炸"的语义）。
-        -- 用 XZ 水平距离（与 NearestTarget 同口径）：子弹平飞在枪口高度、敌人节点常记在
-        -- 脚底，若算进 dy 会白白吃掉半径导致漏判。
+        -- 扫掠：撞到航道上第一个“本颗还未命中过”的非爆桶单位即结算（爆桶不自动当靶，
+        -- 保留“只在连锁中炸”的语义）。用 XZ 水平距离（与 NearestTarget 同口径）：子弹平飞
+        -- 在枪口高度、敌人节点常记在脚底，若算进 dy 会白白吃掉半径导致漏判。
         local hitUnit = nil
         for _, u in ipairs(units) do
-            if u.alive and u.node and u.kind ~= "barrel" then
+            if u.alive and u.node and u.kind ~= "barrel" and not b.hit[u] then
                 local up = u.node:GetWorldPosition()
                 local ddx = up.x - np.x
                 local ddz = up.z - np.z
@@ -196,10 +205,14 @@ function Shooting:UpdateBullets(dt)
 
         if hitUnit then
             self:DamageUnit(hitUnit, np, false)
-            b.node:Remove()
-            table.remove(self.bullets, i)
+            b.hit[hitUnit] = true
+            b.hitsLeft = (b.hitsLeft or 1) - 1
+            if b.hitsLeft <= 0 then
+                b.node:Remove()
+                table.remove(self.bullets, i)
+            end
         elseif b.traveled >= b.maxDist then
-            -- 未命中且飞满射程 → 销毁（落空的散射弹视觉上就是"喷过头"）
+            -- 未命中且飞满射程 → 销毁（落空的散射弹视觉上就是“喷过头”）
             b.node:Remove()
             table.remove(self.bullets, i)
         end

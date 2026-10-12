@@ -266,7 +266,7 @@ shooting = Shooting.Build({
 grow = Grow.Build({
     hud = hud,
     onWeapon = function(snapshot, isInitial)
-        shooting:SetWeaponStats(snapshot.pellets, snapshot.damage)
+        shooting:SetWeaponStats(snapshot.pellets, snapshot.damage, snapshot.pierce)
         if hud then
             hud:SetWeaponText("弹丸 x" .. snapshot.pellets)
             -- 开局不提醒；真正升级时把"变强"做成一次可听可见的反馈（飘字旁白 + 轻震）

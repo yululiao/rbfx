@@ -139,19 +139,28 @@ function Enemy:NearestTarget(fromPos, maxDist)
     local best, bestD, bestPos = nil, maxDist, nil
     for _, u in ipairs(self.units) do
         if u.alive and u.node and (u.kind == "pirate" or u.kind == "boat" or u.kind == "bigboat") then
-            local p = u.node:GetWorldPosition()
-            -- 单位 node 原点都在“脚下/船底”（脚底与水面下），直接拿它当瞄点会让子弹打脚、
-            -- 命中特效也喷在脚底（船更甚：扎进水里被水面盖住）。按 kind 抬到躯干/甲板：选择仍
-            -- 按 XZ 距离（下面只用 dx/dz），y 抬高不影响挑谁，只把弹道与 hitPos 提到身体中段。
-            if u.kind == "pirate" then
-                p.y = p.y + Config.PIRATE_HIT_HEIGHT
-            else
-                p.y = p.y + Config.BOAT_HIT_HEIGHT
-            end
-            local dx, dz = p.x - fromPos.x, p.z - fromPos.z
-            local d = math.sqrt(dx * dx + dz * dz)
-            if d <= bestD then
-                best, bestD, bestPos = u, d, p
+            -- 船在"投递兵员"的窗口内不作目标，否则全程在射程里被扇形弹糊、没靠岸就沉，
+            -- 海盗吐不出来就没得割（尤其大船载 12 人、卸货窗口长）。规则：
+            --   小船：航行(sail)中免锁，靠岸开始卸货(unload)后就可被打——保留玩家拦下后半程的自主。
+            --   大船：航行+卸货(sail/unload)都免锁，直到吐完转滞留炮击(bombard)才成为可拆的炮舰。
+            -- 滩头一有海盗，自动瞄自然优先割草（海盗始终可打），船得以成批靠岸 = 兵如潮水。
+            local delivering = (u.kind == "boat" and u.state == "sail")
+                or (u.kind == "bigboat" and u.state ~= "bombard")
+            if not delivering then
+                local p = u.node:GetWorldPosition()
+                -- 单位 node 原点都在“脚下/船底”（脚底与水面下），直接拿它当瞄点会让子弹打脚、
+                -- 命中特效也喷在脚底（船更甚：扎进水里被水面盖住）。按 kind 抬到躯干/甲板：选择仍
+                -- 按 XZ 距离（下面只用 dx/dz），y 抬高不影响挑谁，只把弹道与 hitPos 提到身体中段。
+                if u.kind == "pirate" then
+                    p.y = p.y + Config.PIRATE_HIT_HEIGHT
+                else
+                    p.y = p.y + Config.BOAT_HIT_HEIGHT
+                end
+                local dx, dz = p.x - fromPos.x, p.z - fromPos.z
+                local d = math.sqrt(dx * dx + dz * dz)
+                if d <= bestD then
+                    best, bestD, bestPos = u, d, p
+                end
             end
         end
     end
@@ -175,6 +184,27 @@ function Enemy:Damage(unit, amount, hitPos, headshot)
         self.onScore(result, unit, headshot)
     end
     return result
+end
+
+--- combo 触发的一次范围爆炸：在 centerPos 放一圈 AoE，杀伤 COMBO_BLAST_RADIUS 内的所有单位
+--- （含爆桶，可引发连锁）。复用爆桶连锁那套“距离遍历 + Schedule 递延”，避免与当前这次击杀
+--- 结算同帧递归引爆（爆炸伤害→onScore→AddKill 可能再触爆炸，全部递延到下帧计时器，不会无限叠加）。
+---@param centerPos Vector3
+function Enemy:ComboBlast(centerPos)
+    self.fx:Spawn("explosion", centerPos)
+    self.fx:Flash(centerPos, Color(1.0, 0.8, 0.35), 16.0, 0.16)
+    self.audio:Play("explosion")
+    local mgr = self
+    mgr:Schedule(Config.BARREL_CHAIN_DELAY, function()
+        for _, other in ipairs(mgr.units) do
+            if other.alive and other.node then
+                local d = (other.node:GetWorldPosition() - centerPos):Length()
+                if d <= Config.COMBO_BLAST_RADIUS then
+                    mgr:Damage(other, Config.COMBO_BLAST_DAMAGE, other.node:GetWorldPosition(), false)
+                end
+            end
+        end
+    end)
 end
 
 ----------------------------------------------------------------------

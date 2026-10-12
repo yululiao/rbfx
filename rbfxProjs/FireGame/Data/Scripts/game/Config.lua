@@ -135,8 +135,8 @@ Config.BOAT_BIG_SPEED = 3.0
 Config.BOAT_UNLOAD_TIME = 0.55       -- 每吐一个海盗的间隔
 Config.BOAT_HP = 3
 Config.BOAT_BIG_HP = 8
-Config.BOAT_CARRY = 3
-Config.BOAT_BIG_CARRY = 5
+Config.BOAT_CARRY = 7
+Config.BOAT_BIG_CARRY = 12
 Config.BOAT_SINK_TIME = 2.2          -- 沉船动画时长，之后移除节点
 
 ----------------------------------------------------------------------
@@ -158,7 +158,7 @@ Config.PIRATE_SPAWN_Z = -4.5         -- 下水点（浅水里，看着像涉水�
 -- Quaternius 角色模型原生朝 -z（Soldier 的散落道具在 z 负侧就是"正前方"），
 -- 海盗要朝 +z（防线/塔）行进，所以偏航 180 度。若进游戏发现海盗倒着走，改成 0。
 Config.PIRATE_YAW = 180.0
-Config.PIRATE_SPEED = 2.6
+Config.PIRATE_SPEED = 2.0            -- 调慢：海盗滩头滞留更久，给玩家更多“割”的时间与参与感
 Config.PIRATE_SPEED_SPREAD = 0.5     -- 每个海盗速度随机 ±，避免排队齐步走
 Config.PIRATE_HP = 1                 -- 一发死：保住割草爽感的根。压迫靠数量/来速，不靠肉。
 -- 海盗 combat 瞄点抬高度（相对 node 原点=脚底）。角色模型原点在脚底，抬到躯干中段
@@ -174,7 +174,7 @@ Config.PIRATE_RAIDER_CHANCE = 0.6    -- 每个海盗是突袭型（追主角）�
 Config.PIRATE_RAIDER_HP = 3          -- 突袭型血量（普通型走 PIRATE_HP=1）：追身的略肉一点避免一发带走
 Config.PIRATE_MELEE_RANGE = 1.7      -- 与主角水平距离小于此值即停下挥刀
 Config.PIRATE_PLAYER_DAMAGE = 10     -- 突袭型一刀砍主角多少血
-Config.MAX_ALIVE_UNITS = 16          -- 同屏单位闸：超了就延后生成。比原 14 略高制造潮水感（真机卡就回调）
+Config.MAX_ALIVE_UNITS = 32          -- 同屏单位闸：超了就延后生成。船能整船靠岸后上岸量猛增，拉到 32 保证潮水不断流（真机卡就回调）
 Config.FAR_UNIT_DISTANCE = 55.0      -- 超过这个距离的单位关掉不可见时也更新
 
 Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako", "Characters_Sharky" }
@@ -186,7 +186,7 @@ Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbaross
 ----------------------------------------------------------------------
 Config.MAG_SIZE = 5
 Config.RELOAD_TIME = 1.2
-Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔
+Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔（不降扳机频率，总伤害靠穿透/爆炸来收）
 Config.FIRE_WINDOW = 0.6             -- 开火后维持射击姿态/上半身对准目标的窗口（秒）：大于冷却
                                      -- 保证连发期间不断档，装弹期间自然回落举枪
 Config.ATTACK_RANGE = 45.0           -- 自动吸附半径：主角周围这个半径内取最近敌人开火（无需手动对准）
@@ -201,18 +201,22 @@ Config.ATTACK_RANGE = 45.0           -- 自动吸附半径：主角周围这个�
 Config.SCATTER_SPREAD_DEG = 26.0     -- 扇形总张角（度，多弹沿此弧均匀铺开）
 Config.BULLET_HIT_RADIUS = 1.3       -- 子弹扫掠命中半径（米）
 Config.GROW_XP = { pirate = 1, boat = 6, bigboat = 20, barrel = 2 }  -- 各类击杀喂的经验
--- 成长曲线：每项 { xp=达到该级所需累计经验, pellets=扇形弹丸数, damage=单发伤害 }。
--- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。数值按三波全清的
--- 经验总量（约 380）标定，通关刚好爬到 5 发附近，不会溢出到封顶。
--- pellets 永远取奇数（1/3/5）：扇形按 spread*(i-0.5)/pellets 均匀铺开，只有奇数发才
+-- 成长曲线：每项 { xp=达到该级所需累计经验, pellets=扇形弹丸数, damage=单发伤害, pierce=子弹可贯穿的单位数 }。
+-- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。pierce=1 即旧行为（命中一个就消亡），
+-- 逐级抬高后一颗子弹能串穿航道上一排小艇。经验阈值按加密后的三波总击杀量标定，
+-- 使成长贯穿全局而不早早封顶（真机体感不对就改 xp 间距）。
+-- pellets 永远取奇数（1/3/5/7/9）：扇形按 spread*(i-0.5)/pellets 均匀铺开，只有奇数发才
 -- 有一颗处于 a=0° 的正中弹直射锁定目标。偶数发（如 2）正中是空的，两颗对称夹住
--- 小船（船体仅 ~1.3m 宽）会刚好从缝里漏掉——故不用 2/4。
+-- 小船（船体仅 ~1.3m 宽）会刚好从缝里漏掉——故不用偶数。
 Config.GROWTH = {
-    { xp = 0,   pellets = 1, damage = 1 },
-    { xp = 60,  pellets = 3, damage = 1 },
-    { xp = 140, pellets = 3, damage = 2 },
-    { xp = 240, pellets = 5, damage = 2 },
-    { xp = 360, pellets = 5, damage = 3 },
+    { xp = 0,    pellets = 1, damage = 1, pierce = 1 },
+    { xp = 50,   pellets = 3, damage = 1, pierce = 1 },
+    { xp = 140,  pellets = 3, damage = 1, pierce = 1 },
+    { xp = 300,  pellets = 5, damage = 1, pierce = 2 },
+    { xp = 550,  pellets = 5, damage = 1, pierce = 2 },
+    { xp = 900,  pellets = 7, damage = 1, pierce = 2 },
+    { xp = 1400, pellets = 7, damage = 2, pierce = 3 },
+    { xp = 2100, pellets = 9, damage = 2, pierce = 3 },
 }
 
 ----------------------------------------------------------------------
@@ -338,7 +342,11 @@ Config.HEADSHOT_MULTIPLIER = 2
 Config.COMBO_WINDOW = 2.0            -- 两次击杀超过这个间隔，combo 断
 Config.COMBO_BONUS_STEP = 10         -- 每级 combo 额外加的分
 Config.COMBO_VOICE_AT = { 3, 5, 8 }  -- 达到这些连击数播 combo / multi_kill 旁白
-Config.DEFENSE_HP = 100
+-- combo 不再只加分：每 COMBO_BLAST_EVERY 连杀在击杀点放一次范围爆炸（割草的“杀→更多杀”正反馈闭环）。
+Config.COMBO_BLAST_EVERY = 4         -- 每几连杀触发一次爆炸（0/nil = 关闭）
+Config.COMBO_BLAST_RADIUS = 6.0      -- combo 爆炸杀伤半径（米），比爆桶 4.6 大一档
+Config.COMBO_BLAST_DAMAGE = 1        -- combo 爆炸伤害（降到只扫过一片、不再一发清屏；秒普通海盗靠 damage=1 就够）
+Config.DEFENSE_HP = 300              -- 潮水改后上岸量大增、又刚削了玩家穿透/爆炸，防线易穿；拉到 300 抗漏（约容忍 30 个漏防，不够再往上调）
 Config.LEAK_DAMAGE = 10              -- 一个海盗摸到防线扣多少
 -- 主角生命：突袭型海盗砍的是这条血。掉到 0 = 主角阵亡（与防线失守同为败局）。
 Config.PLAYER_HP = 100
@@ -352,7 +360,7 @@ Config.BARREL_CHAIN_DELAY = 0.12     -- 连锁引爆的递延，让爆炸看起�
 
 ----------------------------------------------------------------------
 -- 波次：每波一张 {t=秒, kind=船型, lane=航道下标} 的生成时间表
--- kind: "boat" 小艇（3 人）/ "bigboat" 大船（5 人）
+-- kind: "boat" 小艇（吐 BOAT_CARRY 人）/ "bigboat" 大船（吐 BOAT_BIG_CARRY 人）
 -- lane: Config.LANES 的下标（1..4）。同一 t 用不同 lane 错开，直线推进无碰撞，
 --       同航道同时刻会互相穿模。
 ----------------------------------------------------------------------
@@ -361,70 +369,82 @@ Config.WAVES = {
     {
         voice = "round_1",
         spawns = {
-            -- 先头 2
+            -- 开局稀疏：一条一条错开时间出场，绝不并排成墙。间隔随时间收紧 = 船依次增多。
             { t = 1.0, kind = "boat", lane = 2 },
-            { t = 1.0, kind = "boat", lane = 3 },
-            -- 第一批三航道
-            { t = 3.0, kind = "boat", lane = 1 },
-            { t = 3.0, kind = "boat", lane = 3 },
-            { t = 3.0, kind = "boat", lane = 4 },
-            -- 四航道齐射（一次扳机只能扫一条道，其余趁隙逼近）
-            { t = 5.5, kind = "boat", lane = 1 },
-            { t = 5.5, kind = "boat", lane = 2 },
-            { t = 5.5, kind = "boat", lane = 3 },
-            { t = 5.5, kind = "boat", lane = 4 },
-            -- 收尾
-            { t = 8.0, kind = "boat", lane = 2 },
-            { t = 8.0, kind = "boat", lane = 4 },
-            { t = 10.0, kind = "boat", lane = 1 },
-            { t = 10.0, kind = "boat", lane = 3 },
+            { t = 3.2, kind = "boat", lane = 3 },
+            { t = 5.4, kind = "boat", lane = 1 },
+            -- 中段渐密：航道轮换错开，同屏同时航行的船开始累积
+            { t = 7.2, kind = "boat", lane = 4 },
+            { t = 8.8, kind = "boat", lane = 2 },
+            { t = 10.2, kind = "boat", lane = 3 },
+            { t = 11.4, kind = "boat", lane = 1 },
+            -- 后段最密：近乎单列流水，但时间仍两两错开、不成齐射排
+            { t = 12.6, kind = "boat", lane = 4 },
+            { t = 13.6, kind = "boat", lane = 2 },
+            { t = 14.6, kind = "boat", lane = 3 },
+            { t = 15.6, kind = "boat", lane = 1 },
+            { t = 16.6, kind = "boat", lane = 4 },
         },
     },
-    -- 第二波：首次投入大船（吐 5 人 / 慢速），小艇护航。双大船同压逼玩家分兵。
+    -- 第二波：首次投入大船，四航道护航。多艘大船同压逼玩家分兵。
     {
         voice = "round_2",
         spawns = {
             -- 开场双大船压中、右两路
             { t = 1.0, kind = "bigboat", lane = 2 },
             { t = 1.0, kind = "bigboat", lane = 3 },
-            -- 第一梯队小艇铺两侧
-            { t = 3.5, kind = "boat", lane = 1 },
-            { t = 3.5, kind = "boat", lane = 4 },
-            -- 四航道小艇齐射
-            { t = 6.5, kind = "boat", lane = 1 },
-            { t = 6.5, kind = "boat", lane = 2 },
-            { t = 6.5, kind = "boat", lane = 3 },
-            { t = 6.5, kind = "boat", lane = 4 },
-            -- 第二梯队
-            { t = 9.5, kind = "boat", lane = 2 },
-            { t = 9.5, kind = "boat", lane = 4 },
+            -- 第一梯队四航道小艇
+            { t = 3.0, kind = "boat", lane = 1 },
+            { t = 3.0, kind = "boat", lane = 2 },
+            { t = 3.0, kind = "boat", lane = 3 },
+            { t = 3.0, kind = "boat", lane = 4 },
+            -- 第三艘大船 + 两侧小艇
+            { t = 5.5, kind = "bigboat", lane = 4 },
+            { t = 5.5, kind = "boat", lane = 1 },
+            { t = 5.5, kind = "boat", lane = 3 },
+            -- 四航道齐射
+            { t = 8.0, kind = "boat", lane = 1 },
+            { t = 8.0, kind = "boat", lane = 2 },
+            { t = 8.0, kind = "boat", lane = 3 },
+            { t = 8.0, kind = "boat", lane = 4 },
+            -- 第四艘大船压中、右
+            { t = 10.5, kind = "bigboat", lane = 2 },
+            { t = 10.5, kind = "boat", lane = 4 },
             -- 收尾零敲
-            { t = 12.0, kind = "boat", lane = 1 },
-            { t = 12.0, kind = "boat", lane = 3 },
+            { t = 12.5, kind = "boat", lane = 1 },
+            { t = 12.5, kind = "boat", lane = 3 },
         },
     },
-    -- 第三波（终局高潮）：三艘大船 + 一次四航道齐射。密度比前两波高，但不再堆到打不过。
+    -- 第三波（终局高潮）：多艘大船 + 密集四航道齐射。密度比前两波高很多，堆出尸潮。
     {
         voice = "round_3",
         spawns = {
-            -- 双大船开局（中、右）
-            { t = 1.0, kind = "bigboat", lane = 2 },
-            { t = 1.0, kind = "bigboat", lane = 3 },
+            -- 三艘大船开局（左、中、右）
+            { t = 0.8, kind = "bigboat", lane = 1 },
+            { t = 0.8, kind = "bigboat", lane = 2 },
+            { t = 0.8, kind = "bigboat", lane = 3 },
             -- 四航道小艇齐射
-            { t = 4.0, kind = "boat", lane = 1 },
-            { t = 4.0, kind = "boat", lane = 2 },
-            { t = 4.0, kind = "boat", lane = 3 },
-            { t = 4.0, kind = "boat", lane = 4 },
-            -- 第三艘大船压左路
-            { t = 7.0, kind = "bigboat", lane = 1 },
-            -- 中段补杂兵
-            { t = 9.5, kind = "boat", lane = 2 },
-            { t = 9.5, kind = "boat", lane = 4 },
-            { t = 12.0, kind = "boat", lane = 1 },
-            { t = 12.0, kind = "boat", lane = 3 },
+            { t = 3.0, kind = "boat", lane = 1 },
+            { t = 3.0, kind = "boat", lane = 2 },
+            { t = 3.0, kind = "boat", lane = 3 },
+            { t = 3.0, kind = "boat", lane = 4 },
+            -- 第四艘大船 + 中段小艇
+            { t = 5.5, kind = "bigboat", lane = 4 },
+            { t = 5.5, kind = "boat", lane = 2 },
+            { t = 5.5, kind = "boat", lane = 3 },
+            -- 又一波四航道齐射
+            { t = 8.0, kind = "boat", lane = 1 },
+            { t = 8.0, kind = "boat", lane = 2 },
+            { t = 8.0, kind = "boat", lane = 3 },
+            { t = 8.0, kind = "boat", lane = 4 },
+            -- 第五艘大船压左路 + 右舷小艇
+            { t = 10.5, kind = "bigboat", lane = 1 },
+            { t = 10.5, kind = "boat", lane = 4 },
+            { t = 13.0, kind = "boat", lane = 2 },
+            { t = 13.0, kind = "boat", lane = 3 },
             -- 末段
-            { t = 14.5, kind = "boat", lane = 2 },
-            { t = 14.5, kind = "boat", lane = 3 },
+            { t = 15.0, kind = "boat", lane = 1 },
+            { t = 15.0, kind = "boat", lane = 4 },
         },
     },
 }

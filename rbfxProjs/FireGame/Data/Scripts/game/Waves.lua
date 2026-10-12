@@ -178,6 +178,14 @@ function Waves:AddKill(result, unit, headshot)
             self.audio:Voice(threshold >= 5 and Config.Voice.multiKill or Config.Voice.combo)
         end
     end
+
+    -- 连杀正反馈：每 COMBO_BLAST_EVERY 连杀在刚击杀的位置放一次范围爆炸，把 combo 从
+    -- “只加分”变成“越杀越炸”的割草闭环。伤害经 Enemy:ComboBlast 递延结算，不与本次同帧递归。
+    local every = Config.COMBO_BLAST_EVERY
+    if every and every > 0 and (self.combo % every) == 0
+        and unit and unit.node and self.enemy and self.enemy.ComboBlast then
+        self.enemy:ComboBlast(unit.node:GetWorldPosition())
+    end
 end
 
 --- 海盗砍到防线。

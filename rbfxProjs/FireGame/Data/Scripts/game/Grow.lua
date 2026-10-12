@@ -36,10 +36,10 @@ function Grow:Reset()
 end
 
 --- 当前等级对应的武器数值快照（供 Shooting 读，也供 main 判断是否变强）。
----@return { pellets: number, damage: number }
+---@return { pellets: number, damage: number, pierce: number }
 function Grow:Snapshot()
     local g = self.levels[self.level]
-    return { pellets = g.pellets, damage = g.damage }
+    return { pellets = g.pellets, damage = g.damage, pierce = g.pierce or 1 }
 end
 
 --- 一次击杀喂经验（main.lua 的 OnScore 在 killed 分支调）。
