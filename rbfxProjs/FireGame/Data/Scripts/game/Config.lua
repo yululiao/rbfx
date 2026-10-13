@@ -202,10 +202,10 @@ Config.SCATTER_SPREAD_DEG = 26.0     -- 扇形总张角（度，多弹沿此弧�
 Config.BULLET_HIT_RADIUS = 1.3       -- 子弹扫掠命中半径（米）
 Config.GROW_XP = { pirate = 1, boat = 6, bigboat = 20, barrel = 2 }  -- 各类击杀喂的经验
 -- 成长曲线：每项 { xp=达到该级所需累计经验, pellets=扇形弹丸数, damage=单发伤害, pierce=子弹可贯穿的单位数 }。
--- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。pierce=1 即旧行为（命中一个就消亡），
--- 逐级抬高后一颗子弹能串穿航道上一排小艇。经验阈值按加密后的三波总击杀量标定，
--- 使成长贯穿全局而不早早封顶（真机体感不对就改 xp 间距）。
--- pellets 永远取奇数（1/3/5/7/9）：扇形按 spread*(i-0.5)/pellets 均匀铺开，只有奇数发才
+-- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。pierce=1 即一发只杀一个、命中即消亡；
+-- >1 时一颗子弹能沿航道串穿一排单位（路A 后已全线收回 1，若日后要做“后期穿透奖励”再单独抬顶档）。
+-- 经验阈值按加密后的三波总击杀量标定，使成长贯穿全局而不早早封顶（真机体感不对就改 xp 间距）。
+-- pellets 永远取奇数（当前表 1/3/5/7）：扇形按 spread*(i-0.5)/pellets 均匀铺开，只有奇数发才
 -- 有一颗处于 a=0° 的正中弹直射锁定目标。偶数发（如 2）正中是空的，两颗对称夹住
 -- 小船（船体仅 ~1.3m 宽）会刚好从缝里漏掉——故不用偶数。
 Config.GROWTH = {
@@ -357,7 +357,7 @@ function Config.ComboBlastEvery(pellets)
     end
     return Config.COMBO_BLAST_EVERY
 end
-Config.COMBO_BLAST_RADIUS = 6      -- combo 爆炸杀伤半径（米）；从 6.0 收到 5.0（用户反馈主角仍偏强），与爆桶 4.6 拉开一档但不再一发清整片滩头
+Config.COMBO_BLAST_RADIUS = 6      -- combo 爆炸杀伤半径（米），略大于爆桶连锁 4.6；非主要调平衡旋钮（后期无敌的靶心在弹丸×穿透而非此半径）
 Config.COMBO_BLAST_DAMAGE = 1        -- combo 爆炸伤害（降到只扫过一片、不再一发清屏；秒普通海盗靠 damage=1 就够）
 Config.DEFENSE_HP = 300              -- 潮水改后上岸量大增、又刚削了玩家穿透/爆炸，防线易穿；拉到 300 抗漏（约容忍 30 个漏防，不够再往上调）
 Config.LEAK_DAMAGE = 10              -- 一个海盗摸到防线扣多少
