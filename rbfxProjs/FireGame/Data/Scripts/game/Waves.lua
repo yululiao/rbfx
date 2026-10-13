@@ -10,6 +10,7 @@
 -- 与 HUD 的耦合是单向的：Waves 只调 hud:SetXxx（全部 nil-safe），HUD 不反向依赖 Waves。
 
 local Config = require("game.Config")
+local WaveGen = require("game.WaveGen")
 
 ---@class Waves 波次导演
 local Waves = {}
@@ -63,7 +64,8 @@ function Waves:BeginWave()
     end
 
     self.queue = {}
-    for _, spawn in ipairs(wave.spawns) do
+    -- 开局按本波配方实时编排一张生成表（总量固定、铺法每局随机）。
+    for _, spawn in ipairs(WaveGen.Generate(wave)) do
         self.queue[#self.queue + 1] = { t = spawn.t, kind = spawn.kind, lane = spawn.lane, fired = false }
     end
     self.allFired = false

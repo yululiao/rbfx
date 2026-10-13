@@ -359,94 +359,22 @@ Config.BARREL_DAMAGE = 2
 Config.BARREL_CHAIN_DELAY = 0.12     -- 连锁引爆的递延，让爆炸看起来是一串而不是一帧
 
 ----------------------------------------------------------------------
--- 波次：每波一张 {t=秒, kind=船型, lane=航道下标} 的生成时间表
--- kind: "boat" 小艇（吐 BOAT_CARRY 人）/ "bigboat" 大船（吐 BOAT_BIG_CARRY 人）
--- lane: Config.LANES 的下标（1..4）。同一 t 用不同 lane 错开，直线推进无碰撞，
---       同航道同时刻会互相穿模。
+-- 波次：每波是一份"配方"，真正的生成表在开局时由 game/WaveGen.lua 依配额随机编排。
+-- 铁律： boats/volleys/bigboats 的配额与旧手调表逐一等量（总压力/经验不变=难度不飘），
+-- 但航道分配、精确时刻、间距每局随机（铺法新鲜）。
+--   boats：本波小艇总数（含被齐射消耗的部分）；bigboats：大船数。
+--   volleys："同刻铺满 4 航道"的齐射次数，每次消耗 4 艘小艇（从 boats 里扣）。
+--   window：把船铺到的时间跨度（秒）；ramp：前松后紧曲线档（warmup/steady/heavy）。
+--   firstT（可选）：本波第一艘的最早时刻，缺省 1.0。lane 由 WaveGen 轮转，无需指定。
 ----------------------------------------------------------------------
 Config.WAVE_INTERMISSION = 5.0
 Config.WAVES = {
-    {
-        voice = "round_1",
-        spawns = {
-            -- 开局稀疏：一条一条错开时间出场，绝不并排成墙。间隔随时间收紧 = 船依次增多。
-            { t = 1.0, kind = "boat", lane = 2 },
-            { t = 3.2, kind = "boat", lane = 3 },
-            { t = 5.4, kind = "boat", lane = 1 },
-            -- 中段渐密：航道轮换错开，同屏同时航行的船开始累积
-            { t = 7.2, kind = "boat", lane = 4 },
-            { t = 8.8, kind = "boat", lane = 2 },
-            { t = 10.2, kind = "boat", lane = 3 },
-            { t = 11.4, kind = "boat", lane = 1 },
-            -- 后段最密：近乎单列流水，但时间仍两两错开、不成齐射排
-            { t = 12.6, kind = "boat", lane = 4 },
-            { t = 13.6, kind = "boat", lane = 2 },
-            { t = 14.6, kind = "boat", lane = 3 },
-            { t = 15.6, kind = "boat", lane = 1 },
-            { t = 16.6, kind = "boat", lane = 4 },
-        },
-    },
-    -- 第二波：首次投入大船，四航道护航。多艘大船同压逼玩家分兵。
-    {
-        voice = "round_2",
-        spawns = {
-            -- 开场双大船压中、右两路
-            { t = 1.0, kind = "bigboat", lane = 2 },
-            { t = 1.0, kind = "bigboat", lane = 3 },
-            -- 第一梯队四航道小艇
-            { t = 3.0, kind = "boat", lane = 1 },
-            { t = 3.0, kind = "boat", lane = 2 },
-            { t = 3.0, kind = "boat", lane = 3 },
-            { t = 3.0, kind = "boat", lane = 4 },
-            -- 第三艘大船 + 两侧小艇
-            { t = 5.5, kind = "bigboat", lane = 4 },
-            { t = 5.5, kind = "boat", lane = 1 },
-            { t = 5.5, kind = "boat", lane = 3 },
-            -- 四航道齐射
-            { t = 8.0, kind = "boat", lane = 1 },
-            { t = 8.0, kind = "boat", lane = 2 },
-            { t = 8.0, kind = "boat", lane = 3 },
-            { t = 8.0, kind = "boat", lane = 4 },
-            -- 第四艘大船压中、右
-            { t = 10.5, kind = "bigboat", lane = 2 },
-            { t = 10.5, kind = "boat", lane = 4 },
-            -- 收尾零敲
-            { t = 12.5, kind = "boat", lane = 1 },
-            { t = 12.5, kind = "boat", lane = 3 },
-        },
-    },
-    -- 第三波（终局高潮）：多艘大船 + 密集四航道齐射。密度比前两波高很多，堆出尸潮。
-    {
-        voice = "round_3",
-        spawns = {
-            -- 三艘大船开局（左、中、右）
-            { t = 0.8, kind = "bigboat", lane = 1 },
-            { t = 0.8, kind = "bigboat", lane = 2 },
-            { t = 0.8, kind = "bigboat", lane = 3 },
-            -- 四航道小艇齐射
-            { t = 3.0, kind = "boat", lane = 1 },
-            { t = 3.0, kind = "boat", lane = 2 },
-            { t = 3.0, kind = "boat", lane = 3 },
-            { t = 3.0, kind = "boat", lane = 4 },
-            -- 第四艘大船 + 中段小艇
-            { t = 5.5, kind = "bigboat", lane = 4 },
-            { t = 5.5, kind = "boat", lane = 2 },
-            { t = 5.5, kind = "boat", lane = 3 },
-            -- 又一波四航道齐射
-            { t = 8.0, kind = "boat", lane = 1 },
-            { t = 8.0, kind = "boat", lane = 2 },
-            { t = 8.0, kind = "boat", lane = 3 },
-            { t = 8.0, kind = "boat", lane = 4 },
-            -- 第五艘大船压左路 + 右舷小艇
-            { t = 10.5, kind = "bigboat", lane = 1 },
-            { t = 10.5, kind = "boat", lane = 4 },
-            { t = 13.0, kind = "boat", lane = 2 },
-            { t = 13.0, kind = "boat", lane = 3 },
-            -- 末段
-            { t = 15.0, kind = "boat", lane = 1 },
-            { t = 15.0, kind = "boat", lane = 4 },
-        },
-    },
+    -- 第一波：纯小艇、无齐射，一路路错开预热（12 艘）。
+    { voice = "round_1", boats = 12, bigboats = 0, volleys = 0, window = 16.6, ramp = "warmup" },
+    -- 第二波：首次投入大船，两波四航道齐射护航（13 小 + 4 大）。
+    { voice = "round_2", boats = 13, bigboats = 4, volleys = 2, window = 12.5, ramp = "steady" },
+    -- 第三波（终局高潮）：更多大船 + 密集齐射，堆尸潮（15 小 + 5 大）。
+    { voice = "round_3", boats = 15, bigboats = 5, volleys = 2, window = 15.0, ramp = "heavy", firstT = 0.8 },
 }
 
 ----------------------------------------------------------------------
