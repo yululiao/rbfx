@@ -156,4 +156,30 @@ function WaveGen.Generate(recipe)
     return spawns
 end
 
+--- 无尽模式：第 n 波（n 从 Config.ENDLESS.from 起）的配额配方，形状同 Config.WAVES 条目，
+--- 可直接喂 Generate。只按波次升"数量 + 密度 + 收紧窗口"，绝不动单位血量/速度（结构优先）。
+---@param n number
+---@return table
+function WaveGen.EndlessRecipe(n)
+    local e = Config.ENDLESS
+    local k = n - e.from
+    if k < 0 then
+        k = 0
+    end
+    local boats = math.min(e.boatsCap, e.boatsBase + e.boatsPerWave * k)
+    local big = math.min(e.bigCap, e.bigBase + math.floor(k / e.bigEveryWaves))
+    local volleys = math.min(e.volleyCap, e.volleyBase + math.floor(k / e.volleyEveryWaves))
+    local window = math.max(e.windowMin, e.windowStart - e.windowShrinkPerWave * k)
+    local voice = (e.voiceEvery and e.voiceEvery > 0 and (n % e.voiceEvery == 0)) and "round_3" or nil
+    return {
+        voice = voice,
+        boats = boats,
+        bigboats = big,
+        volleys = volleys,
+        window = window,
+        ramp = e.ramp,
+        firstT = e.firstT,
+    }
+end
+
 return WaveGen

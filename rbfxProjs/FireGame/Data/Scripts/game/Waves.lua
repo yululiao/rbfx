@@ -1,7 +1,8 @@
 -- Scripts/game/Waves.lua
 --
--- 波次导演 + 计分/combo + 防线血量 + 胜负结算。它是玩法的"时钟"：按 Config.WAVES 的
--- 时间表催 Enemy 生成船，一波清完进间歇，三波打完或防线破了就结算。
+-- 波次导演 + 计分/combo + 防线血量 + 胜负结算。它是玩法的"时钟"：按 Config.WAVES 手调
+-- 开局、其后再由 WaveGen.EndlessRecipe 随波次升配额（无尽模式），一波清完进间歇、永不通关，
+-- 直到防线/主角被打穿才结算（Lose）。HUD 波次号即"撑到第几波"的战绩。
 --
 -- 计分与 combo 放这里而不是 Shooting：一次击杀的分数会同时被"玩家子弹"和"爆桶连锁"
 -- 两条路径产生（Shooting.DamageUnit 与 Enemy:Damage 都调 onScore），集中在一处才不会
@@ -25,7 +26,6 @@ function Waves.Build(deps)
     self.hud = deps.hud
     self.onGameOver = deps.onGameOver
     self.onWaveCleared = deps.onWaveCleared   -- 一波清完的回调（main.lua 传入：让宠物狗原地休息）
-    self.totalWaves = #Config.WAVES
     self:Reset()
     return self
 end
@@ -43,6 +43,7 @@ function Waves:Reset()
     self.waveClock = 0.0
     self.queue = {}
     self.allFired = true
+    self.blastEvery = Config.COMBO_BLAST_EVERY   -- 动态爆炸间隔（开局低弹丸=基础档）；main 随武器升级下发实际值
 
     if self.hud then
         if self.hud.SetScore then self.hud:SetScore(0) end
@@ -54,14 +55,17 @@ function Waves:Reset()
     self.audio:Voice(Config.Voice.prepare)
 end
 
+--- 设定连杀爆炸触发间隔（随玩家弹丸数动态变）。main.lua 在 onWeapon 武器升级时调。
+---@param every number
+function Waves:SetBlastEvery(every)
+    self.blastEvery = every
+end
+
 --- 开始下一波：拷一份生成时间表，播旁白，切到 active。
 function Waves:BeginWave()
     self.waveIndex = self.waveIndex + 1
-    local wave = Config.WAVES[self.waveIndex]
-    if not wave then
-        self:Win()
-        return
-    end
+    -- 无尽模式：前若干波用 Config.WAVES 手调开场，配额用尽后按波次公式生成越来越重的编队。
+    local wave = Config.WAVES[self.waveIndex] or WaveGen.EndlessRecipe(self.waveIndex)
 
     self.queue = {}
     -- 开局按本波配方实时编排一张生成表（总量固定、铺法每局随机）。
@@ -99,11 +103,7 @@ function Waves:Update(dt)
             self.hud:SetIntermission(math.max(0.0, self.phaseT))
         end
         if self.phaseT <= 0.0 then
-            if self.waveIndex >= self.totalWaves then
-                self:Win()
-            else
-                self:BeginWave()
-            end
+            self:BeginWave()
         end
     elseif self.phase == "active" then
         self.waveClock = self.waveClock + dt
@@ -113,12 +113,8 @@ function Waves:Update(dt)
             if self.onWaveCleared then
                 self.onWaveCleared(self.waveIndex)
             end
-            if self.waveIndex >= self.totalWaves then
-                self:Win()
-            else
-                self.phase = "intermission"
-                self.phaseT = Config.WAVE_INTERMISSION
-            end
+            self.phase = "intermission"
+            self.phaseT = Config.WAVE_INTERMISSION
         end
     end
 
@@ -158,7 +154,8 @@ end
 ---@param result { killed: boolean, score: number }
 ---@param unit any
 ---@param headshot boolean
-function Waves:AddKill(result, unit, headshot)
+---@param fromChain boolean|nil 该击杀是否来自爆炸/连锁（true 则照常计分涨 combo 但不再触发新爆炸，切断自激）
+function Waves:AddKill(result, unit, headshot, fromChain)
     if not result or not result.killed then
         return
     end
@@ -181,10 +178,12 @@ function Waves:AddKill(result, unit, headshot)
         end
     end
 
-    -- 连杀正反馈：每 COMBO_BLAST_EVERY 连杀在刚击杀的位置放一次范围爆炸，把 combo 从
+    -- 连杀正反馈：每 blastEvery 连杀在刚击杀的位置放一次范围爆炸，把 combo 从
     -- “只加分”变成“越杀越炸”的割草闭环。伤害经 Enemy:ComboBlast 递延结算，不与本次同帧递归。
-    local every = Config.COMBO_BLAST_EVERY
-    if every and every > 0 and (self.combo % every) == 0
+    -- 关键：仅玩家子弹击杀才触发（fromChain 的爆炸/连锁击杀照常计分涨 combo，但不再引爆新爆炸），
+    -- 切断“爆炸杀的人回喂触发器”的跨帧自激，EVERY 才回归单调可控。
+    local every = self.blastEvery or Config.COMBO_BLAST_EVERY
+    if every and every > 0 and not fromChain and (self.combo % every) == 0
         and unit and unit.node and self.enemy and self.enemy.ComboBlast then
         self.enemy:ComboBlast(unit.node:GetWorldPosition())
     end

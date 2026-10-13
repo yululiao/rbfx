@@ -212,11 +212,11 @@ Config.GROWTH = {
     { xp = 0,    pellets = 1, damage = 1, pierce = 1 },
     { xp = 50,   pellets = 3, damage = 1, pierce = 1 },
     { xp = 140,  pellets = 3, damage = 1, pierce = 1 },
-    { xp = 300,  pellets = 5, damage = 1, pierce = 2 },
-    { xp = 550,  pellets = 5, damage = 1, pierce = 2 },
-    { xp = 900,  pellets = 7, damage = 1, pierce = 2 },
-    { xp = 1400, pellets = 7, damage = 2, pierce = 3 },
-    { xp = 2100, pellets = 9, damage = 2, pierce = 3 },
+    { xp = 300,  pellets = 5, damage = 1, pierce = 1 },   -- 路A：pellets≥5 段取消穿透（穿 2→1），不再一梭贯穿整列纵队
+    { xp = 550,  pellets = 5, damage = 1, pierce = 1 },   -- 路A：同上，单扣命中上限 = 弹丸数（5）
+    { xp = 900,  pellets = 5, damage = 1, pierce = 1 },   -- 路A：穿 2→1（A1 削顶仍留 2 穿，实测仍打爆，故连穿透一起收）
+    { xp = 1400, pellets = 7, damage = 1, pierce = 1 },   -- 路A：穿 2→1，扇形 7 弹但每发只杀 1，保住散射爽感不刮穿
+    { xp = 2100, pellets = 7, damage = 2, pierce = 1 },   -- 路A：穿 2→1，满级单扣命中上限 14→7
 }
 
 ----------------------------------------------------------------------
@@ -343,8 +343,21 @@ Config.COMBO_WINDOW = 2.0            -- 两次击杀超过这个间隔，combo �
 Config.COMBO_BONUS_STEP = 10         -- 每级 combo 额外加的分
 Config.COMBO_VOICE_AT = { 3, 5, 8 }  -- 达到这些连击数播 combo / multi_kill 旁白
 -- combo 不再只加分：每 COMBO_BLAST_EVERY 连杀在击杀点放一次范围爆炸（割草的“杀→更多杀”正反馈闭环）。
-Config.COMBO_BLAST_EVERY = 4         -- 每几连杀触发一次爆炸（0/nil = 关闭）
-Config.COMBO_BLAST_RADIUS = 6.0      -- combo 爆炸杀伤半径（米），比爆桶 4.6 大一档
+Config.COMBO_BLAST_EVERY = 3         -- 基础档：弹丸数 < 阈值时每几连杀触发一次爆炸（0/nil = 关闭）
+-- 动态补偿：弹丸越多→combo 涨得越快→同一段爆发里爆炸更频繁→后期滚雪球碾压。弹丸数达到
+-- 阈值后改用 BIG 档（更疏）抵消。实际生效值由 main.lua 经 Waves:SetBlastEvery 随武器升级下发。
+Config.COMBO_BLAST_EVERY_BIG = 15      -- 弹丸数 ≥ 阈值时的爆炸间隔（更疏，压后期清屏）
+Config.COMBO_BLAST_PELLETS_SWITCH = 5 -- 弹丸数达到此值（含）起改用 BIG 档
+--- 按当前弹丸数返回应使用的连杀爆炸间隔（>=阈值走 BIG 档，否则基础档）。
+---@param pellets number
+---@return number
+function Config.ComboBlastEvery(pellets)
+    if pellets and pellets >= Config.COMBO_BLAST_PELLETS_SWITCH then
+        return Config.COMBO_BLAST_EVERY_BIG
+    end
+    return Config.COMBO_BLAST_EVERY
+end
+Config.COMBO_BLAST_RADIUS = 6      -- combo 爆炸杀伤半径（米）；从 6.0 收到 5.0（用户反馈主角仍偏强），与爆桶 4.6 拉开一档但不再一发清整片滩头
 Config.COMBO_BLAST_DAMAGE = 1        -- combo 爆炸伤害（降到只扫过一片、不再一发清屏；秒普通海盗靠 damage=1 就够）
 Config.DEFENSE_HP = 300              -- 潮水改后上岸量大增、又刚削了玩家穿透/爆炸，防线易穿；拉到 300 抗漏（约容忍 30 个漏防，不够再往上调）
 Config.LEAK_DAMAGE = 10              -- 一个海盗摸到防线扣多少
@@ -375,6 +388,31 @@ Config.WAVES = {
     { voice = "round_2", boats = 13, bigboats = 4, volleys = 2, window = 12.5, ramp = "steady" },
     -- 第三波（终局高潮）：更多大船 + 密集齐射，堆尸潮（15 小 + 5 大）。
     { voice = "round_3", boats = 15, bigboats = 5, volleys = 2, window = 15.0, ramp = "heavy", firstT = 0.8 },
+}
+
+----------------------------------------------------------------------
+-- 无尽模式：Config.WAVES 的手调开场用尽后（第 from 波起），由 WaveGen.EndlessRecipe(n)
+-- 按下面的配方随波次升配额。只加"数量 / 密度 / 收紧窗口"，绝不动任何单位血量与速度
+-- ——这是"遭遇战压力优先调波次结构而非堆血量"的铁律。一局没有通关，直到防线/主角被
+-- 打穿才结束（Waves:Lose），HUD 波次号即"撑到第几波"的战绩。旋钮集中在此，Play 直调。
+----------------------------------------------------------------------
+Config.ENDLESS = {
+    from = 4,                  -- 前 3 波走 Config.WAVES 手调开场，第 4 波起进公式
+    boatsBase = 15,            -- 小艇起始配额（接住第 3 波的 15，无缝衔接）
+    boatsPerWave = 2,          -- 每波小艇 +2（曾提到 3 直接打不过，退回原值；这是压力主旋钮）
+    boatsCap = 42,             -- 小艇配额上限（到顶后靠窗口收紧继续加压）
+    bigBase = 5,
+    bigEveryWaves = 2,         -- 每 2 波多 1 条大船
+    bigCap = 12,
+    volleyBase = 2,
+    volleyEveryWaves = 3,      -- 每 3 波多 1 次四航道齐射（曾提到 2 过猛，退回原值）
+    volleyCap = 4,
+    windowStart = 15.0,
+    windowShrinkPerWave = 0.35, -- 出怪窗口随波次收紧（0.45 过密，收到略高于原 0.3）
+    windowMin = 10.5,          -- 窗口下限（再密就撞同屏闸 MAX_ALIVE_UNITS）
+    ramp = "heavy",            -- 沿用终局的"前松后紧"曲线
+    firstT = 0.8,
+    voiceEvery = 5,            -- 每 5 波播一次 round_3 旁白作里程碑（其余波静音）
 }
 
 ----------------------------------------------------------------------

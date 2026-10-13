@@ -26,7 +26,7 @@ local BULLET_MODEL = "Models/Sphere.mdl"
 local BULLET_SCALE = 0.3
 local BULLET_SPEED = 60.0   -- m/s，很快但视觉上能看清轨迹
 
----@param deps { scene: Scene, player: Player, fx: Fx, audio: Audio, hud: any, enemies: any, onScore: fun(result:any, unit:any, headshot:boolean)|nil }
+---@param deps { scene: Scene, player: Player, fx: Fx, audio: Audio, hud: any, enemies: any, onScore: fun(result:any, unit:any, headshot:boolean, fromChain:boolean|nil)|nil }
 ---@return Shooting
 function Shooting.Build(deps)
     local self = setmetatable({}, Shooting)
@@ -233,7 +233,8 @@ function Shooting:DamageUnit(unit, hitPos, headshot)
         self.hud:FlashHit(killed or headshot)
     end
     if result and result.score and result.score > 0 and self.onScore then
-        self.onScore(result, unit, headshot)
+        -- 玩家子弹击杀：fromChain=false，它是唯一允许触发连杀爆炸的来源。
+        self.onScore(result, unit, headshot, false)
     end
 end
 

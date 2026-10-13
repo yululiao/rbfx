@@ -50,7 +50,7 @@ end
 -- 管理器
 ----------------------------------------------------------------------
 
----@param deps { scene: Scene, fx: Fx, audio: Audio, player: Player, onScore: fun(result:any,unit:any,headshot:boolean)|nil, onDefenseHit: fun(dmg:number)|nil }
+---@param deps { scene: Scene, fx: Fx, audio: Audio, player: Player, onScore: fun(result:any,unit:any,headshot:boolean,fromChain:boolean|nil)|nil, onDefenseHit: fun(dmg:number)|nil }
 ---@return Enemy
 function Enemy.Build(deps)
     local self = setmetatable({}, Enemy)
@@ -181,7 +181,9 @@ function Enemy:Damage(unit, amount, hitPos, headshot)
     end
     local result = unit:TakeDamage(amount, hitPos, headshot)
     if result and result.score and result.score > 0 and self.onScore then
-        self.onScore(result, unit, headshot)
+        -- Enemy:Damage 只服务连锁/爆炸（玩家子弹由 Shooting 自己转发），故恒标 fromChain=true：
+        -- 这些击杀计分、涨 combo，但不再触发新爆炸（切断自激）。
+        self.onScore(result, unit, headshot, true)
     end
     return result
 end

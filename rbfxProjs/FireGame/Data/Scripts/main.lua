@@ -116,9 +116,10 @@ end
 
 -- 计分/combo 集中到 Waves：玩家子弹（Shooting）与爆桶连锁（Enemy:Damage）两条路径共用；
 -- 同一个汇入点也是打击感三件套的唯一触发口（击杀 = hit-stop + 震屏 + 飘字）。
-local function OnScore(result, unit, headshot)
+-- fromChain 区分击杀来源（子弹 false / 爆炸连锁 true），只用来闸住“是否触发新爆炸”（切断自激）。
+local function OnScore(result, unit, headshot, fromChain)
     if waves then
-        waves:AddKill(result, unit, headshot)
+        waves:AddKill(result, unit, headshot, fromChain)
     end
     if juice and result and result.killed then
         juice:OnKill(unit, result.score)
@@ -267,6 +268,8 @@ grow = Grow.Build({
     hud = hud,
     onWeapon = function(snapshot, isInitial)
         shooting:SetWeaponStats(snapshot.pellets, snapshot.damage, snapshot.pierce)
+        -- 弹丸越多爆炸会越频繁（combo 靠击杀数涨），达阈值后把间隔抬到 BIG 档补偿，防后期滚雪球。
+        if waves then waves:SetBlastEvery(Config.ComboBlastEvery(snapshot.pellets)) end
         if hud then
             hud:SetWeaponText("弹丸 x" .. snapshot.pellets)
             -- 开局不提醒；真正升级时把"变强"做成一次可听可见的反馈（飘字旁白 + 轻震）
