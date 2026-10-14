@@ -58,6 +58,9 @@ function Hud.Build(scene, handlers)
     self.level = 1
     self.xpProg = 0.0
     self.weaponText = "弹丸 x1"
+    -- 性能 Overlay（调试）：perfText 是 Lua 拼好的一行文本，showPerf 控制 data-if 整体显隐。
+    self.perfText = ""
+    self.showPerf = false
 
     local comp = scene:CreateComponent("LuaRmlUIComponent")
     self.comp = comp
@@ -88,6 +91,9 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("level", function() return self.level end)
             w:BindReadonlyProperty("xp", function() return clamp01(self.xpProg) end)
             w:BindReadonlyProperty("weaponText", function() return self.weaponText end)
+            -- 性能 Overlay（调试）：文本 + 显隐开关
+            w:BindReadonlyProperty("perfText", function() return self.perfText end)
+            w:BindReadonlyProperty("showPerf", function() return self.showPerf end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -145,6 +151,19 @@ end
 function Hud:SetReload(v)
     self.reload = clamp01(v or 0.0)
     self:Dirty("reload")
+end
+
+--- 性能 Overlay（调试）：直接喂拼好的一行文本。
+function Hud:SetPerf(text)
+    self.perfText = text or ""
+    self:Dirty("perfText")
+end
+
+--- 性能 Overlay 显隐（上线关/调试开）。关掉后元素不进渲染树，顺带刷一次文本。
+function Hud:ShowPerf(b)
+    self.showPerf = b and true or false
+    self:Dirty("showPerf")
+    self:Dirty("perfText")
 end
 
 --- 防线血量（当前值 + 上限），内部换算成 0..1。

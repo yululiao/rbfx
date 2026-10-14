@@ -1573,6 +1573,8 @@ function RenderSurface.SetViewport(...) end
 Renderer = {}
 function Renderer.DrawDebugGeometry(...) end
 function Renderer.GetDefaultZone(...) end
+function Renderer.GetNumDrawCalls(...) end
+function Renderer.GetNumPrimitives(...) end
 function Renderer.GetNumViewports(...) end
 function Renderer.GetViewport(...) end
 function Renderer.SetTextureAnisotropy(...) end

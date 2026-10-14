@@ -263,6 +263,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC(SetTextureQuality)
             LUA_MEMBER_FUNC(DrawDebugGeometry)
             LUA_MEMBER_FUNC(GetDefaultZone)
+            LUA_MEMBER_FUNC(GetNumDrawCalls)
+            LUA_MEMBER_FUNC(GetNumPrimitives)
         );
     }
     RegisterLuaObjectWrapper<Renderer>();

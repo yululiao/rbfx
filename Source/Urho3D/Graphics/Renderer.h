@@ -274,6 +274,13 @@ public:
     /// @property
     unsigned GetNumOccluders() const;
 
+    /// Return number of draw calls submitted to the render device last frame (all viewports/passes).
+    /// @property
+    unsigned GetNumDrawCalls() const;
+    /// Return number of primitives (triangles) submitted to the render device last frame (all passes).
+    /// @property
+    unsigned GetNumPrimitives() const;
+
     /// Return the default zone.
     /// @property
     Zone* GetDefaultZone() const { return defaultZone_; }

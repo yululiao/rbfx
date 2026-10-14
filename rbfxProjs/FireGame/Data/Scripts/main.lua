@@ -280,6 +280,27 @@ end
 ----------------------------------------------------------------------
 local seaScrollT = 0.0
 
+-- 性能诊断：由 Config.PERF_OVERLAY 总开关（默认 false = 上线态，不显不刷日志）。
+-- 真机（抖音）无引擎 DebugHud（SystemUI 已禁用），靠屏幕上的 perfText Overlay + 每 3 秒一条 print 看指标。
+local perfDiagOn = Config.PERF_OVERLAY
+local perfAccum = 0.0
+local perfRenderer = nil
+local function PerfCountUnits()
+    local pirates, boats = 0, 0
+    if enemy and enemy.units then
+        for _, u in ipairs(enemy.units) do
+            if u.alive then
+                if u.kind == "pirate" then
+                    pirates = pirates + 1
+                elseif u.kind == "boat" or u.kind == "bigboat" then
+                    boats = boats + 1
+                end
+            end
+        end
+    end
+    return pirates, boats
+end
+
 SubscribeToEvent("Update", function(data)
     local dt = data.TimeStep
     -- 打击感帧首：推进 hit-stop 真实倒计时，拿到本帧世界 dt（定格期间被缩到 5%）。
@@ -365,6 +386,33 @@ SubscribeToEvent("Update", function(data)
     local ox, oy = joystick:GetOrigin()
     knob:SetPosition(Vector2(ox + stickX * STICK.travel - STICK.knobHalf,
         oy + stickY * STICK.travel - STICK.knobHalf))
+
+    -- 性能诊断（Config.PERF_OVERLAY 开启时）：每 3 秒一次。drawcalls/tris 是引擎设备级真值
+    -- （上一帧提交量），pirates/boats 是当前存活同屏数——同时喂给屏幕 Overlay 与日志。
+    if perfDiagOn then
+        perfAccum = perfAccum + dt
+        if perfAccum >= 1.0 then
+            perfAccum = 0.0
+            if not perfRenderer then
+                perfRenderer = GetSubsystem("Renderer")
+            end
+            local pirates, boats = PerfCountUnits()
+            local draws, tris, fps = -1, -1, -1
+            if perfRenderer then
+                if perfRenderer.GetNumDrawCalls then draws = perfRenderer:GetNumDrawCalls() end
+                if perfRenderer.GetNumPrimitives then tris = perfRenderer:GetNumPrimitives() end
+            end
+            if time and time.GetFramesPerSecond then fps = time:GetFramesPerSecond() end
+            -- Overlay 一行：FPS / drawcall / 三角面(百万) / 同屏海盗・船
+            if hud and hud.ShowPerf then
+                hud:ShowPerf(true)
+                hud:SetPerf(string.format("FPS %.0f | DC %d | TRI %.1fM | P%d B%d",
+                    fps, draws, tris / 1048576.0, pirates, boats))
+            end
+            -- print(string.format("FireGame PERF: pirates=%d boats=%d drawcalls=%d tris=%d fps=%.1f",
+            --     pirates, boats, draws, tris, fps))
+        end
+    end
 end)
 
 ----------------------------------------------------------------------

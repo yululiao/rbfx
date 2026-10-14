@@ -420,6 +420,18 @@ unsigned Renderer::GetNumOccluders() const
     return numOccluders;
 }
 
+unsigned Renderer::GetNumDrawCalls() const
+{
+    auto* renderDevice = GetSubsystem<RenderDevice>();
+    return renderDevice ? renderDevice->GetStats().numDraws_ : 0;
+}
+
+unsigned Renderer::GetNumPrimitives() const
+{
+    auto* renderDevice = GetSubsystem<RenderDevice>();
+    return renderDevice ? renderDevice->GetStats().numPrimitives_ : 0;
+}
+
 void Renderer::Update(float timeStep)
 {
     URHO3D_PROFILE("UpdateViews");

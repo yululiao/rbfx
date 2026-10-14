@@ -232,6 +232,10 @@ Config.PIRATE_PLAYER_DAMAGE = 10     -- 突袭型一刀砍主角多少血
 Config.MAX_ALIVE_UNITS = 32          -- 同屏单位闸：超了就延后生成。船能整船靠岸后上岸量猛增，拉到 32 保证潮水不断流（真机卡就回调）
 Config.FAR_UNIT_DISTANCE = 55.0      -- 超过这个距离的单位关掉不可见时也更新
 
+-- 性能Overlay（调试开关）：true 时屏幕顶中叠加一行 FPS/drawcall/三角面/同屏单位数（每 3 秒刷）。
+-- 上线前必须置 false（关掉就不显不刷）。真机（抖音）没有引擎 DebugHud（SystemUI 已禁用），靠这个看指标。
+Config.PERF_OVERLAY = true
+
 Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako", "Characters_Sharky" }
 Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbarossa" }
 

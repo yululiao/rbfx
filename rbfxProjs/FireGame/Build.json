@@ -2,9 +2,10 @@
 	"Platforms": [
 		{
 			"Android": {},
+			"AssetFilter": {},
 			"Douyin": {},
-			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
-			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"EngineBin": "D:/GameEngines/rbfx/msvc/bin/Release",
+			"EngineData": "D:/GameEngines/rbfx/msvc/bin",
 			"Name": "Windows",
 			"OutputDir": "Build/Windows",
 			"Platform": "WindowsDesktop",
@@ -19,6 +20,7 @@
 			"Android": {
 				"ApplicationId": "com.example.firegame"
 			},
+			"AssetFilter": {},
 			"Douyin": {},
 			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
 			"EngineData": "D:/openSrc/rbfx/msvc/bin",
@@ -34,9 +36,10 @@
 		},
 		{
 			"Android": {},
+			"AssetFilter": {},
 			"Douyin": {},
-			"EngineBin": "D:/openSrc/rbfx/web/bin/Release",
 			"EmsdkRoot": "D:/openSrc/emsdk",
+			"EngineBin": "D:/openSrc/rbfx/web/bin/Release",
 			"EngineData": "D:/openSrc/rbfx/msvc/bin",
 			"Name": "Web",
 			"OutputDir": "Build/Web",
@@ -50,35 +53,7 @@
 		},
 		{
 			"Android": {},
-			"DisabledEngineModules": [
-				"URHO3D_PHYSICS",
-				"URHO3D_PHYSICS2D",
-				"URHO3D_NAVIGATION",
-				"URHO3D_IK",
-				"URHO3D_UI",
-				"URHO3D_SYSTEMUI"
-			],
-			"Douyin": {},
-			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
-			"EngineBuild": "Never",
-			"EngineData": "D:/openSrc/rbfx/msvc/bin",
-			"Name": "Douyin",
-			"OutputDir": "Build/Douyin",
-			"PackData": false,
-			"Platform": "Douyin",
 			"AssetFilter": {
-				"Include": [
-					"Models/Quaternius_pirate-kit",
-					"Models/Characters-001",
-					"Materials",
-					"Particle",
-					"Textures",
-					"Fonts",
-					"Sound/back_ground",
-					"Sound/gun_shot",
-					"Sound/kenney_voiceover-pack-fighter",
-					"Sound/kenney_impact-sounds"
-				],
 				"Exclude": [
 					"Models/Quaternius_pirate-kit/**/*Duck.ani",
 					"Models/Quaternius_pirate-kit/**/*HitReact.ani",
@@ -105,6 +80,18 @@
 					"Models/Characters-001/**/*AnimalArmatureIdle_2_HeadLow.ani",
 					"Models/Characters-001/**/*AnimalArmatureIdle_HitReact_Left.ani",
 					"Models/Characters-001/**/*AnimalArmatureIdle_HitReact_Right.ani"
+				],
+				"Include": [
+					"Models/Quaternius_pirate-kit",
+					"Models/Characters-001",
+					"Materials",
+					"Particle",
+					"Textures",
+					"Fonts",
+					"Sound/back_ground",
+					"Sound/gun_shot",
+					"Sound/kenney_voiceover-pack-fighter",
+					"Sound/kenney_impact-sounds"
 				]
 			},
 			"CoreDataExclude": [
@@ -113,6 +100,23 @@
 				"Models/PlaneTess.mdl",
 				"Models/Dome.mdl"
 			],
+			"DisabledEngineModules": [
+				"URHO3D_PHYSICS",
+				"URHO3D_PHYSICS2D",
+				"URHO3D_NAVIGATION",
+				"URHO3D_IK",
+				"URHO3D_UI",
+				"URHO3D_SYSTEMUI",
+				"URHO3D_TIMELINE"
+			],
+			"Douyin": {},
+			"EngineBin": "D:/GameEngines/rbfx/cmake-build/minigame-douyin/bin/Release",
+			"EngineBuild": "Incremental",
+			"EngineData": "D:/GameEngines/rbfx/msvc/bin",
+			"Name": "Douyin",
+			"OutputDir": "Build/Douyin",
+			"PackData": false,
+			"Platform": "Douyin",
 			"TextureCompression": {
 				"ColorFormatAlpha": "ETC2_RGBA",
 				"ColorFormatNoAlpha": "ETC2_RGB",

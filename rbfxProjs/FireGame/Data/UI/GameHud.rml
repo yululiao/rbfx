@@ -54,6 +54,12 @@
 
     <!-- 准星已移除：改为王者式自动吸附开火（见 Shooting.lua），命中确认靠下面的 hitmarker。 -->
 
+    <!-- 性能 Overlay（调试）：靠 data-if="showPerf" 整体显隐，文本由 Lua 拼好喂 perfText。
+         顶中不挡左右手操作区；pointer-events:none 确保不吃点击。上线关（Config.PERF_OVERLAY=false）时根本不渲染。 -->
+    <div data-if="showPerf" style="position: absolute; left: 50%; top: 16dp; transform: translateX(-50%); pointer-events: none;">
+        <div style="color: #7CFC00ff; font-size: 20dp; font-weight: bold;">{{perfText}}</div>
+    </div>
+
     <!-- 中央 hitmarker：普通命中(白) / 强命中(红)，靠 data-if 二选一显示（不支持内联 opacity 绑定） -->
     <div data-if="hitNormal" style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
         <div style="position: absolute; left: -18dp; top: -2dp; width: 36dp; height: 4dp; background-color: #ffffffd9; transform: rotate(45deg);"></div>

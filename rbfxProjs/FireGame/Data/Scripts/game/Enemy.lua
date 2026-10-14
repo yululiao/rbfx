@@ -394,7 +394,10 @@ function Enemy:SpawnPirate(spawnPos, skin)
     local model = node:CreateComponent("AnimatedModel")
     model:SetModel(GetResource("Model", Config.PirateModel(skin)))
     model:SetMaterial(Materials.Pirate())
-    model:SetCastShadows(true)
+    -- 海盗一律不投影：每个 AnimatedModel 投影会被按级联重复提交（实测约 8× drawcall/tri），
+    -- 同屏上百海盗时这正是掉帧主因（见 PERF 日志：drawcalls>500 即从 45fps 掉到 30fps）。
+    -- 船/桶/主角仍投影（数量少、体积大，影子对空间感有价值）。俯视塔后视角里海盗缺影子影响很小。
+    model:SetCastShadows(false)
     -- 远处降频：不可见时不更新蒙皮（同屏上限之外的开销主要在这）
     model:SetUpdateInvisible(false)
 
