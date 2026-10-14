@@ -535,6 +535,8 @@ Engine = {}
 function Engine.DumpResources(...) end
 function Engine.Exit(...) end
 function Engine.IsHeadless(...) end
+--- Target frame rate: wasm caps the main loop to it; desktop caps via maxFps sleep limiter.
+function Engine.SetWebFrameRate(...) end
 
 ---@class EventData
 EventData = {}

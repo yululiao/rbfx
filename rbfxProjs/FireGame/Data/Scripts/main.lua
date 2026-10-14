@@ -26,6 +26,18 @@ local Grow = require("game.Grow")
 local Dog = require("game.Dog")
 
 ----------------------------------------------------------------------
+-- 帧率上限：真机（抖音 wasm）主循环按 Config.MAX_FPS 节流，省电/降热。
+-- 必须在脚本加载期（顶层）同步设置：MinigamePlayer 在 Start() 里跑完本脚本后
+-- 才去注册主循环（Application::Run 读 Engine::GetWebFrameRate），此时写入方能生效。
+----------------------------------------------------------------------
+do
+    local engine = GetSubsystem("Engine")
+    if engine and engine.SetWebFrameRate and Config.MAX_FPS and Config.MAX_FPS > 0 then
+        engine:SetWebFrameRate(Config.MAX_FPS)
+    end
+end
+
+----------------------------------------------------------------------
 -- HUD 几何与 UI 缩放：rml 全部用 dp 单位（1dp = Config.UI_SCALE 画布像素），
 -- 本文件里凡与 rml 几何同步的量（摇杆环/帽/行程/抓取半径）= rml 的 dp 基础值
 -- × UI_SCALE。缩放系数按画布短边派生（Config.ComputeUIScale），启动时算一次

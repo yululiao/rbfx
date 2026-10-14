@@ -228,10 +228,12 @@ Engine::Engine(Context* context) :
     timeStep_(0.0f),
     timeStepSmoothing_(2),
 #ifdef __EMSCRIPTEN__
-    // wasm hosts rely on rAF (~60Hz); clamp dt to 1/60 to guard against
-    // emscripten timer-source anomalies (frequency mismatch or
-    // non-standard get_now granularity inflating elapsed by ~1000x).
-    minFps_(60),
+    // wasm hosts run a 30Hz main loop (see Application emscripten_set_main_loop_arg) to cut
+    // GPU/battery cost on phones. Clamp dt to 1/30 so a steady 30fps frame is NOT mistaken for
+    // a hitch and slowed down (a 1/60 clamp would halve game speed at 30fps). Still guards
+    // emscripten timer-source anomalies (frequency mismatch or non-standard get_now granularity
+    // inflating elapsed by ~1000x).
+    minFps_(30),
 #else
     minFps_(10),
 #endif
@@ -890,6 +892,27 @@ void Engine::SetMinFps(int fps)
 void Engine::SetMaxFps(int fps)
 {
     maxFps_ = (unsigned)Max(fps, 0);
+}
+
+void Engine::SetWebFrameRate(int fps)
+{
+    if (fps <= 0)
+        return;
+
+#if defined(__EMSCRIPTEN__)
+    // On wasm the real frame-rate cap is the main-loop rate: Application registers
+    // emscripten_set_main_loop_arg(..., GetWebFrameRate(), ...) after Start(), so the entry script
+    // can steer it here. The engine's own maxFps sleep limiter is compiled out on emscripten, so
+    // setting maxFps_ here would be inert. minFps_ is NOT a cap but the dt floor below which the
+    // timestep is clamped (time appears to slow down); since the loop is now FORCED to one frame
+    // per 1/fps s, minFps must match that rate or every legitimate frame would be treated as a
+    // hitch and the game would crawl. Hence the couple to SetMinFps, not SetMaxFps.
+    webFrameRate_ = fps;
+    SetMinFps(fps);
+#else
+    // Desktop/editor: cap the blocking main loop through the sleep limiter's upper bound.
+    SetMaxFps(fps);
+#endif
 }
 
 void Engine::SetMaxInactiveFps(int fps)

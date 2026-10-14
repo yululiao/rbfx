@@ -680,6 +680,7 @@ void RegisterCoreBindings(sol::state& lua, Context* context)
             sol::base_classes, LuaBases<Engine, Object>::bases(lua),
             "Exit", &Engine::Exit,
             "DumpResources", &Engine::DumpResources,
+            "SetWebFrameRate", &Engine::SetWebFrameRate,
             "IsHeadless", &Engine::IsHeadless
         );
     }

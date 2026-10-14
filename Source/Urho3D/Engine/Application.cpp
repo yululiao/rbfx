@@ -146,7 +146,14 @@ int Application::Run()
 #if defined(IOS) || defined(TVOS)
         SDL_iPhoneSetAnimationCallback(GetSubsystem<Graphics>()->GetWindow(), 1, &RunFrame, engine_);
 #elif defined(__EMSCRIPTEN__)
-        emscripten_set_main_loop_arg(RunFrame, engine_, 0, 1);
+        // Throttle the wasm main loop to the engine's target frame rate (default 30). fps=0 would
+        // follow requestAnimationFrame at ~60Hz; on phones that doubles present/render work for no
+        // gameplay benefit and drives heat/battery, so we register a fixed-rate loop instead -
+        // emscripten schedules an fps>0 loop on a timer, letting the engine genuinely idle between
+        // frames. The value comes from Engine::GetWebFrameRate(), which the game's entry script may
+        // have set via Engine::SetWebFrameRate during Start() (before this line). That setter also
+        // couples minFps to the same rate, so a steady frame is never clamped into slow motion.
+        emscripten_set_main_loop_arg(RunFrame, engine_, engine_->GetWebFrameRate(), 1);
 #endif
 #endif
 

@@ -71,6 +71,14 @@ public:
     /// Set maximum frames per second when the application does not have input focus.
     /// @property
     void SetMaxInactiveFps(int fps);
+    /// Set the target frame rate. On emscripten/wasm this drives the main-loop rate the host
+    /// registers (Application reads GetWebFrameRate() after Start(), so the entry script can steer
+    /// it) and couples minFps to the same value so the timestep is not clamped into slow motion.
+    /// On the desktop/editor blocking loop it caps the frame rate through the maxFps sleep limiter.
+    void SetWebFrameRate(int fps);
+    /// Return the target web main-loop frame rate.
+    /// @property
+    int GetWebFrameRate() const { return webFrameRate_; }
     /// Set how many frames to average for timestep smoothing. Default is 2. 1 disables smoothing.
     /// @property
     void SetTimeStepSmoothing(int frames);
@@ -186,6 +194,9 @@ private:
     unsigned maxFps_;
     /// Maximum frames per second when the application does not have input focus.
     unsigned maxInactiveFps_;
+    /// Target frame rate for the emscripten/wasm main loop (see SetWebFrameRate). Defaults to 30
+    /// to keep phone GPU/battery cost down; the game script may override it via SetWebFrameRate.
+    int webFrameRate_{ 30 };
     /// Pause when minimized flag.
     bool pauseMinimized_;
     /// Time out counter for testing.
