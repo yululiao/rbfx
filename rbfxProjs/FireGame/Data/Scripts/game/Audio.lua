@@ -11,6 +11,13 @@
 --
 -- 防"机关枪式重复感"靠 Config.Sfx 里每个事件的 5 个变体随机取，而不是靠 SetFrequency 变调
 -- （同样是拿不到基础频率、且绝对 Hz 对不同采样率文件会错）。真要变调等确认全部 ogg 同采样率再加。
+--
+-- 双播放后端：
+--   * 桌面/web：引擎 Sound 解码 ogg，SoundSource 出声（上面的论述都是这条路的）。
+--   * 抖音小游戏：宿主没有 WebAudio，引擎没有 PCM 出口，改走 MinigameSDK 的
+--     PlayGameAudio —— 宿主 InnerAudioContext 直接播打包时由 ogg 转出的 m4a
+--     （Build 的 DouyinRuntimeStep 转码，包里没有 ogg），一次一实例、BGM 循环常驻，
+--     语义与桌面路一致。路径只做扩展名替换，Config 里的 ogg 路径两边通用。
 
 local Config = require("game.Config")
 
@@ -24,13 +31,41 @@ function Audio.Build(scene)
     local self = setmetatable({}, Audio)
     self.scene = scene
     self.bgmSource = nil
+    self.bgmPath = nil             -- 小游戏侧 BGM 幂等标记（宿主实例由 JS 池管）
+    self.sdk = GetSubsystem("MinigameSDK")
+    self.minigame = self.sdk ~= nil and self.sdk:IsAvailable()
+    self.warned = {}               -- 小游戏侧已报过的失败路径，防刷屏
+    if self.minigame then
+        SubscribeToEvent("MinigameSdkResult", function(data)
+            if data.Kind == MINIGAME_REQUEST_KIND.PLAY_GAME_AUDIO and not data.Success then
+                local key = tostring(data.Payload)
+                if not self.warned[key] then
+                    self.warned[key] = true
+                    print("Audio: host playback failed: " .. key)
+                end
+            end
+        end)
+    end
     return self
+end
+
+--- 小游戏侧路径换算：资源路径只换扩展名，m4a 由打包转码生成。
+---@param path string
+---@return string
+local function ToHostPath(path)
+    return (path:gsub("%.ogg$", ".m4a"))
 end
 
 --- 播放背景音乐（循环，不自动回收，只播一次不叠加）。
 ---@param path string Sound 资源路径
 ---@param gain number|nil 音量，缺省 0.3
 function Audio:PlayBGM(path, gain)
+    if self.minigame then
+        if self.bgmPath then return end
+        self.bgmPath = path
+        self.sdk:PlayGameAudio(ToHostPath(path), gain or 0.3, true)
+        return
+    end
     if self.bgmSource then return end
     local sound = GetResource("Sound", path)
     if not sound then
@@ -65,10 +100,14 @@ function Audio:Voice(name, gain)
     self:Emit(Config.VoicePath(name), gain or 1.0)
 end
 
---- 底层：按资源路径建一个自动回收的 SoundSource 播一次。
+--- 底层：按资源路径播一次（桌面建自动回收 SoundSource，小游戏走宿主一次性实例）。
 ---@param path string Sound 资源名
 ---@param gain number
 function Audio:Emit(path, gain)
+    if self.minigame then
+        self.sdk:PlayGameAudio(ToHostPath(path), gain or 1.0)
+        return
+    end
     local sound = GetResource("Sound", path)
     if not sound then
         print("Audio: missing Sound " .. tostring(path))

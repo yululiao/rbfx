@@ -460,10 +460,14 @@ end
 
 --- 主角动画栈（Characters_Lis）：Idle / Idle_Gun / Run / Run_Gun / Walk / Walk_Gun / HitReact /
 --- Death / Duck / Jump 系列 / Punch / Slash / Stab 等（没有 Idle_Shoot，举枪待机用 Idle_Gun）
+--- 注意：重导后的 Characters_Lis.fbx 把骨骼名烘进了动画 take 名（Blender 里 action 命名成了
+--- "CharacterArmature|Idle"，导出时 "|" 并入名字），于是 FbxImporter 按 <base>_<骨骼><take> 拼出的
+--- .ani 变成双前缀 Characters_Lis_CharacterArmatureCharacterArmature<Stack>.ani。这里前缀相应写两层
+--- _CharacterArmature 以匹配现有产物；若日后回 Blender 把 take 名清成 Idle 等干净名，改回一层即可。
 ---@param stack string
 ---@return string
 function Config.PlayerAnim(stack)
-    return PLAYER_DIR .. PLAYER_MODEL .. ".fbx.d/Models/" .. PLAYER_MODEL .. "_CharacterArmature" .. stack .. ".ani"
+    return PLAYER_DIR .. PLAYER_MODEL .. ".fbx.d/Models/" .. PLAYER_MODEL .. "_CharacterArmatureCharacterArmature" .. stack .. ".ani"
 end
 
 --- 宠物狗模型（Characters-001/Characters_Dog，与主角同目录、共用 Zombie_Atlas 图集，

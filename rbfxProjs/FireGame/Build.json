@@ -60,7 +60,7 @@
 			],
 			"Douyin": {},
 			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
-			"EngineBuild": "Incremental",
+			"EngineBuild": "Never",
 			"EngineData": "D:/openSrc/rbfx/msvc/bin",
 			"Name": "Douyin",
 			"OutputDir": "Build/Douyin",
@@ -69,7 +69,7 @@
 			"AssetFilter": {
 				"Include": [
 					"Models/Quaternius_pirate-kit",
-					"Models/Quaternius_Player",
+					"Models/Characters-001",
 					"Materials",
 					"Particle",
 					"Textures",

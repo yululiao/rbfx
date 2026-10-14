@@ -56,34 +56,15 @@ local STATE_ANIM = {
     run_shoot  = "Run_Gun",
 }
 
---- 只保留主体与一把枪，其余手持道具隐藏。键是 .mdl 内嵌的 geometry 基名
---- （AssetImporter 的 SetGeometryName 写入源网格名；同网格多材质段会是 "Lis #0"，
---- 下面取 # 前基名再比对）。
-local PLAYER_KEEP_GEOMETRIES = { Lis = true, Shoulder = true, Rifle = true }
-
 --- 给主角 Characters_Lis 上材质。这个包与 pirate-kit 同路数：导入走 -nm -nt 不产材质，
---- 但它是真正的贴图角色（非 Soldier 的顶点色方案），全身（含所有手持道具）共用一张
---- Zombie_Atlas.png，所以整体挂手写的图集材质 Materials.Character()。
---- 例外：FBX 把十件手持武器道具（Guitar/Axe/Spear/Pistol/Rifle/Shotgun/SMG/
---- WoodenBat_Barbed/WoodenBat_Saw/Knife）全绑在左手 Middle1.L 同一处，显出来就是一身
---- 兵器库。按 geometry 名只留主体 Lis、左肩甲 Shoulder 与唯一保留的武器 Rifle，其余逐个
---- SetMaterial(index, Hidden) 藏掉（不再硬编码段号，靠 Model:GetGeometryName 逐段判定）。
+--- 但它是真正的贴图角色（非 Soldier 的顶点色方案），全身共用一张 Zombie_Atlas.png，
+--- 所以整体挂手写的图集材质 Materials.Character()。
+--- FBX 里已把不用的手持道具全删掉，mdl 只剩主体 Lis / 左肩甲 Shoulder / 唯一保留的
+--- 步枪 Rifle 三段 geometry，运行期不再需要按名逐段隐藏（旧模型十件兵器堆在左手
+--- Middle1.L 才需要那套 GetGeometryName + Hidden 隐藏逻辑，资产精简后整段移除）。
 ---@param model AnimatedModel
 local function ApplyBodyMaterials(model)
     model:SetMaterial(Materials.Character())
-    local mdl = GetResource("Model", Config.PlayerModel())
-    if not mdl then
-        return
-    end
-    local hidden = Materials.Hidden()
-    for i = 0, mdl:GetNumGeometries() - 1 do
-        -- 去掉多材质段的 " #N" 后缀取基名，再与保留集比对
-        local name = mdl:GetGeometryName(i)
-        local base = name:match("^(.-)%s*#") or name
-        if not PLAYER_KEEP_GEOMETRIES[base] then
-            model:SetMaterial(i, hidden)
-        end
-    end
 end
 
 --- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做俯视相机。
