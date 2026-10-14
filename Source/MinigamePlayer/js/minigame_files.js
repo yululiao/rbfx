@@ -304,6 +304,18 @@
         return bytes;
     }
 
+    // Engine-visible resource name -> package-relative physical path, for the vendor APIs
+    // that open package files themselves (InnerAudioContext.src and friends) rather than
+    // going through readBytes. Resource-style paths ("Sound/...") resolve under Data/ like
+    // the engine resource cache does; remote files answer null until they are downloaded.
+    function resolve(path) {
+        var key = package_files[path] ? path : "Data/" + path;
+        var entry = package_files[key];
+        if (!entry || entry.remote)
+            return null;
+        return (entry.root ? entry.root : "") + (entry.physical || key);
+    }
+
     function list(directory) {
         var prefix = directory ? directory.replace(/\/+$/, "") + "/" : "";
         var result = [];
@@ -411,6 +423,7 @@
         // Package reads, all synchronously answerable.
         size: size,
         readBytes: readBytes,
+        resolve: resolve,
         list: list,
         prefetch: prefetch,
 

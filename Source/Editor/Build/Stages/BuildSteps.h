@@ -264,6 +264,10 @@ private:
     /// Regenerate rbfx_game_config.js around the subpackages this build actually produced; the
     /// template beside it names both variants, which is only true for a merged package.
     bool WriteGameConfig(const ea::vector<ea::string>& wasmSubpackages, ea::string& message);
+    /// Transcode every staged .ogg into .m4a and drop the .ogg: the vendor runtime has no
+    /// WebAudio for the engine's decoders to mix into, so the host audio player plays the game
+    /// audio itself, and m4a/aac is the compressed family it documents.
+    bool TranscodeStagedAudio(ea::string& message);
     /// Rename every package file whose extension the vendor tool would drop on import; the file
     /// manifest generated right after carries the mapping back to the engine-visible names. The
     /// return value is the rename map (package-relative name after -> before) for that manifest.

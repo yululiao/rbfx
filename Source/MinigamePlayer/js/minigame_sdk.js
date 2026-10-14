@@ -25,7 +25,9 @@
         privacy: 4,
         record_voice: 5,
         play_user_audio: 6,
-        stop_user_audio: 7
+        stop_user_audio: 7,
+        play_game_audio: 8,
+        stop_game_audio: 9
     };
 
     function complete(request_id, success, payload) {
@@ -311,6 +313,152 @@
 
     handlers[KIND.stop_user_audio] = function (request_id) {
         stop_voice_audio();
+        complete(request_id, true, "{}");
+    };
+
+    // ---------- game audio (sfx one-shots + looped music) ----------
+    // The vendor runtime may offer no WebAudio at all; then the engine's Sound decoders
+    // have no output to mix into and this player is the game's only audio. The packaging
+    // step transcodes the ogg masters into m4a, and rbfx.files.resolve maps the
+    // engine-visible path onto the physical package file for InnerAudioContext.src.
+
+    var SFX_CAP = 8;          // concurrent one-shots; past it the oldest is stolen
+    var sfx_active = [];      // one-shot instances in flight, oldest first
+    var looped_audio = {};    // engine path -> instance (music)
+
+    function destroy_audio(audio) {
+        if (!audio)
+            return;
+        try { audio.stop(); } catch (e) { /* already stopped */ }
+        try { audio.destroy(); } catch (e) { /* already destroyed */ }
+    }
+
+    function sfx_remove(audio) {
+        var index = sfx_active.indexOf(audio);
+        if (index >= 0)
+            sfx_active.splice(index, 1);
+    }
+
+    handlers[KIND.play_game_audio] = function (request_id, payload) {
+        if (!wx_tt || typeof wx_tt.createInnerAudioContext !== "function")
+            return complete(request_id, false, "audio playback is not supported by the host");
+
+        var args = parse_payload(payload);
+        var path = args.path ? String(args.path) : "";
+        if (!path)
+            return complete(request_id, false, "no path in the request");
+        var gain = Number(args.gain);
+        if (!(gain >= 0))
+            gain = 1.0;
+        gain = Math.min(gain, 1.0);
+
+        var src = (rbfx.files && typeof rbfx.files.resolve === "function")
+            ? rbfx.files.resolve(path) : null;
+        if (!src)
+            return complete(request_id, false, "not in the package: " + path);
+
+        if (args.loop) {
+            // One looped instance per path: a repeat request retunes the running music
+            // instead of stacking a second track, and completes immediately.
+            var existing = looped_audio[path];
+            if (existing) {
+                existing.volume = gain;
+                complete(request_id, true, "{}");
+                return;
+            }
+            var music = wx_tt.createInnerAudioContext();
+            music.src = src;
+            music.loop = true;
+            music.volume = gain;
+            looped_audio[path] = music;
+            music.onError(function (error) {
+                if (looped_audio[path] === music)
+                    delete looped_audio[path];
+                destroy_audio(music);
+                console.warn("[rbfx] music playback failed for " + path + ": " +
+                    fail_text(error, "playback failed"));
+            });
+            try {
+                music.play();
+            } catch (error) {
+                delete looped_audio[path];
+                destroy_audio(music);
+                return complete(request_id, false, fail_text(error, "playback failed"));
+            }
+            // Looped playback never "ends": the request completes on start, the
+            // instance lives until stop_game_audio.
+            complete(request_id, true, "{}");
+            return;
+        }
+
+        // One-shot: past the cap, steal the oldest (a truncated gunshot is less wrong
+        // than a silently dropped one).
+        if (sfx_active.length >= SFX_CAP) {
+            var oldest = sfx_active.shift();
+            if (oldest.__settle) {
+                try { oldest.__settle(false, "stolen by a newer playback"); } catch (e) { /* ignore */ }
+            } else {
+                destroy_audio(oldest);
+            }
+        }
+
+        var audio = wx_tt.createInnerAudioContext();
+        audio.src = src;
+        audio.volume = gain;
+        audio.__path = path;
+        var settled = false;
+        var settle = function (ok, text) {
+            if (settled)
+                return;
+            settled = true;
+            sfx_remove(audio);
+            complete(request_id, ok, text || "{}");
+            destroy_audio(audio);
+        };
+        audio.__settle = settle;
+        audio.onEnded(function () { settle(true); });
+        audio.onError(function (error) { settle(false, fail_text(error, "playback failed")); });
+        try {
+            audio.play();
+        } catch (error) {
+            settle(false, fail_text(error, "playback failed"));
+        }
+    };
+
+    handlers[KIND.stop_game_audio] = function (request_id, payload) {
+        var args = parse_payload(payload);
+        var path = args.path ? String(args.path) : "";
+
+        if (path) {
+            var music = looped_audio[path];
+            if (music) {
+                delete looped_audio[path];
+                destroy_audio(music);
+            }
+            // One-shots settle through their own closure, so the matching request is
+            // always answered and the instance torn down exactly once.
+            for (var i = sfx_active.length - 1; i >= 0; --i) {
+                var audio = sfx_active[i];
+                if (audio.__path === path && audio.__settle)
+                    audio.__settle(false, "playback stopped");
+            }
+        } else {
+            for (var key in looped_audio) {
+                if (Object.prototype.hasOwnProperty.call(looped_audio, key)) {
+                    destroy_audio(looped_audio[key]);
+                    delete looped_audio[key];
+                }
+            }
+            while (sfx_active.length) {
+                var active = sfx_active[0];
+                if (active.__settle)
+                    active.__settle(false, "playback stopped");
+                else {
+                    sfx_remove(active);
+                    destroy_audio(active);
+                }
+            }
+        }
         complete(request_id, true, "{}");
     };
 

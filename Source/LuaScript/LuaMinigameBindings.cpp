@@ -58,6 +58,17 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
                 return sdk ? sdk->PlayUserAudio(slot, playbackRate.value_or(1.0f)) : 0;
             })
             LUA_MEMBER_FUNC(StopUserAudio)
+            // Game audio (sfx/music) through the host player: gain defaults to 1.0,
+            // looped to false. The packaging step ships m4a for these paths.
+            LUA_MEMBER_FUNC_RAW(PlayGameAudio, [](MinigameSDK* sdk, const ea::string& path,
+                sol::optional<float> gain, sol::optional<bool> looped) -> int {
+                return sdk ? sdk->PlayGameAudio(path, gain.value_or(1.0f), looped.value_or(false)) : 0;
+            })
+            // Path is optional: no argument stops every game-audio playback.
+            LUA_MEMBER_FUNC_RAW(StopGameAudio, [](MinigameSDK* sdk,
+                sol::optional<ea::string> path) -> int {
+                return sdk ? sdk->StopGameAudio(path.value_or(EMPTY_STRING)) : 0;
+            })
             LUA_MEMBER_FUNC_RET(IsAvailable, bool)
         );
     }
@@ -102,7 +113,9 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
         "PRIVACY_AUTHORIZATION", static_cast<int>(MinigameSDKRequestKind::PrivacyAuthorization),
         "RECORD_VOICE", static_cast<int>(MinigameSDKRequestKind::RecordVoice),
         "PLAY_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayUserAudio),
-        "STOP_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopUserAudio));
+        "STOP_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopUserAudio),
+        "PLAY_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayGameAudio),
+        "STOP_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopGameAudio));
 }
 
 } // namespace Urho3D

@@ -34,6 +34,12 @@ enum class MinigameSDKRequestKind
     PlayUserAudio = 6,
     /// Stop the current user-audio playback immediately.
     StopUserAudio = 7,
+    /// Play a packaged game audio file (sfx or music) through the host's audio system.
+    /// The engine's Sound decoders are not involved: the vendor runtime may have no
+    /// WebAudio at all, and then the host player is the only output.
+    PlayGameAudio = 8,
+    /// Stop game-audio playback for a path (or for everything when the path is empty).
+    StopGameAudio = 9,
 };
 
 /// Bridge to the host SDK capabilities (login, share, rewarded ads, payment, privacy).
@@ -94,6 +100,15 @@ public:
     int PlayUserAudio(const ea::string& slotName, float playbackRate);
     /// Stop the current user-audio playback immediately. Completes right away.
     int StopUserAudio();
+
+    /// Play a packaged audio file through the host audio player. path is the engine-visible
+    /// resource path of the packaged file ("Data/Sound/shot.m4a"); gain maps onto the host
+    /// volume (0..1). One-shot playbacks complete when they end or fail; a looped playback
+    /// (music) completes on start and persists until StopGameAudio. The packaging step
+    /// transcodes the game's ogg masters into the m4a family the vendor player documents.
+    int PlayGameAudio(const ea::string& path, float gain, bool looped);
+    /// Stop the game-audio playbacks of path (empty path: everything). Completes right away.
+    int StopGameAudio(const ea::string& path);
 
     /// Return whether the JavaScript SDK shim is attached.
     /// @property

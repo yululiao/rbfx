@@ -142,6 +142,11 @@ bool DouyinRuntimeStep::Run(ea::string& message)
     }
     if (!WriteGameConfig(wasmSubpackages, message))
         return false;
+    // Before the renames and the manifest scan: the host plays the game audio itself (there is
+    // no WebAudio for the engine to mix into), and the vendor audio player documents no ogg,
+    // so the staged ogg files become m4a here and the scan below lists the results.
+    if (!TranscodeStagedAudio(message))
+        return false;
     // Before the manifest scan: the renames are what the scan has to see, and the manifest is
     // what maps the engine-visible names back onto the renamed files.
     ea::unordered_map<ea::string, ea::string> vendorRenames;
@@ -346,6 +351,88 @@ bool DouyinRuntimeStep::WriteGameConfig(const ea::vector<ea::string>& wasmSubpac
     return WriteTextFile(owner_.context(), owner_.outputDir() + "rbfx_game_config.js", text, message);
 }
 
+bool DouyinRuntimeStep::TranscodeStagedAudio(ea::string& message)
+{
+    auto* fs = owner_.context()->GetSubsystem<FileSystem>();
+    const ea::string& resourceDir = owner_.resourceDir();
+
+    // The game data staged so far carries the master audio (ogg is the engine-side format;
+    // desktop and web decode it natively). Everything here converts, not only Sound/: the host
+    // player is the only audio output the vendor runtime offers, whatever directory the file
+    // came from.
+    ea::vector<ea::string> files;
+    fs->ScanDir(files, resourceDir, "*.ogg", SCAN_FILES | SCAN_RECURSIVE);
+    if (files.empty())
+        return true;
+
+    // ffmpeg rides the emsdk python as an imageio-ffmpeg wheel (a static binary per platform,
+    // asked for its path through the module): the pipeline ships no codec of its own, and the
+    // wheel install is a one-time step per machine. Resolved once per editor session.
+    static ea::string ffmpeg;
+    if (ffmpeg.empty())
+    {
+        ea::string output;
+        const int exitCode = fs->SystemRun(owner_.ResolveEmsdkPython(), {"-c",
+            "import imageio_ffmpeg, sys; sys.stdout.write(imageio_ffmpeg.get_ffmpeg_exe())"},
+            output);
+        const ea::string resolved = output.trimmed();
+        if (exitCode != 0 || resolved.empty() || !fs->FileExists(resolved))
+        {
+            message = Format("The Douyin package transcodes .ogg to .m4a for the host audio "
+                "player, which needs ffmpeg, and locating it failed: {}. Install it once with "
+                "'<emsdk-python> -m pip install imageio-ffmpeg'.", output);
+            return false;
+        }
+        ffmpeg = resolved;
+    }
+
+    // AAC-LC at 96k: LC rather than HE because SBR smears the attack transients gun sounds
+    // live on (and adds decoder startup delay); 96k matches the ogg q3-q4 the sources carry,
+    // so the package size stays roughly neutral across the swap.
+    unsigned long long bytesBefore = 0;
+    unsigned long long bytesAfter = 0;
+    for (const ea::string& file : files)
+    {
+        const ea::string source = resourceDir + file;
+        const ea::string target = source.substr(0, source.length() - 4) + ".m4a";
+
+        // Sizes are read through short-lived handles: an open handle would make the Delete
+        // below fail on Windows (sharing violation) and the package would ship both formats.
+        {
+            File sourceHandle(owner_.context(), source, FILE_READ);
+            bytesBefore += sourceHandle.IsOpen() ? sourceHandle.GetSize() : 0;
+        }
+
+        ea::string output;
+        const int exitCode = fs->SystemRun(ffmpeg,
+            {"-y", "-hide_banner", "-loglevel", "error", "-i", source,
+             "-vn", "-map_metadata", "-1", "-c:a", "aac", "-profile:a", "aac_low",
+             "-b:a", "96k", target},
+            output);
+        if (exitCode != 0 || !fs->FileExists(target))
+        {
+            message = Format("Transcoding '{}' to m4a failed (exit code {}): {}",
+                source, exitCode, output);
+            return false;
+        }
+
+        {
+            File targetHandle(owner_.context(), target, FILE_READ);
+            bytesAfter += targetHandle.IsOpen() ? targetHandle.GetSize() : 0;
+        }
+        if (!fs->Delete(source))
+        {
+            message = Format("Could not remove '{}' after transcoding; the package would ship "
+                "both the ogg and the m4a.", source);
+            return false;
+        }
+    }
+
+    URHO3D_LOGINFO("[Build] Transcoded {} ogg file(s) to m4a for the host audio player: "
+        "{} KB -> {} KB", files.size(), (bytesBefore + 1023) / 1024, (bytesAfter + 1023) / 1024);
+    return true;
+}
+
 bool DouyinRuntimeStep::RenameForVendorCompatibility(
     ea::unordered_map<ea::string, ea::string>& vendorRenames, ea::string& message)
 {
@@ -494,12 +581,29 @@ bool DouyinRuntimeStep::WriteProjectConfig(ea::string& message)
     // The developer tool reads this when the output directory is opened as a project; the runtime
     // never looks at it. The appid is the one piece the editor cannot derive, so it is whatever the
     // platform settings carry - the tool asks for it on import when it is empty.
+    //
+    // The "setting" block is not cosmetic: the vendor packer's compile step (byted-tma-pack) reads
+    // project.config.json's setting.es6 to decide whether to transpile the bootstrap JS, and a
+    // missing "setting" makes it dereference undefined and abort the preview/upload build with
+    // "TypeError: Cannot read properties of undefined (reading 'es6')".
+    //
+    // es6 stays FALSE on purpose. The emscripten shell (MinigamePlayer.js) is modern JS that uses
+    // optional chaining ("globalThis.document?.currentScript?.src", ES2020), but the vendor's
+    // transpiler parses with a babylon old enough to choke on "?." - turning es6 on swaps the
+    // undefined crash for "SyntaxError: Unexpected token" on that line. The Douyin minigame runtime
+    // is a Chromium/V8 kernel that executes "?." natively, so no down-level transpile is wanted.
     const BuildPlatformData* platform = owner_.platform();
 
     ea::string text;
     text += "{\n";
     text += "  \"appid\": \"" + platform->douyin_.appId_ + "\",\n";
-    text += "  \"projectname\": \"" + platform->executableName_ + "\"\n";
+    text += "  \"projectname\": \"" + platform->executableName_ + "\",\n";
+    text += "  \"setting\": {\n";
+    text += "    \"urlCheck\": false,\n";
+    text += "    \"es6\": false,\n";
+    text += "    \"postcss\": false,\n";
+    text += "    \"minified\": false\n";
+    text += "  }\n";
     text += "}\n";
 
     return WriteTextFile(owner_.context(), owner_.outputDir() + "project.config.json", text, message);

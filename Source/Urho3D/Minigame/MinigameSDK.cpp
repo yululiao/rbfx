@@ -280,6 +280,28 @@ int MinigameSDK::StopUserAudio()
     return Invoke(MinigameSDKRequestKind::StopUserAudio, "{}");
 }
 
+int MinigameSDK::PlayGameAudio(const ea::string& path, float gain, bool looped)
+{
+    ea::string payload;
+    payload += "{\"path\":";
+    payload += EscapeJson(path);
+    payload += ",\"gain\":";
+    payload += ea::to_string(std::min(std::max(gain, 0.0f), 1.0f));
+    payload += ",\"loop\":";
+    payload += looped ? "true" : "false";
+    payload += '}';
+    return Invoke(MinigameSDKRequestKind::PlayGameAudio, payload);
+}
+
+int MinigameSDK::StopGameAudio(const ea::string& path)
+{
+    ea::string payload;
+    payload += "{\"path\":";
+    payload += EscapeJson(path);
+    payload += '}';
+    return Invoke(MinigameSDKRequestKind::StopGameAudio, payload);
+}
+
 int MinigameSDK::Invoke(MinigameSDKRequestKind kind, const ea::string& payloadJson)
 {
     const int requestId = nextRequestId_++;
