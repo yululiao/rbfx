@@ -522,7 +522,58 @@ bool StageCoreDataStep::Run(ea::string& message)
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     const BuildPlatformData* platform = owner_.platform();
     const ea::string source = AddTrailingSlash(ForwardSlashes(platform->engineData_)) + CoreDataDirName;
-    return MergeDirectory(fs, source, owner_.stagingDir() + CoreDataDirName, message);
+    const ea::string destination = owner_.stagingDir() + CoreDataDirName;
+    if (platform->coreDataExclude_.empty())
+        return MergeDirectory(fs, source, destination, message);
+
+    // Selective staging, same copy shape as MergeProjectData: directories are created around each
+    // surviving file, so an excluded subtree does not resurface as empty folders in the package.
+    if (!fs->DirExists(source))
+    {
+        message = Format("Nothing to copy from '{}': the directory does not exist.", source);
+        return false;
+    }
+
+    ea::vector<ea::string> files;
+    fs->ScanDir(files, source, "*", SCAN_FILES | SCAN_RECURSIVE);
+
+    unsigned dropped = 0;
+    unsigned long long droppedBytes = 0ULL;
+    for (const ea::string& relative : files)
+    {
+        ea::string rel = relative;
+        rel.replace("\\", "/");
+        bool excluded = false;
+        for (const ea::string& ex : platform->coreDataExclude_)
+        {
+            if (MatchRule(rel, ex))
+            {
+                excluded = true;
+                break;
+            }
+        }
+        if (excluded)
+        {
+            ++dropped;
+            droppedBytes += FileSizeOf(owner_.context(), source + relative);
+            continue;
+        }
+        const ea::string target = destination + relative;
+        if (!fs->CreateDirsRecursive(GetPath(target)))
+        {
+            message = Format("Could not create the staging directory for '{}'.", target);
+            return false;
+        }
+        if (!fs->Copy(source + relative, target))
+        {
+            message = Format("Could not copy '{}' to '{}'.", source + relative, target);
+            return false;
+        }
+    }
+
+    URHO3D_LOGINFO("[Build] CoreData exclude active: dropped {} file(s), {} bytes not staged",
+        dropped, droppedBytes);
+    return true;
 }
 
 bool ExportDataStep::Run(ea::string& message)

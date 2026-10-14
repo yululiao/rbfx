@@ -80,6 +80,12 @@
 					"Sound/kenney_impact-sounds"
 				]
 			},
+			"CoreDataExclude": [
+				"Models/TeaPot.mdl",
+				"Models/Torus.mdl",
+				"Models/PlaneTess.mdl",
+				"Models/Dome.mdl"
+			],
 			"TextureCompression": {
 				"ColorFormatAlpha": "ETC2_RGBA",
 				"ColorFormatNoAlpha": "ETC2_RGB",

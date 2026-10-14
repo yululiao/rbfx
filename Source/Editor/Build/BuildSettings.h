@@ -202,6 +202,11 @@ struct BuildPlatformData
     TextureCompressionSettings textureCompression_;
     /// Directory allowlist for the packaged Data/ and Cache outputs. Empty (default) ships everything.
     AssetFilterSettings assetFilter_;
+    /// Prefixes or globs carved out of the engine CoreData/ tree at staging time (same matching
+    /// rules as AssetFilter.Exclude: no wildcard = whole subtree, case-insensitive). Empty
+    /// (default) ships CoreData whole, the historical behavior; the project data filter cannot
+    /// reach CoreData because that tree is staged straight from engineData_.
+    ea::vector<ea::string> coreDataExclude_;
 
     void SerializeInBlock(Archive& archive);
 

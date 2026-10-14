@@ -221,6 +221,7 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "Douyin", douyin_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "TextureCompression", textureCompression_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "AssetFilter", assetFilter_, AlwaysSerialize{});
+    SerializeOptionalValue(archive, "CoreDataExclude", coreDataExclude_, ea::vector<ea::string>{});
 }
 
 ea::string BuildPlatformData::ResolveOutputDir(const ea::string& projectPath) const
