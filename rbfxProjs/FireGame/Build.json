@@ -78,6 +78,33 @@
 					"Sound/gun_shot",
 					"Sound/kenney_voiceover-pack-fighter",
 					"Sound/kenney_impact-sounds"
+				],
+				"Exclude": [
+					"Models/Quaternius_pirate-kit/**/*Duck.ani",
+					"Models/Quaternius_pirate-kit/**/*HitReact.ani",
+					"Models/Quaternius_pirate-kit/**/*Idle.ani",
+					"Models/Quaternius_pirate-kit/**/*Jump*.ani",
+					"Models/Quaternius_pirate-kit/**/*No.ani",
+					"Models/Quaternius_pirate-kit/**/*Punch.ani",
+					"Models/Quaternius_pirate-kit/**/*Walk.ani",
+					"Models/Quaternius_pirate-kit/**/*Wave.ani",
+					"Models/Quaternius_pirate-kit/**/*Yes.ani",
+					"Models/Characters-001/**/*Duck.ani",
+					"Models/Characters-001/**/*Jump*.ani",
+					"Models/Characters-001/**/*No.ani",
+					"Models/Characters-001/**/*Punch.ani",
+					"Models/Characters-001/**/*Slash.ani",
+					"Models/Characters-001/**/*Stab.ani",
+					"Models/Characters-001/**/*Wave.ani",
+					"Models/Characters-001/**/*Yes.ani",
+					"Models/Characters-001/**/*CharacterArmatureWalk.ani",
+					"Models/Characters-001/**/*CharacterArmatureWalk_Gun.ani",
+					"Models/Characters-001/**/*AnimalArmatureDeath.ani",
+					"Models/Characters-001/**/*AnimalArmatureEating.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_2.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_2_HeadLow.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_HitReact_Left.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_HitReact_Right.ani"
 				]
 			},
 			"CoreDataExclude": [
