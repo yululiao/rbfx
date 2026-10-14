@@ -457,7 +457,7 @@ macro(FetchContent_DeclareShallowGit Name GIT_REPOSITORY GitRepository GIT_TAG G
 endmacro()
 
 function(set_targets_emscripten_properties)
-    if (PLATFORM_EMSCRIPTEN)
+    if (PLATFORM_EMSCRIPTEN AND URHO3D_THREADING)
         foreach(_TARGET IN LISTS ARGN)
             get_target_property(_TARGET_TYPE ${_TARGET} TYPE)
             if (_TARGET_TYPE STREQUAL "STATIC_LIBRARY")

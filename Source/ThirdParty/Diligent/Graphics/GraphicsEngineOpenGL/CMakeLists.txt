@@ -272,7 +272,11 @@ elseif(PLATFORM_IOS)
     # Silence GLES deprecation warnings
     target_compile_definitions(Diligent-GraphicsEngineOpenGL-static PUBLIC GLES_SILENCE_DEPRECATION)
 elseif(PLATFORM_EMSCRIPTEN)
-    target_link_options(Diligent-GraphicsEngineOpenGL-static PUBLIC "SHELL: -s FULL_ES3=1 -s USE_PTHREADS=1")
+    if (URHO3D_THREADING)
+        target_link_options(Diligent-GraphicsEngineOpenGL-static PUBLIC "SHELL: -s FULL_ES3=1 -s USE_PTHREADS=1")
+    else ()
+        target_link_options(Diligent-GraphicsEngineOpenGL-static PUBLIC "SHELL: -s FULL_ES3=1")
+    endif()
 endif()
 
 if(PLATFORM_WIN32)

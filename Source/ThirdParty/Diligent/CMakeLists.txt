@@ -371,7 +371,7 @@ endif()
 
 add_library(Diligent-BuildSettings INTERFACE)
 
-if (PLATFORM_EMSCRIPTEN)
+if (PLATFORM_EMSCRIPTEN AND URHO3D_THREADING)
     target_compile_options(Diligent-BuildSettings INTERFACE
         "-pthread"
         "-mbulk-memory"

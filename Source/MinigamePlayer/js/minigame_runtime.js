@@ -79,6 +79,23 @@
         }
     }
 
+    // Host capability dump: one boot line with everything a post-mortem needs - system
+    // info (SDK/base library version, window vs screen size, pixel ratio) and the audio
+    // surface. Mirrored into the log file like everything else on console.
+    (function () {
+        if (!wx_tt)
+            return;
+        try {
+            var info = typeof wx_tt.getSystemInfoSync === "function" ? wx_tt.getSystemInfoSync() : null;
+            console.log("[rbfx] host info: " + (info ? JSON.stringify(info) : "(no getSystemInfoSync)"));
+            console.log("[rbfx] host audio: AudioContext=" + typeof globalThis.AudioContext +
+                " createWebAudioContext=" + typeof wx_tt.createWebAudioContext +
+                " createInnerAudioContext=" + typeof wx_tt.createInnerAudioContext);
+        } catch (error) {
+            console.warn("[rbfx] host info dump failed", error);
+        }
+    })();
+
     (function () {
         if (typeof globalThis.AudioContext !== "undefined" || !wx_tt)
             return;

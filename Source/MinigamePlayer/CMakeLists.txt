@@ -107,6 +107,35 @@ target_link_libraries (MinigamePlayer PRIVATE Urho3D RbfxLuaScript)
 minigame_link_options (MinigamePlayer)
 
 set_property (TARGET MinigamePlayer PROPERTY FOLDER "Applications")
+
+# The wasm VMs inside the vendor runtimes on real devices implement the MVP opcode set
+# (plus mutable-globals) only. Emscripten's prebuilt system libraries are compiled with
+# bulk-memory, sign-ext and nontrapping-float-to-int baked in, so the linked payload
+# always contains memory.copy / i32.extendN_s / i32.trunc_sat opcodes even though the
+# engine's own translation units compile clean. On device the module then dies at
+# instantiation with "API_ERROR: unknown opcode". Binaryen ships lowering passes that
+# rewrite exactly these three opcode families into their MVP equivalents; run them over
+# the final payload right after linking and strip the target-features section, so the
+# output validates with `wasm-opt -mvp`.
+find_program (MINIGAME_WASM_OPT NAMES wasm-opt
+    HINTS "${EMSCRIPTEN_ROOT_PATH}/../bin"
+    DOC "binaryen wasm-opt, used to lower non-MVP opcodes out of the minigame wasm payload")
+if (MINIGAME_WASM_OPT)
+    add_custom_command (TARGET MinigamePlayer POST_BUILD
+        COMMAND "${MINIGAME_WASM_OPT}"
+            "$<TARGET_FILE_DIR:MinigamePlayer>/MinigamePlayer.wasm"
+            --enable-bulk-memory-opt --enable-sign-ext --enable-nontrapping-float-to-int
+            --llvm-memory-copy-fill-lowering --signext-lowering --llvm-nontrapping-fptoint-lowering
+            --strip-target-features
+            -o "$<TARGET_FILE_DIR:MinigamePlayer>/MinigamePlayer.mvp.wasm"
+        COMMAND ${CMAKE_COMMAND} -E rename
+            "$<TARGET_FILE_DIR:MinigamePlayer>/MinigamePlayer.mvp.wasm"
+            "$<TARGET_FILE_DIR:MinigamePlayer>/MinigamePlayer.wasm"
+        COMMENT "Lowering bulk-memory/sign-ext/nontrapping opcodes to MVP for the vendor wasm VMs")
+else ()
+    message (WARNING "wasm-opt not found near the Emscripten toolchain; the minigame wasm payload will keep non-MVP opcodes and fail to instantiate on real devices")
+endif ()
+
 install (TARGETS MinigamePlayer
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})

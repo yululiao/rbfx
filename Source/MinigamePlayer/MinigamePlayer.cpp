@@ -64,6 +64,23 @@ namespace
 /// Startup scene used when Game.json is missing or does not specify one.
 const ea::string defaultStartupScene = "Scenes/Default.scene";
 
+#ifdef __EMSCRIPTEN__
+// The vendor runtime owns the screen and the canvas; the JavaScript bootstrap already
+// resolves the host window (logical pixels) through rbfx.env.get_screen_info().
+EM_JS(int, QueryHostWindowWidth, (), {
+    const env = globalThis.rbfx && globalThis.rbfx.env;
+    if (!env || typeof env.get_screen_info !== "function")
+        return 0;
+    return Math.max(0, Math.round(env.get_screen_info().width || 0));
+});
+EM_JS(int, QueryHostWindowHeight, (), {
+    const env = globalThis.rbfx && globalThis.rbfx.env;
+    if (!env || typeof env.get_screen_info !== "function")
+        return 0;
+    return Math.max(0, Math.round(env.get_screen_info().height || 0));
+});
+#endif
+
 /// Report bootstrap progress to the JavaScript loading manager (game.js/loading.js). The
 /// manager may be absent - a test harness can instantiate the module without the minigame
 /// bootstrap - so the call is a no-op then.
@@ -123,6 +140,18 @@ public:
             engineParameters_[EP_RESOURCE_PREFIX_PATHS] = prefixPath;
         engineParameters_[EP_HEADLESS] = false;
         engineParameters_[EP_SOUND] = true;
+#ifdef __EMSCRIPTEN__
+        // The SDL window must match the host screen: SDL resizes the canvas to the window
+        // size at creation, so leaving the engine default (1024x768) would stamp over the
+        // bootstrap's sizing and stretch every frame - HUD included - from landscape 4:3
+        // onto a portrait phone screen. The window is logical pixels; the runtime displays
+        // the canvas at its physical resolution, and touch coordinates arrive in the same
+        // logical space, so HUD layout and input stay in one coordinate system.
+        if (const int hostWidth = QueryHostWindowWidth())
+            engineParameters_[EP_WINDOW_WIDTH] = hostWidth;
+        if (const int hostHeight = QueryHostWindowHeight())
+            engineParameters_[EP_WINDOW_HEIGHT] = hostHeight;
+#endif
         // The runtime never shows window decorations; the value is kept for parity with the
         // other hosts so a shared config file behaves identically everywhere.
         engineParameters_[EP_BORDERLESS] = false;

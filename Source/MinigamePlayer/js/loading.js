@@ -217,6 +217,8 @@ class RbfxLoading {
         if (this.game_canvas.width !== width || this.game_canvas.height !== height) {
             this.game_canvas.width = width;
             this.game_canvas.height = height;
+            console.log("[rbfx] canvas sized to " + width + "x" + height +
+                " (window " + info.width + "x" + info.height + " @" + pixel_ratio + "x)");
         }
         this.loading_canvas.width = width;
         this.loading_canvas.height = height;
