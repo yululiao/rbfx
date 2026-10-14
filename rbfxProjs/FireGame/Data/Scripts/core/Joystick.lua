@@ -6,10 +6,9 @@
 -- 里，由 UI 编辑器维护；本模块只负责输入判定，帽的位置由 main.lua 每帧回写。
 --
 -- 坐标系约定
---   * 所有几何量用"画布像素"表达（与 GameHud.rml 里的 px 同一坐标系）。
---     RmlUi 的 px 不随 SetScale 缩放（SetDensityIndependentPixelRatio 只影响
---     dp 单位与媒体查询，见 RmlUi ComputeProperty.cpp 的 ComputeLength），
---     布局空间恒等于画布尺寸，不存在"设计空间/缩放系数"这一层。
+--   * 所有几何量用"画布像素"表达（= rml 里的 dp 基础值 × UI_SCALE；rml 全面采用
+--     dp 单位后，RmlUi SetScale 只负责把 dp 折成像素，本模块的量纲始终是折好的
+--     像素，缩放系数由 main.lua 统一注入，见其 STICK_BASE/ApplyUIScale）。
 --   * 触摸/鼠标坐标本来就是画布像素（原点在左上，y 向下），拿来即用。
 --   * 输出的 y_ 沿用屏幕语义（向上为负），由调用方决定怎么映射到世界轴。
 --
@@ -54,6 +53,16 @@ function Joystick:SetCenter(cx, cy)
     self.cy_ = cy
 end
 
+--- 行程/抓取半径重设（编辑器拖 GameView 改 UI_SCALE 后由 main 同步；真机缩放恒定不调）。
+---@param radius number 帽行程（画布像素）
+---@param grab number|nil 起手判定半径（画布像素）
+function Joystick:SetRadius(radius, grab)
+    self.radius_ = radius
+    if grab then
+        self.grab_ = grab
+    end
+end
+
 --- 判断采样点（画布像素）是否落在抓取范围内。
 ---@param dx number 画布像素 X
 ---@param dy number 画布像素 Y
@@ -74,8 +83,13 @@ function Joystick:Apply(ocx, ocy, dx, dy)
     local oy = (dy - ocy) / self.radius_
     local len = math.sqrt(ox * ox + oy * oy)
     if len > 1.0 then
-        ox = ox / len
-        oy = oy / len
+        -- 原点追手：拖出最大行程时原点向指针方向推进（vector 仍 clamp 满偏），
+        -- 帽始终贴在指针正下方——否则满偏后手指继续拖、帽原地不动，手感“不跟手”。
+        local nx, ny = ox / len, oy / len
+        local push = (len - 1.0) * self.radius_
+        self.acx_ = ocx + nx * push
+        self.acy_ = ocy + ny * push
+        ox, oy = nx, ny
         len = 1.0
     end
     if len < self.dead_ then

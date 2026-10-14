@@ -71,8 +71,9 @@ end
 ---@param scene Scene
 ---@param spot Vector3 主角脚底世界坐标（Coast.Build 返回的 playerSpot）
 ---@param playerBoat Node|nil 玩家专属船节点（载具），由 main.lua 从 Coast 传入
+---@param aspect number|nil 画布宽高比（宽/高）；竖屏端据此拉高机位/加大俯角与垂直视场（Config.CameraForAspect）
 ---@return Player
-function Player.Build(scene, spot, playerBoat)
+function Player.Build(scene, spot, playerBoat, aspect)
     local self = setmetatable({}, Player)
 
     -- 主角落地在沙滩上可走动（不再是塔上固定站位）；忽略传入的平台 spot，用配置的地面出生点
@@ -153,7 +154,10 @@ function Player.Build(scene, spot, playerBoat)
     if not camera then
         camera = cameraNode:CreateComponent("Camera")
     end
-    camera:SetFov(Config.CAMERA_FOV)
+    -- 相机参数按画布宽高比派生：竖屏端更高机位 + 更陡俯角 + 更大垂直 FOV（水平恒定），
+    -- 真机一眼看到整条海岸登陆带；桌面横屏 t=0 即历史观感（1024x768 时垂直 FOV≈42）。
+    local camFit = Config.CameraForAspect(aspect)
+    camera:SetFov(camFit.vfov)
     camera:SetFarClip(Config.CAMERA_FAR_CLIP)
     cameraNode:SetVar("noShoot", true)
     SetViewport(0, scene, camera)
@@ -178,7 +182,9 @@ function Player.Build(scene, spot, playerBoat)
     self.aimTwist_ = 0.0         -- 上半身当前扭转量（弧度，平滑值）
 
     self.aim = 0.0                              -- 度，正=右转（俯视角下固定 0，不再动态变化）
-    self.pitch = Config.CAMERA_PITCH            -- 度，相机俯角（俯视约 55）
+    self.pitch = camFit.pitch                   -- 度，相机俯角（竖屏端更陡，见 CameraForAspect）
+    self.camDistance_ = camFit.distance         -- 相机离关注点的距离（竖屏端更远/更高）
+    self.camLookAhead_ = camFit.lookAhead       -- 视线中心朝海前推量（竖屏端更大）
     self.kick = 0.0                             -- 开火相机微小震动（度），指数回落
     self.facing = Vector3(0.0, 0.0, -1.0)
     self.nodeYaw = 0.0                          -- 人物自身航向（弧度），朝目标转；相机不用它
@@ -532,15 +538,15 @@ end
 function Player:UpdateCamera()
     local pitchRad = math.rad(self.pitch + self.kick)
     local sinP, cosP = math.sin(pitchRad), math.cos(pitchRad)
-    local dist = Config.CAMERA_DISTANCE
+    local dist = self.camDistance_
 
     -- 相机在主角 +z 后方上方（俯视时屏幕上方=朝海 -z）
     local target = self.spot + Vector3(0.0, Config.CAMERA_TARGET_Y, 0.0)
     local camPos = target + Vector3(0.0, dist * sinP, dist * cosP)
 
     self.cameraNode:SetPosition(camPos)
-    -- 视线中心朝海(-z)前推 LOOK_AHEAD，看到更大范围战场而不是只盯脚下
-    local lookAt = target + Vector3(0.0, 0.0, -Config.CAMERA_LOOK_AHEAD)
+    -- 视线中心朝海(-z)前推 lookAhead，看到更大范围战场而不是只盯脚下
+    local lookAt = target + Vector3(0.0, 0.0, -self.camLookAhead_)
     self.cameraNode:LookAt(lookAt, Vector3.UP, TS.WORLD)
 
     -- 人物节点朝 nodeYaw（船上时人物是船的子节点，由船带动旋转，不单独设）。

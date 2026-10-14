@@ -38,8 +38,10 @@ local DEFAULT_PROFILE = { stop = 0.08, trauma = 0.35 }
 
 -- 飘字池大小：连环爆桶 + 双船同沉的峰值同屏约 6-8 条，10 个槽够轮
 local POP_POOL = 10
--- 飘字文档的固定尺寸（画布像素），与 ScorePop.rml 的 body 宽高一致
-local POP_W, POP_H = 200.0, 44.0
+-- 飘字文档的固定尺寸：ScorePop.rml 的 body 宽高是 dp 基础值，× UI_SCALE 才是画布像素，
+-- Build 时按当档缩放折算（编辑器拖 GameView 改缩放后不追更重算，真机缩放恒定）。
+local POP_BASE_W, POP_BASE_H = 200.0, 44.0
+local POP_W, POP_H = POP_BASE_W, POP_BASE_H
 
 --- 伪噪声：两个不可通约频率的正弦叠加，看不出周期但不需要随机数库。
 --- t 是相位（真实时间 × 频率），seed 给 x/y/roll 各自错开。
@@ -55,6 +57,9 @@ function Juice.Build(scene, deps)
     self.camera = deps.camera
     self.cameraNode = deps.cameraNode
     self.canvasSize = deps.canvasSize
+
+    POP_W = POP_BASE_W * (Config.UI_SCALE or 1.0)
+    POP_H = POP_BASE_H * (Config.UI_SCALE or 1.0)
 
     self.stopT = 0.0        -- hit-stop 剩余时长（真实秒）
     self.trauma = 0.0       -- 震屏强度 0..1

@@ -13,10 +13,11 @@
 
     约定：
       * head 同时 link rml.rcss / layout.rcss（拿到 .fullscreen 与默认字体）+ default.rcss（主题、progress 样式）。
-      * body class="fullscreen"，内部一律绝对定位，单位是画布像素（px 不随 SetScale 缩放）。
+      * body class="fullscreen"，内部一律绝对定位，单位用 dp（1dp = UI_SCALE 画布像素，
+        缩放系数由 main.lua 按画布短边算出并 rmlUi:SetScale，小屏等比缩小适配）。
       * 颜色统一 RRGGBBAA 八位十六进制，不用 rgba()（会被 atoi 截断，见 RCSS 配色坑）。
-      * 左下 #stick_ring 的几何（left40/bottom40/176x176）与 main.lua 的 STICK 常量、
-        core/Joystick 的抓取判定是同一套，改这里必须同步改那里。
+      * 左下 #stick_ring 的几何（left40/bottom40/224x224，dp 基础值）与 main.lua 的
+        STICK_BASE 常量、core/Joystick 的抓取判定是同一套，改这里必须同步改那里。
 -->
 <rml>
 <head>
@@ -24,9 +25,9 @@
     <link type="text/rcss" href="layout.rcss"/>
     <link type="text/rcss" href="default.rcss"/>
     <style>
-        .bar_track { position: relative; background-color: #00000066; border-radius: 6px; overflow: hidden; }
-        .label { color: #ffffffd9; font-size: 22px; }
-        .big { color: #ffffffff; font-size: 64px; font-weight: bold; }
+        .bar_track { position: relative; background-color: #00000066; border-radius: 6dp; overflow: hidden; }
+        .label { color: #ffffffd9; font-size: 22dp; }
+        .big { color: #ffffffff; font-size: 64dp; font-weight: bold; }
     </style>
 </head>
 <body class="fullscreen">
@@ -34,101 +35,61 @@
 
     <!-- 左上：波次 + 主角血 + 防线血 + 局内成长（等级/经验条）。两条血条靠标签区分（
          progress 填充色来自主题 default.rcss，不能内联改色，只能用文本标签辨别）。 -->
-    <div style="position: absolute; left: 28px; top: 24px; width: 300px;">
+    <div style="position: absolute; left: 28dp; top: 24dp; width: 300dp;">
         <div class="label">WAVE {{wave}}</div>
-        <div class="label" style="margin-top: 8px; font-size: 18px; color: #ff6b6bff;">HP</div>
-        <progress class="horizontal" data-value="playerHp" style="display: block; margin-top: 2px; width: 260px; height: 14px;"/>
-        <div class="label" style="margin-top: 8px; font-size: 18px; color: #ffffffb3;">防线</div>
-        <progress class="horizontal" data-value="defense" style="display: block; margin-top: 2px; width: 260px; height: 14px;"/>
-        <div class="label" style="margin-top: 10px; font-size: 24px; color: #ffd24dff;">LV {{level}}</div>
-        <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4px; width: 260px; height: 10px;"/>
-        <div class="label" style="margin-top: 6px; font-size: 18px; color: #ffffff99;">{{narrate}}</div>
+        <div class="label" style="margin-top: 8dp; font-size: 18dp; color: #ff6b6bff;">HP</div>
+        <progress class="horizontal" data-value="playerHp" style="display: block; margin-top: 2dp; width: 260dp; height: 14dp;"/>
+        <div class="label" style="margin-top: 8dp; font-size: 18dp; color: #ffffffb3;">防线</div>
+        <progress class="horizontal" data-value="defense" style="display: block; margin-top: 2dp; width: 260dp; height: 14dp;"/>
+        <div class="label" style="margin-top: 10dp; font-size: 24dp; color: #ffd24dff;">LV {{level}}</div>
+        <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4dp; width: 260dp; height: 10dp;"/>
+        <div class="label" style="margin-top: 6dp; font-size: 18dp; color: #ffffff99;">{{narrate}}</div>
     </div>
 
     <!-- 右上：分数 + combo -->
-    <div style="position: absolute; right: 28px; top: 24px; width: 220px; text-align: right;">
+    <div style="position: absolute; right: 28dp; top: 24dp; width: 220dp; text-align: right;">
         <div class="big">{{score}}</div>
-        <div class="label" style="font-size: 30px; color: #ffd24dff;">{{comboText}}</div>
+        <div class="label" style="font-size: 30dp; color: #ffd24dff;">{{comboText}}</div>
     </div>
 
     <!-- 准星已移除：改为王者式自动吸附开火（见 Shooting.lua），命中确认靠下面的 hitmarker。 -->
 
     <!-- 中央 hitmarker：普通命中(白) / 强命中(红)，靠 data-if 二选一显示（不支持内联 opacity 绑定） -->
     <div data-if="hitNormal" style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
-        <div style="position: absolute; left: -18px; top: -2px; width: 36px; height: 4px; background-color: #ffffffd9; transform: rotate(45deg);"></div>
-        <div style="position: absolute; left: -18px; top: -2px; width: 36px; height: 4px; background-color: #ffffffd9; transform: rotate(-45deg);"></div>
+        <div style="position: absolute; left: -18dp; top: -2dp; width: 36dp; height: 4dp; background-color: #ffffffd9; transform: rotate(45deg);"></div>
+        <div style="position: absolute; left: -18dp; top: -2dp; width: 36dp; height: 4dp; background-color: #ffffffd9; transform: rotate(-45deg);"></div>
     </div>
     <div data-if="hitStrong" style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
-        <div style="position: absolute; left: -20px; top: -3px; width: 40px; height: 6px; background-color: #ff4d4dff; transform: rotate(45deg);"></div>
-        <div style="position: absolute; left: -20px; top: -3px; width: 40px; height: 6px; background-color: #ff4d4dff; transform: rotate(-45deg);"></div>
+        <div style="position: absolute; left: -20dp; top: -3dp; width: 40dp; height: 6dp; background-color: #ff4d4dff; transform: rotate(45deg);"></div>
+        <div style="position: absolute; left: -20dp; top: -3dp; width: 40dp; height: 6dp; background-color: #ff4d4dff; transform: rotate(-45deg);"></div>
     </div>
 
     <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua -->
-    <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196px; bottom: 168px; width: 96px; height: 96px; border-radius: 48px; background-color: #2e8b8be6; text-align: center;">
-        <div style="position: relative; top: 32px; color: #ffffffff; font-size: 30px; font-weight: bold;">登船</div>
+    <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #2e8b8be6; text-align: center;">
+        <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">登船</div>
     </div>
-    <div data-if="showDisembark" data-event-click="disembark" style="position: absolute; right: 196px; bottom: 168px; width: 96px; height: 96px; border-radius: 48px; background-color: #8b6b2ee6; text-align: center;">
-        <div style="position: relative; top: 32px; color: #ffffffff; font-size: 30px; font-weight: bold;">下船</div>
+    <div data-if="showDisembark" data-event-click="disembark" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #8b6b2ee6; text-align: center;">
+        <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">下船</div>
     </div>
 
     <!-- 右下：弹药 + 装弹条 + 当前武器（弹丸数，随成长变化） -->
-    <div style="position: absolute; right: 40px; bottom: 64px; width: 200px; text-align: right;">
+    <div style="position: absolute; right: 40dp; bottom: 64dp; width: 200dp; text-align: right;">
         <div class="big">{{ammo}}</div>
-        <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6px; margin-left: 40px; width: 160px; height: 10px;"/>
-        <div class="label" style="margin-top: 6px; font-size: 20px; color: #9fe0ffd9;">{{weaponText}}</div>
-    </div>
-
-    <!-- 右中：自定义语音入口（data-if="voiceAvailable"，编辑器宿主无 SDK 时隐藏）。
-         放在摇杆与弹药之间右侧留白处，不挡操作。 -->
-    <div data-if="voiceAvailable" data-event-click="voiceOpen" style="position: absolute; right: 44px; bottom: 300px; width: 84px; height: 84px; border-radius: 42px; background-color: #6a4b9ee6; text-align: center;">
-        <div style="position: relative; top: 24px; color: #ffffffff; font-size: 26px; font-weight: bold;">配音</div>
-    </div>
-
-    <!-- 自定义语音面板（data-if="voicePanel"）：居中卡片。槽位两个（失败吐槽/连杀战吼），
-         录音中提示与状态行都是绑定文本；音色按钮文本随循环切换。 -->
-    <div data-if="voicePanel" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #00000080;">
-        <div style="position: absolute; left: 50%; top: 50%; width: 600px; height: 520px;">
-            <div style="position: absolute; left: -300px; top: -260px; width: 600px; height: 520px; background-color: #222831f2; border-radius: 20px;">
-                <div style="position: relative; margin-top: 36px; text-align: center; color: #ffffffff; font-size: 40px; font-weight: bold;">自定义语音</div>
-                <div style="position: relative; margin-top: 14px; text-align: center; color: #ffffffb3; font-size: 22px;">录一句话，防线被破/连杀时用你的声音播</div>
-
-                <div style="position: relative; margin-top: 36px; margin-left: 60px;">
-                    <div style="color: #ffffffd9; font-size: 26px;">失败吐槽（防线被破时播）</div>
-                    <button data-event-click="voiceRecordLose" style="margin-top: 10px; padding: 14px 36px; font-size: 26px; background-color: #d94b3aff; color: #ffffffff; border-radius: 10px;">录一句</button>
-                </div>
-
-                <div style="position: relative; margin-top: 30px; margin-left: 60px;">
-                    <div style="color: #ffffffd9; font-size: 26px;">连杀战吼（三杀及以上播）</div>
-                    <button data-event-click="voiceRecordKillstreak" style="margin-top: 10px; padding: 14px 36px; font-size: 26px; background-color: #d94b3aff; color: #ffffffff; border-radius: 10px;">录一句</button>
-                </div>
-
-                <div data-if="voiceRecording" style="position: relative; margin-top: 24px; margin-left: 60px; color: #ffd24dff; font-size: 26px;">录音中…（最多几秒，说完自动停）</div>
-
-                <div style="position: relative; margin-top: 28px; margin-left: 60px;">
-                    <button data-event-click="voiceFilter" style="padding: 14px 32px; font-size: 26px; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10px;">音色：{{voiceFilterName}}</button>
-                    <button data-event-click="voicePreview" style="margin-left: 20px; padding: 14px 32px; font-size: 26px; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10px;">试听</button>
-                </div>
-
-                <div style="position: relative; margin-top: 20px; margin-left: 60px; height: 34px; color: #ffffff99; font-size: 22px;">{{voiceStatus}}</div>
-
-                <div style="position: relative; margin-top: 8px; text-align: center;">
-                    <button data-event-click="voiceClose" style="padding: 14px 48px; font-size: 26px; background-color: #45586bcb; color: #ffffffff; border-radius: 10px;">完成</button>
-                </div>
-            </div>
-        </div>
+        <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6dp; margin-left: 40dp; width: 160dp; height: 10dp;"/>
+        <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">{{weaponText}}</div>
     </div>
 
     <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。
          会动的只有 Knob.rml 那颗帽（Lua 逐帧 SetPosition）。这里原先套过一个深色内圆，
          看起来像帽却永远不动，极易被误认为“帽不跟手”，已移除。 -->
-    <div id="stick_ring" style="position: absolute; left: 40px; bottom: 40px; width: 176px; height: 176px; border-radius: 88px; background-color: #ffffff2e;"></div>
+    <div id="stick_ring" style="position: absolute; left: 40dp; bottom: 40dp; width: 224dp; height: 224dp; border-radius: 112dp; background-color: #ffffff2e;"></div>
 
     <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
     <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center;">
-        <div style="position: relative; top: 320px;">
-            <div style="color: #ffffffff; font-size: 72px; font-weight: bold;">{{endTitle}}</div>
-            <div class="label" style="margin-top: 16px; font-size: 34px;">SCORE {{endScore}}</div>
-            <button data-event-click="restart" style="margin-top: 48px; padding: 18px 48px; font-size: 30px; background-color: #d94b3aff; color: #ffffffff; border-radius: 12px;">再来一局</button>
+        <div style="position: relative; top: 320dp;">
+            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
+            <div class="label" style="margin-top: 16dp; font-size: 34dp;">SCORE {{endScore}}</div>
+            <button data-event-click="restart" style="margin-top: 48dp; padding: 18dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
         </div>
     </div>
 

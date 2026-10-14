@@ -105,15 +105,70 @@ Config.PALISADE_POST = Vector3(0.26, 1.70, 0.26)
 
 ----------------------------------------------------------------------
 -- 相机（俯视角固定朝海，吊在主角正后上方；抖音小游戏刻意不需要玩家手动转视角）
+--
+-- 竖屏适配：水平视场角恒定（CAMERA_H_FOV）推出垂直 FOV，但竖屏被 VFOV_CAP 封顶；
+-- 距离/俯角/前视按 t 从桌面值插值到 PORTRAIT 端值。竖屏端值的规格（可复解）：
+--   * 人物在距屏幕底 1/5 屏高（中心下 0.3 屏高，占半屏 k=0.6）：
+--     k = tan(pitch - atan(dist·sinP/(dist·cosP+lookAhead))) / tan(vfov/2)
+--   * 人物占屏高 ≈11%（与桌面相当）：tan(1.8/dist) / (2·tan(vfov/2))
+--   * 视线中心(lookAt)落在人物前方 lookAhead 处 ≈ 登陆带，画面上 4/5 全给海岸。
+-- t=0 即桌面观感（1024x768 时垂直 FOV≈42，与改动前一致）。
 ----------------------------------------------------------------------
+Config.CAMERA_H_FOV = 54.0           -- 水平视场角（度），各端恒定
 Config.CAMERA_DISTANCE = 20.0
-Config.CAMERA_TARGET_Y = 1.45        -- 相机关注点相对主角脚底的高度
+Config.CAMERA_TARGET_Y = 2.85        -- 相机关注点相对主角脚底的高度
 Config.CAMERA_PITCH = 35.0           -- 俯角（度），斜后方朝海面倾斜俯视
 Config.CAMERA_LOOK_AHEAD = 6.0       -- 视线中心往海方向偏移，看到更大范围战场
-Config.CAMERA_FOV = 42.0
 Config.CAMERA_FAR_CLIP = 260.0
 Config.CAMERA_KICK = 0.3             -- 开火相机微小震动幅度
 Config.CAMERA_KICK_DECAY = 12.0
+-- 竖屏端值与插值区间：aspect<=PORTRAIT_ASPECT 取满竖屏值，>=LANDSCAPE_ASPECT 用桌面原值
+Config.CAMERA_PORTRAIT = { distance = 12.0, pitch = 30.0, lookAhead = 14.0 }
+Config.CAMERA_PORTRAIT_ASPECT = 0.55
+Config.CAMERA_LANDSCAPE_ASPECT = 1.3
+Config.CAMERA_VFOV_CAP = 70.0        -- 垂直 FOV 上限，竖屏构图旋钮：96° 全视野人物只剩 2.4% 屏高；
+                                     -- 70° 时人物 ≈11% 与桌面相当——横向覆盖收窄换主体清晰
+
+--- 按画布宽高比（宽/高）派生本端相机参数。
+---@param aspect number|nil 画布宽/高；nil 按桌面横屏
+---@return { vfov: number, distance: number, pitch: number, lookAhead: number }
+function Config.CameraForAspect(aspect)
+    aspect = (aspect and aspect > 0.0) and aspect or Config.CAMERA_LANDSCAPE_ASPECT
+    local t = (Config.CAMERA_LANDSCAPE_ASPECT - aspect)
+        / (Config.CAMERA_LANDSCAPE_ASPECT - Config.CAMERA_PORTRAIT_ASPECT)
+    t = math.min(math.max(t, 0.0), 1.0)
+    local function lerp(a, b) return a + (b - a) * t end
+    -- 水平恒定 ⇒ 垂直 FOV = 2·atan(tan(H/2)/aspect)
+    local vfov = 2.0 * math.deg(math.atan(math.tan(math.rad(Config.CAMERA_H_FOV * 0.5)) / aspect))
+    return {
+        vfov = math.min(vfov, Config.CAMERA_VFOV_CAP),
+        distance = lerp(Config.CAMERA_DISTANCE, Config.CAMERA_PORTRAIT.distance),
+        pitch = lerp(Config.CAMERA_PITCH, Config.CAMERA_PORTRAIT.pitch),
+        lookAhead = lerp(Config.CAMERA_LOOK_AHEAD, Config.CAMERA_PORTRAIT.lookAhead),
+    }
+end
+
+----------------------------------------------------------------------
+-- UI 缩放（dp 方案）：rml 里全部用 dp 单位，1 dp = UI_SCALE 画布像素，
+-- main.lua 启动时按画布短边算出并 rmlUi:SetScale 生效。基准短边 700px 时 1:1；
+-- 小屏按比例缩（下限保可读/可点），大屏不放大（桌面观感与历史一致）。
+-- 真机 393x852 → 393/700 ≈ 0.56。
+----------------------------------------------------------------------
+Config.UI_DESIGN_SHORT_SIDE = 700.0
+Config.UI_SCALE_MIN = 0.55
+Config.UI_SCALE = 1.0   -- 占位：main.lua 启动时写入，Juice/摇杆几何读它
+
+--- 按画布尺寸派生 UI 缩放系数。
+---@param canvasW number
+---@param canvasH number
+---@return number
+function Config.ComputeUIScale(canvasW, canvasH)
+    local shortSide = math.min(canvasW or 0.0, canvasH or 0.0)
+    if shortSide <= 0.0 then
+        return 1.0
+    end
+    return math.min(math.max(shortSide / Config.UI_DESIGN_SHORT_SIDE, Config.UI_SCALE_MIN), 1.0)
+end
 
 ----------------------------------------------------------------------
 -- 敌人

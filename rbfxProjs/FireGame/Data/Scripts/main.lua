@@ -22,23 +22,33 @@ local Enemy = require("game.Enemy")
 local Waves = require("game.Waves")
 local Shooting = require("game.Shooting")
 local Juice = require("game.Juice")
-local Voice = require("game.Voice")
 local Grow = require("game.Grow")
 local Dog = require("game.Dog")
 
 ----------------------------------------------------------------------
--- HUD 几何：摇杆环（与 GameHud.rml 的 #stick_ring 同一套常量，单位都是画布像素）
--- 注意：RmlUi 的 px 不随 SetScale 缩放（SetDensityIndependentPixelRatio 只影响
--- dp 单位与媒体查询，见 RmlUi ComputeProperty.cpp 的 ComputeLength），布局空间
--- 恒等于画布尺寸，所以不存在"设计分辨率/缩放系数"这一层，全部直接用画布像素。
+-- HUD 几何与 UI 缩放：rml 全部用 dp 单位（1dp = Config.UI_SCALE 画布像素），
+-- 本文件里凡与 rml 几何同步的量（摇杆环/帽/行程/抓取半径）= rml 的 dp 基础值
+-- × UI_SCALE。缩放系数按画布短边派生（Config.ComputeUIScale），启动时算一次
+-- 经 rmlUi:SetScale 生效；编辑器拖 GameView 改尺寸时帧循环里重算（真机恒定）。
 ----------------------------------------------------------------------
-local STICK = {
-    inset = 40.0,        -- GameHud.rml: #stick_ring 的 left / bottom
-    size = 176.0,        -- width / height（半径 88 = 行程 40 + 帽半宽 48，满偏时帽外缘恰贴环边）
-    travel = 40.0,       -- 帽行程
-    knobHalf = 48.0,     -- Knob.rml 是 96x96
+local STICK_BASE = {
+    inset = 40.0,        -- GameHud.rml: #stick_ring 的 left / bottom（dp）
+    size = 224.0,        -- width / height（dp；半径 112 = 行程 64 + 帽半宽 48，满偏时帽外缘恰贴环边）
+    travel = 64.0,       -- 帽行程（dp）：40dp 在真机只有 22px，轻碰即满偏没量程；64dp≈36px
+    knobHalf = 48.0,     -- Knob.rml 是 96x96（dp）
+    grab = 260.0,        -- 起手判定半径（dp）：浮动原点式，放宽到覆盖整块左下移动区，好按
 }
-STICK.cx = STICK.inset + STICK.size * 0.5
+-- 画布像素量（= 基础值 × UI_SCALE），ApplyUIScale 每次缩放变化重算
+local STICK = {}
+local function ApplyUIScale(scale)
+    Config.UI_SCALE = scale
+    STICK.inset = STICK_BASE.inset * scale
+    STICK.size = STICK_BASE.size * scale
+    STICK.travel = STICK_BASE.travel * scale
+    STICK.knobHalf = STICK_BASE.knobHalf * scale
+    STICK.grab = STICK_BASE.grab * scale
+    STICK.cx = STICK.inset + STICK.size * 0.5
+end
 
 -- 画布尺寸必须问 RmlUI 要：编辑器 GameView 里 RmlUi 的 context 是那块 backbuffer，
 -- 而 Graphics:GetWidth 是整个编辑器窗口（浏览器/抖音里两者相等，兜底分支才用窗口）。
@@ -77,10 +87,22 @@ if rmlUi and not rmlUi:LoadFont("Fonts/NotoSansSC-Regular.otf", true) then
 end
 
 ----------------------------------------------------------------------
+-- UI 缩放与画布量：必须在 HUD/Knob 文档打开与 Player/Juice 装配前完成
+-- （rml 的 dp 按 SetScale 折像素，相机垂直 FOV 按宽高比派生，两者都吃这对输入）。
+----------------------------------------------------------------------
+local canvasW, canvasH = CanvasSize()
+local uiScale = Config.ComputeUIScale(canvasW, canvasH)
+ApplyUIScale(uiScale)
+if rmlUi then
+    rmlUi:SetScale(uiScale)
+end
+local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
+
+----------------------------------------------------------------------
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, voice, knob, joystick, grow, dog
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog
 
 local function RestartGame()
     if enemy then
@@ -105,10 +127,6 @@ local function RestartGame()
     if juice then
         juice:Reset()
     end
-    -- 换局停掉上一局的语音回放（避免败局吐槽拖进新局）
-    if voice then
-        voice:Stop()
-    end
     if hud then
         hud:HideEnd()
     end
@@ -128,17 +146,6 @@ local function OnScore(result, unit, headshot, fromChain)
     -- 把新武器数值推回 shooting、并升级时播旁白/震屏，这里只管喂。
     if grow and result and result.killed then
         grow:AddKill(unit and unit.kind)
-    end
-    -- 连杀里程碑播玩家自录的战吼：combo 在 waves:AddKill 里已更新，读它即可（
-    -- 阈值表复用 COMBO_VOICE_AT，与系统旁白同刻触发，自录语音压在旁白后面）。没
-    -- 录过音时宿主回失败，Voice:Play 静默，不影响系统旁白。
-    if voice and result and result.killed and waves then
-        for _, threshold in ipairs(Config.COMBO_VOICE_AT) do
-            if waves.combo == threshold then
-                voice:Play(Config.VOICE_SLOT_KILLSTREAK)
-                break
-            end
-        end
     end
 end
 
@@ -176,10 +183,6 @@ end
 
 local function OnGameOver(outcome, score)
     print(string.format("FireGame MARK game over: %s score=%d", tostring(outcome), score or 0))
-    -- 败局播玩家的自录吐槽（没录过则静默）；胜利不播（胜利旁白已够）
-    if voice and outcome == "lose" then
-        voice:Play(Config.VOICE_SLOT_LOSE)
-    end
 end
 
 -- 载具交互（HUD 按钮回调）：登船/下船（player 在下方装配后才存在，这里是闭包运行时才解引用）
@@ -191,39 +194,8 @@ local function OnDisembark()
     if player then player:LeaveBoat() end
 end
 
--- 自定义语音面板的 HUD 回调（按钮事件 → Voice 编排）
-local function OnVoiceOpen()
-    if hud and voice then
-        hud:SetVoicePanel(true)
-    end
-end
-
-local function OnVoiceClose()
-    if hud then
-        hud:SetVoicePanel(false)
-    end
-end
-
-local function OnVoiceRecord(slot)
-    if voice then
-        voice:Record(slot)
-    end
-end
-
-local function OnVoicePreview()
-    if voice then
-        voice:Preview()
-    end
-end
-
-local function OnVoiceFilter()
-    if voice and hud then
-        hud:SetVoiceFilterName(voice:CycleFilter())
-    end
-end
-
 coast = Coast.Build(scene)
-player = Player.Build(scene, coast.playerSpot, coast.playerBoat)
+player = Player.Build(scene, coast.playerSpot, coast.playerBoat, canvasAspect)
 -- 打击感三件套：要主角的相机（飘字投影 + 震屏偏移的宿主）与画布尺寸
 juice = Juice.Build(scene, {
     camera = player.camera,
@@ -237,11 +209,6 @@ hud = Hud.Build(scene, {
     onRestart = RestartGame,
     onBoard = OnBoard,
     onDisembark = OnDisembark,
-    onVoiceOpen = OnVoiceOpen,
-    onVoiceClose = OnVoiceClose,
-    onVoiceRecord = OnVoiceRecord,
-    onVoicePreview = OnVoicePreview,
-    onVoiceFilter = OnVoiceFilter,
 })
 enemy = Enemy.Build({
     scene = scene, fx = fx, audio = audio, player = player,
@@ -254,11 +221,6 @@ dog = Dog.Build({ scene = scene, player = player, enemies = enemy, audio = audio
 enemy.dog = dog
 waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver,
     onWaveCleared = function() if dog then dog:GoRest() end end })
--- 自定义语音：要 hud（结果状态行）与 SDK 子系统；编辑器宿主无 SDK 时入口按钮隐藏
-voice = Voice.Build(scene, { hud = hud })
-if hud then
-    hud:SetVoiceAvailable(voice:IsAvailable())
-end
 shooting = Shooting.Build({
     scene = scene, player = player, fx = fx, audio = audio, hud = hud,
     enemies = enemy, onScore = OnScore,
@@ -288,15 +250,14 @@ grow = Grow.Build({
 knob = scene:CreateComponent("RmlUIComponent")
 knob:SetResource("UI/Knob.rml")
 
-local canvasW, canvasH = CanvasSize()
 local stickCx, stickCy = StickCenter(canvasH)
-joystick = Joystick:New({ cx = stickCx, cy = stickCy, radius = STICK.travel })
+joystick = Joystick:New({ cx = stickCx, cy = stickCy, radius = STICK.travel, grab = STICK.grab })
 
 local input = GetSubsystem("Input")
 local time = GetSubsystem("Time")
 
-print(string.format("FireGame MARK boot: canvas=%.0fx%.0f tower=(%.1f,%.1f,%.1f)",
-    canvasW, canvasH,
+print(string.format("FireGame MARK boot: canvas=%.0fx%.0f uiScale=%.2f aspect=%.2f tower=(%.1f,%.1f,%.1f)",
+    canvasW, canvasH, uiScale, canvasAspect or 0.0,
     Config.TOWER_POS.x, Config.TOWER_POS.y, Config.TOWER_POS.z))
 
 ----------------------------------------------------------------------
@@ -336,6 +297,18 @@ SubscribeToEvent("Update", function(data)
     -- 环底锚，画布高度可能随 GameView 拖拽变化，每帧重算环心
     local cw, ch = CanvasSize()
     if cw > 0 then
+        if cw ~= canvasW or ch ~= canvasH then
+            -- 尺寸变了（编辑器拖 GameView；真机恒定不进这分支）：重算 UI 缩放并同步。
+            -- 引擎只在 ApplyScreenMode 时按 dpiScale 重设 SetScale（Engine.cpp），
+            -- GameView 拖拽不走那条路，这里的重设不会被盖掉。
+            canvasW, canvasH = cw, ch
+            local scale = Config.ComputeUIScale(cw, ch)
+            ApplyUIScale(scale)
+            if rmlUi then
+                rmlUi:SetScale(scale)
+            end
+            joystick:SetRadius(STICK.travel, STICK.grab)
+        end
         joystick:SetCenter(StickCenter(ch))
     end
 
