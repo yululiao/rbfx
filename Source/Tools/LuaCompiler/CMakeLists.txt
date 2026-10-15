@@ -10,7 +10,7 @@
 
 return_if_not_tool(LuaCompiler)
 
-file (GLOB SOURCE_FILES *.cpp *.h)
+file (GLOB SOURCE_FILES CONFIGURE_DEPENDS *.cpp *.h)
 add_executable (LuaCompiler ${SOURCE_FILES})
 
 # The container format and the bytecode compiler both live in RbfxLuaScript, and the tool links

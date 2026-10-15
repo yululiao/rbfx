@@ -26,7 +26,7 @@ endif ()
 
 include (../ThirdParty/catch2/Catch.cmake)
 
-file (GLOB_RECURSE TEST_SOURCE_CODE RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" *.cpp *.h)
+file (GLOB_RECURSE TEST_SOURCE_CODE CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" *.cpp *.h)
 list (REMOVE_ITEM TEST_SOURCE_CODE MainDll.cpp MainExe.cpp)
 
 # Group source code in VS solution

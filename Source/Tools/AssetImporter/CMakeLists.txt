@@ -33,7 +33,7 @@ add_subdirectory (../../ThirdParty/ufbx ${CMAKE_CURRENT_BINARY_DIR}/../ThirdPart
 # Build meshoptimizer for offline mesh simplification (the -sq option)
 add_subdirectory (../../ThirdParty/meshoptimizer ${CMAKE_CURRENT_BINARY_DIR}/../ThirdParty/meshoptimizer)
 
-file (GLOB SOURCE_FILES *.cpp *.h)
+file (GLOB SOURCE_FILES CONFIGURE_DEPENDS *.cpp *.h)
 # AssetImporter is built as a dynamic library so the Editor can import FBX in-process.
 # Public C API is defined in AssetImporterLibrary.h (ASSETIMPORTER_API export macro).
 add_library (AssetImporter SHARED ${SOURCE_FILES})

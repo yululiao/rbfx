@@ -5,7 +5,7 @@
 
 project(RbfxLuaScript C CXX)
 
-file(GLOB SOURCE_FILES *.cpp *.h)
+file(GLOB SOURCE_FILES CONFIGURE_DEPENDS *.cpp *.h)
 
 # Static on every platform: the web target has no dynamic libraries in the plain sense, and a
 # single static form removes the Lua-version pairing constraint between the engine and its

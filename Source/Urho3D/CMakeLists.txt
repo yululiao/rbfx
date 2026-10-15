@@ -30,8 +30,13 @@ macro (define_engine_source_files)
         set (_action GLOB_RECURSE)
     endif ()
     foreach (path ${DEFINE_SRC_FILES_UNPARSED_ARGUMENTS})
+        # CONFIGURE_DEPENDS makes the globbed list part of the build system dependencies, so adding
+        # or removing an engine source file re-runs the configure during the next plain build. Without
+        # it a stale tree silently keeps the old file list: a new class then links as an undefined
+        # symbol in every target that references it (bindings, host, tools) even though it builds fine
+        # in a tree that was reconfigured after the file was added.
         # Get header files
-        file (${_action} _files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${path}/*.h ${path}/*.hpp ${path}/*.inl)
+        file (${_action} _files CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${path}/*.h ${path}/*.hpp ${path}/*.inl)
         list (REMOVE_ITEM _files Urho3D.h)
         list (APPEND HEADER_FILES ${_files})
         # Install them (preserve subdirectory structure)
@@ -44,7 +49,7 @@ macro (define_engine_source_files)
             endif ()
         endforeach ()
         # Get source files
-        file (${_action} _files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${path}/*.cpp)
+        file (${_action} _files CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${path}/*.cpp)
         list (APPEND SOURCE_FILES ${_files})
     endforeach ()
 endmacro()
