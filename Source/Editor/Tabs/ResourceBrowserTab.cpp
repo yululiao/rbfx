@@ -26,6 +26,7 @@
 #include "../Project/AssetManager.h"
 
 #include <Urho3D/Graphics/Animation.h>
+#include <Urho3D/Graphics/BoneMatrixBaker.h>
 #include <Urho3D/Graphics/Model.h>
 #include <Urho3D/Graphics/VATBaker.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -430,6 +431,7 @@ void ResourceBrowserTab::RenderDialogs()
     RenderRenameDialog();
     RenderDeleteDialog();
     RenderCreateDialog();
+    RenderBoneBakeDialog();
 }
 
 void ResourceBrowserTab::RenderDirectoryTree(const FileSystemEntry& entry, const ea::string& displayedName)
@@ -552,6 +554,9 @@ void ResourceBrowserTab::RenderEntryContextMenuItems(const FileSystemEntry& entr
     {
         if (ui::MenuItem("Bake Vertex Animation..."))
             BakeVertexAnimationForEntry(GetProject()->GetContext(), entry.resourceName_, entry.absolutePath_);
+
+        if (ui::MenuItem("Bake Bone Animation Textures..."))
+            BeginBoneBakeDialog(entry);
     }
 
     ui::Separator();
@@ -968,6 +973,162 @@ void ResourceBrowserTab::RenderDeleteDialog()
     ui::SameLine();
 
     if (ui::Button(ICON_FA_BAN " Cancel") || ui::IsKeyPressed(KEY_ESCAPE))
+        ui::CloseCurrentPopup();
+
+    ui::EndPopup();
+}
+
+void ResourceBrowserTab::BeginBoneBakeDialog(const FileSystemEntry& entry)
+{
+    boneBake_ = BoneBakeDialog{};
+    boneBake_.resourceName_ = entry.resourceName_;
+    boneBake_.absolutePath_ = entry.absolutePath_;
+    boneBake_.openPending_ = true;
+
+    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    if (!cache)
+        return;
+
+    const ea::string extension = GetExtension(entry.resourceName_);
+    if (extension == ".mdl")
+    {
+        // Cooked model asset: clips live next to it.
+        boneBake_.modelResourceName_ = entry.resourceName_;
+    }
+    else
+    {
+        // Source model asset: the cooked model lives in the satellite import directory.
+        const ea::string baseName = ReplaceExtension(GetFileNameAndExtension(entry.resourceName_), "");
+        boneBake_.modelResourceName_ = Format("{}{}/Models/{}.mdl", entry.resourceName_, satelliteDirectoryExtension,
+            baseName);
+    }
+
+    // Animation clips always live next to the cooked model (both for source and cooked assets).
+    // ScanDir returns bare file names, so prepend the directory to get loadable resource names.
+    const ea::string animDirectory = GetParentPath(boneBake_.modelResourceName_);
+    ea::vector<ea::string> clipFileNames;
+    cache->Scan(clipFileNames, animDirectory, "*.ani", SCAN_FILES);
+    boneBake_.animationNames_.reserve(clipFileNames.size());
+    for (const ea::string& clipFileName : clipFileNames)
+        boneBake_.animationNames_.push_back(animDirectory + "/" + clipFileName);
+
+    // Default to all clips checked; the operator unchecks the ones not used by the game.
+    boneBake_.selected_.assign(boneBake_.animationNames_.size(), true);
+}
+
+void ResourceBrowserTab::BakeBoneMatrices()
+{
+    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    Model* model = cache ? cache->GetResource<Model>(boneBake_.modelResourceName_) : nullptr;
+    if (!model)
+    {
+        URHO3D_LOGERROR("Bake Bone Animation Textures: could not load model '{}'"
+            " (import the source asset first)", boneBake_.modelResourceName_);
+        return;
+    }
+
+    ea::vector<Animation*> animations;
+    for (unsigned i = 0; i < boneBake_.animationNames_.size(); ++i)
+    {
+        if (!boneBake_.selected_[i])
+            continue;
+        if (Animation* animation = cache->GetResource<Animation>(boneBake_.animationNames_[i]))
+            animations.push_back(animation);
+        else
+            URHO3D_LOGERROR("Bake Bone Animation Textures: failed to load clip '{}'", boneBake_.animationNames_[i]);
+    }
+    if (animations.empty())
+    {
+        URHO3D_LOGERROR("Bake Bone Animation Textures: no clips were selected or loaded");
+        return;
+    }
+
+    BoneMatrixBaker baker(GetProject()->GetContext());
+    if (!baker.Bake(model, animations, boneBake_.fps_))
+    {
+        URHO3D_LOGERROR("Bake Bone Animation Textures failed: {}", baker.GetLastError());
+        return;
+    }
+
+    const ea::string outputPath = ReplaceExtension(boneBake_.absolutePath_, ".bonetex");
+    ea::string error;
+    if (!baker.Save(outputPath, error))
+    {
+        URHO3D_LOGERROR("Bake Bone Animation Textures save failed: {}", error);
+        return;
+    }
+
+    URHO3D_LOGINFO("Bake Bone Animation Textures: baked {} clip(s), {} bone(s), atlas {}x{} -> '{}'",
+        baker.GetClips().size(), baker.GetNumBones(), baker.GetWidth(), baker.GetFrames(), outputPath);
+}
+
+void ResourceBrowserTab::RenderBoneBakeDialog()
+{
+    if (boneBake_.openPending_)
+    {
+        // The OpenPopup id and the BeginPopupModal id below must match exactly (ImGui derives the popup
+        // id from the label string); a mismatch makes BeginPopupModal never find the opened popup.
+        ui::OpenPopup("Bake Bone Animation Textures");
+        boneBake_.openPending_ = false;
+    }
+
+    if (boneBake_.resourceName_.empty() || !ui::BeginPopupModal("Bake Bone Animation Textures", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+
+    ui::Text("%s", boneBake_.resourceName_.c_str());
+    ui::Separator();
+
+    if (boneBake_.animationNames_.empty())
+    {
+        ui::TextWrapped("No animation clips found. Import the source asset first, then try again.");
+    }
+    else
+    {
+        ui::TextWrapped("Select the clips to bake:");
+        ui::BeginChild("boneBakeClips", ImVec2(0.0f, 220.0f));
+        for (unsigned i = 0; i < boneBake_.animationNames_.size(); ++i)
+        {
+            ea::string clipName = GetFileNameAndExtension(boneBake_.animationNames_[i]);
+            if (clipName.ends_with(".ani"))
+                clipName.resize(clipName.size() - 4);
+
+            const IdScopeGuard guard(i);
+            ui::Checkbox(clipName.c_str(), &boneBake_.selected_[i]);
+        }
+        ui::EndChild();
+
+        if (ui::Button("All"))
+        {
+            for (bool& selected : boneBake_.selected_)
+                selected = true;
+        }
+        ui::SameLine();
+        if (ui::Button("None"))
+        {
+            for (bool& selected : boneBake_.selected_)
+                selected = false;
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(120.0f);
+        ui::InputFloat("FPS", &boneBake_.fps_, 0.0f, 0.0f, "%.0f");
+
+        ui::TextWrapped("Output: '%s' next to the source asset.",
+            ReplaceExtension(GetFileNameAndExtension(boneBake_.resourceName_), ".bonetex").c_str());
+    }
+
+    bool anySelected = false;
+    for (bool selected : boneBake_.selected_)
+        anySelected = anySelected || selected;
+
+    ui::BeginDisabled(!anySelected);
+    if (ui::Button(ICON_FA_PLAY " Bake"))
+    {
+        BakeBoneMatrices();
+        ui::CloseCurrentPopup();
+    }
+    ui::EndDisabled();
+    ui::SameLine();
+    if (ui::Button(ICON_FA_BAN " Cancel"))
         ui::CloseCurrentPopup();
 
     ui::EndPopup();

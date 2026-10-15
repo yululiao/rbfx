@@ -90,6 +90,31 @@ mat4 GetModelMatrix()
 
     const vec4 col4 = vec4(0.0, 0.0, 0.0, 1.0);
     return mat4(col1, col2, col3, col4);
+#elif defined(URHO3D_GEOMETRY_BONE)
+    // Bone-matrix texture skinning (GPU Gems 3 ch.2): the same linear blend of per-bone mat3x4 rows as
+    // the SKINNED path above, but each bone row is fetched from the atlas instead of the cSkinMatrices
+    // uniform array. BoneMatrixBaker stores Matrix3x4::Data() (12 row-major floats) per bone as 3
+    // consecutive RGBA32F texels, so texel (bone * 3 + k) is row k of that bone's matrix - identical to
+    // cSkinMatrices[bone * 3 + k]. The baked matrices are object space (model node at identity), so the
+    // per-instance world transform (cModel) is folded in afterwards.
+    highp float frameRow = cBoneAnimParams.x;
+    ivec4 idx = ivec4(iBlendIndices) * 3;
+    highp vec2 atlasSize = textureSize(sBoneMatrices, 0);
+    highp float invW = 1.0 / atlasSize.x;
+    highp float v = (frameRow + 0.5) / atlasSize.y;
+
+    #define GetBoneMatrixRow(k) (( \
+        texture(sBoneMatrices, vec2((float(idx.x + k) + 0.5) * invW, v)) * iBlendWeights.x + \
+        texture(sBoneMatrices, vec2((float(idx.y + k) + 0.5) * invW, v)) * iBlendWeights.y + \
+        texture(sBoneMatrices, vec2((float(idx.z + k) + 0.5) * invW, v)) * iBlendWeights.z + \
+        texture(sBoneMatrices, vec2((float(idx.w + k) + 0.5) * invW, v)) * iBlendWeights.w))
+    vec4 col1 = GetBoneMatrixRow(0);
+    vec4 col2 = GetBoneMatrixRow(1);
+    vec4 col3 = GetBoneMatrixRow(2);
+    #undef GetBoneMatrixRow
+
+    const vec4 col4 = vec4(0.0, 0.0, 0.0, 1.0);
+    return mat4(col1, col2, col3, col4) * cModel;
 #else
     return cModel;
 #endif
@@ -137,7 +162,7 @@ mat4 GetModelMatrix()
 ///   iPos.xyz: Trail position in model space
 ///   iTangent.xyz: Trail previous position in model space
 ///   iTangent.w: Trail width
-#if defined(URHO3D_GEOMETRY_STATIC) || defined(URHO3D_GEOMETRY_SKINNED)
+#if defined(URHO3D_GEOMETRY_STATIC) || defined(URHO3D_GEOMETRY_SKINNED) || defined(URHO3D_GEOMETRY_BONE)
     VertexTransform GetVertexTransform()
     {
         mat4 modelMatrix = GetModelMatrix();

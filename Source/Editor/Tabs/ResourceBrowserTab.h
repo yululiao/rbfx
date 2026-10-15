@@ -147,6 +147,12 @@ private:
     void RenderRenameDialog();
     void RenderDeleteDialog();
     void RenderCreateDialog();
+    void RenderBoneBakeDialog();
+
+    /// Populate the bone-bake dialog from the entry: resolve the cooked model and scan its animation clips.
+    void BeginBoneBakeDialog(const FileSystemEntry& entry);
+    /// Run the bake for the clips selected in the bone-bake dialog and save the atlas beside the asset.
+    void BakeBoneMatrices();
     /// @}
 
     /// Drag&drop handling
@@ -268,6 +274,17 @@ private:
         SharedPtr<ResourceFactory> factory_;
         bool openPending_{};
     } create_;
+
+    struct BoneBakeDialog
+    {
+        ea::string resourceName_;       // source asset (fbx/mdl) resource name
+        ea::string absolutePath_;       // source asset path on disk
+        ea::string modelResourceName_;  // cooked model to sample the skeleton from
+        ea::vector<ea::string> animationNames_;  // candidate clips, resource names
+        ea::vector<bool> selected_;
+        float fps_{30.0f};
+        bool openPending_{};
+    } boneBake_;
     /// @}
 
     struct TempEntry

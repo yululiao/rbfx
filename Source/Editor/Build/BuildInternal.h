@@ -46,10 +46,11 @@ inline bool IsTextureSourceFile(const ea::string& name)
 
 /// Sources that exist in Data/ purely as cooking inputs. The importer reads them from the project
 /// tree and the runtime resolves the products it wrote (a source .fbx arrived as the .mdl staged
-/// beside it), so the staging step leaves these behind instead of spending package size on them.
+/// beside it, and the import settings of "<name>.fbx.fbxmeta" were consumed at import time), so
+/// the staging step leaves these behind instead of spending package size on them.
 inline bool IsCookingSourceFile(const ea::string& name)
 {
-    return ExtensionIs(name, "fbx");
+    return ExtensionIs(name, "fbx") || ExtensionIs(name, "fbxmeta");
 }
 
 } // namespace Urho3D

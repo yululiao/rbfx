@@ -27,10 +27,12 @@
 #include "../Graphics/AnimatedModel.h"
 #include "../Graphics/Animation.h"
 #include "../Graphics/AnimationController.h"
+#include "../Graphics/BoneMatrixBaker.h"
 #include "../Graphics/Camera.h"
 #include "../Graphics/CameraOperator.h"
 #include "../Graphics/Geometry.h"
 #include "../Graphics/CustomGeometry.h"
+#include "../Graphics/InstancedBoneModel.h"
 #include "../Graphics/InstancedVATModel.h"
 #include "../Graphics/VATBaker.h"
 #include "../Graphics/DebugRenderer.h"
@@ -708,7 +710,9 @@ void RegisterGraphicsLibrary(Context* context)
     StaticModel::RegisterObject(context);
     StaticModelGroup::RegisterObject(context);
     InstancedVATModel::RegisterObject(context);
+    InstancedBoneModel::RegisterObject(context);
     VATBaker::RegisterObject(context);
+    BoneMatrixBaker::RegisterObject(context);
     Skybox::RegisterObject(context);
     AnimatedModel::RegisterObject(context);
     AnimationController::RegisterObject(context);

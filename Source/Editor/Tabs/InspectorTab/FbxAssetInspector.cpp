@@ -62,14 +62,49 @@ void FbxAssetInspector::OnProjectRequest(ProjectRequest* request)
     {
         fbxFileName_ = fileName;
         fbxResourceName_ = resourceName;
+        fbxSettings_ = FbxImportSettings{};
+        LoadFbxImportSettings(project_->GetContext(), fileName, *fbxSettings_);
         OnActivated(this);
     });
 }
 
+void FbxAssetInspector::SaveSettings()
+{
+    if (!fbxFileName_ || !fbxSettings_)
+        return;
+    if (SaveFbxImportSettings(project_->GetContext(), *fbxFileName_, *fbxSettings_))
+        project_->GetAssetManager()->MarkCacheDirty(*fbxResourceName_);
+}
+
 void FbxAssetInspector::RenderContent()
 {
-    if (!fbxFileName_)
+    if (!fbxFileName_ || !fbxSettings_)
         return;
+
+    // Per-asset import settings, persisted as "<fbx>.fbxmeta" next to the source file and
+    // consumed by the import pipeline on every (re)import. Any change saves the file and
+    // reimports, so the cached model always matches the panel state.
+    if (ui::Checkbox("Simplify Mesh", &fbxSettings_->simplify_))
+        SaveSettings();
+    if (ui::IsItemHovered())
+    {
+        ui::SetTooltip("Reduce the imported model to a fraction of its triangles with\n"
+            "meshopt_simplify. Vertex attributes (UV, skinning weights) follow the\n"
+            "surviving vertices. Stored as \"<name>.fbx.fbxmeta\" next to the FBX.");
+    }
+
+    if (fbxSettings_->simplify_)
+    {
+        ui::SetNextItemWidth(120.0f);
+        ui::SliderFloat("Ratio", &fbxSettings_->simplifyRatio_, 0.05f, 0.95f, "%.2f");
+        // Apply on release, not on every frame of the drag. The deactivated query must be made
+        // unconditionally: on the release frame SliderFloat may return false (the value settled
+        // on the previous frame), so nesting the query inside its return value loses the save.
+        if (ui::IsItemDeactivatedAfterEdit())
+            SaveSettings();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Target fraction of triangles to keep.");
+    }
 
     if (ui::Button(ICON_FA_FILE_IMPORT " Import FBX"))
         project_->GetAssetManager()->MarkCacheDirty(*fbxResourceName_);

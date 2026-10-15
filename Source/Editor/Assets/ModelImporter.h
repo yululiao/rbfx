@@ -24,6 +24,8 @@
 
 #include "../Project/Project.h"
 
+#include "../Assets/FbxImportSettings.h"
+
 #include <Urho3D/Utility/AssetTransformer.h>
 #include <Urho3D/Utility/GLTFImporter.h>
 
@@ -106,8 +108,10 @@ private:
 
     /// Import an FBX file with the embedded ufbx backend, writing the produced Model into
     /// the temporary output folder. The base pipeline then copies it to the cache and registers it.
-    /// Honors the per-asset import parameters (currently the scale) just like the glTF path does.
-    bool ImportFBXEmbedded(const AssetTransformerInput& input, const TransformerParams& params);
+    /// Honors the per-asset import parameters (the scale from the transformer sidecar and the
+    /// simplification settings from "<asset>.fbxmeta") just like the glTF path does.
+    bool ImportFBXEmbedded(const AssetTransformerInput& input, const TransformerParams& params,
+        const FbxImportSettings& fbxSettings);
 
     ea::string GetParametersFileName(const ea::string& fileName) const;
     bool LoadParameters(TransformerParams& params, const ea::string& paramsFileName) const;

@@ -281,6 +281,21 @@ UNIFORM_BUFFER_END(4, Material)
                 #define cVatAnimParams iTexCoord7
             #endif
         #endif
+
+        #ifdef URHO3D_GEOMETRY_BONE
+            // Per-instance bone-matrix atlas params (the same trailing instancing texcoord slot as VAT):
+            // x = absolute atlas frame row for this instance (clips are stacked row-wise in the atlas).
+            #ifdef URHO3D_AMBIENT_DIRECTIONAL
+                VERTEX_INPUT(vec4 iTexCoord14)
+                #define cBoneAnimParams iTexCoord14
+            #elif defined(URHO3D_AMBIENT_FLAT)
+                VERTEX_INPUT(vec4 iTexCoord8)
+                #define cBoneAnimParams iTexCoord8
+            #else
+                VERTEX_INPUT(vec4 iTexCoord7)
+                #define cBoneAnimParams iTexCoord7
+            #endif
+        #endif
     #else
         UNIFORM_BUFFER_BEGIN(5, Object)
             UNIFORM_HIGHP(mat4 cModel)
@@ -313,6 +328,13 @@ UNIFORM_BUFFER_END(4, Material)
         // material textures "VatPosition" / "VatNormal" (VS-only samplers, distinct slots).
         SAMPLER(11, sampler2D sVatPosition)
         SAMPLER(12, sampler2D sVatNormal)
+    #endif
+
+    #ifdef URHO3D_GEOMETRY_BONE
+        // Bone-matrix atlas: one RGBA32F texel holds one row of a bone's mat3x4; width = numBones * 3,
+        // height = total baked frame rows across all clips. Bound from the material texture "BoneMatrices"
+        // (VS-only sampler, slot distinct from VAT).
+        SAMPLER(13, sampler2D sBoneMatrices)
     #endif
 #endif // URHO3D_VERTEX_SHADER
 

@@ -30,6 +30,9 @@ endif ()
 # Build ufbx as the static dependency library of the tool (the only FBX backend)
 add_subdirectory (../../ThirdParty/ufbx ${CMAKE_CURRENT_BINARY_DIR}/../ThirdParty/ufbx)
 
+# Build meshoptimizer for offline mesh simplification (the -sq option)
+add_subdirectory (../../ThirdParty/meshoptimizer ${CMAKE_CURRENT_BINARY_DIR}/../ThirdParty/meshoptimizer)
+
 file (GLOB SOURCE_FILES *.cpp *.h)
 # AssetImporter is built as a dynamic library so the Editor can import FBX in-process.
 # Public C API is defined in AssetImporterLibrary.h (ASSETIMPORTER_API export macro).
@@ -38,7 +41,7 @@ target_compile_definitions (AssetImporter PRIVATE ASSETIMPORTER_LIBRARY_BUILD)
 target_include_directories (AssetImporter SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ThirdParty/ufbx
 )
-target_link_libraries (AssetImporter Urho3D ufbx)
+target_link_libraries (AssetImporter Urho3D ufbx meshoptimizer)
 # Install next to the Editor executable. Not part of the SDK export set
 # because the third-party dependency (ufbx) is not exported.
 install (TARGETS AssetImporter
