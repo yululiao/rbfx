@@ -56,8 +56,8 @@
 
     <!-- 性能 Overlay（调试）：靠 data-if="showPerf" 整体显隐，文本由 Lua 拼好喂 perfText。
          pointer-events:none 确保不吃点击。上线关（Config.PERF_OVERLAY=false）时根本不渲染。
-         top 用 64dp 下移避开手机刘海（居中这行正落在中置缺口区，16dp 会被挡）；真机仍挡就再调大。 -->
-    <div data-if="showPerf" style="position: absolute; left: 50%; top: 64dp; transform: translateX(-50%); pointer-events: none;">
+         top 用 120dp 大幅下移避开手机刘海（居中这行正落在中置缺口区，64dp 仍被挡）；真机还挡就继续调大。 -->
+    <div data-if="showPerf" style="position: absolute; left: 50%; top: 120dp; transform: translateX(-50%); pointer-events: none;">
         <div style="color: #7CFC00ff; font-size: 20dp; font-weight: bold;">{{perfText}}</div>
     </div>
 
