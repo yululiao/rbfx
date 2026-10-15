@@ -1,0 +1,23 @@
+<!--
+    Quaternius pirate-kit 的共用图集材质。
+
+    这个包里 71 个 fbx 共用一张 9KB 的调色板图集（Atlas_Pirate.png），而资产导入走
+    -nm -nt（不产材质、不产贴图引用），所以模型进 rbfx 后没有材质可用，这里手写一份。
+
+    走 PBR（LitOpaque + PBR defines）而不是老的 Techniques/Diff.xml：本工程场景用的
+    DefaultWhite/DefaultGrey 都是 PBR，渲染管线带曝光与色调映射后处理，混一个非 PBR
+    材质进去会和周围光照脱节（偏平、偏亮）。结构照 CoreData 的 PBRMushroom.xml。
+
+    Roughness 拉到 0.9：这批资产是手绘调色板，本来就没有高光，低了会塑料感。
+    Metallic 必须为 0，拉高会杀掉漫反射让模型发暗（Kenney 图集踩过这个坑）。
+    UV 的 V 朝向已由 FbxImporter 在导入期翻转，材质侧不需要 VOffset 补偿。
+-->
+<material>
+    <technique name="Techniques/LitOpaque.xml" />
+    <shader vsdefines="PBR" psdefines="PBR" />
+    <texture slot="Albedo" name="Models/Quaternius_pirate-kit/Atlas_Pirate.png" />
+    <parameter name="MatDiffColor" value="1 1 1 1" />
+    <parameter name="MatSpecColor" value="1 1 1 1" />
+    <parameter name="Roughness" value="0.9" />
+    <parameter name="Metallic" value="0" />
+</material>

@@ -798,6 +798,7 @@ private:
 
         const unsigned numBatchInstances = pipelineBatch.geometryType_ == GEOM_STATIC
             || pipelineBatch.geometryType_ == GEOM_INSTANCED_VAT
+            || pipelineBatch.geometryType_ == GEOM_INSTANCED_BONE
             ? sourceBatch.numWorldTransforms_ : 1u;
 
         const bool resetInstancingGroup = instancingGroup_.count_ == 0 || dirty_.IsAnythingDirty();

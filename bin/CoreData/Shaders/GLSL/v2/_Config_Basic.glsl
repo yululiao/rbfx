@@ -215,6 +215,14 @@ half RoughnessToSpecularPower(half roughness) { return (1.0 - roughness) * 255.0
         #endif
     #endif
 
+    /// Bone-matrix-texture instancing reuses the same per-vertex blend attributes as skinning, but
+    /// samples the bone matrices from a texture instead of the cSkinMatrices uniform array.
+    #if defined(URHO3D_GEOMETRY_BONE)
+        #ifndef URHO3D_VERTEX_HAS_BONE_WEIGHTS_AND_INDICES
+            #define URHO3D_VERTEX_HAS_BONE_WEIGHTS_AND_INDICES
+        #endif
+    #endif
+
     #if defined(URHO3D_GEOMETRY_BILLBOARD) || defined(URHO3D_GEOMETRY_DIRBILLBOARD)
         #ifndef URHO3D_VERTEX_HAS_TEXCOORD1
             #define URHO3D_VERTEX_HAS_TEXCOORD1

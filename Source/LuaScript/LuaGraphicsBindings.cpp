@@ -33,7 +33,9 @@
 #include "../Urho3D/Graphics/StaticModel.h"
 #include "../Urho3D/Graphics/StaticModelGroup.h"
 #include "../Urho3D/Graphics/InstancedVATModel.h"
+#include "../Urho3D/Graphics/InstancedBoneModel.h"
 #include "../Urho3D/Graphics/VATBaker.h"
+#include "../Urho3D/Graphics/BoneMatrixBaker.h"
 #include "../Urho3D/Graphics/RibbonTrail.h"
 #include "../Urho3D/Graphics/Technique.h"
 #include "../Urho3D/Graphics/Terrain.h"
@@ -89,7 +91,9 @@ template <> struct is_automagical<Urho3D::DecalSet> : std::false_type {};
 template <> struct is_automagical<Urho3D::Terrain> : std::false_type {};
 template <> struct is_automagical<Urho3D::StaticModelGroup> : std::false_type {};
 template <> struct is_automagical<Urho3D::InstancedVATModel> : std::false_type {};
+template <> struct is_automagical<Urho3D::InstancedBoneModel> : std::false_type {};
 template <> struct is_automagical<Urho3D::VATBaker> : std::false_type {};
+template <> struct is_automagical<Urho3D::BoneMatrixBaker> : std::false_type {};
 template <> struct is_automagical<Urho3D::RibbonTrail> : std::false_type {};
 template <> struct is_automagical<Urho3D::VertexBuffer> : std::false_type {};
 template <> struct is_automagical<Urho3D::IndexBuffer> : std::false_type {};
@@ -436,6 +440,7 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC(GetNumGeometries)
             LUA_MEMBER_FUNC(GetGeometry)
             LUA_MEMBER_FUNC(GetGeometryName)
+            LUA_MEMBER_FUNC(GetBoundingBox)
             LUA_MEMBER_FUNC_RAW(Clone, [](Model* model) -> SharedPtr<Model> {
                 return model ? SharedPtr<Model>(model->Clone()) : nullptr;
             })
@@ -620,6 +625,58 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             LUA_MEMBER_FUNC(GetLocalBoundingBox)
         );
     }
+
+    // BoneMatrixBaker: bakes a skinned Model + several Animation clips into one bone-matrix texture
+    // atlas (".bonetex") for InstancedBoneModel. Also used to Load a previously baked archive.
+    {
+        using LUA_THIS = BoneMatrixBaker;
+        LUA_CLASS(BoneMatrixBaker,
+            sol::call_constructor, sol::factories(
+                [context]() { return SharedPtr<BoneMatrixBaker>(new BoneMatrixBaker(context)); })
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC_RAW(Save, static_cast<bool (BoneMatrixBaker::*)(const ea::string&)>(&BoneMatrixBaker::Save))
+            LUA_MEMBER_FUNC_RAW(Load, static_cast<bool (BoneMatrixBaker::*)(const ea::string&)>(&BoneMatrixBaker::Load))
+            LUA_MEMBER_FUNC(GetLastError)
+            LUA_MEMBER_FUNC(Reset)
+            LUA_MEMBER_FUNC(GetNumBones)
+            LUA_MEMBER_FUNC(GetWidth)
+            LUA_MEMBER_FUNC(GetFrames)
+            LUA_MEMBER_FUNC(GetTexture)
+        );
+    }
+
+    // InstancedBoneModel: many GPU-instanced skinned characters sharing one bone-matrix atlas,
+    // drawn in a single batch per geometry. Each instance carries a world transform plus a clip
+    // index and phase; the CPU folds those into a per-instance atlas frame row for the vertex shader.
+    {
+        using LUA_THIS = InstancedBoneModel;
+        LUA_CLASS(InstancedBoneModel,
+            sol::no_constructor
+            LUA_BASES(Drawable, Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetGeometry)
+            LUA_MEMBER_FUNC(GetGeometry)
+            LUA_MEMBER_FUNC(SetMaterial)
+            LUA_MEMBER_FUNC(GetMaterial)
+            LUA_MEMBER_FUNC(SetBoneAtlas)
+            LUA_MEMBER_FUNC(GetBoneAtlas)
+            LUA_MEMBER_FUNC_RAW(AddInstanceTRS, [](InstancedBoneModel* model, const Vector3& position,
+                const Quaternion& rotation, const Vector3& scale, unsigned animIndex,
+                sol::optional<float> phase, sol::optional<float> playSpeed) {
+                    return model->AddInstanceTRS(position, rotation, scale, animIndex,
+                        phase.value_or(0.0f), playSpeed.value_or(1.0f));
+                })
+            LUA_MEMBER_FUNC(RemoveInstance)
+            LUA_MEMBER_FUNC(ClearInstances)
+            LUA_MEMBER_FUNC(GetNumInstances)
+            LUA_MEMBER_FUNC(SetInstanceTransform)
+            LUA_MEMBER_FUNC(SetInstanceAnimIndex)
+            LUA_MEMBER_FUNC(SetInstancePhase)
+            LUA_MEMBER_FUNC(GetInstancePhase)
+            LUA_MEMBER_FUNC(SetInstancePlaySpeed)
+            LUA_MEMBER_FUNC(SetLocalBoundingBox)
+        );
+    }
+    RegisterLuaObjectWrapper<InstancedBoneModel>();
 
     // RibbonTrail: trail rendered behind a moving node (44_RibbonTrailDemo).
     {

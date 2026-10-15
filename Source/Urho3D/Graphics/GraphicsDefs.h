@@ -49,6 +49,10 @@ enum GeometryType
     // Vertex-animation-texture (VAT) instanced mesh: a statically-baked mesh whose skeletal animation
     // is sampled from a vertex-animation texture in the vertex shader, drawn through the instancing path.
     GEOM_INSTANCED_VAT = 8,
+    // Bone-matrix-texture instanced skinned mesh: the original skinned geometry (per-vertex bone indices
+    // and weights) whose skin matrices are sampled per-frame from a bone-matrix atlas in the vertex shader,
+    // with each instance also carrying a world transform and a frame-row index, drawn through instancing.
+    GEOM_INSTANCED_BONE = 9,
 };
 
 /// Vertex/index buffer lock state.
