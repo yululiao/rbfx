@@ -227,16 +227,12 @@ Engine::Engine(Context* context) :
     Object(context),
     timeStep_(0.0f),
     timeStepSmoothing_(2),
-#ifdef __EMSCRIPTEN__
-    // wasm hosts run a 30Hz main loop (see Application emscripten_set_main_loop_arg) to cut
-    // GPU/battery cost on phones. Clamp dt to 1/30 so a steady 30fps frame is NOT mistaken for
-    // a hitch and slowed down (a 1/60 clamp would halve game speed at 30fps). Still guards
-    // emscripten timer-source anomalies (frequency mismatch or non-standard get_now granularity
-    // inflating elapsed by ~1000x).
-    minFps_(30),
-#else
+    // Per-frame dt ceiling (1/this): if a real frame takes longer than this, the timestep is clamped
+    // so logic does not jump ahead (avoids tunneling; time just slows). The wasm clock now reads the
+    // real wall clock (see Timer.cpp RealNowMs), so the host no longer inflates dt and the upstream
+    // default is correct everywhere. The earlier emscripten override to 60 only masked the rescaled
+    // performance.now() clock and is no longer needed.
     minFps_(10),
-#endif
 #if defined(IOS) || defined(TVOS) || defined(__ANDROID__) || defined(__arm__) || defined(__aarch64__)
     maxFps_(60),
     maxInactiveFps_(10),
@@ -900,15 +896,12 @@ void Engine::SetWebFrameRate(int fps)
         return;
 
 #if defined(__EMSCRIPTEN__)
-    // On wasm the real frame-rate cap is the main-loop rate: Application registers
-    // emscripten_set_main_loop_arg(..., GetWebFrameRate(), ...) after Start(), so the entry script
-    // can steer it here. The engine's own maxFps sleep limiter is compiled out on emscripten, so
-    // setting maxFps_ here would be inert. minFps_ is NOT a cap but the dt floor below which the
-    // timestep is clamped (time appears to slow down); since the loop is now FORCED to one frame
-    // per 1/fps s, minFps must match that rate or every legitimate frame would be treated as a
-    // hitch and the game would crawl. Hence the couple to SetMinFps, not SetMaxFps.
+    // Store the cap target only. Throttling is done in Application's RunFrame as a Godot-style rAF
+    // frame-skip, which always takes effect regardless of whether the host honours emscripten's fps
+    // argument. Application also feeds a fixed dt = 1/this each processed frame (SetNextTimeStep), so
+    // game speed is locked to 1x regardless of the minFps clamp. minFps_ is left alone here - it does
+    // not participate in web frame-rate correctness.
     webFrameRate_ = fps;
-    SetMinFps(fps);
 #else
     // Desktop/editor: cap the blocking main loop through the sleep limiter's upper bound.
     SetMaxFps(fps);

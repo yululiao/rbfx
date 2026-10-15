@@ -28,6 +28,7 @@
 
 #include <SDL_timer.h>
 
+#include <chrono>
 #include <ctime>
 
 #ifdef _WIN32
@@ -47,6 +48,9 @@ namespace Urho3D
 
 bool HiresTimer::supported(false);
 long long HiresTimer::frequency(1000);
+
+/// Length in milliseconds of the real-time window over which Time measures the presented frame rate.
+static const unsigned FPS_WINDOW_MS = 500;
 
 Time::Time(Context* context) :
     Object(context),
@@ -72,11 +76,24 @@ Time::~Time()
     SetTimerPeriod(0);
 }
 
+#ifdef __EMSCRIPTEN__
+// Real elapsed milliseconds for wasm. Mini-game hosts (Douyin/WeChat) serve performance.now()
+// through weapp-adapter.js, which rescales tt.getPerformance().now() by /1000 and over-reports the
+// elapsed time (observed ~2x on device), so emscripten_get_now() cannot be trusted for dt: it
+// inflates the measured frame time and speeds gameplay up. std::chrono::system_clock maps to the
+// host's real wall clock (JS Date.now, epoch ms), which is not rescaled, so use it instead.
+static double RealNowMs()
+{
+    using namespace std::chrono;
+    return static_cast<double>(duration_cast<microseconds>(system_clock::now().time_since_epoch()).count()) * 0.001;
+}
+#endif
+
 static unsigned Tick()
 {
 #ifdef __EMSCRIPTEN__
-    static const double baseValue = emscripten_get_now();
-    return static_cast<unsigned>(emscripten_get_now() - baseValue);
+    static const double baseValue = RealNowMs();
+    return static_cast<unsigned>(RealNowMs() - baseValue);
 #else
     return SDL_GetTicks();
 #endif
@@ -98,7 +115,7 @@ static long long HiresTick()
         return SDL_GetTicks();
 #endif
 #elif __EMSCRIPTEN__
-    return (long long)(emscripten_get_now()*1000.0);
+    return (long long)(RealNowMs() * 1000.0);
 #else
     struct timeval time{};
     gettimeofday(&time, nullptr);
@@ -114,6 +131,22 @@ void Time::BeginFrame(float timeStep)
 
     timeStep_ = timeStep;
     isFrameInProgress_ = true;
+
+    // Measure the real presented frame rate over a fixed wall-clock window. This deliberately does
+    // NOT derive from timeStep_: GetFramesPerSecond used to be 1/timeStep_, but timeStep_ is the
+    // smoothed and min/max-fps-clamped logical timestep, so 1/dt over-reports whenever the clamp is
+    // active - e.g. a wasm main loop throttled to 30Hz with minFps=30 truncates every slow frame's dt
+    // to 1/30, pinning the reading at a constant 30 even when the device actually stalls to 20.
+    // Counting frames against a real stopwatch (not the logical timestep) yields the honest rate that
+    // DebugHud and gameplay HUDs should show.
+    ++fpsWindowFrames_;
+    const unsigned windowMs = fpsWindowTimer_.GetMSec(false);
+    if (windowMs >= FPS_WINDOW_MS)
+    {
+        framesPerSecond_ = fpsWindowFrames_ * 1000.0f / static_cast<float>(windowMs);
+        fpsWindowFrames_ = 0;
+        fpsWindowTimer_.Reset();
+    }
 
     {
         URHO3D_PROFILE("BeginFrame");
@@ -201,7 +234,10 @@ void Time::Sleep(unsigned mSec)
 
 float Time::GetFramesPerSecond() const
 {
-    return 1.0f / timeStep_;
+    // Measured over a real wall-clock window in BeginFrame (see fpsWindowTimer_). Deliberately not
+    // 1.0f / timeStep_: the logical timestep is clamped by min/max fps and would over-report under
+    // throttling. Returns 0 only until the first measurement window completes.
+    return framesPerSecond_;
 }
 
 Timer::Timer()

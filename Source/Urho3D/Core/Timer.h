@@ -112,7 +112,9 @@ public:
     /// @property
     float GetElapsedTime();
 
-    /// Return current frames per second.
+    /// Return current frames per second. Measured as the real number of frames presented per
+    /// wall-clock second over the last timing window, independent of the (possibly clamped) frame
+    /// timestep, so it reports the true achieved rate (drops below an fps cap when the device stalls).
     /// @property
     float GetFramesPerSecond() const;
 
@@ -138,6 +140,12 @@ private:
     float timeStep_{};
     /// Low-resolution timer period.
     unsigned timerPeriod_{};
+    /// Wall-clock timer used to measure the real presented frame rate over a fixed window.
+    Timer fpsWindowTimer_;
+    /// Frames counted inside the current fps measurement window.
+    unsigned fpsWindowFrames_{};
+    /// Most recently measured frames per second (frames in window / real window length in seconds).
+    float framesPerSecond_{};
 };
 
 /// Accumulates statistics for specified number of intervals.

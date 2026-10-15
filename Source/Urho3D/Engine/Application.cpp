@@ -23,6 +23,7 @@
 #include "../Precompiled.h"
 
 #include "../Core/Profiler.h"
+#include "../Core/Timer.h"
 #include "../Engine/Application.h"
 #include "../Engine/EngineDefs.h"
 #include "../Engine/EngineEvents.h"
@@ -50,7 +51,37 @@ namespace Urho3D
 #endif
 void RunFrame(void* data)
 {
-    static_cast<Engine*>(data)->RunFrame();
+    Engine* engine = static_cast<Engine*>(data);
+#if defined(__EMSCRIPTEN__)
+    // Frame-rate cap modelled on Godot's web main loop (godot/platform/web/web_main.cpp
+    // main_loop_callback). The loop is registered on requestAnimationFrame (fps=0), so this callback
+    // runs once per display refresh. We skip a refresh entirely (no update, no render -> that is what
+    // actually saves CPU/GPU/battery) until a monotonic clock reaches the next target time, then
+    // advance that target by one frame period. If we ever fall behind by more than a second (tab
+    // hidden, host stall) we snap the target to now so we never burst-catch-up. The skip lives in our
+    // own code so it always takes effect, unlike emscripten's fps throttle which some hosts (Douyin)
+    // ignore - and unlike passing a nonzero fps to emscripten_set_main_loop_arg, which on Douyin
+    // double-schedules the callback and runs the game at 2x.
+    const int targetFps = engine->GetWebFrameRate();
+    if (targetFps > 0)
+    {
+        static unsigned long long targetMSec = 0;
+        const unsigned long long nowMSec = Time::GetSystemTime();
+        if (nowMSec < targetMSec)
+            return; // Not time for the next frame yet: skip this refresh.
+        if (nowMSec - targetMSec > 1000ULL)
+            targetMSec = nowMSec; // Recovered from a stall; do not accumulate the gap.
+        targetMSec += 1000ULL / static_cast<unsigned long long>(targetFps);
+
+        // Feed an exact fixed timestep for the frame we are about to process, so game speed is
+        // exactly processedRate * (1/targetFps) == 1x: independent of the minFps clamp and of the
+        // per-frame measured dt, hence immune to the coarse (1ms) wall-clock resolution on wasm. The
+        // wall clock used for the skip above is real (see Timer.cpp RealNowMs), so the skip really
+        // does process at targetFps.
+        engine->SetNextTimeStep(1.0f / static_cast<float>(targetFps));
+    }
+#endif
+    engine->RunFrame();
 }
 #endif
 
@@ -146,14 +177,12 @@ int Application::Run()
 #if defined(IOS) || defined(TVOS)
         SDL_iPhoneSetAnimationCallback(GetSubsystem<Graphics>()->GetWindow(), 1, &RunFrame, engine_);
 #elif defined(__EMSCRIPTEN__)
-        // Throttle the wasm main loop to the engine's target frame rate (default 30). fps=0 would
-        // follow requestAnimationFrame at ~60Hz; on phones that doubles present/render work for no
-        // gameplay benefit and drives heat/battery, so we register a fixed-rate loop instead -
-        // emscripten schedules an fps>0 loop on a timer, letting the engine genuinely idle between
-        // frames. The value comes from Engine::GetWebFrameRate(), which the game's entry script may
-        // have set via Engine::SetWebFrameRate during Start() (before this line). That setter also
-        // couples minFps to the same rate, so a steady frame is never clamped into slow motion.
-        emscripten_set_main_loop_arg(RunFrame, engine_, engine_->GetWebFrameRate(), 1);
+        // Register the loop on requestAnimationFrame (fps=0). Do NOT pass the target fps to
+        // emscripten: minigame runtimes such as Douyin ignore its internal throttle, which is what
+        // made the previous fixed-rate registration silently stay at ~60Hz. The frame-rate cap is
+        // applied by hand inside RunFrame (Godot-style target-timestamp skip), which runs on every
+        // refresh and cannot be ignored by the host.
+        emscripten_set_main_loop_arg(RunFrame, engine_, 0, 1);
 #endif
 #endif
 

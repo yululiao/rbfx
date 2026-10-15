@@ -297,16 +297,35 @@ if (globalThis.wx_tt) {
 	  var _wx$getSystemInfoSync = wx_tt.getSystemInfoSync(),
 	      platform = _wx$getSystemInfoSync.platform;
 
-	  var wxPerf = wx_tt.getPerformance();
-	  var initTime = wxPerf.now();
-
-	  var clientPerfAdapter = Object.assign({}, wxPerf, {
+	  var ori_performance = wx_tt.getPerformance();
+	  var ori_initTime = ori_performance.now();
+	  var initTime = Date.now();
+	  
+	  // rbfx: align with the official WeChat adapter (minigame-unity-webgl-transform).
+	  // Official logic: only Development+Profiling builds (and not devtools, not iOS high
+	  // performance mode) use the getPerformance() microsecond clock with the *0.001
+	  // conversion; every normal run uses Date.now(). rbfx is not a Unity build and has
+	  // no such profiling flags, so the official condition is always false here and the
+	  // equivalent implementation is to always take the Date.now() path. The WeChat docs
+	  // state the high-precision clock has runtime overhead and must not be enabled in
+	  // release builds; on Douyin the unit of tt.getPerformance().now() is undocumented
+	  // and its observed behavior is anomalous, so the normal path must never use it.
+	  var clientPerfAdapter = Object.assign({}, ori_performance, {
 	    now: function now() {
-	      return (wxPerf.now() - initTime) / 1000;
+	      return Date.now() - initTime;
 	    }
 	  });
-
-	  performance = platform === 'devtools' ? wxPerf : clientPerfAdapter;
+	  
+	  // rbfx probe result (2026-10-15, devtools + real iPhone): the host high-precision
+	  // clock returns microseconds and is accurate (~67ppm drift); the historical speed
+	  // bug was never caused by this clock's unit or rate.
+	  
+	  // rbfx: use the Date.now-based adapter on every platform, devtools included. The raw
+	  // host clock must never be exposed as performance.now(): the probe shows it returns
+	  // microseconds even in devtools, which is 1000x off for downstream millisecond
+	  // consumers (emscripten steady_clock, SDL clock_gettime(MONOTONIC)). The official
+	  // adapter also falls back to Date.now() in devtools (its !isDevtools condition).
+	  performance = clientPerfAdapter;
 	}
 
 	exports.default = performance;
