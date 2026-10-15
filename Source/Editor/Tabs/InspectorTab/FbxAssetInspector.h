@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "../../Assets/FbxImportSettings.h"
 #include "../../Tabs/InspectorTab.h"
 
 namespace Urho3D
@@ -49,11 +50,13 @@ public:
 
 private:
     void OnProjectRequest(ProjectRequest* request);
+    void SaveSettings();
 
     WeakPtr<Project> project_;
 
     ea::optional<ea::string> fbxFileName_;
     ea::optional<ea::string> fbxResourceName_;
+    ea::optional<FbxImportSettings> fbxSettings_;
 };
 
 }

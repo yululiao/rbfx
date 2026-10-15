@@ -49,6 +49,7 @@
 #include <Urho3D/Scene/Scene.h>
 
 #include <ufbx.h>
+#include <meshoptimizer.h>
 
 #include <EASTL/sort.h>
 
@@ -91,6 +92,9 @@ extern unsigned lastImportContentFlags_;
 // assets whose declared unit does not match how they were authored. Defined in AssetImporter.cpp
 // next to the other shared globals.
 extern float importScale_;
+// Target triangle ratio for offline mesh simplification from "-sq" (1.0 disables). Defined in
+// AssetImporter.cpp next to the other shared globals.
+extern float simplifyRatio_;
 
 namespace Urho3D
 {
@@ -1060,6 +1064,42 @@ static void FbxProcessMeshPart(
 
     ufbx_error err;
     size_t numUniqueVertices = ufbx_generate_indices(&stream, 1, dedupIndices.data(), numTriIndices, nullptr, &err);
+
+    // Offline mesh simplification ("-sq"): shrink the index buffer with meshopt_simplify. Every
+    // vertex attribute (UV, normals, skinning weights) stays tied to its vertex, so the data
+    // follows the surviving vertices with no re-projection. Runs per material part with locked
+    // borders: vertices on part seams are open borders locally, locking them keeps adjacent
+    // parts welded together instead of tearing apart.
+    if (simplifyRatio_ < 1.0f)
+    {
+        const unsigned targetTriangles = Max(numTriIndices / 3 * simplifyRatio_, 1.0f);
+        const size_t targetIndexCount = (size_t)targetTriangles * 3;
+        ea::vector<uint32_t> simplified(numTriIndices);
+        float resultError = 0.0f;
+        const size_t newIndexCount = meshopt_simplify(simplified.data(), dedupIndices.data(), numTriIndices,
+            &rawVertices[0].position.x_, numUniqueVertices, sizeof(RawVertex),
+            targetIndexCount, 1e-2f, meshopt_SimplifyLockBorder, &resultError);
+        if (newIndexCount > 0 && newIndexCount < numTriIndices)
+        {
+            // Compact vertices down to the ones the simplified index buffer still references
+            ea::vector<uint32_t> remap(numUniqueVertices);
+            const size_t newVertexCount = meshopt_generateVertexRemap(remap.data(), simplified.data(),
+                newIndexCount, rawVertices.data(), numUniqueVertices, sizeof(RawVertex));
+            ea::vector<RawVertex> remappedVertices(newVertexCount);
+            meshopt_remapVertexBuffer(remappedVertices.data(), rawVertices.data(), numUniqueVertices,
+                sizeof(RawVertex), remap.data());
+            dedupIndices.resize(newIndexCount);
+            meshopt_remapIndexBuffer(dedupIndices.data(), simplified.data(), newIndexCount, remap.data());
+            rawVertices.swap(remappedVertices);
+
+            numUniqueVertices = newVertexCount;
+            numTriIndices = (unsigned)newIndexCount;
+            PrintLine(Format("Simplified geometry to {} triangles (target {}, error {:.4f})",
+                (unsigned)newIndexCount / 3, targetTriangles, resultError));
+        }
+        else
+            PrintLine("Mesh simplification made no progress, keeping the original geometry");
+    }
 
     PrintLine(Format("Writing geometry with {} vertices {} indices", (unsigned)numUniqueVertices, numTriIndices));
 

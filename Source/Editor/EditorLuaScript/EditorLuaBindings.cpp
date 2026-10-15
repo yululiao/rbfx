@@ -159,7 +159,7 @@ ea::string NormalizeExtension(std::string_view in)
 // import metadata, pipeline definitions, and per-source ".d" output folders ("foo.fbx.d/...").
 bool IsSatelliteResource(const ea::string& name)
 {
-    static const char* const suffixes[] = { ".meta", ".assetpipeline", ".AssetPipeline.json", ".texmeta" };
+    static const char* const suffixes[] = { ".meta", ".assetpipeline", ".AssetPipeline.json", ".texmeta", ".fbxmeta" };
     for (const char* suffix : suffixes)
         if (name.ends_with(suffix))
             return true;

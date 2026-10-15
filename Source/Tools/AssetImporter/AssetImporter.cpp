@@ -114,6 +114,10 @@ float importEndTime_ = 0.0f;
 // Escape hatch for assets whose declared unit does not match how they were authored, so that rbfx's
 // 1 unit = 1 meter still holds. Consumed by FbxImporter.
 float importScale_ = 1.0f;
+// Target triangle ratio for offline mesh simplification, from "-sq" (1.0 disables). Consumed by
+// FbxImporter: the index buffer is reduced with meshopt_simplify after deduplication, and vertex
+// attributes (UVs, skinning weights) follow the surviving vertices.
+float simplifyRatio_ = 1.0f;
 // Bitmask of AssetImporterContentType detected by the last "import" run. Set by ImportFbx in
 // FbxImporter.cpp (through the extern contract) and exposed via AssetImporterGetLastImportContent.
 unsigned lastImportContentFlags_ = 0;
@@ -154,6 +158,7 @@ void Run(const ea::vector<ea::string>& arguments)
     importStartTime_ = 0.0f;
     importEndTime_ = 0.0f;
     importScale_ = 1.0f;
+    simplifyRatio_ = 1.0f;
     lastImportContentFlags_ = 0;
 
     // Reuse the host process context (see AcquireImportContext),
@@ -201,6 +206,9 @@ void Run(const ea::vector<ea::string>& arguments)
             "-is <scale> Multiply every position by <scale>, on top of the FBX unit scale.\n"
             "            Escape hatch for assets whose declared unit does not match how they were\n"
             "            authored, so that 1 rbfx unit still means 1 meter\n"
+            "-sq <ratio> Simplify model geometry to about <ratio> of its triangles (0.0 < ratio\n"
+            "            < 1.0, disabled by default). Vertex attributes follow the surviving\n"
+            "            vertices, so UVs and skinning weights stay intact\n"
             "-split <start> <end> (animation model only)\n"
             "            Split animation, will only import from start frame to end frame\n"
         );
@@ -285,6 +293,14 @@ void Run(const ea::vector<ea::string>& arguments)
                 importScale_ = ToFloat(value);
                 if (importScale_ <= 0.0f)
                     importScale_ = 1.0f;
+                ++i;
+            }
+            else if (argument == "sq" && !value.empty())
+            {
+                simplifyRatio_ = ToFloat(value);
+                // Anything outside (0, 1) disables the simplification
+                if (simplifyRatio_ <= 0.0f || simplifyRatio_ >= 1.0f)
+                    simplifyRatio_ = 1.0f;
                 ++i;
             }
             else if (argument == "s")

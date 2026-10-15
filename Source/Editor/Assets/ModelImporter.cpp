@@ -22,6 +22,8 @@
 
 #include "../Assets/ModelImporter.h"
 
+#include "../Assets/FbxImportSettings.h"
+
 #include <Tools/AssetImporter/AssetImporterLibrary.h>
 
 #include <Urho3D/Core/ProcessUtils.h>
@@ -258,7 +260,15 @@ bool ModelImporter::Execute(
     // per-asset parameters are loaded above for this path as well, so the Inspector's "Scale" (or
     // the "<asset>.fbx.d/ModelImporter.json" override) means the same thing for FBX as for glTF.
     if (IsFileNameFBX(input.resourceName_))
-        return ImportFBXEmbedded(input, params);
+    {
+        // Per-asset FBX import settings ("<asset>.fbxmeta"): read next to the source file and
+        // merged into the importer command line. Registering the file as a dependency makes a
+        // later settings edit reimport the FBX instead of leaving stale outputs behind.
+        FbxImportSettings fbxSettings;
+        if (LoadFbxImportSettings(context_, input.inputFileName_, fbxSettings))
+            AddDependency(input, output, GetFbxMetaFileName(input.inputFileName_));
+        return ImportFBXEmbedded(input, params, fbxSettings);
+    }
 
     params.assetName_ = GetFileName(input.originalInputFileName_);
 
@@ -269,7 +279,8 @@ bool ModelImporter::Execute(
     return ImportGLTF(handle, params, input, output, transformers);
 }
 
-bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input, const TransformerParams& params)
+bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input, const TransformerParams& params,
+    const FbxImportSettings& fbxSettings)
 {
     auto* project = GetSubsystem<Project>();
     if (!project)
@@ -301,6 +312,11 @@ bool ModelImporter::ImportFBXEmbedded(const AssetTransformerInput& input, const 
     {
         arguments.push_back("-is");
         arguments.push_back(ToString("%g", params.scale_));
+    }
+    if (fbxSettings.simplify_)
+    {
+        arguments.push_back("-sq");
+        arguments.push_back(ToString("%g", fbxSettings.simplifyRatio_));
     }
     if (!RunAssetImporter(input.inputFileName_, arguments))
     {
