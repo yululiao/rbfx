@@ -418,7 +418,7 @@ SubscribeToEvent("Update", function(data)
             -- Overlay 一行：FPS / drawcall / 三角面(百万) / 同屏海盗・船
             if hud and hud.ShowPerf then
                 hud:ShowPerf(true)
-                hud:SetPerf(string.format("FPS %.0f | DC %d | TRI %.1fM | P%d B%d",
+                hud:SetPerf(string.format("FPS: %.0f | DC: %d | TRI: %.1fM | P:%d B:%d",
                     fps, draws, tris / 1048576.0, pirates, boats))
             end
             -- print(string.format("FireGame PERF: pirates=%d boats=%d drawcalls=%d tris=%d fps=%.1f",

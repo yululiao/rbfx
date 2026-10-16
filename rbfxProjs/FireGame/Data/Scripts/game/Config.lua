@@ -239,7 +239,7 @@ Config.PERF_OVERLAY = true
 -- 帧率上限（省电/降热）。真机（抖音 wasm）由引擎主循环按此值节流；桌面/编辑器同步生效。
 -- 0 或 nil = 不改引擎默认（wasm 默认 30）。改这个值只需重打包（不碰 wasm），main.lua 启动时
 -- 经 engine:SetWebFrameRate(Config.MAX_FPS) 落地。
-Config.MAX_FPS = 30
+Config.MAX_FPS = 40
 
 Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako", "Characters_Sharky" }
 Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbarossa" }
