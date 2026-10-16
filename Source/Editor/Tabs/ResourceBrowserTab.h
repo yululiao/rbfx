@@ -39,6 +39,8 @@ namespace Urho3D
 
 void Tabs_ResourceBrowserTab(Context* context, Project* project);
 
+class FlipbookBaker;
+
 class ResourceBrowserTab : public EditorTab
 {
     URHO3D_OBJECT(ResourceBrowserTab, EditorTab);
@@ -148,11 +150,17 @@ private:
     void RenderDeleteDialog();
     void RenderCreateDialog();
     void RenderBoneBakeDialog();
+    void RenderFlipbookBakeDialog();
 
     /// Populate the bone-bake dialog from the entry: resolve the cooked model and scan its animation clips.
     void BeginBoneBakeDialog(const FileSystemEntry& entry);
     /// Run the bake for the clips selected in the bone-bake dialog and save the atlas beside the asset.
     void BakeBoneMatrices();
+
+    /// Populate the flipbook-bake dialog from the entry: resolve the cooked model and scan its clips.
+    void BeginFlipbookBakeDialog(const FileSystemEntry& entry);
+    /// Kick off the frame-driven flipbook bake for the clips selected in the dialog.
+    void StartFlipbookBake();
     /// @}
 
     /// Drag&drop handling
@@ -285,6 +293,26 @@ private:
         float fps_{30.0f};
         bool openPending_{};
     } boneBake_;
+
+    struct FlipbookBakeDialog
+    {
+        ea::string resourceName_;       // source asset (fbx/mdl) resource name
+        ea::string absolutePath_;       // source asset path on disk
+        ea::string modelResourceName_;  // cooked model to render during the bake
+        ea::vector<ea::string> animationNames_;  // candidate clips, resource names
+        ea::vector<bool> selected_;
+        float fps_{15.0f};
+        int cellSize_{256};
+        int rotations_{1};
+        float yaw_{180.0f};            // camera orbit start angle (Quaternius fronts face -Z)
+        StringHash materialType_{"Material"};  // resource-reference picker type for the bake material
+        ea::string materialName_;              // optional material applied to the model while baking
+        bool openPending_{};
+        bool started_{};                // a bake has been kicked off in this dialog session
+    } flipbookBake_;
+
+    /// Frame-driven flipbook bake instance, kept alive while the dialog runs.
+    SharedPtr<FlipbookBaker> flipbookBaker_;
     /// @}
 
     struct TempEntry

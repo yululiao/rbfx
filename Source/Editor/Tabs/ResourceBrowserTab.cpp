@@ -27,12 +27,15 @@
 
 #include <Urho3D/Graphics/Animation.h>
 #include <Urho3D/Graphics/BoneMatrixBaker.h>
+#include <Urho3D/Graphics/FlipbookBaker.h>
+#include <Urho3D/Graphics/Material.h>
 #include <Urho3D/Graphics/Model.h>
 #include <Urho3D/Graphics/VATBaker.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/PrefabResource.h>
+#include <Urho3D/SystemUI/Widgets.h>
 
 #include <EASTL/sort.h>
 #include <EASTL/tuple.h>
@@ -432,6 +435,7 @@ void ResourceBrowserTab::RenderDialogs()
     RenderDeleteDialog();
     RenderCreateDialog();
     RenderBoneBakeDialog();
+    RenderFlipbookBakeDialog();
 }
 
 void ResourceBrowserTab::RenderDirectoryTree(const FileSystemEntry& entry, const ea::string& displayedName)
@@ -557,6 +561,9 @@ void ResourceBrowserTab::RenderEntryContextMenuItems(const FileSystemEntry& entr
 
         if (ui::MenuItem("Bake Bone Animation Textures..."))
             BeginBoneBakeDialog(entry);
+
+        if (ui::MenuItem("Bake Animation Flipbook..."))
+            BeginFlipbookBakeDialog(entry);
     }
 
     ui::Separator();
@@ -1130,6 +1137,214 @@ void ResourceBrowserTab::RenderBoneBakeDialog()
     ui::SameLine();
     if (ui::Button(ICON_FA_BAN " Cancel"))
         ui::CloseCurrentPopup();
+
+    ui::EndPopup();
+}
+
+void ResourceBrowserTab::BeginFlipbookBakeDialog(const FileSystemEntry& entry)
+{
+    flipbookBake_ = FlipbookBakeDialog{};
+    flipbookBake_.resourceName_ = entry.resourceName_;
+    flipbookBake_.absolutePath_ = entry.absolutePath_;
+    flipbookBake_.openPending_ = true;
+    flipbookBaker_.Reset();
+
+    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    if (!cache)
+        return;
+
+    const ea::string extension = GetExtension(entry.resourceName_);
+    if (extension == ".mdl")
+    {
+        flipbookBake_.modelResourceName_ = entry.resourceName_;
+    }
+    else
+    {
+        // Source model asset: the cooked model lives in the satellite import directory.
+        const ea::string baseName = ReplaceExtension(GetFileNameAndExtension(entry.resourceName_), "");
+        flipbookBake_.modelResourceName_ = Format("{}{}/Models/{}.mdl", entry.resourceName_, satelliteDirectoryExtension,
+            baseName);
+    }
+
+    const ea::string animDirectory = GetParentPath(flipbookBake_.modelResourceName_);
+    ea::vector<ea::string> clipFileNames;
+    cache->Scan(clipFileNames, animDirectory, "*.ani", SCAN_FILES);
+    flipbookBake_.animationNames_.reserve(clipFileNames.size());
+    for (const ea::string& clipFileName : clipFileNames)
+        flipbookBake_.animationNames_.push_back(animDirectory + "/" + clipFileName);
+
+    // Default to all clips checked; the operator unchecks the ones not needed.
+    flipbookBake_.selected_.assign(flipbookBake_.animationNames_.size(), true);
+}
+
+void ResourceBrowserTab::StartFlipbookBake()
+{
+    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    Model* model = cache ? cache->GetResource<Model>(flipbookBake_.modelResourceName_) : nullptr;
+    if (!model)
+    {
+        URHO3D_LOGERROR("Bake Animation Flipbook: could not load model '{}' (import the source asset first)",
+            flipbookBake_.modelResourceName_);
+        return;
+    }
+
+    ea::vector<Animation*> animations;
+    for (unsigned i = 0; i < flipbookBake_.animationNames_.size(); ++i)
+    {
+        if (!flipbookBake_.selected_[i])
+            continue;
+        if (Animation* animation = cache->GetResource<Animation>(flipbookBake_.animationNames_[i]))
+            animations.push_back(animation);
+        else
+            URHO3D_LOGERROR("Bake Animation Flipbook: failed to load clip '{}'", flipbookBake_.animationNames_[i]);
+    }
+    if (animations.empty())
+    {
+        URHO3D_LOGERROR("Bake Animation Flipbook: no clips were selected or loaded");
+        return;
+    }
+
+    flipbookBaker_ = MakeShared<FlipbookBaker>(GetProject()->GetContext());
+
+    FlipbookBakeParams params;
+    params.fps_ = Max(1.0f, flipbookBake_.fps_);
+    params.cellSize_ = static_cast<unsigned>(Clamp(flipbookBake_.cellSize_, 16, 2048));
+    params.rotations_ = static_cast<unsigned>(Clamp(flipbookBake_.rotations_, 1, 64));
+    params.yaw_ = flipbookBake_.yaw_;
+
+    // Optional bake material: the offscreen model is rendered with it so the atlas carries the
+    // real colors (vertex-color / atlas materials); left empty, the model's own slots apply.
+    if (!flipbookBake_.materialName_.empty())
+    {
+        Material* bakeMaterial = cache->GetResource<Material>(flipbookBake_.materialName_);
+        if (!bakeMaterial)
+        {
+            URHO3D_LOGERROR("Bake Animation Flipbook: could not load bake material '{}' (import it first or clear the field)",
+                flipbookBake_.materialName_);
+            return;
+        }
+        flipbookBaker_->SetBakeMaterial(bakeMaterial);
+    }
+
+    const ea::string outputPath = ReplaceExtension(flipbookBake_.absolutePath_, ".flipbook");
+    flipbookBaker_->SetOutputPath(outputPath);
+
+    if (!flipbookBaker_->Start(model, animations, params))
+    {
+        URHO3D_LOGERROR("Bake Animation Flipbook failed to start: {}", flipbookBaker_->GetLastError());
+        flipbookBaker_.Reset();
+        return;
+    }
+
+    flipbookBake_.started_ = true;
+    URHO3D_LOGINFO("Bake Animation Flipbook: started a frame-driven bake of {} clip(s) (cell {}px, {} rotation(s), "
+        "{} fps) -> '{}'",
+        animations.size(), params.cellSize_, params.rotations_, params.fps_, outputPath);
+}
+
+void ResourceBrowserTab::RenderFlipbookBakeDialog()
+{
+    if (flipbookBake_.openPending_)
+    {
+        ui::OpenPopup("Bake Animation Flipbook");
+        flipbookBake_.openPending_ = false;
+    }
+
+    if (flipbookBake_.resourceName_.empty() || !ui::BeginPopupModal("Bake Animation Flipbook", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+
+    const bool running = flipbookBaker_ && flipbookBaker_->IsRunning();
+    const bool finished = flipbookBaker_ && flipbookBaker_->IsFinished();
+
+    ui::Text("%s", flipbookBake_.resourceName_.c_str());
+    ui::Separator();
+
+    if (flipbookBake_.animationNames_.empty())
+    {
+        ui::TextWrapped("No animation clips found. Import the source asset first, then try again.");
+    }
+    else
+    {
+        ui::BeginDisabled(running);
+        ui::TextWrapped("Select the clips to bake into the sequence-frame atlas:");
+        ui::BeginChild("flipbookBakeClips", ImVec2(0.0f, 200.0f));
+        for (unsigned i = 0; i < flipbookBake_.animationNames_.size(); ++i)
+        {
+            ea::string clipName = GetFileNameAndExtension(flipbookBake_.animationNames_[i]);
+            if (clipName.ends_with(".ani"))
+                clipName.resize(clipName.size() - 4);
+
+            const IdScopeGuard guard(i);
+            ui::Checkbox(clipName.c_str(), &flipbookBake_.selected_[i]);
+        }
+        ui::EndChild();
+
+        if (ui::Button("All"))
+        {
+            for (bool& selected : flipbookBake_.selected_)
+                selected = true;
+        }
+        ui::SameLine();
+        if (ui::Button("None"))
+        {
+            for (bool& selected : flipbookBake_.selected_)
+                selected = false;
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(90.0f);
+        ui::InputFloat("FPS", &flipbookBake_.fps_, 0.0f, 0.0f, "%.0f");
+        ui::SetNextItemWidth(90.0f);
+        ui::InputInt("Cell", &flipbookBake_.cellSize_);
+        ui::SameLine();
+        ui::SetNextItemWidth(90.0f);
+        ui::InputInt("Rotations", &flipbookBake_.rotations_);
+        ui::SameLine();
+        ui::SetNextItemWidth(90.0f);
+        ui::InputFloat("Yaw", &flipbookBake_.yaw_);
+
+        // Bake material picker: required for models whose color lives in vertex colors or an
+        // external atlas (the offscreen render would otherwise come out flat gray).
+        Widgets::EditResourceRef(flipbookBake_.materialType_, flipbookBake_.materialName_, nullptr);
+        ui::TextWrapped("Material: applied to the model during the offscreen bake (e.g. Materials/VertexColor.xml "
+            "for vertex-colored characters). Leave empty to use the model's own materials.");
+
+        ui::TextWrapped("Output: '%s' + '%s.png' next to the source asset.",
+            ReplaceExtension(GetFileNameAndExtension(flipbookBake_.resourceName_), ".flipbook").c_str(),
+            ReplaceExtension(GetFileNameAndExtension(flipbookBake_.resourceName_), ".flipbook").c_str());
+        ui::EndDisabled();
+    }
+
+    if (running)
+    {
+        float progress = flipbookBaker_->GetProgress();
+        ui::ProgressBar(progress);
+        ui::TextWrapped("Baking... %.0f%%", progress * 100.0f);
+    }
+    else if (finished)
+    {
+        if (flipbookBaker_->IsSucceeded())
+            ui::TextWrapped("Bake complete. Atlas written next to the source asset.");
+        else
+            ui::TextWrapped("Bake failed: %s", flipbookBaker_->GetLastError().c_str());
+    }
+
+    bool anySelected = false;
+    for (bool selected : flipbookBake_.selected_)
+        anySelected = anySelected || selected;
+
+    ui::BeginDisabled(running || !anySelected || flipbookBake_.started_);
+    if (ui::Button(ICON_FA_PLAY " Bake"))
+        StartFlipbookBake();
+    ui::EndDisabled();
+    ui::SameLine();
+    ui::BeginDisabled(running);
+    if (ui::Button(ICON_FA_BAN " Close") || (!running && ui::IsKeyPressed(KEY_ESCAPE)))
+    {
+        flipbookBaker_.Reset();
+        flipbookBake_.started_ = false;
+        ui::CloseCurrentPopup();
+    }
+    ui::EndDisabled();
 
     ui::EndPopup();
 }
