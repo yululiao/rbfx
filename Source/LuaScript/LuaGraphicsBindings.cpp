@@ -36,6 +36,7 @@
 #include "../Urho3D/Graphics/InstancedBoneModel.h"
 #include "../Urho3D/Graphics/VATBaker.h"
 #include "../Urho3D/Graphics/BoneMatrixBaker.h"
+#include "../Urho3D/Graphics/FlipbookBaker.h"
 #include "../Urho3D/Graphics/RibbonTrail.h"
 #include "../Urho3D/Graphics/Technique.h"
 #include "../Urho3D/Graphics/Terrain.h"
@@ -94,6 +95,7 @@ template <> struct is_automagical<Urho3D::InstancedVATModel> : std::false_type {
 template <> struct is_automagical<Urho3D::InstancedBoneModel> : std::false_type {};
 template <> struct is_automagical<Urho3D::VATBaker> : std::false_type {};
 template <> struct is_automagical<Urho3D::BoneMatrixBaker> : std::false_type {};
+template <> struct is_automagical<Urho3D::FlipbookBaker> : std::false_type {};
 template <> struct is_automagical<Urho3D::RibbonTrail> : std::false_type {};
 template <> struct is_automagical<Urho3D::VertexBuffer> : std::false_type {};
 template <> struct is_automagical<Urho3D::IndexBuffer> : std::false_type {};
@@ -647,6 +649,31 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         );
     }
 
+    // FlipbookBaker: runtime consumer of a baked ".flipbook" sequence-frame atlas. Load() rehydrates
+    // the RGBA8 atlas texture plus the clip table; GetClipCellUV() maps a (clip, frame, rotation) to
+    // the atlas UV rectangle to assign to a Billboard. (The bake side is editor-only and not bound.)
+    {
+        using LUA_THIS = FlipbookBaker;
+        LUA_CLASS(FlipbookBaker,
+            sol::call_constructor, sol::factories(
+                [context]() { return SharedPtr<FlipbookBaker>(new FlipbookBaker(context)); })
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC_RAW(Load, static_cast<bool (FlipbookBaker::*)(const ea::string&)>(&FlipbookBaker::Load))
+            LUA_MEMBER_FUNC(GetLastError)
+            LUA_MEMBER_FUNC(Reset)
+            LUA_MEMBER_FUNC(GetTexture)
+            LUA_MEMBER_FUNC(GetNumClips)
+            LUA_MEMBER_FUNC(GetClipName)
+            LUA_MEMBER_FUNC(GetClipFrameCount)
+            LUA_MEMBER_FUNC(GetClipDuration)
+            LUA_MEMBER_FUNC(GetFps)
+            LUA_MEMBER_FUNC(GetRotations)
+            LUA_MEMBER_FUNC(GetAtlasWidth)
+            LUA_MEMBER_FUNC(GetAtlasHeight)
+            LUA_MEMBER_FUNC(GetClipCellUV)
+        );
+    }
+
     // InstancedBoneModel: many GPU-instanced skinned characters sharing one bone-matrix atlas,
     // drawn in a single batch per geometry. Each instance carries a world transform plus a clip
     // index and phase; the CPU folds those into a per-instance atlas frame row for the vertex shader.
@@ -1086,6 +1113,8 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
             sol::no_constructor
             LUA_MEMBER_PROP_RAW(position, &Billboard::position_)
             LUA_MEMBER_PROP_RAW(size, &Billboard::size_)
+            LUA_MEMBER_PROP_RAW(uv, &Billboard::uv_)
+            LUA_MEMBER_PROP_RAW(color, &Billboard::color_)
             LUA_MEMBER_PROP_RAW(rotation, &Billboard::rotation_)
             LUA_MEMBER_PROP_RAW(enabled, &Billboard::enabled_)
         );

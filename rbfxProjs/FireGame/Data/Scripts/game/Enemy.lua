@@ -21,6 +21,7 @@
 
 local Config = require("game.Config")
 local Materials = require("game.Materials")
+local FlipbookCrowd = require("game.FlipbookCrowd")
 
 ---@class Enemy 敌人管理器
 local Enemy = {}
@@ -63,6 +64,8 @@ function Enemy.Build(deps)
     self.onPlayerHit = deps.onPlayerHit
     self.dog = deps.dog          -- 宠物狗引用（main.lua 在 Dog.Build 后回填）：大船炮弹炸到它就把它掀飞
     self.root = deps.scene:CreateChild("Enemies")
+    -- 海盗序列帧 billboard 群体渲染器（每皮一个 BillboardSet 合批）。
+    self.crowd = FlipbookCrowd.Build(deps.scene)
     ---@type table[]
     self.units = {}
     ---@type { t: number, fn: function }[]
@@ -391,24 +394,18 @@ function Enemy:SpawnPirate(spawnPos, skin)
     node:SetPosition(Vector3(spawnPos.x, y, spawnPos.z))
     node:SetRotation(Quaternion(Config.PIRATE_YAW, Vector3.UP))
 
-    local model = node:CreateComponent("AnimatedModel")
-    model:SetModel(GetResource("Model", Config.PirateModel(skin)))
-    model:SetMaterial(Materials.Pirate())
-    -- 海盗一律不投影：每个 AnimatedModel 投影会被按级联重复提交（实测约 8× drawcall/tri），
-    -- 同屏上百海盗时这正是掉帧主因（见 PERF 日志：drawcalls>500 即从 45fps 掉到 30fps）。
-    -- 船/桶/主角仍投影（数量少、体积大，影子对空间感有价值）。俯视塔后视角里海盗缺影子影响很小。
-    model:SetCastShadows(false)
-    -- 远处降频：不可见时不更新蒙皮（同屏上限之外的开销主要在这）
-    model:SetUpdateInvisible(false)
-
-    local anim = node:CreateComponent("AnimationController")
-    anim:Play(Config.PirateAnim(skin, "Run"), 0, true, 0.2)
+    -- 视觉降级为序列帧 billboard：海盗不再挂 AnimatedModel/AnimationController（不再逐实例蒙皮），
+    -- 改由 FlipbookCrowd 在该皮肤的 BillboardSet 里占一张卡片、逐帧改写 UV 切帧。node 仅保留世界
+    -- 位置与朝向，承载全部玩法数学（自动吸附/子弹扫掠/溅射/移除倒计时都读 u.node）。billboard 恒朝
+    -- 相机，故 node 旋转不影响视觉。
+    local sprite = self.crowd:Acquire(skin, node)
+    self.crowd:Play(sprite, "Run")
 
     local unit = newUnit(self, "pirate", node)
     unit.hp = raider and Config.PIRATE_RAIDER_HP or Config.PIRATE_HP
     unit.raider = raider           -- 突袭型：Update 里转追主角而非直冲防线
     unit.skin = skin
-    unit.anim = anim
+    unit.sprite = sprite
     unit.speed = randSpread(Config.PIRATE_SPEED, Config.PIRATE_SPEED_SPREAD)
     unit.state = "advance"
     unit.attackT = 0.0
@@ -428,7 +425,7 @@ function Enemy:SpawnPirate(spawnPos, skin)
                 if dist <= Config.PIRATE_MELEE_RANGE then
                     self.state = "attack"
                     self.attackT = Config.PIRATE_ATTACK_TIME
-                    self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+                    self.mgr.crowd:Play(self.sprite, "Sword")
                 else
                     local step = self.speed * dt
                     p.x = p.x + dx / dist * step
@@ -447,7 +444,7 @@ function Enemy:SpawnPirate(spawnPos, skin)
                 if p.z >= Config.DEFENSE_Z then
                     self.state = "attack"
                     self.attackT = Config.PIRATE_ATTACK_TIME
-                    self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+                    self.mgr.crowd:Play(self.sprite, "Sword")
                 end
             end
         elseif self.state == "attack" then
@@ -459,15 +456,17 @@ function Enemy:SpawnPirate(spawnPos, skin)
                 local reachable = player and (not player.inBoat) and player.hp > 0
                 if not reachable then
                     self.state = "advance"
+                    self.mgr.crowd:Play(self.sprite, "Run")
                 else
                     local p = self.node:GetPosition()
                     local dx, dz = player.spot.x - p.x, player.spot.z - p.z
                     local leash = Config.PIRATE_MELEE_RANGE * 1.9
                     if dx * dx + dz * dz > leash * leash then
                         self.state = "advance"
+                        self.mgr.crowd:Play(self.sprite, "Run")
                     elseif self.attackT <= 0.0 then
                         self.attackT = Config.PIRATE_ATTACK_TIME
-                        self.anim:Play(Config.PirateAnim(self.skin, "Sword"), 0, false, 0.1)
+                        self.mgr.crowd:Play(self.sprite, "Sword")
                         if self.mgr.onPlayerHit and not player:IsInvuln() then
                             self.mgr.onPlayerHit(Config.PIRATE_PLAYER_DAMAGE)
                         end
@@ -487,7 +486,7 @@ function Enemy:SpawnPirate(spawnPos, skin)
 
     function unit:PlayDeath()
         self.state = "dead"
-        self.anim:Play(Config.PirateAnim(self.skin, "Death"), 0, false, 0.1)
+        self.mgr.crowd:Play(self.sprite, "Death")
         startRemove(self, Config.PIRATE_DEATH_TIME)
     end
 
@@ -669,6 +668,10 @@ function Enemy:Update(dt)
         if unit.removing then
             unit.removeT = unit.removeT - dt
             if unit.removeT <= 0.0 then
+                if unit.sprite then
+                    self.crowd:Release(unit.sprite)   -- 归还 billboard 槽位（仅海盗有）
+                    unit.sprite = nil
+                end
                 if unit.node then
                     unit.node:Remove()
                 end
@@ -678,6 +681,9 @@ function Enemy:Update(dt)
         end
     end
 
+    -- 序列帧海盗：在各单位 Update 摆好 node 世界位置后，统一推进 clip 时间并同步 billboard 位置/UV。
+    self.crowd:Update(dt)
+
     -- 大船炮台的在飞炮弹（独立于 units：船开走/沉没，已发射的炮弹照样落地）
     self:UpdateProjectiles(dt)
 end
@@ -685,10 +691,15 @@ end
 --- 清空所有单位与计时器（换局/停止）。
 function Enemy:Clear()
     for _, unit in ipairs(self.units) do
+        if unit.sprite then
+            self.crowd:Release(unit.sprite)
+            unit.sprite = nil
+        end
         if unit.node then
             unit.node:Remove()
         end
     end
+    self.crowd:Reset()
     self.units = {}
     self.timers = {}
     for _, pr in ipairs(self.projectiles) do

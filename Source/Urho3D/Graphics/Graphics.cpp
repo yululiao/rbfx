@@ -28,6 +28,7 @@
 #include "../Graphics/Animation.h"
 #include "../Graphics/AnimationController.h"
 #include "../Graphics/BoneMatrixBaker.h"
+#include "../Graphics/FlipbookBaker.h"
 #include "../Graphics/Camera.h"
 #include "../Graphics/CameraOperator.h"
 #include "../Graphics/Geometry.h"
@@ -713,6 +714,7 @@ void RegisterGraphicsLibrary(Context* context)
     InstancedBoneModel::RegisterObject(context);
     VATBaker::RegisterObject(context);
     BoneMatrixBaker::RegisterObject(context);
+    FlipbookBaker::RegisterObject(context);
     Skybox::RegisterObject(context);
     AnimatedModel::RegisterObject(context);
     AnimationController::RegisterObject(context);
