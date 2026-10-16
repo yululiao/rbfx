@@ -61,10 +61,11 @@ namespace Urho3D
 namespace
 {
 
-/// Archive magic for the ".flipbook" binary atlas container.
+/// Archive magic for the ".flipbook.meta" clip-table sidecar.
 constexpr char kFlipbookMagic[4] = { 'F', 'L', 'B', 'K' };
-/// Archive format version.
-constexpr unsigned kFlipbookVersion = 1;
+/// Archive format version. 2 = pixels live in the sibling ".flipbook.png" (lossless, ~20x smaller
+/// than raw RGBA8); the meta only carries the layout / clip table.
+constexpr unsigned kFlipbookVersion = 2;
 
 } // namespace
 
@@ -551,9 +552,9 @@ bool FlipbookBaker::Save(const ea::string& path, ea::string& error) const
     }
 
     SharedPtr<File> file = MakeShared<File>(context_);
-    if (!file->Open(path, FILE_WRITE))
+    if (!file->Open(path + ".meta", FILE_WRITE))
     {
-        error = "FlipbookBaker::Save: cannot open " + path;
+        error = "FlipbookBaker::Save: cannot open " + path + ".meta";
         return false;
     }
 
@@ -577,16 +578,19 @@ bool FlipbookBaker::Save(const ea::string& path, ea::string& error) const
         file->Write(&clip.frameCount_, sizeof(clip.frameCount_));
         file->Write(&clip.duration_, sizeof(clip.duration_));
     }
-
-    file->Write(atlasTexels_.data(), static_cast<unsigned>(atlasTexels_.size()));
     file->Close();
 
-    // Sidecar PNG preview so the atlas can be eyeballed outside the engine.
+    // Pixel source: a lossless PNG next to the meta. Saved as part of the same output so the two
+    // files can never disagree; also serves as the eyeball preview.
     {
         Image preview(context_);
         preview.SetSize(static_cast<int>(atlasWidth_), static_cast<int>(atlasHeight_), 4);
         memcpy(preview.GetData(), atlasTexels_.data(), atlasTexels_.size());
-        preview.SavePNG(path + ".png");
+        if (!preview.SavePNG(path + ".png"))
+        {
+            error = "FlipbookBaker::Save: cannot write " + path + ".png";
+            return false;
+        }
     }
     return true;
 }
@@ -607,18 +611,24 @@ bool FlipbookBaker::Load(const ea::string& path, ea::string& error)
     error.clear();
     Reset();
 
-    ea::string resolved = path;
+    // The ".flipbook" name is a base, not a file: layout comes from "<path>.meta", pixels from the
+    // lossless "<path>.png".
+    ea::string metaPath = path + ".meta";
+    ea::string pngPath = path + ".png";
     if (auto* cache = GetSubsystem<ResourceCache>())
     {
-        const ea::string absolute = cache->GetResourceFileName(path);
-        if (!absolute.empty())
-            resolved = absolute;
+        const ea::string absoluteMeta = cache->GetResourceFileName(metaPath);
+        if (!absoluteMeta.empty())
+            metaPath = absoluteMeta;
+        const ea::string absolutePng = cache->GetResourceFileName(pngPath);
+        if (!absolutePng.empty())
+            pngPath = absolutePng;
     }
 
     SharedPtr<File> file = MakeShared<File>(context_);
-    if (!file->Open(resolved, FILE_READ))
+    if (!file->Open(metaPath, FILE_READ))
     {
-        error = "FlipbookBaker::Load: cannot open " + path;
+        error = "FlipbookBaker::Load: cannot open " + metaPath;
         return false;
     }
 
@@ -657,12 +667,31 @@ bool FlipbookBaker::Load(const ea::string& path, ea::string& error)
         file->Read(&clip.duration_, sizeof(clip.duration_));
     }
 
-    const size_t byteCount = static_cast<size_t>(atlasWidth_) * atlasHeight_ * 4;
-    atlasTexels_.resize(byteCount);
-    file->Read(atlasTexels_.data(), static_cast<unsigned>(byteCount));
     totalCells_ = 0;
     for (const BakedFlipbookClip& clip : clips_)
         totalCells_ = Max(totalCells_, clip.startCell_ + clip.frameCount_ * rotations_);
+
+    // Decode the PNG pixel source.
+    SharedPtr<File> pngFile = MakeShared<File>(context_);
+    if (!pngFile->Open(pngPath, FILE_READ))
+    {
+        error = "FlipbookBaker::Load: cannot open " + pngPath;
+        return false;
+    }
+    SharedPtr<Image> image = MakeShared<Image>(context_);
+    if (!image->BeginLoad(*pngFile))
+    {
+        error = "FlipbookBaker::Load: failed to decode " + pngPath;
+        return false;
+    }
+
+    if (static_cast<unsigned>(image->GetWidth()) != atlasWidth_ ||
+        static_cast<unsigned>(image->GetHeight()) != atlasHeight_)
+    {
+        error = Format("FlipbookBaker::Load: PNG size {}x{} does not match meta {}x{}",
+            image->GetWidth(), image->GetHeight(), atlasWidth_, atlasHeight_);
+        return false;
+    }
 
     texture_ = MakeShared<Texture2D>(context_);
     texture_->SetName("FlipbookAtlas");
@@ -670,13 +699,11 @@ bool FlipbookBaker::Load(const ea::string& path, ea::string& error)
     texture_->SetFilterMode(FILTER_NEAREST);
     texture_->SetAddressMode(TextureCoordinate::U, ADDRESS_CLAMP);
     texture_->SetAddressMode(TextureCoordinate::V, ADDRESS_CLAMP);
-    if (!texture_->SetSize(static_cast<int>(atlasWidth_), static_cast<int>(atlasHeight_),
-            TextureFormat::TEX_FORMAT_RGBA8_UNORM))
+    if (!texture_->SetData(image))
     {
-        error = "FlipbookBaker::Load: failed to allocate the atlas texture";
+        error = "FlipbookBaker::Load: failed to upload the atlas texture";
         return false;
     }
-    texture_->SetData(0, 0, 0, static_cast<int>(atlasWidth_), static_cast<int>(atlasHeight_), atlasTexels_.data());
     return true;
 }
 

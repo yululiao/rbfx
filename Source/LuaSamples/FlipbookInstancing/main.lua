@@ -149,9 +149,12 @@ function app:BuildCrowd()
 
     -- Unlit + vertex-color + alpha-blended technique: the baked cards carry their own
     -- shading, and billboard.uv/color are the only per-instance knobs the shader reads.
+    -- rbfx's Unlit/DIFFMAP path samples the "Albedo" texture unit (sAlbedo), NOT the legacy
+    -- "Diffuse" name -- binding to "Diffuse" leaves Albedo empty and the GPU shows the white
+    -- default texture (solid white billboards).
     local material = Material()
     material:SetTechnique(0, technique)
-    material:SetTexture("Diffuse", texture)
+    material:SetTexture("Albedo", texture)
 
     local node = self.scene:CreateChild("FlipbookCrowd")
     local set = node:CreateComponent("BillboardSet")

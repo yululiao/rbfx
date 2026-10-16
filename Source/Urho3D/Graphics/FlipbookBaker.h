@@ -86,7 +86,8 @@ struct FlipbookBakeParams
 /// The bake is inherently frame-driven (each cell is one engine render of the offscreen viewport),
 /// so Start() kicks off an asynchronous job that self-advances through the E_UPDATE / E_ENDRENDERING
 /// events; a caller (the editor dialog) shows progress until IsRunning() goes false, at which point
-/// the atlas archive (and a PNG preview) have been written to the output path.
+/// the layout meta ("<output>.flipbook.meta") and the lossless PNG pixel source
+/// ("<output>.flipbook.png") have been written next to the output path.
 ///
 /// The same object doubles as the runtime consumer: Load() rehydrates the atlas texture plus the
 /// clip table, and GetClipCellUV() maps a (clip, frame, rotation) triple to the UV rectangle to
@@ -106,7 +107,8 @@ public:
 
     // ---- Editor bake (asynchronous, self-driving across engine frames) ----
 
-    /// Set where Start() writes the ".flipbook" archive and its PNG preview on completion.
+    /// Set the base path Start() writes on completion: "<base>.meta" (clip table) and
+    /// "<base>.png" (lossless atlas pixels).
     void SetOutputPath(const ea::string& path) { outputPath_ = path; }
     /// Optional material applied to the model during the bake (null = whatever the model carries).
     void SetBakeMaterial(Material* material) { bakeMaterial_ = material; }
@@ -136,8 +138,8 @@ public:
     /// Convenience overload recording the failure reason in GetLastError().
     bool Load(const ea::string& path);
 
-    /// Persist the atlas (RGBA8 texels + layout + per-clip metadata) to a binary ".flipbook" archive,
-    /// plus a sidecar ".flipbook.png" for human inspection. Requires a completed successful bake.
+    /// Persist the layout / per-clip metadata to "<path>.meta" and the atlas pixels as a lossless
+    /// "<path>.png" (also the human-inspectable preview). Requires a completed successful bake.
     bool Save(const ea::string& path, ea::string& error) const;
     /// Convenience overload recording the failure reason in GetLastError().
     bool Save(const ea::string& path);
