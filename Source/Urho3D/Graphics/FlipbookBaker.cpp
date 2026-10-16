@@ -615,18 +615,22 @@ bool FlipbookBaker::Load(const ea::string& path, ea::string& error)
     // lossless "<path>.png".
     ea::string metaPath = path + ".meta";
     ea::string pngPath = path + ".png";
-    if (auto* cache = GetSubsystem<ResourceCache>())
-    {
-        const ea::string absoluteMeta = cache->GetResourceFileName(metaPath);
-        if (!absoluteMeta.empty())
-            metaPath = absoluteMeta;
-        const ea::string absolutePng = cache->GetResourceFileName(pngPath);
-        if (!absolutePng.empty())
-            pngPath = absolutePng;
-    }
 
-    SharedPtr<File> file = MakeShared<File>(context_);
-    if (!file->Open(metaPath, FILE_READ))
+    // Open through the resource system so both the editor/desktop loose layout and the packaged
+    // layout resolve: ResourceCache::GetFile searches the mounted resource paths and the in-package
+    // manifest, which maps the engine-visible "...flipbook.meta"/"...flipbook.png" names back onto
+    // the vendor-renamed physical files (e.g. ".meta.dat"). A raw filesystem File::Open only sees the
+    // CWD and misses everything inside the package, so it silently fails on the minigame build.
+    auto* cache = GetSubsystem<ResourceCache>();
+    AbstractFilePtr file = cache ? cache->GetFile(metaPath) : nullptr;
+    if (!file || !file->IsOpen())
+    {
+        // Fall back to a direct filesystem open, so an absolute path outside the resource tree
+        // (as passed by the desktop baking tool) still loads.
+        SharedPtr<File> direct = MakeShared<File>(context_);
+        file = direct->Open(metaPath, FILE_READ) ? AbstractFilePtr(direct) : nullptr;
+    }
+    if (!file)
     {
         error = "FlipbookBaker::Load: cannot open " + metaPath;
         return false;
@@ -671,9 +675,14 @@ bool FlipbookBaker::Load(const ea::string& path, ea::string& error)
     for (const BakedFlipbookClip& clip : clips_)
         totalCells_ = Max(totalCells_, clip.startCell_ + clip.frameCount_ * rotations_);
 
-    // Decode the PNG pixel source.
-    SharedPtr<File> pngFile = MakeShared<File>(context_);
-    if (!pngFile->Open(pngPath, FILE_READ))
+    // Decode the PNG pixel source, opened the same package-aware way as the meta.
+    AbstractFilePtr pngFile = cache ? cache->GetFile(pngPath) : nullptr;
+    if (!pngFile || !pngFile->IsOpen())
+    {
+        SharedPtr<File> direct = MakeShared<File>(context_);
+        pngFile = direct->Open(pngPath, FILE_READ) ? AbstractFilePtr(direct) : nullptr;
+    }
+    if (!pngFile)
     {
         error = "FlipbookBaker::Load: cannot open " + pngPath;
         return false;
