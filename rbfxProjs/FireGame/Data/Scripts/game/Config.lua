@@ -517,6 +517,27 @@ function Config.PirateAnim(name, stack)
     return PIRATE_DIR .. name .. ".fbx.d/Models/" .. name .. "_CharacterArmature" .. stack .. ".ani"
 end
 
+----------------------------------------------------------------------
+-- 海盗序列帧（flipbook）billboard 群体渲染：把 3D 蒙皮小海盗降级成相机朝向的
+-- 序列帧卡片，一个 BillboardSet 合批整群。烘焙产物 "<name>.flipbook.meta/.png"
+-- 落在源 fbx 同目录（PIRATE_DIR），运行期 FlipbookBaker:Load 吃 "<base>.flipbook"。
+----------------------------------------------------------------------
+--- pirate-kit 序列帧图集资源基名（不含 .meta/.png 后缀，Load 内部拼接）。
+---@param name string 资产名，如 "Characters_Anne"
+---@return string
+function Config.PirateFlipbook(name)
+    return PIRATE_DIR .. name .. ".flipbook"
+end
+
+Config.FLIPBOOK_TECHNIQUE = "Techniques/DiffVColUnlitAlpha.xml"  -- Unlit+顶点色+alpha 混合
+-- 单张卡片的尺寸与竖直摆放：billboard 是正方形图集格的 world 映射，position 为卡片中心。
+-- 烘焙取景按全姿态并集加了留白，故卡片边长大于角色净高（~1.8m）；中心抬高把脚底近似落到 node 原点。
+-- 进游戏按实际观感微调这两个值即可（改这里、不碰逻辑）。
+Config.PIRATE_CARD_SIZE = 2.6      -- 卡片边长（world 单位，square）
+Config.PIRATE_CARD_CENTER = 1.0    -- 卡片中心相对 node 原点（脚底）的抬高
+-- 逻辑动画名 → 烘焙 clip 名尾缀（烘只有这三条在用动画）。
+Config.PIRATE_CLIP_STACKS = { "Run", "Sword", "Death" }
+
 ---@return string
 function Config.PlayerModel()
     return PLAYER_DIR .. PLAYER_MODEL .. ".fbx.d/Models/" .. PLAYER_MODEL .. ".mdl"
