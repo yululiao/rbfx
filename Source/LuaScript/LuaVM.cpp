@@ -66,6 +66,27 @@ LuaVM::~LuaVM()
         subscribers_->map_.clear();
 }
 
+void LuaVM::DestroyState()
+{
+    if (!luaState_)
+        return;
+
+    // Holders outside this VM go first: they have no place else to hear about the state dying, so
+    // the VM broadcasts from itself and they subscribe to the event type with any sender (rbfx
+    // Context is not an Object, hence no context-wide SendEvent - same shape as the E_CONSOLECOMMAND
+    // handler EngineLuaVM installs). Then the references owned here.
+    VariantMap eventData;
+    eventData[LuaVMStateClosing::P_STATE] = Variant(static_cast<void*>(luaState_->lua_state()));
+    SendEvent(E_LUAVMSTATECLOSING, eventData);
+    if (subscribers_)
+        subscribers_->map_.clear();
+
+    // The searcher closure holds a pointer to the loader and the loader holds the raw
+    // lua_State*, so neither may outlive the state in the other direction either.
+    packageLoader_.reset();
+    luaState_.reset();
+}
+
 bool LuaVM::Initialize()
 {
     if (luaState_)

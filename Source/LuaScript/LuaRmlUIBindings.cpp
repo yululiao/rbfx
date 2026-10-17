@@ -23,6 +23,7 @@
 #include "LuaBindings.h"
 #include "LuaBindHelpers.h"
 #include "LuaBindMacros.h"
+#include "LuaVM.h"
 
 #include "../Urho3D/Core/Context.h"
 #include "../Urho3D/Graphics/Texture2D.h"
@@ -74,6 +75,21 @@ public:
     explicit LuaRmlUIComponent(Context* context)
         : RmlUIComponent(context)
     {
+        // This component is the one engine object that keeps Lua callbacks past the VM's own
+        // bookkeeping: Bind* hands sol::protected_function values into the RmlUi data model, and
+        // handlers_ is another reference. The editor's Stop path resets the game VM before it
+        // rebuilds the scene, so without this the data model would be destroyed against a closed
+        // lua_State (unref walks freed memory). Reacting to the warning is what moves that
+        // destruction back to where the state is still alive.
+        SubscribeToEvent(E_LUAVMSTATECLOSING, [this](StringHash, VariantMap& eventData)
+        {
+            // Only the VM whose state we actually reference may trigger a release. Several VMs live
+            // side by side, and this subscription matches by event type from any sender - without the
+            // pointer check a plugin host reloading would disable our document even though the state
+            // it points into is alive and untouched.
+            if (luaState_ && eventData[LuaVMStateClosing::P_STATE].GetVoidPtr() == luaState_)
+                ReleaseLuaRefs();
+        });
     }
 
     /// Register as a creatable component type. Safe to call repeatedly.
@@ -254,6 +270,18 @@ protected:
     }
 
 private:
+    /// Drop every Lua reference this component owns while the state is still alive. Order matters:
+    /// disabling the component closes the document, and that path removes the data model which
+    /// holds the bound getter/setter/event callbacks. The two members go first so that no stale
+    /// tick can reach the dying VM - both OnDataModelInitialized and Update already bail when
+    /// either is unset.
+    void ReleaseLuaRefs()
+    {
+        handlers_.reset();
+        luaState_ = nullptr;
+        SetEnabled(false);
+    }
+
     lua_State* luaState_ = nullptr;
     sol::optional<sol::table> handlers_;
     /// Persistent data-model storage. ea::map keeps element addresses stable so the

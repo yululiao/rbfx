@@ -54,10 +54,11 @@ void EngineLuaVM::Reinitialize()
 
     UnsubscribeFromAllEvents();
 
-    // The searcher closure holds a pointer to the loader and the loader holds the raw
-    // lua_State*, so neither may outlive the state in the other direction either.
-    packageLoader_.reset();
-    luaState_.reset();
+    // Ordered teardown lives in LuaVM: external Lua references first, then the VM's own, then the
+    // state. Resetting luaState_ by hand here used to leave the data-model callbacks of a Lua-bound
+    // UI component pointing into a closed state - the editor's Stop path rebuilds the scene only
+    // after this returns, and that is the moment those callbacks actually get destroyed.
+    DestroyState();
     Initialize();
 }
 

@@ -37,6 +37,20 @@ struct RBFXLUA_API LuaVMConfig
     ea::vector<ea::string> requirePrefixes_ = { EMPTY_STRING };
 };
 
+/// Broadcast by a LuaVM immediately before it destroys its lua_State. Subscribe with the any-sender
+/// form, because rbfx Context is not an Object and has no context-wide SendEvent to hang this on.
+/// Anything holding a Lua reference outside the VM - a data-model callback captured by a UI
+/// component, for instance - has to let go on this signal. Releasing a reference against a closed
+/// state is undefined: the editor crashed on Stop because its Play/Stop path tears the game VM down
+/// *before* it rebuilds the scene, so those components outlive the state they point into.
+/// P_STATE carries the lua_State* being destroyed so a holder can tell whether it references *this*
+/// state (release) or a different VM's (ignore) - several VMs live side by side, and a subscriber
+/// matched by event type alone would react to every one of them shutting down.
+URHO3D_EVENT(E_LUAVMSTATECLOSING, LuaVMStateClosing)
+{
+    URHO3D_PARAM(P_STATE, State); // void* (lua_State*) being destroyed
+}
+
 /// Lightweight read-only wrapper over event data that allows Lua callbacks
 /// to read event parameters by name: data.TimeStep, data.Name, etc.
 ///
@@ -117,6 +131,12 @@ public:
     void UnsubscribeSenderEvent(Object* sender, const char* eventName);
 
 protected:
+    /// Tear the state down in the one order that is safe: warn the holders outside this VM so they
+    /// drop their Lua references, drop the ones owned here, then destroy the state. Every one of
+    /// those steps needs a live lua_State to unref, so resetting luaState_ ad hoc is a bug - which
+    /// is exactly why the sequence lives here and not at the call site. No-op when no state is alive.
+    void DestroyState();
+
     /// Called at the end of every successful Initialize -- including those inside a rebuild
     /// like EngineLuaVM::Reinitialize -- with the state alive. Lets subclasses (re)attach
     /// what a state reset drops, without hiding the base Initialize().
