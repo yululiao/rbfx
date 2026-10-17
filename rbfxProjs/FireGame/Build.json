@@ -104,9 +104,9 @@
 				"URHO3D_TIMELINE"
 			],
 			"Douyin": {},
-			"EmsdkRoot": "D:/openSrc/emsdk",
-			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
-			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"EmsdkRoot": "D:/GameEngines/emsdk",
+			"EngineBin": "D:/GameEngines/rbfx/cmake-build/minigame-douyin/bin/Release",
+			"EngineData": "D:/GameEngines/rbfx/msvc/bin",
 			"Name": "Douyin",
 			"OutputDir": "Build/Douyin",
 			"PackData": false,
