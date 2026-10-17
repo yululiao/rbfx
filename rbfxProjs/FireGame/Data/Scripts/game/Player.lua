@@ -182,6 +182,8 @@ function Player.Build(scene, spot, playerBoat, aspect)
     self.aimTwist_ = 0.0         -- 上半身当前扭转量（弧度，平滑值）
 
     self.aim = 0.0                              -- 度，正=右转（俯视角下固定 0，不再动态变化）
+    self.aspect_ = aspect                       -- 画布宽高比，Build 时定下不再变（真机恒定）；
+                                                -- 调试面板改 Config 后靠它重跑 CameraForAspect
     self.pitch = camFit.pitch                   -- 度，相机俯角（竖屏端更陡，见 CameraForAspect）
     self.camDistance_ = camFit.distance         -- 相机离关注点的距离（竖屏端更远/更高）
     self.camLookAhead_ = camFit.lookAhead       -- 视线中心朝海前推量（竖屏端更大）
@@ -222,6 +224,20 @@ function Player:AddKick()
     self.kick = self.kick + Config.CAMERA_KICK
 end
 
+--- 把当前 Config 相机常量重新落到相机与本帧缓存上（调试面板每拖一下滑条调它）。
+--- FOV/远裁剪面是写在相机组件上的，必须显式重设；距离/俯角/前视是 UpdateCamera 每帧读的
+--- 成员缓存，覆写即生效；关注高度（CAMERA_TARGET_Y）本来就是每帧直读 Config，无需搬。
+--- 末尾立刻摆一次位，免得等到下一帧才跳变（观感上像卡了一下）。
+function Player:ApplyCameraFit()
+    local camFit = Config.CameraForAspect(self.aspect_)
+    self.camera:SetFov(camFit.vfov)
+    self.camera:SetFarClip(Config.CAMERA_FAR_CLIP)
+    self.pitch = camFit.pitch
+    self.camDistance_ = camFit.distance
+    self.camLookAhead_ = camFit.lookAhead
+    self:UpdateCamera(0.0)
+end
+
 --- 左摇杆走位：屏幕绝对方向（上=朝海 -z，右=+x），限制在可行走矩形内。
 --- 俯视角下相机固定不转，所以方向不依赖任何相机基准。
 ---@param stickX number -1..1，右为正
@@ -248,8 +264,9 @@ function Player:Move(stickX, stickY, dt)
             local d = angDiff(self.boatYaw, math.atan(dirX, -dirZ))
             self.boatYaw = self.boatYaw + clamp(d, -step, step)
         end
-        -- Ship_Small 长轴沿模型原生 x，Coast 以 Config.BOAT_YAW 落位；boatYaw=0 时旋转回落到 Config.BOAT_YAW
-        -- 与出生姿态连续（不突跳）。若发现船是“倒着开”（船尾朝行驶方向），翻转本式的符号即可。
+        -- 船体（kenney ship-row-large）沿 z 建模，Coast 以 Config.BOAT_YAW=180 落位把船头拧向内陆；
+        -- boatYaw=0 时旋转回落到 Config.BOAT_YAW，与出生姿态连续（不突跳）。若发现船是“倒着开”
+        -- （船尾朝行驶方向），翻转本式的符号即可。
         self.boatNode:SetRotation(Quaternion(Config.BOAT_YAW - math.deg(self.boatYaw), Vector3.UP))
         return
     end

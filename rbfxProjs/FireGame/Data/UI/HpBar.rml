@@ -1,0 +1,49 @@
+<!--
+    HpBar.rml —— 主角头顶的 3 格血条。它不是屏幕 HUD，而是渲染进一张离屏纹理、贴在被
+    game/HpBar.lua 创建的 3D 节点上的"世界面板"（机制同 107_HelloRmlUI 里贴旋转方块那份：
+    同一个 Node 上放 RmlCanvasComponent + LuaRmlUIComponent，文档会被自动挪进离屏 UI，
+    屏幕那份同时关闭，所以不会既在 3D 里有一份、屏幕上又剩一份）。
+
+    单位为什么用 px 而不是 GameHud 那套 dp：本文档渲染进的是 RmlCanvasComponent 自己那份
+    离屏 RmlUI 实例，main.lua 的 rmlUi:SetScale(UI_SCALE) 只作用在子系统主实例上，管不到这里；
+    而 dp 要再乘一次 device pixel ratio，那是个我不想在真机上赌的量。px 是绝对像素，320x64
+    就是纹理的 320x64，排版结果与设备无关。
+
+    尺寸契约（改一边必须同步另一边，见 Config.HP_BAR）：
+      * 本文档按 320 x 64 排版，对应 canvas:SetUISize(320, 64)；两轴都不小于 64，那是
+        RmlCanvasComponent::SetUISize 的硬校验下限（低于它整条会被拒收，纹理停在默认 512x512）；
+      * 面板世界尺寸 1.9 x 0.38 米 = 5:1，与 320:64 同比例，格子不会被透视拉扁。
+
+    绑定期望值（与 GameHud 同源的那套规则）：
+      * 绑定节点必须包在 <div data-model="{{__data_model_id}}"> 里；
+      * 显隐走 data-if="pipN"（bool getter）——绝不写内联 style 绑 {{}}，RCSS 解析器会崩；
+      * 掉血时亮格整个不进渲染树，露出底下常驻的暗槽，所以上限（3 格）始终可读，
+        也不会出现"格子还在但变灰"这种和暗槽重复的表达。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+    <style>
+        /* 常驻暗槽：告诉玩家上限是 3。比亮格四周各宽 6px，露出一圈边当描边。 */
+        .track { position: absolute; left: 6px; top: 6px; width: 308px; height: 52px;
+                 background-color: #00000077; border-radius: 7px; }
+        /* 亮格：96px 宽，左起 10 / 112 / 214（格间距 6px，最右格 310px 处正好收进槽内）。 */
+        .pip { position: absolute; top: 12px; width: 96px; height: 40px;
+               background-color: #ff2d2dff; border-radius: 5px; }
+        .p1 { left: 10px; }
+        .p2 { left: 112px; }
+        .p3 { left: 214px; }
+    </style>
+</head>
+<!-- 离屏画布尺寸固定，所以 body 显式吃满，不依赖 auto-size 行为。 -->
+<body style="display: block; width: 320px; height: 64px; pointer-events: none;">
+<div data-model="{{__data_model_id}}">
+    <div class="track"></div>
+    <div data-if="pip1" class="pip p1"></div>
+    <div data-if="pip2" class="pip p2"></div>
+    <div data-if="pip3" class="pip p3"></div>
+</div>
+</body>
+</rml>

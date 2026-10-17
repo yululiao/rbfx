@@ -50,7 +50,7 @@ function Waves:Reset()
         if self.hud.SetCombo then self.hud:SetCombo(0) end
         if self.hud.SetWave then self.hud:SetWave(1) end
         if self.hud.SetDefense then self.hud:SetDefense(self.defenseHp, Config.DEFENSE_HP) end
-        if self.hud.SetPlayer then self.hud:SetPlayer(self.playerHp, Config.PLAYER_HP) end
+        -- 主角血不往 HUD 喂：头顶 3 格血条（game/HpBar.lua）每帧直读 self.playerHp。
     end
     self.audio:Voice(Config.Voice.prepare)
 end
@@ -201,16 +201,14 @@ function Waves:DamageDefense(dmg)
     end
 end
 
---- 突袭型海盗砍到主角。
+--- 突袭型海盗砍到主角 / 大船炮弹炸到主角。只动数值，不在这里渲染：
+--- 主角血唯一的消费者是头顶那 3 格，它每帧来读 self.playerHp（见 game/HpBar.lua）。
 ---@param dmg number
 function Waves:DamagePlayer(dmg)
     if self.phase == "ended" then
         return
     end
     self.playerHp = math.max(0, self.playerHp - (dmg or 0))
-    if self.hud and self.hud.SetPlayer then
-        self.hud:SetPlayer(self.playerHp, Config.PLAYER_HP)
-    end
 end
 
 ----------------------------------------------------------------------

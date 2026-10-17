@@ -1,0 +1,117 @@
+<!--
+    CamDebug.rml —— 相机参数调试面板（仅 Config.DEBUG_CAM_PANEL=true 时被 Lua 打开）。
+
+    为什么长这样（三条都是实测/官方样例的硬约束，勿"顺手优化"）：
+      * 绑定节点必须包在 <div data-model="{{__data_model_id}}"> 里（LuaRmlUIComponent 硬要求）。
+      * 滑条用 <input type="range" data-value="name">：rbfx 的 DataControllerValue 会监听该元素
+        的 change 事件并把新值写回 data model，即 Lua 侧 BindProperty 的 setter（见官方样例
+        107_HelloRmlUI 与 LuaSamples/107 的 slider_value）。真机触摸经 RmlUI::HandleTouchBegin/
+        Move/End 转成 rmlUi 的 mouse down/move/up，所以拖得动。
+      * 绝不在内联 style 里塞 {{}}（RCSS 解析器吃到就报 Syntax error）——所以每行数值是独立的
+        <td>{{xxxText}}</td>，由 Lua 格式化好喂进来。
+
+    参数行与 game/CamDebug.lua 的 PARAMS 是一一对应的：加/删参数必须两处同改
+    （这里改 <tr>，那里改表项），否则绑定名对不上，表现是"滑条拖了没反应"。
+
+    显隐用两个 bool 绑定（showTrigger/showPanel）而不是 data-if="!open"：取反写法在本仓库
+    没有实测先例，不值得为省一个变量去赌。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+    <style>
+        .trigger { position: absolute; right: 28dp; top: 150dp; width: 88dp; height: 88dp;
+            border-radius: 44dp; background-color: #7a3fbfe6; text-align: center;
+            color: #ffffffff; font-size: 26dp; font-weight: bold; }
+        .trigger:active { background-color: #9d63ffd9; }
+        .trigger .cap { position: relative; top: 26dp; }
+
+        /* 宽度一律用百分比（不写死 dp）：真机竖屏 702dp、编辑器 GameView 更宽，
+           写死一个 dp 值就是在赌屏幕宽度。行内部列宽仍用 dp（滑条要固定可拖长度）。 */
+        .panel { position: absolute; left: 8dp; top: 8dp; width: 96%; height: 880dp;
+            background-color: #10161be6; border: 1dp #3d584b; border-radius: 10dp; }
+        .head { position: absolute; left: 12dp; top: 10dp; width: 94%; height: 52dp; }
+        .title { float: left; color: #ffd24dff; font-size: 24dp; font-weight: bold; }
+        .btns { float: right; }
+        .btns button { margin-left: 6dp; padding: 6dp 14dp; font-size: 20dp; color: #ffffffff;
+            border-radius: 6dp; }
+        .status { position: absolute; left: 12dp; top: 66dp; width: 94%; height: 30dp;
+            color: #7cfc00ff; font-size: 18dp; }
+        /* 第二行：aspect / t 档位 / FPS。面板展开时 GameHud 的性能 Overlay 主动让位，
+           帧数只能在这里看（两个都挤屏幕上部会互相盖掉）。 */
+        .status2 { position: absolute; left: 12dp; top: 96dp; width: 94%; height: 30dp;
+            color: #9fe0ffd9; font-size: 18dp; }
+        /* 滚动区：状态行下面到面板底。行数多于屏幕时靠它兜底（复位/收起按钮在滚动区外，永远够得着）。 */
+        .scroller { position: absolute; left: 12dp; top: 130dp; width: 94%; height: 740dp;
+            overflow: auto; }
+        .grid { width: 100%; }
+        .grid td { height: 40dp; vertical-align: middle; }
+        .k { width: 168dp; color: #ffffffd9; font-size: 20dp; }
+        .r { width: 330dp; }
+        .v { width: 148dp; color: #9fe0ffd9; font-size: 20dp; text-align: right; }
+        .sl { width: 320dp; height: 36dp; }
+        /* 把手默认 16dp（default.rcss），真机 UI_SCALE≈0.56 只剩 9px，手指根本按不准；
+           这里放大到接近摇杆帽的尺寸（帽 96dp×0.56≈54px）。 */
+        .sl sliderbar { width: 44dp; height: 32dp; border-radius: 8dp; }
+        .grp td { height: 30dp; color: #ffd24db3; font-size: 18dp; }
+        .hint { margin-top: 8dp; color: #ffffff80; font-size: 16dp; }
+    </style>
+</head>
+<body class="fullscreen">
+<div data-model="{{__data_model_id}}">
+
+    <!-- 右上触发按钮（右上角分数/combo 之下、避开刘海区） -->
+    <div data-if="showTrigger" data-event-click="open" class="trigger">
+        <div class="cap">相机</div>
+    </div>
+
+    <div data-if="showPanel">
+        <div class="panel">
+            <div class="head">
+                <div class="title">相机调试</div>
+                <div class="btns">
+                    <button data-event-click="reset">复位</button>
+                    <button data-event-click="dump">打印</button>
+                    <button data-event-click="close">收起</button>
+                </div>
+            </div>
+            <!-- 本端实际生效值：t 是插值档位，不写出来就无法判断"拖这行有没有用" -->
+            <div class="status">{{statusLine}}</div>
+            <div class="status2">{{statusLine2}}</div>
+
+            <div class="scroller">
+                <table class="grid">
+                    <tr class="grp"><td colspan="3">竖屏端（t=1 时生效；手机真机就是这一端）</td></tr>
+                    <tr><td class="k">距离</td><td class="r"><input class="sl" type="range" min="4" max="40" step="0.25" data-value="distPort"/></td><td class="v">{{distPortText}}</td></tr>
+                    <tr><td class="k">俯角</td><td class="r"><input class="sl" type="range" min="0" max="70" step="0.5" data-value="pitchPort"/></td><td class="v">{{pitchPortText}}</td></tr>
+                    <tr><td class="k">前视</td><td class="r"><input class="sl" type="range" min="0" max="30" step="0.25" data-value="lookPort"/></td><td class="v">{{lookPortText}}</td></tr>
+
+                    <tr class="grp"><td colspan="3">横屏端（t=0 时生效；编辑器 GameView 里调这三行）</td></tr>
+                    <tr><td class="k">距离</td><td class="r"><input class="sl" type="range" min="4" max="40" step="0.25" data-value="distLand"/></td><td class="v">{{distLandText}}</td></tr>
+                    <tr><td class="k">俯角</td><td class="r"><input class="sl" type="range" min="0" max="70" step="0.5" data-value="pitchLand"/></td><td class="v">{{pitchLandText}}</td></tr>
+                    <tr><td class="k">前视</td><td class="r"><input class="sl" type="range" min="0" max="30" step="0.25" data-value="lookLand"/></td><td class="v">{{lookLandText}}</td></tr>
+
+                    <tr class="grp"><td colspan="3">视场（水平恒定推垂直，cap 是竖屏构图旋钮）</td></tr>
+                    <tr><td class="k">水平 FOV</td><td class="r"><input class="sl" type="range" min="20" max="110" step="0.5" data-value="fovH"/></td><td class="v">{{fovHText}}</td></tr>
+                    <tr><td class="k">垂直 FOV 上限</td><td class="r"><input class="sl" type="range" min="20" max="110" step="0.5" data-value="vfovCap"/></td><td class="v">{{vfovCapText}}</td></tr>
+
+                    <tr class="grp"><td colspan="3">取景与手感</td></tr>
+                    <tr><td class="k">关注高度</td><td class="r"><input class="sl" type="range" min="0" max="8" step="0.05" data-value="targetY"/></td><td class="v">{{targetYText}}</td></tr>
+                    <tr><td class="k">远裁剪</td><td class="r"><input class="sl" type="range" min="60" max="600" step="5" data-value="farClip"/></td><td class="v">{{farClipText}}</td></tr>
+                    <tr><td class="k">后座幅度</td><td class="r"><input class="sl" type="range" min="0" max="3" step="0.02" data-value="kick"/></td><td class="v">{{kickText}}</td></tr>
+                    <tr><td class="k">后座回落</td><td class="r"><input class="sl" type="range" min="1" max="40" step="0.5" data-value="kickDecay"/></td><td class="v">{{kickDecayText}}</td></tr>
+
+                    <tr class="grp"><td colspan="3">插值区间（改这两个会移动 t 本身，端值行跟着串味）</td></tr>
+                    <tr><td class="k">竖屏阈值</td><td class="r"><input class="sl" type="range" min="0.3" max="1.2" step="0.01" data-value="aspPort"/></td><td class="v">{{aspPortText}}</td></tr>
+                    <tr><td class="k">横屏阈值</td><td class="r"><input class="sl" type="range" min="0.8" max="2.2" step="0.01" data-value="aspLand"/></td><td class="v">{{aspLandText}}</td></tr>
+                </table>
+                <div class="hint">“打印”把当前值以可直接粘回 Config.lua 的形式输出到日志。</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+</body>
+</rml>

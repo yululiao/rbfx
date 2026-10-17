@@ -18,12 +18,14 @@ local Player = require("game.Player")
 local Fx = require("game.Fx")
 local Audio = require("game.Audio")
 local Hud = require("game.Hud")
+local CamDebug = require("game.CamDebug")
 local Enemy = require("game.Enemy")
 local Waves = require("game.Waves")
 local Shooting = require("game.Shooting")
 local Juice = require("game.Juice")
 local Grow = require("game.Grow")
 local Dog = require("game.Dog")
+local HpBar = require("game.HpBar")
 
 ----------------------------------------------------------------------
 -- 帧率上限：真机（抖音 wasm）主循环按 Config.MAX_FPS 节流，省电/降热。
@@ -114,7 +116,7 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar
 
 local function RestartGame()
     if enemy then
@@ -222,6 +224,12 @@ hud = Hud.Build(scene, {
     onBoard = OnBoard,
     onDisembark = OnDisembark,
 })
+-- 相机参数调试面板（仅 Config.DEBUG_CAM_PANEL=true）：右上角一颗按钮，真机上实时拖相机常量
+-- 并把可粘回 Config.lua 的数值打到日志。必须在 player 之后建（它要调 player:ApplyCameraFit）。
+-- 开关为 false 时下面整块不存在——上线包里连 UI 组件都不会创建。
+if Config.DEBUG_CAM_PANEL then
+    camDebug = CamDebug.Build(scene, player)
+end
 enemy = Enemy.Build({
     scene = scene, fx = fx, audio = audio, player = player,
     onScore = OnScore, onDefenseHit = OnDefenseHit, onPlayerHit = OnPlayerHit,
@@ -233,6 +241,14 @@ dog = Dog.Build({ scene = scene, player = player, enemies = enemy, audio = audio
 enemy.dog = dog
 waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver,
     onWaveCleared = function() if dog then dog:GoRest() end end })
+-- 主角头顶 3 格血条：一份 RmlUI 文档渲染进离屏纹理、贴在跟随主角的 3D 面板节点上
+-- （引擎原生的 UI 挂 3D 通路，不是世界坐标转屏幕坐标）。必须在 waves 之后建：
+-- 血量的唯一真相在 waves.playerHp（Player.hp 只是个旧快照，别接上去）。
+hpBar = HpBar.Build(scene, {
+    cameraNode = player.cameraNode,
+    player = player,
+    getHp = function() return waves.playerHp end,
+})
 shooting = Shooting.Build({
     scene = scene, player = player, fx = fx, audio = audio, hud = hud,
     enemies = enemy, onScore = OnScore,
@@ -353,6 +369,11 @@ SubscribeToEvent("Update", function(data)
     if kx ~= 0.0 or ky ~= 0.0 then
         stickX, stickY = kx, ky
     end
+    -- 相机调试面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：小画布（编辑器
+    -- GameView）下面板会盖住左下抓取区，否则拖滑条的同时人物在走，构图边变边看，调不准。
+    if camDebug and camDebug:IsModal() then
+        stickX, stickY = 0.0, 0.0
+    end
 
     -- 全自动开火 + 装弹计时（世界 dt：定格期间不吐弹，弹与定格是同一套时间）
     shooting:Update(worldDt)
@@ -375,6 +396,10 @@ SubscribeToEvent("Update", function(data)
     -- 打击感帧尾：飘字投影上屏 + 震屏叠加到相机（必须在 player:Update 摆好相机
     -- 基础姿态之后，否则偏移被覆盖）。
     juice:EndFrame(dt)
+
+    -- 头顶血条：排在震屏之后，才能拿到本帧最终的相机姿态做朝向对齐
+    -- （放前面会用抖之前的姿态，血条比画面慢一帧）。
+    hpBar:Update(dt)
 
     -- 载具交互：两个按钮独立判定、互斥显示（条件本身互斥，显式双保险防止
     -- 遗留显示——旧版 if/elseif 只在 else 里隐藏，下船瞬间走不到 else，
@@ -417,7 +442,9 @@ SubscribeToEvent("Update", function(data)
             if time and time.GetFramesPerSecond then fps = time:GetFramesPerSecond() end
             -- Overlay 一行：FPS / drawcall / 三角面(百万) / 同屏海盗・船
             if hud and hud.ShowPerf then
-                hud:ShowPerf(true)
+                -- 相机调试面板展开时让位：两者都想占屏幕上部，同屏只会互相盖掉；
+                -- 帧数在那块面板自己的状态行里看（见 game/CamDebug.lua）。
+                hud:ShowPerf(not (camDebug and camDebug:IsModal()))
                 hud:SetPerf(string.format("FPS: %.0f | DC: %d | TRI: %.1fM | P:%d B:%d",
                     fps, draws, tris / 1048576.0, pirates, boats))
             end

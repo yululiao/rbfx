@@ -145,6 +145,10 @@ function Config.CameraForAspect(aspect)
         distance = lerp(Config.CAMERA_DISTANCE, Config.CAMERA_PORTRAIT.distance),
         pitch = lerp(Config.CAMERA_PITCH, Config.CAMERA_PORTRAIT.pitch),
         lookAhead = lerp(Config.CAMERA_LOOK_AHEAD, Config.CAMERA_PORTRAIT.lookAhead),
+        -- 本端落在插值的哪一格（0=桌面原值，1=满竖屏端值）。调试面板显示它，否则在手机上
+        -- 调“横屏端”那三行会毫无反应，看起来像面板坏了。
+        t = t,
+        aspect = aspect,
     }
 end
 
@@ -174,14 +178,23 @@ end
 -- 敌人
 ----------------------------------------------------------------------
 Config.LANES = { -13.0, -4.5, 4.5, 13.0 }
--- Ship_Small 的长边在 x 轴（5.14 x 1.99 x 3.60），所以船头默认朝着 ±x，必须偏航 90 度
--- 才能沿 z 航行。R_y(-90) 把 +x 转到 +z（内陆），若进游戏发现船是倒着开的，
--- 把这个数改成 90.0 即可（说明模型船头在 -x）。
-Config.BOAT_YAW = -90.0
-Config.BOAT_DRAFT = 0.45             -- 吃水：船体底面沉到水面下这么多，看着才像浮着
--- 船的 combat 瞄点抬高度（相对船 node 原点=船底）。船 node 在水面下，需抬到甲板附近：
--- Ship_Small 包围盒 y[-0.01,1.98]，1.2 落在上层建筑附近，且保证命中点高于水面（SEA_Y）。
-Config.BOAT_HIT_HEIGHT = 1.2
+-- 船族现在全是 kenney prefab：小船/玩家船 ship-row-large、大船 ship-pirate-large
+-- （旧的 Quaternius Ship_Small/Ship_Large 已连资产一起删除）。这批沿 z 建模，静置时船头
+-- 朝海（= 退着开），故统一用 180 把船头拧向内陆（航行方向 +z）。玩家船驾船公式也以此为
+-- 基准偏置（Player.lua），所以改这一处两侧同步生效；若某艘反而了，再按 kind 拆档。
+Config.BOAT_YAW = 180.0
+-- 船体视觉缩放，只作用于实例化出来的船体子节点（见 Enemy:SpawnBoat / Coast:BuildPlayerBoat），
+-- 不缩逻辑节点：吃水、瞄点、坐船高度、沉船翻滚都是相对逻辑节点定义的。
+Config.BOAT_SMALL_SCALE = 1.0        -- ship-row-large（小船 + 玩家船，实测 2.75宽 x 0.85高 x 2.85长；旧船是 3.60 长，要更像旧体型可往上加）
+Config.BOAT_BIG_SCALE = 0.8          -- ship-pirate-large（大船，真机量过：原尺寸过大、0.6 又偏小）
+Config.BOAT_DRAFT = 0.15             -- 吃水：船体底面沉到水面下这么多，看着才像浮着
+-- 船的 combat 瞄点抬高度（相对船 node 原点=船底）。船 node 在水面下，需抬到甲板附近，
+-- 且保证命中点高于水面（SEA_Y）。数值按 .mdl 实测包围盒定：ship-row-large 高 0.85
+-- （旧 Ship_Small 高 1.98，故旧值 1.2 已高于新船顶，子弹会打到船上方空气）。
+Config.BOAT_HIT_HEIGHT = 0.45
+-- 大船（ship-pirate-large）单独一档：原生高 9.96，×BOAT_BIG_SCALE=0.8 后船壳约 8m，
+-- 与小船的 0.85 差一个数量级，共用会把大船的瞄点/炮口压到水线上。2.5 落在船壳中段。
+Config.BOAT_BIG_HIT_HEIGHT = 2.5
 Config.BOAT_SPAWN_Z = -44.0
 Config.BOAT_STOP_Z = -6.5            -- 停船位置，海盗从这里下水
 -- 船速/血：维持基线（不靠堆血量制造压力，已定案教训），只用略快的航速减少在射程里空转的时间。
@@ -207,7 +220,7 @@ Config.CANNON_BALL_SCALE = 0.55          -- 炮弹实体大小（复用 Sphere.m
 Config.CANNON_FLIGHT_TIME = 2.2          -- 炮弹飞行时长（秒）：慢，留躲避时间
 Config.CANNON_LOB_HEIGHT = 9.0           -- 抛物线拱高（米，峰在轨迹中点上方）
 Config.CANNON_SPLASH_RADIUS = 3.2        -- 落点杀伤半径（米）
-Config.CANNON_PLAYER_DAMAGE = 30         -- 炸到主角的大血量（对比突袭型 melee 10）
+Config.CANNON_PLAYER_DAMAGE = 2          -- 炸到主角掉几格血（3 格口径：一发掉 2 格，与旧 100 血/30 伤同比例）
 
 Config.PIRATE_SPAWN_Z = -4.5         -- 下水点（浅水里，看着像涉水冲滩）
 -- Quaternius 角色模型原生朝 -z（Soldier 的散落道具在 z 负侧就是"正前方"），
@@ -217,8 +230,8 @@ Config.PIRATE_SPEED = 2.0            -- 调慢：海盗滩头滞留更久，给�
 Config.PIRATE_SPEED_SPREAD = 0.5     -- 每个海盗速度随机 ±，避免排队齐步走
 Config.PIRATE_HP = 1                 -- 一发死：保住割草爽感的根。压迫靠数量/来速，不靠肉。
 -- 海盗 combat 瞄点抬高度（相对 node 原点=脚底）。角色模型原点在脚底，抬到躯干中段
--- 才能让子弹打身子、命中特效不喷在脚底。Quaternius 角色约 1.5~1.8 高，0.9 落在胸口附近。
-Config.PIRATE_HIT_HEIGHT = 0.9
+-- 才能让子弹打身子、命中特效不喷在脚底。离屏形象缩到 0.5 倍后，胸口高度同比减半。
+Config.PIRATE_HIT_HEIGHT = 0.45
 Config.PIRATE_ATTACK_TIME = 1.1      -- 到防线后挥刀的时长，然后结算掉血
 Config.PIRATE_DEATH_TIME = 1.6       -- 死亡动画播多久后移除
 Config.PIRATE_HITREACT_TIME = 0.28
@@ -228,13 +241,19 @@ Config.PIRATE_WADE_DEPTH = 0.35      -- 涉水时把模型抬高一点，别半�
 Config.PIRATE_RAIDER_CHANCE = 0.6    -- 每个海盗是突袭型（追主角）的概率。分流阀：调高→追你的多、冲海岸的自动少（总数不变）
 Config.PIRATE_RAIDER_HP = 3          -- 突袭型血量（普通型走 PIRATE_HP=1）：追身的略肉一点避免一发带走
 Config.PIRATE_MELEE_RANGE = 1.7      -- 与主角水平距离小于此值即停下挥刀
-Config.PIRATE_PLAYER_DAMAGE = 10     -- 突袭型一刀砍主角多少血
+Config.PIRATE_PLAYER_DAMAGE = 1      -- 突袭型一刀砍主角几格血（3 格口径：一刀掉 1 格）
 Config.MAX_ALIVE_UNITS = 32          -- 同屏单位闸：超了就延后生成。船能整船靠岸后上岸量猛增，拉到 32 保证潮水不断流（真机卡就回调）
 Config.FAR_UNIT_DISTANCE = 55.0      -- 超过这个距离的单位关掉不可见时也更新
 
 -- 性能Overlay（调试开关）：true 时屏幕顶中叠加一行 FPS/drawcall/三角面/同屏单位数（每 3 秒刷）。
 -- 上线前必须置 false（关掉就不显不刷）。真机（抖音）没有引擎 DebugHud（SystemUI 已禁用），靠这个看指标。
 Config.PERF_OVERLAY = true
+
+-- 相机参数调试面板（调试开关）：true 时 HUD 右上角多一颗“相机”按钮，点开可在真机上实时拖
+-- 本节全部相机常量并打印可直接粘回本文件的数值（见 game/CamDebug.lua + UI/CamDebug.rml）。
+-- 上线前必须置 false：为 false 时 main.lua 根本不创建那个 RmlUI 组件，按钮与面板都不存在，
+-- 不是“隐藏了”而是没有这份 UI。
+Config.DEBUG_CAM_PANEL = true
 
 -- 帧率上限（省电/降热）。真机（抖音 wasm）由引擎主循环按此值节流；桌面/编辑器同步生效。
 -- 0 或 nil = 不改引擎默认（wasm 默认 30）。改这个值只需重打包（不碰 wasm），main.lua 启动时
@@ -378,13 +397,15 @@ Config.DOG = {
 -- 载具（玩家专属船：靠近码头按交互键登船，摇杆改驱动船在海域自由探索）
 ----------------------------------------------------------------------
 Config.BOAT_SPAWN = Vector3(-6.0, Config.SEA_Y, 5.0)   -- 船停在码头旁水面上
--- 角色坐船的局部高度（相对船节点）。Ship_Small 实测包围盒 y[-0.01,1.98]（原点在船底、甲板靠顶），
--- 坐太低会被船舷从俯视相机角度看进“舱里”看不见，故抬到甲板附近。
-Config.BOAT_SEAT_Y = 1.6
+-- 角色坐船的局部高度（相对船节点）。坐太低会被船舷从俯视相机角度看进“舱里”看不见，故抬到甲板
+-- 附近。新船 ship-row-large 实测高 0.85（y[0,0.85]，旧 Ship_Small 是 1.98），主角髋部大约在甲板。
+Config.BOAT_SEAT_Y = 0.45
 -- 船上双炮（船头左右两侧）：每发在两舷间轮换，子弹从对应炮位出膛
-Config.BOAT_GUN_FORWARD = 2.4      -- 沿船头方向前探（米）
-Config.BOAT_GUN_LATERAL = 1.1      -- 沿左右舷横向偏移（米）
-Config.BOAT_GUN_Y = 2.0            -- 炮口高度（相对船节点）
+-- 数值按新船实测盒同比折算（旧船 5.14宽 x 3.60长 x 1.98高 → 新船 2.75 x 2.85 x 0.85）：
+-- 前探不能超出船头 1.42，横移不能超出船舷 1.37，炮口不能高过船顶 0.85。
+Config.BOAT_GUN_FORWARD = 1.3      -- 沿船头方向前探（米）
+Config.BOAT_GUN_LATERAL = 0.8      -- 沿左右舷横向偏移（米）
+Config.BOAT_GUN_Y = 0.6            -- 炮口高度（相对船节点）
 -- 注意：不要复用 Config.BOAT_SPEED（那是敌人船速，见 Enemy.lua），玩家船速单独命名
 Config.PLAYER_BOAT_SPEED = 8.0       -- 米/秒，比走路快
 Config.PLAYER_BOAT_TURN = 3.0        -- 船转向速率（弧度/秒），比人物慢，做出惯性
@@ -426,8 +447,30 @@ Config.COMBO_BLAST_DAMAGE = 1        -- combo 爆炸伤害（降到只扫过一�
 Config.DEFENSE_HP = 300              -- 潮水改后上岸量大增、又刚削了玩家穿透/爆炸，防线易穿；拉到 300 抗漏（约容忍 30 个漏防，不够再往上调）
 Config.LEAK_DAMAGE = 10              -- 一个海盗摸到防线扣多少
 -- 主角生命：突袭型海盗砍的是这条血。掉到 0 = 主角阵亡（与防线失守同为败局）。
-Config.PLAYER_HP = 100
+-- 口径从 100 改成 3 点整数：头顶血条（见下方 HP_BAR）就是 3 格，一格 = 1 点，不存在半格。
+-- 伤害同步重标（melee 10→1、炮弹 30→2），耐打次数与旧口径一致，难度没变。
+Config.PLAYER_HP = 3
 Config.PLAYER_INVULN = 0.6           -- 受击后无敌帧（秒），防贴身多刀在同一帧秒融
+
+-- 主角头顶血条（3 格，RmlUI 挂在 3D 节点上，见 game/HpBar.lua + UI/HpBar.rml）。
+Config.HP_BAR = {
+    -- 血条中心离脚底的高度（米）。Characters_Lis.mdl 实测原生 y 上限 1.712（.mdl 顶点盒解析，
+    -- 同法已复现 boat-row-large 的 2.75x0.85x2.85），乘 PLAYER_MODEL_SCALE 1.5 = 2.568，
+    -- 再加 0.18 余量让条子压在头顶空气上而不是埋进头发。
+    overhead = 2.75,
+    -- 面板世界尺寸（米）。1.9 x 0.38 恰为 5:1，与下面纹理 320x64 同比例 → 格子不会被拉扁。
+    worldW = 1.9,
+    worldH = 0.38,
+    -- 离屏画布的逻辑尺寸（UI 像素，同时是分配的纹理大小）。RmlUI 按它排版，别改一边忘另一边。
+    -- 硬约束：两轴都必须在 64..4096（RmlCanvasComponent::SetUISize 里校验）。踩过的坑：
+    -- 先前写的 200x40 因 40 < 64 被整条拒收，纹理停在默认的 512x512，血条的 200x40 排版
+    -- 只占那张纹理左上 39%x8%，UV 覆满面板后就被拉成一条几乎看不见的细缝。
+    texW = 320,
+    texH = 64,
+    -- 贴图技术：引擎 Contents 里的 DiffUnlitAlpha（RmlWorldCanvas 内部用的同一个，无光照 + alpha 混合，
+    -- 血条不会被太阳打暗、透明处不糊成一块黑）。
+    technique = "Techniques/DiffUnlitAlpha.xml",
+}
 
 -- 爆桶：无物理模块（抖音包禁用 URHO3D_PHYSICS），所以用距离遍历而不是球形查询
 Config.BARREL_HP = 1
@@ -502,11 +545,19 @@ Config.BOX_MODEL = "Models/Box.mdl"
 -- 共用一张 Zombie_Atlas 图集（导入 -nm -nt 无材质，材质手写见 Materials/CharacterAtlas.xml）；只留
 -- Rifle、其余道具按 geometry 名隐藏，逐段材质分派见 Player.lua。
 
---- pirate-kit 的模型资源名。这个包没有 prefab（导入时只产了 mdl/ani），一律直接取 Model。
----@param name string 不含扩展名的资产名，如 "Ship_Small"
+--- pirate-kit 的模型资源名。
+---@param name string 不含扩展名的资产名，如 "Prop_Barrel"
 ---@return string
 function Config.PirateModel(name)
     return PIRATE_DIR .. name .. ".fbx.d/Models/" .. name .. ".mdl"
+end
+
+--- pirate-kit 的 prefab 资源名（prefabs/ 目录）。prefab 里已配好模型引用与逐槽材质，
+--- 运行期只需 Node:InstantiatePrefab，不再手动 SetMaterial。
+---@param name string 不含扩展名的 prefab 名，如 "ship-pirate-large"
+---@return string
+function Config.PiratePrefab(name)
+    return "Models/Quaternius_pirate-kit/prefabs/" .. name .. ".prefab"
 end
 
 --- pirate-kit 角色的动画资源名。栈名见导入产物，如 Walk / Run / Sword / HitReact / Death / Idle。
@@ -533,8 +584,8 @@ Config.FLIPBOOK_TECHNIQUE = "Techniques/DiffVColUnlitAlpha.xml"  -- Unlit+顶点
 -- 单张卡片的尺寸与竖直摆放：billboard 是正方形图集格的 world 映射，position 为卡片中心。
 -- 烘焙取景按全姿态并集加了留白，故卡片边长大于角色净高（~1.8m）；中心抬高把脚底近似落到 node 原点。
 -- 进游戏按实际观感微调这两个值即可（改这里、不碰逻辑）。
-Config.PIRATE_CARD_SIZE = 2.6      -- 卡片边长（world 单位，square）
-Config.PIRATE_CARD_CENTER = 1.0    -- 卡片中心相对 node 原点（脚底）的抬高
+Config.PIRATE_CARD_SIZE = 1.3      -- 卡片边长（world 单位，square）；原 2.6，整组离屏形象缩到 0.5 倍
+Config.PIRATE_CARD_CENTER = 0.5    -- 卡片中心相对 node 原点（脚底）的抬高；随尺寸同比减半，脚底仍贴 node 原点
 -- 逻辑动画名 → 烘焙 clip 名尾缀（烘只有这三条在用动画）。
 Config.PIRATE_CLIP_STACKS = { "Run", "Sword", "Death" }
 

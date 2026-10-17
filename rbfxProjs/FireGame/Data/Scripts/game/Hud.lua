@@ -40,7 +40,7 @@ function Hud.Build(scene, handlers)
     self.ammo = Config.MAG_SIZE
     self.reload = 0.0          -- 0..1，绑定 <progress data-value="reload">
     self.defense = 1.0         -- 0..1，绑定 <progress data-value="defense">
-    self.player = 1.0          -- 0..1，主角血量，绑定 <progress data-value="playerHp">
+    -- 主角血不在 HUD 里：它住在 waves.playerHp，由头顶 3 格血条（game/HpBar.lua）每帧直读。
     self.narrate = ""
     self.narrateT = 0.0
     -- hitmarker 靠两个 bool + data-if 二选一显示（内联 style 绑不了 opacity/color）
@@ -77,7 +77,6 @@ function Hud.Build(scene, handlers)
             end)
             -- progress 条：0..1 数值，RmlUi <progress data-value> 直接吃
             w:BindReadonlyProperty("defense", function() return clamp01(self.defense) end)
-            w:BindReadonlyProperty("playerHp", function() return clamp01(self.player) end)
             w:BindReadonlyProperty("reload", function() return clamp01(self.reload) end)
             -- data-if 显隐：bool
             w:BindReadonlyProperty("hitNormal", function() return self.hitNormal end)
@@ -171,13 +170,6 @@ function Hud:SetDefense(cur, max)
     max = (max and max > 0) and max or Config.DEFENSE_HP
     self.defense = clamp01((cur or 0) / max)
     self:Dirty("defense")
-end
-
---- 主角血量（当前值 + 上限），内部换算成 0..1。
-function Hud:SetPlayer(cur, max)
-    max = (max and max > 0) and max or Config.PLAYER_HP
-    self.player = clamp01((cur or 0) / max)
-    self:Dirty("playerHp")
 end
 
 --- 命中标记闪一下。strong（爆头/击杀）时显红色那组，否则白色。~0.15s 后由 Update 自动灭。

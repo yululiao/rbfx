@@ -8,10 +8,14 @@
 --   * 敌人航道（Config.LANES）、防线（DEFENSE_Z）、塔位（TOWER_POS）都要和布景对齐，
 --     同一份 Config 出两边，才不会改了一边忘了另一边。
 --
--- 所有落位 y 都按实测包围盒算过（python_utils/parse_mdl.py 量 Cache 里的 .mdl）：
+-- 所有落位 y 都按实测包围盒算过（解析 Cache 里 .mdl 的顶点缓冲求 AABB：UMD3 头部后面的
+-- vertex buffer 块按元素描述子算 stride 与 position 偏移，逐个顶点取 min/max，与引擎
+-- Geometry 在 EndLoad 里算的盒子同源）：
 --   House2 3.78x9.38x3.74 y[0,9.38]、Dock/Dock_Pole y[-2.00,1.01]（桥面 1.01、桩到 -2）、
 --   PalmTree_1 高 3.58 y[0.01,3.59]、Rock_* 高 0.6 上下、Cliff2 8.0x6.9x7.1 y[-0.78,6.13]、
---   Skulls 高 3.81、Prop_Barrel 0.72x0.66x0.72 y[0,0.66]、Ship_Small 5.14x1.99x3.60。
+--   Skulls 高 3.81、Prop_Barrel 0.72x0.66x0.72 y[0,0.66]。
+--   船族：ship-row-large 2.75x0.85x2.85 y[0,0.85]、ship-pirate-large 4.80x9.96x13.10 y[0,9.96]
+--   （旧 Ship_Small 5.14x1.99x3.60 / Ship_Large 已连资产删除，不再由本模块的 Place 落位）。
 -- 模型大多自带"底部略低于 y=0"的埋地量，所以按 y=0 摆就是站在地上，不要再手动抬。
 
 local Config = require("game.Config")
@@ -288,13 +292,25 @@ end
 -- 玩家专属船（载具）
 ----------------------------------------------------------------------
 
---- 在码头旁放一条属于玩家的船（Ship_Small），供 Player:BoardBoat 接管驱动。
+--- 在码头旁放一条属于玩家的船（与敌人小船同一张 ship-row-large prefab），供 Player:BoardBoat 接管驱动。
 --- 与敌人船无关：这条标 noShoot，不会被命中结算/爆炸波及。
 ---@param root Node
 ---@return Node
 local function BuildPlayerBoat(root)
-    local boat = Place(root, "PlayerBoat", Config.PirateModel("Ship_Small"), Materials.Pirate(),
-        Config.BOAT_SPAWN, nil, Config.BOAT_YAW, true)
+    -- 与 Enemy:SpawnBoat 同构：外层空节点当逻辑真值（位置/朝向/子节点挂主角），
+    -- 船体从 prefab 实例化作子节点；Place 只能吃 modelName，所以这里不走它。
+    local boat = root:CreateChild("PlayerBoat")
+    boat:SetPosition(Config.BOAT_SPAWN)
+    boat:SetRotation(Quaternion(Config.BOAT_YAW, Vector3.UP))
+    local prefab = GetResource("PrefabResource", Config.PiratePrefab("ship-row-large"))
+    if prefab then
+        local hull = boat:InstantiatePrefab(prefab, Vector3.ZERO, Quaternion.IDENTITY)
+        if hull then
+            hull:SetScale(Config.BOAT_SMALL_SCALE)
+        end
+    else
+        LogError("Coast: 玩家船 prefab 加载失败 '" .. Config.PiratePrefab("ship-row-large") .. "'")
+    end
     boat:SetVar("noShoot", true)
     return boat
 end

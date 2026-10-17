@@ -156,6 +156,10 @@ function Enemy:NearestTarget(fromPos, maxDist)
                 -- 按 XZ 距离（下面只用 dx/dz），y 抬高不影响挑谁，只把弹道与 hitPos 提到身体中段。
                 if u.kind == "pirate" then
                     p.y = p.y + Config.PIRATE_HIT_HEIGHT
+                elseif u.kind == "bigboat" then
+                    -- 大船船壳约 8m（ship-pirate-large ×0.8），与小船的 0.85 差一个数量级，
+                    -- 共用一个高度必有一边飘，所以按 kind 分档。
+                    p.y = p.y + Config.BOAT_BIG_HIT_HEIGHT
                 else
                     p.y = p.y + Config.BOAT_HIT_HEIGHT
                 end
@@ -281,16 +285,26 @@ end
 ---@param laneIndex integer Config.LANES 的下标
 function Enemy:SpawnBoat(kind, laneIndex)
     local big = (kind == "bigboat")
-    local asset = big and "Ship_Large" or "Ship_Small"
     local laneX = Config.LANES[laneIndex] or Config.LANES[1]
 
     local node = self.root:CreateChild(big and "BigBoat" or "Boat")
     node:SetPosition(Vector3(laneX, Config.SEA_Y - Config.BOAT_DRAFT, Config.BOAT_SPAWN_Z))
     node:SetRotation(Quaternion(Config.BOAT_YAW, Vector3.UP))
-    local model = node:CreateComponent("StaticModel")
-    model:SetModel(GetResource("Model", Config.PirateModel(asset)))
-    model:SetMaterial(Materials.Pirate())
-    model:SetCastShadows(true)
+    -- 船体走 prefab：旧 Quaternius Ship_Small/Ship_Large 已连资产删除（Ship_Large 三角面太多），
+    -- 换成同风格 kenney prefab。prefab 自带模型引用 + kennypirate.material + 投影，所以不再
+    -- CreateComponent("StaticModel")/SetMaterial；实例化出的子节点继承本节点的位置/朝向，
+    -- 吃水、偏航、沉船翻滚仍由 unit.node 统一驱动，视觉缩放也只加在子节点上（不连累
+    -- 相对逻辑节点的吃水/瞄点）。
+    local prefabName = big and "ship-pirate-large" or "ship-row-large"
+    local prefab = GetResource("PrefabResource", Config.PiratePrefab(prefabName))
+    if prefab then
+        local hull = node:InstantiatePrefab(prefab, Vector3.ZERO, Quaternion.IDENTITY)
+        if hull then
+            hull:SetScale(big and Config.BOAT_BIG_SCALE or Config.BOAT_SMALL_SCALE)
+        end
+    else
+        LogError("Enemy: 船 prefab 加载失败 '" .. Config.PiratePrefab(prefabName) .. "'")
+    end
 
     local unit = newUnit(self, kind, node)
     unit.hp = big and Config.BOAT_BIG_HP or Config.BOAT_HP
@@ -311,7 +325,7 @@ function Enemy:SpawnBoat(kind, laneIndex)
         if self.cannonT <= 0.0 then
             self.cannonT = randSpread(Config.BOAT_CANNON_INTERVAL, Config.BOAT_CANNON_INTERVAL_SPREAD)
             local deck = self.node:GetWorldPosition()
-            deck.y = deck.y + Config.BOAT_HIT_HEIGHT   -- 从甲板高度出膛，不要从船底
+            deck.y = deck.y + Config.BOAT_BIG_HIT_HEIGHT   -- 从甲板高度出膛，不要从船底（本函数只跑在大船上）
             self.mgr:FireCannon(deck)
         end
     end
