@@ -201,7 +201,7 @@ Config.BOAT_STOP_Z = -6.5            -- 停船位置，海盗从这里下水
 Config.BOAT_SPEED = 4.2
 Config.BOAT_BIG_SPEED = 3.0
 Config.BOAT_UNLOAD_TIME = 0.55       -- 每吐一个海盗的间隔
-Config.BOAT_HP = 3
+Config.BOAT_HP = 3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
 Config.BOAT_BIG_HP = 8
 Config.BOAT_CARRY = 7
 Config.BOAT_BIG_CARRY = 12
@@ -539,6 +539,11 @@ Config.MAT_HIDDEN = "Materials/Hidden.xml"
 Config.MAT_WATER = "Materials/Water.xml"
 Config.PLANE_MODEL = "Models/Plane.mdl"
 Config.BOX_MODEL = "Models/Box.mdl"
+
+-- 主角 prefab：模型引用 + 逐槽材质（hero.material×3）+ 整副骨骼层级都在里面，用户在枪骨
+-- （PoleTarget.R_end）下挂了个空节点 ShootingPos 作为出膛点，运行期读它的世界坐标。见 Player.lua。
+-- prefab 根节点名 CharacterArmature，自带 100× 骨骼单位缩放（FBX 导入残留），实例化时保持 identity。
+Config.PLAYER_PREFAB = "Models/Characters-001/Characters_Lis.prefab"
 
 -- Characters_Lis.mdl 有 12 个 geometry：主体蒙皮 Lis + 左肩甲 Shoulder + 一堆挂在左手 Middle1.L 的
 -- 手持道具（Guitar/Axe/Spear/Pistol/Rifle/Shotgun/SMG/WoodenBat_Barbed/WoodenBat_Saw/Knife）。全身

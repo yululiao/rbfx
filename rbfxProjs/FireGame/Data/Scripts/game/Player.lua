@@ -16,7 +16,6 @@
 --   Soldier 模型原生朝 -z。nodeYaw=0 时主角面朝海面。相机永远在 +z 侧上方看回主角。
 
 local Config = require("game.Config")
-local Materials = require("game.Materials")
 
 ---@class Player 主角与俯视角相机的运行时状态
 local Player = {}
@@ -56,16 +55,7 @@ local STATE_ANIM = {
     run_shoot  = "Run_Gun",
 }
 
---- 给主角 Characters_Lis 上材质。这个包与 pirate-kit 同路数：导入走 -nm -nt 不产材质，
---- 但它是真正的贴图角色（非 Soldier 的顶点色方案），全身共用一张 Zombie_Atlas.png，
---- 所以整体挂手写的图集材质 Materials.Character()。
---- FBX 里已把不用的手持道具全删掉，mdl 只剩主体 Lis / 左肩甲 Shoulder / 唯一保留的
---- 步枪 Rifle 三段 geometry，运行期不再需要按名逐段隐藏（旧模型十件兵器堆在左手
---- Middle1.L 才需要那套 GetGeometryName + Hidden 隐藏逻辑，资产精简后整段移除）。
----@param model AnimatedModel
-local function ApplyBodyMaterials(model)
-    model:SetMaterial(Materials.Character())
-end
+--（主角材质改由 Characters_Lis.prefab 逐槽配好，不再在此手写 Materials.Character()。）
 
 --- 在 Coast 搭好的阵地上生成主角，并接管场景里的 Camera Rig 做俯视相机。
 ---@param scene Scene
@@ -101,19 +91,30 @@ function Player.Build(scene, spot, playerBoat, aspect)
     -- noShoot：Shooting 的射线打到自己/塔面时要穿过去续查，靠这个变量识别（见 Shooting.lua）
     node:SetVar("noShoot", true)
 
-    local model = node:GetComponent("AnimatedModel")
-    if not model then
-        -- 复用场景里旧的 Player 节点时，它可能挂着一个 StaticModel（占位球），
-        -- RemoveComponent 收的是类型名字符串而不是组件对象，先探再删。
-        if node:GetComponent("StaticModel") then
-            node:RemoveComponent("StaticModel")
+    -- 主角改用 Characters_Lis.prefab 直接实例化：模型引用、逐槽材质（hero.material×3）与整副骨骼
+    -- （含挂在枪骨 PoleTarget.R_end 下的 ShootingPos 出膛点）都烘在 prefab 里，运行期不再手搭
+    -- AnimatedModel/材质。prefab 根节点名 CharacterArmature；重进 Play 时先复用已有实例，避免叠一份。
+    local modelNode = node:GetChild("CharacterArmature", true)
+    if not modelNode then
+        local prefab = GetResource("PrefabResource", Config.PLAYER_PREFAB)
+        if prefab then
+            modelNode = node:InstantiatePrefab(prefab, Vector3.ZERO, Quaternion.IDENTITY)
         end
-        model = node:CreateComponent("AnimatedModel")
     end
-    model:SetModel(GetResource("Model", Config.PlayerModel()))
-    ApplyBodyMaterials(model)
-    -- 远处降频用不上（主角永远在近处），但显式关掉不可见时更新，省一点蒙皮开销
-    model:SetUpdateInvisible(false)
+    if not modelNode then
+        print("FireGame ERROR: 主角 prefab 实例化失败（Config.PLAYER_PREFAB = " .. Config.PLAYER_PREFAB .. "）")
+    end
+    local model = modelNode and modelNode:GetComponent("AnimatedModel")
+    if model then
+        -- 远处降频用不上（主角永远在近处），显式关掉不可见时更新，省一点蒙皮开销
+        model:SetUpdateInvisible(false)
+    end
+
+    -- 枪口出膛点：prefab 里挂在枪骨下的空节点，运行时取世界坐标（跟随动画与整条骨骼变换）。缺失则退回胸口近似。
+    self.shootingPos = node:GetChild("ShootingPos", true)
+    if not self.shootingPos then
+        print("FireGame MARK ShootingPos 节点缺失（子弹退回胸口近似出膛点）")
+    end
 
     -- 上半身扭转用的骨骼节点：SetModel 时引擎把骨架建成真实子节点
     -- （AnimatedModel::SetSkeleton 逐骨 CreateChild，层级 Root→Hips→Abdomen→Torso→Neck…），
@@ -139,9 +140,11 @@ function Player.Build(scene, spot, playerBoat, aspect)
         print("FireGame MARK gun-hold bone missing (右臂扶枪 IK 失效)")
     end
 
-    local anim = node:GetComponent("AnimationController")
+    -- AnimationController 必须与 AnimatedModel 同节点才驱动它；prefab 不带控制器，补建在实例根上。
+    local animNode = modelNode or node
+    local anim = animNode:GetComponent("AnimationController")
     if not anim then
-        anim = node:CreateComponent("AnimationController")
+        anim = animNode:CreateComponent("AnimationController")
     end
 
     -- 相机：复用场景里编辑器摆的 Camera Rig（有 Camera 组件与既定 viewport），
@@ -576,10 +579,14 @@ function Player:UpdateCamera()
     self.facing = Vector3(0.0, 0.0, -1.0)
 end
 
---- 枪口世界坐标：胸口沿“身体朝向 + 上半身扭转”前探一点（开火窗口内即指向目标），
---- 给枪口光/子弹出膛/音效定位用，保证出弹方向与视觉一致。
+--- 枪口世界坐标：首选 prefab 里挂在枪骨上的 ShootingPos（跟随动画与整条骨骼变换、含缩放的世界
+--- 坐标，出弹方向与视觉严格一致）；缺失时退回旧近似——胸口沿“身体朝向 + 上半身扭转”前探一点。
 ---@return Vector3
 function Player:GetMuzzleWorld()
+    local sp = self.shootingPos
+    if sp then
+        return sp:GetWorldPosition()
+    end
     local yaw = self.nodeYaw + self.aimTwist_
     local f = Vector3(math.sin(yaw), 0.0, -math.cos(yaw))
     return self.spot + Vector3(0.0, 1.30, 0.0) + f * 0.7
