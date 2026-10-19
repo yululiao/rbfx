@@ -1,0 +1,34 @@
+<!--
+    曳光弹的微火花残迹：常驻发射器挂在高速飞行的子弹节点上（见 Shooting.lua），
+    relative=false 让火星留在世界空间、被子弹甩在身后形成断续亮尘。
+
+    常驻写法 activetime=0 + inactivetime=0 = 永久发射（约定见 HitFlesh.xml）；它不进
+    Fx.lua 的一次性生命周期表，随子弹节点 Remove 自动消失。
+
+    火星零初速（velocity 0 / damping 0）：子弹 60 m/s，自带速度只会让残迹甩偏。
+    scaled=false 是关键：子弹节点被拉成细长条（非均匀缩放），粒子尺寸不能跟着走形。
+    寿命极短（~0.05s），存活粒子 ≈ 240 × 0.05 ≈ 12 颗，numparticles 16 封顶。
+-->
+<particleeffect>
+    <material name="Materials/ParticleAdd.xml" />
+    <numparticles value="16" />
+    <updateinvisible enable="false" />
+    <relative enable="false" />
+    <scaled enable="false" />
+    <sorted enable="false" />
+    <emittertype value="Sphere" />
+    <emittersize value="0.03 0.03 0.03" />
+    <direction min="0 0 0" max="0 0 0" />
+    <constantforce value="0 0 0" />
+    <dampingforce value="0" />
+    <activetime value="0" />
+    <inactivetime value="0" />
+    <emissionrate min="220" max="260" />
+    <particlesize min="0.05 0.05" max="0.09 0.09" />
+    <timetolive min="0.04" max="0.06" />
+    <velocity min="0" max="0" />
+    <sizedelta add="-0.5" mul="1.0" />
+    <colorfade color="1.0 0.95 0.70 0.9" time="0" />
+    <colorfade color="1.0 0.55 0.15 0.5" time="0.03" />
+    <colorfade color="0.5 0.1 0.02 0" time="0.06" />
+</particleeffect>

@@ -1,0 +1,15 @@
+<!--
+    曳光弹亮芯材质：加色（add）发光的纯色，给拉成细长条的 Box.mdl 用（见 Shooting.lua）。
+
+    技术选 UnlitTransparentAdd 而不是 NoTextureAdd：前者走 M_Default（UNLIT ADDITIVE define），
+    与本工程其余渲染同一条着色器管线；NoTextureAdd 走 legacy 的 Unlit 着色器，会多引一条
+    着色器分支进 wasm（与 Materials/Hidden.xml 不选 NoTextureUnlitAlpha 是同一个取舍）。
+
+    add 混合 = src×srcAlpha + dst，所以 MatDiffColor.a 是整体亮度系数（<1 让亮芯不至于糊成一团白）。
+    alpha pass 自带 depthwrite=false；该 technique 的 shadow pass 在 UNLIT+ADDITIVE 下已被
+    excludes 剔除，StaticModel 侧 Shooting.lua 仍会 SetCastShadows(false) 双保险。
+-->
+<material>
+    <technique name="Techniques/UnlitTransparentAdd.xml" />
+    <parameter name="MatDiffColor" value="1.0 0.72 0.30 0.85" />
+</material>

@@ -1,14 +1,14 @@
 -- Scripts/game/Shooting.lua
 --
 -- 全自动开火 + 子弹实体。
--- 冷却完毕且射程内有敌人就自动开火，玩家只需走位。子弹是 CoreData 球体，从枪口飞向目标，
--- 到达后结算伤害。弹道速度很快（视觉上能看清飞行）。
+-- 冷却完毕且射程内有敌人就自动开火，玩家只需走位。子弹是曳光弹：Box.mdl 拉成的细长
+-- 加色亮芯（LookAt 对准飞行方向）+ 常驻微火花拖尾，从枪口飞向目标，到达后结算伤害。
+-- 弹道速度很快（视觉上能看清飞行）。
 --
 -- 目标选择：Enemy:NearestTarget(主角位置, ATTACK_RANGE) 取最近存活威胁（船/海盗，跳过爆桶）。
 -- 装弹：打空 MAG_SIZE 发后自动装弹，装弹期间不开火。
 
 local Config = require("game.Config")
-local Materials = require("game.Materials")
 
 ---@class Shooting 全自动开火 + 子弹管理
 local Shooting = {}
@@ -22,9 +22,7 @@ local FEEDBACK = {
     barrel = { hit = { fx = "hitWood", snd = "hitWood" }, kill = { fx = "explosion", snd = "explosion" } },
 }
 
-local BULLET_MODEL = "Models/Sphere.mdl"
-local BULLET_SCALE = 0.3
-local BULLET_SPEED = 60.0   -- m/s，很快但视觉上能看清轨迹
+local BULLET_SPEED = 60.0  -- m/s，很快但视觉上能看清轨迹
 
 ---@param deps { scene: Scene, player: Player, fx: Fx, audio: Audio, hud: any, enemies: any, onScore: fun(result:any, unit:any, headshot:boolean, fromChain:boolean|nil)|nil }
 ---@return Shooting
@@ -150,10 +148,20 @@ function Shooting:FireAt(unit, targetPos)
         end
         local bulletNode = self.scene:CreateChild("Bullet")
         bulletNode:SetPosition(muzzle)
+        -- 曳光弹亮芯：Box.mdl（12 三角面）拉成细长条 + 加色发光材质，LookAt 让长轴对准
+        -- 飞行方向（旧实现是 54KB 的 Sphere.mdl 实心球，面数高又不像子弹）。
+        local flyDir = Vector3(dx, dy, dz)
+        bulletNode:LookAt(muzzle + flyDir, Vector3.UP, TS.WORLD)
         local sm = bulletNode:CreateComponent("StaticModel")
-        sm:SetModel(GetResource("Model", BULLET_MODEL))
-        sm:SetMaterial(Materials.Tint("bullet"))
-        bulletNode:SetScale(BULLET_SCALE)
+        sm:SetModel(GetResource("Model", Config.BOX_MODEL))
+        sm:SetMaterial(GetResource("Material", Config.MAT_BULLET_TRACER))
+        sm:SetCastShadows(false)
+        bulletNode:SetScale(Vector3(Config.BULLET_BOLT_THICK, Config.BULLET_BOLT_THICK, Config.BULLET_BOLT_LEN))
+        if Config.BULLET_TRAIL then
+            -- 微火花拖尾：常驻发射器（relative=false 把火星留在世界空间），随子弹 Remove 自动消失
+            local trail = bulletNode:CreateComponent("ParticleEmitter")
+            trail:SetEffect(GetResource("ParticleEffect", Config.FxTrail.bullet))
+        end
         table.insert(self.bullets, {
             node = bulletNode,
             dir = Vector3(dx, dy, dz),

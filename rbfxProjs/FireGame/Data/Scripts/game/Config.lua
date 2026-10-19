@@ -283,6 +283,11 @@ Config.ATTACK_RANGE = 45.0           -- 自动吸附半径：主角周围这个�
 ----------------------------------------------------------------------
 Config.SCATTER_SPREAD_DEG = 26.0     -- 扇形总张角（度，多弹沿此弧均匀铺开）
 Config.BULLET_HIT_RADIUS = 1.3       -- 子弹扫掠命中半径（米）
+-- 曳光弹造型：Box.mdl（12 三角面）拉成细长亮芯 + 加色发光材质（Materials/BulletTracer.xml），
+-- 替换旧的 54KB Sphere.mdl 实心球；微火花拖尾是常驻发射器，随弹销毁，false 可整关。
+Config.BULLET_BOLT_THICK = 0.055     -- 亮芯截面边长（米）
+Config.BULLET_BOLT_LEN = 0.85        -- 亮芯长度（米）
+Config.BULLET_TRAIL = true           -- 子弹微火花拖尾（每颗弹 1 个 draw call，可关）
 Config.GROW_XP = { pirate = 1, boat = 6, bigboat = 20, barrel = 2 }  -- 各类击杀喂的经验
 -- 成长曲线：每项 { xp=达到该级所需累计经验, pellets=扇形弹丸数, damage=单发伤害, pierce=子弹可贯穿的单位数 }。
 -- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。pierce=1 即一发只杀一个、命中即消亡；
@@ -537,6 +542,7 @@ Config.MAT_WHITE = "Materials/DefaultWhite.xml"
 Config.MAT_SKY = "Materials/Sky.xml"
 Config.MAT_HIDDEN = "Materials/Hidden.xml"
 Config.MAT_WATER = "Materials/Water.xml"
+Config.MAT_BULLET_TRACER = "Materials/BulletTracer.xml"  -- 曳光弹亮芯（加色发光）
 Config.PLANE_MODEL = "Models/Plane.mdl"
 Config.BOX_MODEL = "Models/Box.mdl"
 
@@ -703,6 +709,12 @@ Config.Fx = {
     sink = "Particle/Splash.xml",
 }
 
+-- 常驻拖尾效果：发射器直接挂在飞行物节点上（activetime=0 永久发射、relative=false 在
+-- 世界空间留痕），随节点 Remove 自动消失，不走 Fx:Spawn 的一次性生命周期表。
+Config.FxTrail = {
+    bullet = "Particle/BulletTrail.xml",       -- 曳光弹微火花残迹（Shooting.lua）
+}
+
 ----------------------------------------------------------------------
 -- 纯色（运行时 Clone DefaultWhite 后染色，省掉一堆 XML 材质文件）
 ----------------------------------------------------------------------
@@ -714,7 +726,6 @@ Config.Tint = {
     defense = Color(0.75, 0.22, 0.18),
     water = Color(0.10, 0.28, 0.40),
     playerBody = Color(0.36, 0.42, 0.30),
-    bullet = Color(1.0, 0.12, 0.08),
     cannon = Color(0.14, 0.14, 0.16),       -- 炮弹：深铁色
     cannonWarn = Color(1.0, 0.42, 0.10),    -- 落点预警盘：醒目橙
 }
@@ -728,7 +739,6 @@ Config.Roughness = {
     tower = 0.80,
     defense = 0.85,
     water = 0.10,
-    bullet = 0.4,
     cannon = 0.5,
     cannonWarn = 0.9,
     playerBody = 0.70,
