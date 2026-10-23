@@ -23,6 +23,7 @@
     <link type="text/rcss" href="default.rcss"/>
     <style>
         .trigger { position: absolute; right: 28dp; top: 150dp; width: 88dp; height: 88dp;
+            pointer-events: auto;
             border-radius: 44dp; background-color: #7a3fbfe6; text-align: center;
             color: #ffffffff; font-size: 26dp; font-weight: bold; }
         .trigger:active { background-color: #9d63ffd9; }
@@ -31,6 +32,7 @@
         /* 宽度一律用百分比（不写死 dp）：真机竖屏 702dp、编辑器 GameView 更宽，
            写死一个 dp 值就是在赌屏幕宽度。行内部列宽仍用 dp（滑条要固定可拖长度）。 */
         .panel { position: absolute; left: 8dp; top: 8dp; width: 96%; height: 880dp;
+            pointer-events: auto;
             background-color: #10161be6; border: 1dp #3d584b; border-radius: 10dp; }
         .head { position: absolute; left: 12dp; top: 10dp; width: 94%; height: 52dp; }
         .title { float: left; color: #ffd24dff; font-size: 24dp; font-weight: bold; }
@@ -59,7 +61,10 @@
         .hint { margin-top: 8dp; color: #ffffff80; font-size: 16dp; }
     </style>
 </head>
-<body class="fullscreen">
+<!-- body 全屏但 pointer-events:none：本面板创建在 GameHud 之后、z 序更高，若 body 吃指针
+     会把底下整个 GameHud 的点击（含"再来一局"）全部遮掉。只让 .trigger/.panel 重新 auto，
+     空白区穿透到下层。 -->
+<body class="fullscreen" style="pointer-events: none;">
 <div data-model="{{__data_model_id}}">
 
     <!-- 右上触发按钮（右上角分数/combo 之下、避开刘海区） -->

@@ -30,7 +30,12 @@
         .big { color: #ffffffff; font-size: 64dp; font-weight: bold; }
     </style>
 </head>
-<body class="fullscreen">
+<!-- body 设 pointer-events:none 的缘由：RmlUi 的 Context::OnFocusChange 在被聚焦元素所属文档
+     z-index 为默认 auto 时会调 document->PullToFront()，把整文档拉到最上层。于是点“再来一局”/
+     登船等 HUD 控件会把 GameHud 顶到 CamDebug 之上；GameHud 是全屏根，若吃指针就会盖住
+     底下的相机按钮，令其点击无声（与早期“再来一局点不动”同源，只是两个文档位置互换了）。
+     故 body 穿透，只让真正可点的控件（结算面板/登船/下船）重新 auto；内部按钮继承面板的 auto。 -->
+<body class="fullscreen" style="pointer-events: none;">
 <div data-model="{{__data_model_id}}">
 
     <!-- 左上：波次 + 防线血 + 局内成长（等级/经验条）。主角血不在这里——它改成了挂在人物
@@ -71,10 +76,10 @@
     </div>
 
     <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua -->
-    <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #2e8b8be6; text-align: center;">
+    <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #2e8b8be6; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">登船</div>
     </div>
-    <div data-if="showDisembark" data-event-click="disembark" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #8b6b2ee6; text-align: center;">
+    <div data-if="showDisembark" data-event-click="disembark" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #8b6b2ee6; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">下船</div>
     </div>
 
@@ -91,7 +96,7 @@
     <div id="stick_ring" style="position: absolute; left: 40dp; bottom: 40dp; width: 224dp; height: 224dp; border-radius: 112dp; background-color: #ffffff2e;"></div>
 
     <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
-    <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center;">
+    <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 320dp;">
             <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
             <div class="label" style="margin-top: 16dp; font-size: 34dp;">SCORE {{endScore}}</div>
