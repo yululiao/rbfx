@@ -284,7 +284,10 @@ function Player:Move(stickX, stickY, dt)
         if len > 1.0 then dirX, dirZ = dirX / len, dirZ / len end
 
         local nx = clamp(self.spot.x + dirX * Config.MOVE_SPEED * dt, Config.WALK_MIN_X, Config.WALK_MAX_X)
-        local nz = clamp(self.spot.z + dirZ * Config.MOVE_SPEED * dt, Config.WALK_MIN_Z, Config.WALK_MAX_Z)
+        -- 走位下界按“这个 x 处的岸线 + 余量”：岸线是曲线，写死一个 z 会在湾里留出
+        -- “看着踩进水里、判据还说在沙上”的那段。先钳 x 再算岸线，顺序反了会越钳越深。
+        local zmin = Config.ShoreZ(nx) + Config.WALK_SHORE_MARGIN
+        local nz = clamp(self.spot.z + dirZ * Config.MOVE_SPEED * dt, zmin, Config.WALK_MAX_Z)
         self.spot = Vector3(nx, self.groundY, nz)
         self.node:SetPosition(self.spot)
 
@@ -447,7 +450,9 @@ function Player:LeaveBoat()
     self.node:SetParent(self.scene)
     local bp = self.boatNode:GetPosition()
     local x = clamp(bp.x + 3.0, Config.WALK_MIN_X, Config.WALK_MAX_X)
-    local z = clamp(math.max(bp.z, Config.WALK_MIN_Z), Config.WALK_MIN_Z, Config.WALK_MAX_Z)
+    -- 落点也得按落点那列的岸线算：船靠岸线是斜的，用统一 z 会把人放在水里。
+    local zmin = Config.ShoreZ(x) + Config.WALK_SHORE_MARGIN
+    local z = clamp(math.max(bp.z, zmin), zmin, Config.WALK_MAX_Z)
     self.spot = Vector3(x, self.groundY, z)
     self.node:SetPosition(self.spot)
     self.nodeYaw = 0.0

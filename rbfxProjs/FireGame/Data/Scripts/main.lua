@@ -3,7 +3,8 @@
 -- FireGame 入口：第三人称俯视角"狙击海盗"垂直切片（全自动开火，玩家只负责走位）。
 -- 本文件不含玩法逻辑，只负责按依赖顺序装配各模块并驱动帧循环：
 --   Config → Coast（海岸布景）→ Player（主角+俯视相机）→ Fx/Audio（反馈）
---   → Hud（数据绑定 HUD）→ Enemy（单位管理）→ Waves（波次导演）→ Shooting（自动开火）
+--   → Hud（数据绑定 HUD）→ Enemy（单位管理）→ Waves（波次导演）→ Turrets（友方炮塔）
+--   → Shooting（自动开火）
 --
 -- 宿主约定：三个宿主（编辑器 GameView Play / MinigamePlayer / LuaGamePlayer）都在 C++ 侧
 --   注入全局 `scene` 后再执行本脚本；场景根节点必须挂 LuaGameScript 且 Script Path 指向
@@ -21,6 +22,7 @@ local Hud = require("game.Hud")
 local CamDebug = require("game.CamDebug")
 local Enemy = require("game.Enemy")
 local Waves = require("game.Waves")
+local Turrets = require("game.Turrets")
 local Shooting = require("game.Shooting")
 local Juice = require("game.Juice")
 local Grow = require("game.Grow")
@@ -116,7 +118,7 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars
 
 local function RestartGame()
     if enemy then
@@ -137,6 +139,9 @@ local function RestartGame()
     end
     if waves then
         waves:Reset()
+    end
+    if turrets then
+        turrets:Reset()   -- 在飞弹丸清空、冷却回首发迟、塌下来的炮管收回去（血量由 waves:Reset 复位）
     end
     if juice then
         juice:Reset()
@@ -163,14 +168,21 @@ local function OnScore(result, unit, headshot, fromChain)
     end
 end
 
-local function OnDefenseHit(dmg)
+-- 海盗砍到某座炮塔：扣那座塔自己的血（经 Waves 统一裁决败局）+ 一记轻震提示“有人在摸防线”。
+-- 但不做 hit-stop（玩家没杀东西，停时间只会困惑）。塔号与 Config.TURRETS / waves.turretHp 同下标。
+local function OnTurretHit(index, dmg)
     if waves then
-        waves:DamageDefense(dmg)
+        waves:DamageTurret(index, dmg)
     end
-    -- 防线被砍：给一记轻震提示“有人在摸防线”，但不做 hit-stop（玩家没杀东西，
-    -- 停时间只会困惑）。
     if juice then
         juice:AddTrauma(0.3)
+    end
+end
+
+-- 塔被打哑：播报哪一侧失去火力（合计血条看不出“快塌的是左边那座”），不给语音、只上旁白。
+local function OnTowerDown(index, x)
+    if hud then
+        hud:Narrate((x < 0.0) and "左炮塔失能！" or "右炮塔失能！", 2.5)
     end
 end
 
@@ -232,7 +244,7 @@ if Config.DEBUG_CAM_PANEL then
 end
 enemy = Enemy.Build({
     scene = scene, fx = fx, audio = audio, player = player,
-    onScore = OnScore, onDefenseHit = OnDefenseHit, onPlayerHit = OnPlayerHit,
+    onScore = OnScore, onTurretHit = OnTurretHit, onPlayerHit = OnPlayerHit,
 })
 enemy:SpawnStaticBarrels()
 -- 宠物狗：友方伴随单位，独立于 enemy.units（不被玩家子弹/波次/爆桶波及）。需 player+enemy，
@@ -241,14 +253,41 @@ dog = Dog.Build({ scene = scene, player = player, enemies = enemy, audio = audio
 enemy.dog = dog
 waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver,
     onWaveCleared = function() if dog then dog:GoRest() end end })
+-- 友方炮塔：需 enemy（索敌）+ waves（血量）+ coast.turrets（句柄），故在两者之后建；
+-- 建完回填 enemy.turrets，使冲塔型海盗能问“最近哪座塔还活着、该走到哪”（与 dog 同一条路子）。
+turrets = Turrets.Build({
+    scene = scene, handles = coast.turrets, enemies = enemy, waves = waves,
+    fx = fx, audio = audio, onTowerDown = OnTowerDown,
+})
+enemy.turrets = turrets
 -- 主角头顶 3 格血条：一份 RmlUI 文档渲染进离屏纹理、贴在跟随主角的 3D 面板节点上
 -- （引擎原生的 UI 挂 3D 通路，不是世界坐标转屏幕坐标）。必须在 waves 之后建：
 -- 血量的唯一真相在 waves.playerHp（Player.hp 只是个旧快照，别接上去）。
 hpBar = HpBar.Build(scene, {
+    name = "PlayerHpBar",
     cameraNode = player.cameraNode,
-    player = player,
-    getHp = function() return waves.playerHp end,
+    getAnchorPos = function() return player.node:GetWorldPosition() end,
+    getHp = function() return waves.playerHp, Config.PLAYER_HP end,
+    overhead = Config.HP_BAR.overhead,
+    isHidden = function() return player.dying end,
 })
+-- 两座炮塔头顶血条：复用主角那套世界面板（HpBar.lua）但走 ratio 模式（连续进度条 UI/TurretHpBar.rml，
+-- 绿色）——砍塔是持续掉血，3 格太粗。锚点换成每座塔的节点、血量真相换成 waves.turretHp。
+-- 塔不动，但面板仍每帧跟相机对齐朝向（相机以后若可转这里不用改）。
+-- 重开不重建 Coast（RestartGame 只 Reset），所以这里捕的塔节点引用整局有效。
+turretBars = {}
+for i, tw in ipairs(turrets.towers) do
+    turretBars[#turretBars + 1] = HpBar.Build(scene, {
+        name = "TurretHpBar_" .. tostring(i),
+        mode = "ratio",
+        cameraNode = player.cameraNode,
+        getAnchorPos = function() return tw.node:GetWorldPosition() end,
+        getHp = function() return waves:GetTurretHp(i) end,
+        overhead = Config.TURRET_HP_BAR.overhead,
+        worldW = Config.TURRET_HP_BAR.worldW,
+        worldH = Config.TURRET_HP_BAR.worldH,
+    })
+end
 shooting = Shooting.Build({
     scene = scene, player = player, fx = fx, audio = audio, hud = hud,
     enemies = enemy, onScore = OnScore,
@@ -380,6 +419,7 @@ SubscribeToEvent("Update", function(data)
 
     -- 玩法与世界
     enemy:Update(worldDt)
+    turrets:Update(worldDt)
     dog:Update(worldDt)
     waves:Update(worldDt)
     -- 粒子的模拟在引擎侧走真实 timeStep（Lua 改不了），所以寿命回收也用真实 dt 对齐，
@@ -400,6 +440,11 @@ SubscribeToEvent("Update", function(data)
     -- 头顶血条：排在震屏之后，才能拿到本帧最终的相机姿态做朝向对齐
     -- （放前面会用抖之前的姿态，血条比画面慢一帧）。
     hpBar:Update(dt)
+    -- 炮塔头顶血条：同样排在震屏之后取本帧最终相机姿态。塔哑（血量归零）时整块自动摘掉，
+    -- 重开 waves:Reset 把血补满后下一帧又亮回来。
+    for _, bar in ipairs(turretBars) do
+        bar:Update(dt)
+    end
 
     -- 载具交互：两个按钮独立判定、互斥显示（条件本身互斥，显式双保险防止
     -- 遗留显示——旧版 if/elseif 只在 else 里隐藏，下船瞬间走不到 else，

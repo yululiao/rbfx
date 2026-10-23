@@ -1,8 +1,12 @@
 -- Scripts/game/Waves.lua
 --
--- 波次导演 + 计分/combo + 防线血量 + 胜负结算。它是玩法的"时钟"：按 Config.WAVES 手调
+-- 波次导演 + 计分/combo + 炮塔血量 + 胜负结算。它是玩法的"时钟"：按 Config.WAVES 手调
 -- 开局、其后再由 WaveGen.EndlessRecipe 随波次升配额（无尽模式），一波清完进间歇、永不通关，
 -- 直到防线/主角被打穿才结算（Lose）。HUD 波次号即"撑到第几波"的战绩。
+--
+-- 血量都住在这里、只住这里：主角血 playerHp、两座炮塔血 turretHp（每塔一份，
+-- 下标对齐 Config.TURRETS）。Enemy 砍塔只递一个 (塔号, 伤害) 过来、Turrets 开火前反过来
+-- 读这里的血量，两边都不自己另存一份——否则"塔哑了还在开炮"这种不一致迟早出现。
 --
 -- 计分与 combo 放这里而不是 Shooting：一次击杀的分数会同时被"玩家子弹"和"爆桶连锁"
 -- 两条路径产生（Shooting.DamageUnit 与 Enemy:Damage 都调 onScore），集中在一处才不会
@@ -35,7 +39,10 @@ function Waves:Reset()
     self.score = 0
     self.combo = 0
     self.comboT = 0.0
-    self.defenseHp = Config.DEFENSE_HP
+    self.turretHp = {}
+    for i = 1, #Config.TURRETS do
+        self.turretHp[i] = Config.TURRET_HP
+    end
     self.playerHp = Config.PLAYER_HP    -- 主角生命（突袭型海盗砍的是这条）
     self.waveIndex = 0                 -- 已开始的波数；当前波 = Config.WAVES[waveIndex]
     self.phase = "intermission"        -- intermission -> active -> ended
@@ -49,7 +56,7 @@ function Waves:Reset()
         if self.hud.SetScore then self.hud:SetScore(0) end
         if self.hud.SetCombo then self.hud:SetCombo(0) end
         if self.hud.SetWave then self.hud:SetWave(1) end
-        if self.hud.SetDefense then self.hud:SetDefense(self.defenseHp, Config.DEFENSE_HP) end
+        self:SyncDefenseHud()
         -- 主角血不往 HUD 喂：头顶 3 格血条（game/HpBar.lua）每帧直读 self.playerHp。
     end
     self.audio:Voice(Config.Voice.prepare)
@@ -119,7 +126,7 @@ function Waves:Update(dt)
     end
 
     if self.phase == "ended" or self.phase == "freeRoam" then return end
-    if self.defenseHp <= 0 then
+    if self:TurretsAllDown() then
         self:Lose("defense")
     elseif self.playerHp <= 0 then
         self:Lose("hero")
@@ -189,16 +196,59 @@ function Waves:AddKill(result, unit, headshot, fromChain)
     end
 end
 
---- 海盗砍到防线。
+--- 海盗砍到某座塔。index 与 Config.TURRETS 同下标（由 Enemy 选塔时定下来再传过来，
+--- 不在这里重做一次"最近塔"的判据，免得两边选到不同的塔）。
+---@param index number
 ---@param dmg number
-function Waves:DamageDefense(dmg)
-    if self.phase == "ended" then
+function Waves:DamageTurret(index, dmg)
+    if self.phase == "ended" or not index or not self.turretHp[index] then
         return
     end
-    self.defenseHp = math.max(0, self.defenseHp - (dmg or 0))
-    if self.hud and self.hud.SetDefense then
-        self.hud:SetDefense(self.defenseHp, Config.DEFENSE_HP)
+    self.turretHp[index] = math.max(0, self.turretHp[index] - (dmg or 0))
+    self:SyncDefenseHud()
+end
+
+--- 某塔当前/上限血量（Turrets 读它决定这座塔还能不能开火、要不要把炮管歪下来）。
+---@param index number
+---@return number, number
+function Waves:GetTurretHp(index)
+    return (self.turretHp and self.turretHp[index]) or 0, Config.TURRET_HP
+end
+
+--- 所有塔都哑了才算防线失守：单塔被打掉只是少一路火力，不直接判负。
+---@return boolean
+function Waves:TurretsAllDown()
+    for i = 1, #Config.TURRETS do
+        if (self.turretHp[i] or 0) > 0 then
+            return false
+        end
     end
+    return true
+end
+
+--- 两塔都满血（即原 flawless 判据 defenseHp >= DEFENSE_HP 的等价式）。
+---@return boolean
+function Waves:DefenseIntact()
+    for i = 1, #Config.TURRETS do
+        if (self.turretHp[i] or 0) < Config.TURRET_HP then
+            return false
+        end
+    end
+    return true
+end
+
+--- HUD 那一条防线血读的是两塔合计（合计/合计上限）。不改 RML、不加第二条血条：
+--- "哪座塔快塌了"由塔自己的 3D 表现（炮管歪下 + 烟）说，不在屏幕上再开一处真相。
+function Waves:SyncDefenseHud()
+    if not (self.hud and self.hud.SetDefense) then
+        return
+    end
+    local cur, max = 0, 0
+    for i = 1, #Config.TURRETS do
+        cur = cur + math.max(0, self.turretHp[i] or 0)
+        max = max + Config.TURRET_HP
+    end
+    self.hud:SetDefense(cur, max)
 end
 
 --- 突袭型海盗砍到主角 / 大船炮弹炸到主角。只动数值，不在这里渲染：
@@ -225,7 +275,7 @@ function Waves:Win()
     self.phase = "freeRoam"
     self.allFired = true
     self.audio:Voice(Config.Voice.win)
-    if self.defenseHp >= Config.DEFENSE_HP then
+    if self:DefenseIntact() then
         self.audio:Voice(Config.Voice.flawless)
     end
     if self.hud and self.hud.Narrate then

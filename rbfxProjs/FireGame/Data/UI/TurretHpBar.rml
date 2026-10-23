@@ -1,0 +1,41 @@
+<!--
+    TurretHpBar.rml —— 炮塔头顶的连续血条（一条 progress，随血量比例平滑增减）。
+    它和 HpBar.rml 一样不是屏幕 HUD，而是渲染进 game/HpBar.lua 建的那张离屏纹理、贴在被
+    挂到每座塔节点上方的 3D 面板上（同一个 Node 放 RmlCanvasComponent + LuaRmlUIComponent，
+    文档被自动挪进离屏 UI，屏幕那份同时关闭，不会画双份）。
+
+    为什么这里用 <progress> 而不是 HpBar.rml 那套 3 格：海盗砍塔是缓慢持续掉血，3 格把
+    “还剩多少”量化得太粗（一格 = 50 血），连续条才读得出细微增减。填充宽度交给 RmlUI 的
+    progress 元素按 hpFrac（一个 0..1 的数值绑定）自己画——绝不写内联 style="{{hpFrac}}" 去
+    绑 width，RCSS 解析器吃到 {{ 就崩（绑定约束同 GameHud.rml：值绑文本、进度绑 <progress
+    data-value>、显隐绑 data-if，唯独 style 里不能绑）。
+
+    尺寸契约（与 HpBar.rml 同，改一边必须同步另一边，见 Config.HP_BAR / Config.TURRET_HP_BAR）：
+      * 本文档按 320 x 64 排版，对应 canvas:SetUISize(320, 64)（两轴都 ≥64 才不被 RmlCanvasComponent 拒收）；
+      * 面板世界尺寸 1.4 x 0.28 米 = 5:1，与 320:64 同比例，进度条不会被透视拉扁。
+
+    progress 故意不设 class：default.rcss 里 progress.horizontal 的规则特异性（元素+class）比
+    单 progress 高，会把这里给的高度覆盖掉；不带 class 时本文档 <style>（在 link 之后）即可稳定
+    赢过 default 主题那条带暗绿 decorator 的 progress 规则。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="default.rcss"/>
+    <style>
+        /* 槽底：覆盖 default 主题的暗绿渐变 decorator，换成中性半透明暗槽，让鲜绿填充跳出来。 */
+        progress { position: absolute; left: 4px; top: 16px; width: 312px; height: 32px;
+                   decorator: none; background-color: #00000088;
+                   border: 2px #00000066; border-radius: 6px; }
+        /* 填充：绿色，与主角那套格血条同色系（友方单位一律这个绿）。 */
+        progress fill { background-color: #37d17aff; border-radius: 4px; }
+    </style>
+</head>
+<!-- 离屏画布尺寸固定，body 显式吃满，不依赖 auto-size 行为。 -->
+<body style="display: block; width: 320px; height: 64px; pointer-events: none;">
+<div data-model="{{__data_model_id}}">
+    <progress data-value="hpFrac"/>
+</div>
+</body>
+</rml>

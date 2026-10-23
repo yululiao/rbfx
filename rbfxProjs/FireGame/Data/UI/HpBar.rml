@@ -29,9 +29,10 @@
         /* 常驻暗槽：告诉玩家上限是 3。比亮格四周各宽 6px，露出一圈边当描边。 */
         .track { position: absolute; left: 6px; top: 6px; width: 308px; height: 52px;
                  background-color: #00000077; border-radius: 7px; }
-        /* 亮格：96px 宽，左起 10 / 112 / 214（格间距 6px，最右格 310px 处正好收进槽内）。 */
+        /* 亮格：96px 宽，左起 10 / 112 / 214（格间距 6px，最右格 310px 处正好收进槽内）。
+           绿与炮塔连续条（UI/TurretHpBar.rml）同色系，主角、友方同一种绿。 */
         .pip { position: absolute; top: 12px; width: 96px; height: 40px;
-               background-color: #ff2d2dff; border-radius: 5px; }
+               background-color: #37d17aff; border-radius: 5px; }
         .p1 { left: 10px; }
         .p2 { left: 112px; }
         .p3 { left: 214px; }

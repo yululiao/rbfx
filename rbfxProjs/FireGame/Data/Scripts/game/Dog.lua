@@ -81,15 +81,16 @@ function Dog:PlaceAtSpawn()
     self.node:SetRotation(Quaternion(self.yaw, Vector3.UP))
 end
 
---- 把 (x,z) 钳进可活动矩形：x 用主角可走范围，z 允许略微探到水线去咬刚上岸的海盗，
---- 但不许深入海里、也不绕到塔后村子。
+--- 把 (x,z) 钳进可活动区：x 用主角可走范围，z 允许略微探到水线去咬刚上岸的海盗，
+--- 但不许深入海里、也不绕到塔后村子。下界按“这个 x 处的岸线 - 探水余量”算：
+--- 先钳 x 再算岸线（顺序反了会拿到一个走不到的 x，湾里那几米就白让了）。
 function Dog:ClampPair(x, z)
-    local zmin = Config.SHORE_Z - 1.5
     if x < Config.WALK_MIN_X then
         x = Config.WALK_MIN_X
     elseif x > Config.WALK_MAX_X then
         x = Config.WALK_MAX_X
     end
+    local zmin = Config.ShoreZ(x) - 1.5
     if z < zmin then
         z = zmin
     elseif z > Config.WALK_MAX_Z then
