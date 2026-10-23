@@ -1,6 +1,6 @@
 -- Scripts/game/Enemy.lua
 --
--- 敌人单位与生成器：船（驶来→靠岸吐海盗→离开/被击沉）、海盗（涉水冲滩→砍防线）、
+-- 敌人单位与生成器：船（驶来→靠岸吐海盗→离开/被击沉）、海盗（涉水冲滩→砍炮塔）、
 -- 爆桶（打爆→半径内连锁伤害）。所有单位共用一套"状态机 + 生命周期"骨架。
 --
 -- 无物理/导航模块（抖音包禁用 URHO3D_PHYSICS / NAVIGATION），所以：
@@ -48,10 +48,35 @@ local function pickRaiderSkin()
 end
 
 ----------------------------------------------------------------------
+-- 涉水判定：岸线是一条曲线，不是一个常量
+----------------------------------------------------------------------
+
+--- 这个位置是在沙上还是在水里。旧写法是 p.z < SHORE_Z（一条直水线），现在读
+--- Config.ShoreZ(x)：几何与玩法同源，不会出现“看着已上岸、判据还在水里”。
+--- 注意用移动后的 x 算：航道是等分直线，但两侧小湾里的水线会往内陆鼓进来。
+---@param x number
+---@param z number
+---@return boolean
+local function onLand(x, z)
+    return z >= Config.ShoreZ(x)
+end
+
+--- 涉水/贴沙两个高度（抬高 PIRATE_WADE_DEPTH 是为了别让模型半截埋在水里）。
+---@param x number
+---@param z number
+---@return number
+local function wadeY(x, z)
+    if onLand(x, z) then
+        return Config.SAND_Y
+    end
+    return Config.SEA_Y + Config.PIRATE_WADE_DEPTH
+end
+
+----------------------------------------------------------------------
 -- 管理器
 ----------------------------------------------------------------------
 
----@param deps { scene: Scene, fx: Fx, audio: Audio, player: Player, onScore: fun(result:any,unit:any,headshot:boolean,fromChain:boolean|nil)|nil, onDefenseHit: fun(dmg:number)|nil }
+---@param deps { scene: Scene, fx: Fx, audio: Audio, player: Player, onScore: fun(result:any,unit:any,headshot:boolean,fromChain:boolean|nil)|nil, onTurretHit: fun(index:number,dmg:number)|nil }
 ---@return Enemy
 function Enemy.Build(deps)
     local self = setmetatable({}, Enemy)
@@ -60,9 +85,12 @@ function Enemy.Build(deps)
     self.audio = deps.audio
     self.player = deps.player
     self.onScore = deps.onScore
-    self.onDefenseHit = deps.onDefenseHit
+    self.onTurretHit = deps.onTurretHit
     self.onPlayerHit = deps.onPlayerHit
     self.dog = deps.dog          -- 宠物狗引用（main.lua 在 Dog.Build 后回填）：大船炮弹炸到它就把它掀飞
+    -- 友方炮塔模块引用（main.lua 在 Turrets.Build 后回填，与 dog 同一条路子）：冲塔型海盗
+    -- 靠它回答"最近哪座塔还活着、该走到哪个位置"。本模块不自存塔的状态。
+    self.turrets = nil
     self.root = deps.scene:CreateChild("Enemies")
     -- 海盗序列帧 billboard 群体渲染器（每皮一个 BillboardSet 合批）。
     self.crowd = FlipbookCrowd.Build(deps.scene)
@@ -418,6 +446,7 @@ function Enemy:SpawnPirate(spawnPos, skin)
     local unit = newUnit(self, "pirate", node)
     unit.hp = raider and Config.PIRATE_RAIDER_HP or Config.PIRATE_HP
     unit.raider = raider           -- 突袭型：Update 里转追主角而非直冲防线
+    unit.turretIdx = nil           -- 冲塔型进入砍击时定下的目标塔号（扣血时回传给 Waves）
     unit.skin = skin
     unit.sprite = sprite
     unit.speed = randSpread(Config.PIRATE_SPEED, Config.PIRATE_SPEED_SPREAD)
@@ -444,21 +473,48 @@ function Enemy:SpawnPirate(spawnPos, skin)
                     local step = self.speed * dt
                     p.x = p.x + dx / dist * step
                     p.z = p.z + dz / dist * step
-                    p.y = (p.z < Config.SHORE_Z) and (Config.SEA_Y + Config.PIRATE_WADE_DEPTH) or Config.SAND_Y
+                    p.y = wadeY(p.x, p.z)
                     self.node:SetPosition(p)
                     -- 面向主角（角色模型原生朝 -z，与 Player 同一 yaw 约定）
                     local yaw = math.atan(dx, -dz)
                     self.node:SetRotation(Quaternion(-math.deg(yaw), Vector3.UP))
                 end
             else
-                -- 冲滩型（或主角已上船/阵亡）：直线 +z 朝防线，到 DEFENSE_Z 砍防线
-                p.z = p.z + self.speed * dt
-                p.y = (p.z < Config.SHORE_Z) and (Config.SEA_Y + Config.PIRATE_WADE_DEPTH) or Config.SAND_Y
-                self.node:SetPosition(p)
-                if p.z >= Config.DEFENSE_Z then
-                    self.state = "attack"
-                    self.attackT = Config.PIRATE_ATTACK_TIME
-                    self.mgr.crowd:Play(self.sprite, "Sword")
+                -- 冲滩型（或主角已上船/阵亡）：直线 +z 朝滩头，抵近防线带后转打最近那座炮塔。
+                local reachZ = Config.DEFENSE_Z - Config.TURRET_STAND_OFF
+                if p.z >= reachZ - 1.0 and self.mgr.turrets then
+                    -- 进塔前圈：锁最近的一座活塔并走到它的砍击点（海侧、距心 STAND_OFF）。
+                    -- 塔在 x=±9、航道在 ±13/±4.5，正对着塔的只有少数几条，不在这里转过去
+                    -- 就会当着两塔中间对空气挥刀、却算砍到塔——视觉与判据脱节。
+                    local idx, tx, tz = self.mgr.turrets:NearestAlive(p.x, p.z)
+                    if not idx then
+                        -- 塔全哑了（Waves 下一帧就判负），别再拖：直接同归于尽收尸
+                        self.alive = false
+                        self:PlayDeath()
+                    else
+                        local dx, dz = tx - p.x, tz - p.z
+                        local dist = math.sqrt(dx * dx + dz * dz)
+                        if dist <= 0.35 then
+                            self.state = "attack"
+                            self.attackT = Config.PIRATE_ATTACK_TIME
+                            self.turretIdx = idx
+                            self.mgr.crowd:Play(self.sprite, "Sword")
+                        else
+                            -- 塔在正内陆侧，所以这一步是"向内陆挨过去"；billboard 恒朝相机，
+                            -- 旋转不影响观感，这里就不调了。
+                            local step = self.speed * dt
+                            p.x = p.x + dx / dist * step
+                            p.z = p.z + dz / dist * step
+                            p.y = wadeY(p.x, p.z)
+                            self.node:SetPosition(p)
+                        end
+                    end
+                else
+                    -- 直线冲滩：x 恒在航道上，只有 z 在动，所以“涉水→贴沙”的切换点就是
+                    -- 这条航道自己撞岸那一处（四条航道各不相同）——这正是曲线岸线顺手给的好处。
+                    p.z = p.z + self.speed * dt
+                    p.y = wadeY(p.x, p.z)
+                    self.node:SetPosition(p)
                 end
             end
         elseif self.state == "attack" then
@@ -487,9 +543,10 @@ function Enemy:SpawnPirate(spawnPos, skin)
                     end
                 end
             elseif self.attackT <= 0.0 then
-                -- 冲滩型：一刀砍防线即与防线同归于尽（占位：不做回撤）
-                if self.mgr.onDefenseHit then
-                    self.mgr.onDefenseHit(Config.LEAK_DAMAGE)
+                -- 冲塔型：一刀砍到塔即与塔同归于尽（占位：不做回撤）。扣的是这座塔自己的血，
+                -- 塔号在进塔前圈时就定下了（不在这里重新选，否则两边可能选到不同的塔）。
+                if self.mgr.onTurretHit and self.turretIdx then
+                    self.mgr.onTurretHit(self.turretIdx, Config.LEAK_DAMAGE)
                 end
                 self.alive = false
                 self:PlayDeath()
@@ -572,7 +629,11 @@ end
 ---@param fromPos Vector3 炮口世界坐标（甲板）
 function Enemy:FireCannon(fromPos)
     local tx = Config.WALK_MIN_X + math.random() * (Config.WALK_MAX_X - Config.WALK_MIN_X)
-    local tz = Config.WALK_MIN_Z + math.random() * (Config.WALK_MAX_Z - Config.WALK_MIN_Z)
+    -- 靠海一侧的边界按这一列的岸线算（旧写法是读一个写死的 1.5，那是“直水线 -0.5
+    -- + 余量”的抄值）：拿常数当统一边界，要么在岬角那侧把炮弹丢进水里（那片玩家根本不
+    -- 能站，覆盖白给），要么在湾里盖到岸上来。逐列算才和走位边界一致。
+    local zmin = Config.ShoreZ(tx) + Config.WALK_SHORE_MARGIN
+    local tz = zmin + math.random() * (Config.WALK_MAX_Z - zmin)
     local toPos = Vector3(tx, Config.SAND_Y, tz)
 
     -- 开炮反馈：炮口光 + 炮声（专用 cannonShot，由 powerful-cannon-shot 转码而来）

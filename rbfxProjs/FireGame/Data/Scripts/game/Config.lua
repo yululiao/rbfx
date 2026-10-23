@@ -4,7 +4,8 @@
 -- 其它模块一律从这里读，不写魔数。
 --
 -- 坐标约定：+z 是内陆（主角与防线在这侧），-z 是外海（敌人从这侧来），y 向上。
--- 水线在 SHORE_Z，沙滩从水线往 +z 铺到 BEACH_END_Z，防线在 DEFENSE_Z，塔在 TOWER_POS。
+-- 水线不是一个 z，而是 Config.ShoreZ(x) 一条曲线（见下方 SHORE 段）：沙滩从这条线往 +z
+-- 铺到 SHORE_FOG_END_Z，防线在 DEFENSE_Z，塔在 TOWER_POS。
 -- 单位是米（rbfx 约定 1 单位 = 1 米，FBX 导入已按 unit_meters 自动换算）。
 
 ---@class GameConfig 只读配置表，不实例化
@@ -19,12 +20,122 @@ Config.SEA_TILE = 24.0               -- 法线噪声平铺密度（400m 海面�
                                      -- 越大波纹越细碎，改动会同步 Water.xml 与 main.lua 滚动公式）
 Config.SEA_SCROLL_U = 0.03           -- 海面波纹 UV 滚动速度（UV/秒；米速 = 值×SEA_SIZE，现 12m/s）
 Config.SEA_SCROLL_V = 0.02           -- 两个轴取不同速避免波纹整体平移的“传送带”感
--- 海面的 +z 边正好落在水线上（SHORE_Z - SEA_SIZE/2）。写成"往海里偏一点"的 -60 会让
--- 海面一直铺到 z=+140，从塔上回头看内陆是一片蓝，所以这里必须贴住水线算。
-Config.SEA_CENTER_Z = -200.5
-Config.SHORE_Z = -0.5                -- 水线：沙滩从这里往 +z 铺
-Config.SAND_SIZE = 400.0             -- 沙滩从水线往内陆铺满，远端交给雾吃掉
-Config.BEACH_END_Z = 28.0            -- 装饰带内边界：棕榈/岩石/点缀只摆在这条线以内
+----------------------------------------------------------------------
+-- 海岸线：一个 z 标量 → Config.ShoreZ(x) 一条曲线（海岸线的唯一真源）
+--
+-- 之前水线是常量 SHORE_Z=-0.5，海与沙是两块轴对齐的大 Plane 在 z=-0.5 对接，
+-- 所以水陆交界在屏幕上是一条字面的直线——一眼就是“程序生成的占位”。岸线本来就不直，
+-- 把它做成曲线不是为了好看而好看，是因为它同时是 5 个玩法判据的输入（涉水 y、狗活动
+-- 下界、船靠岸线、玩家走位下界、炮塔警戒线）：几何与玩法同源才不会出现“看着已上岸、
+-- 判据还在水里”的那类脱节。
+--
+-- 唯一真源纪律：控制点只有 SHORE_PTS 这一张表，上面那 5 个消费点与 Coast 的沙滩网格
+-- 全从 Config.ShoreZ(x) 读，任何地方都不许再抄一个“-0.5”。
+-- 控制点按 x 递增；区间外按端值平推（钳制而不是外推斜率，否则沙滩边界会在远端翘飞）。
+-- 岬（凸向海）与湾（凹向陆）交替，峰谷差约 4m——幅度调大到这个量级才能在俯视镜头下
+-- 真正看出“弯曲”，之前 ±0.7m 的单一缓拱只会被当成一条斜直线。幅度受两条边界约束：
+-- 上界 ShoreZMax 须远小于 DEFENSE_Z（走位下限 ShoreZ(x)+WALK_SHORE_MARGIN 不能顶到防线）、
+-- 且 < BEACH_END_Z（BuildScenery 摆件落海自检断言）；下界别太靠海免得沙滩过宽。
+Config.SHORE_PTS = {
+    { x = -34.0, z = -1.0 },
+    { x = -26.0, z =  2.2 },
+    { x = -17.0, z = -1.6 },
+    { x = -8.0,  z =  2.6 },
+    { x =  0.0,  z = -0.6 },
+    { x =  8.0,  z =  2.2 },
+    { x = 17.0,  z = -1.6 },
+    { x = 26.0,  z =  2.2 },
+    { x = 34.0,  z = -1.0 },
+}
+
+--- 给定 x 处的水线 z（控制点间 Catmull-Rom 样条插值，区间外按端值平推）。
+--- 过全部控制点、切线连续，拐角圆滑；几何与玩法都读这一个函数，曲线全链路一致。
+---@param x number
+---@return number
+function Config.ShoreZ(x)
+    local pts = Config.SHORE_PTS
+    local n = #pts
+    if x <= pts[1].x then
+        return pts[1].z
+    end
+    if x >= pts[n].x then
+        return pts[n].z
+    end
+    for i = 1, n - 1 do
+        if x <= pts[i + 1].x then
+            -- 本段 [p1,p2]，取前后邻居 p0/p3（端点处夹取自身）做 Catmull-Rom
+            local p0 = pts[math.max(i - 1, 1)]
+            local p1 = pts[i]
+            local p2 = pts[i + 1]
+            local p3 = pts[math.min(i + 2, n)]
+            local t = (x - p1.x) / (p2.x - p1.x)
+            local z0, z1, z2, z3 = p0.z, p1.z, p2.z, p3.z
+            local t2 = t * t
+            local t3 = t2 * t
+            return 0.5 * ((2 * z1)
+                + (-z0 + z2) * t
+                + (2 * z0 - 5 * z1 + 4 * z2 - z3) * t2
+                + (-z0 + 3 * z1 - 3 * z2 + z3) * t3)
+        end
+    end
+    return pts[n].z
+end
+
+-- 样条在控制点之间可能有微小过冲，极值不能只扫控制点，得密集采样曲线本身，
+-- 否则海直边/走位下限按“控制点极值”少留余量，过冲处会露出空洞或蓝面。
+local SHORE_EXTREMA_SAMPLES = 64
+
+--- 岸线的最靠海一处（下界）。海的矩形只能贴着它铺，否则曲线低谷里会露出蓝面。
+---@return number
+function Config.ShoreZMin()
+    local pts = Config.SHORE_PTS
+    local x0, x1 = pts[1].x, pts[#pts].x
+    local minZ = math.huge
+    for i = 0, SHORE_EXTREMA_SAMPLES do
+        local z = Config.ShoreZ(x0 + (x1 - x0) * i / SHORE_EXTREMA_SAMPLES)
+        if z < minZ then
+            minZ = z
+        end
+    end
+    return minZ
+end
+
+--- 岸线的最靠陆一处（上界）。所有“确保已上岸”的判据都按它算，不按平均值算。
+---@return number
+function Config.ShoreZMax()
+    local pts = Config.SHORE_PTS
+    local x0, x1 = pts[1].x, pts[#pts].x
+    local maxZ = -math.huge
+    for i = 0, SHORE_EXTREMA_SAMPLES do
+        local z = Config.ShoreZ(x0 + (x1 - x0) * i / SHORE_EXTREMA_SAMPLES)
+        if z > maxZ then
+            maxZ = z
+        end
+    end
+    return maxZ
+end
+
+-- 岸线的两个极值不另存常量：ShoreZMin()/ShoreZMax() 就是唯一算法，
+-- 存一份副本只会多一个“改了控制点但忘了改它”的对账点。
+
+-- 海面中心：+z 直边要探到“岸线最大值再往内陆一点”，水才漫得到那条曲线岸边的每一处
+-- （否则曲线比 ShoreZMin 靠陆的列会出现“该有水却没水”的空洞）。这条直线边藏在沙滩
+-- 底下——沙的前缘就是曲线，从曲线往内陆全是沙，正好盖过探进来的海边；tuck 只取一点点，
+-- 免得越过沙滩横向尽头（|x|>BEACH_SPAN_X）后在两侧露出内陆蓝面。
+-- （必须在 ShoreZMax 定义之后：文件级赋值时函数要是 nil，得到的是算术错误崩掉整个 Config）
+Config.SEA_SHORE_TUCK = 0.4        -- 海边探过岸线最大值的量，须小于 Coast 次行相对包络的内移量(0.8)
+Config.SEA_CENTER_Z = (Config.ShoreZMax() + Config.SEA_SHORE_TUCK) - Config.SEA_SIZE * 0.5
+
+-- 沙滩网格（Coast.BuildSand）。之前是一整块 400x400 的 Plane，现在换成真网格：
+-- 只有贴水线那一条带需要细（那是岸线本体），往内陆是三级拉伸的条带，
+-- 铺到雾尽头只要几百个顶点。x 跨度必须大于可动区（WALK/SEA 矩形 ±60 是船）：
+-- 现在取 ±34，船开不到沙上去，所以看不到沙滩的横向尽头。
+Config.BEACH_SPAN_X = 34.0
+Config.SHORE_SAMPLES = 64        -- 岸线方向分段数（±34m 分 64 段 ≈ 1.06m/格；越密样条曲线越圆滑）
+Config.SHORE_BAND_MID_Z = 24.0   -- 中密度带外沿，再往外就是稀疏大条带
+Config.SHORE_FAR_ROWS = 4        -- 稀疏带行数（外沿到 SHORE_FOG_END_Z 均分）
+Config.SAND_TWIST = 1            -- 三角面绕序：1=正面朝上（实测必须；0 的法线朝下会被背面剔除，沙滩整片不可见，见 Coast 注释）
+Config.BEACH_END_Z = 28.0        -- 装饰带内边界：棕榈/岩石/点缀只摆在这条线以内（必须大于岸线最大值，见 Coast.BuildScenery 的自检）
 Config.SAND_Y = 0.02                 -- 沙滩面高度，略高于海面以免共面闪烁
 Config.DEFENSE_Z = 9.0               -- 防线：海盗走到这里就攻击，掉防线血
 
@@ -41,6 +152,8 @@ Config.TOWER_POLE_SCALE_Y = 4.11
 Config.FOG_COLOR = Color(0.65, 0.74, 0.82)   -- 与 Sky.png 的地平线色 (166,188,208) 对齐
 Config.FOG_START = 55.0
 Config.FOG_END = 210.0
+-- 沙滩往内陆铺到雾外（所以必须在 FOG_END 之后算）：网格不封边，尽头自然进了雾里。
+Config.SHORE_FOG_END_Z = Config.FOG_END + 20.0
 -- 环境光偏蓝（天光）而不是中性灰：沙子和木头受光面暖、背光面冷，画面才有早晚户外感。
 -- 场景里原本写的是 0.35 0.35 0.4，这里接管过来，调光不用再去改 .scene。
 Config.AMBIENT_COLOR = Color(0.32, 0.37, 0.46)
@@ -74,7 +187,8 @@ Config.DECOR = {
     { "Environment_LargeBones", -18.0, 4.5, 35.0 },
     { "Prop_Anchor", 6.0, 2.0, 110.0 },
     { "Prop_Chest_Gold", -6.5, 7.0, -25.0 },
-    { "Prop_Cannon", 4.0, 11.0, 180.0 },
+    -- Prop_Cannon 不在这里了：它是炮塔的炮身（见下方 TURRET 段）。同一个模型既是纯装饰
+    -- 又能开炮就是"一个功能两个入口"，之前那颗还挂不到 noShoot、能被玩家打爆。
 }
 -- 村落：摆在塔的两侧而不是正后方。相机的偏航被限制在 ±62 度（朝着海），
 -- 放在塔后（z > 19）的屋子根本进不了画面，白摆。
@@ -98,10 +212,44 @@ Config.BARREL_SPOTS = {
     { -3.5, 0.02, 8.5 },             -- 防线附近
 }
 
--- 防线的视觉：一排木桩栅栏，横贯 x，桩高与间距在这里调
-Config.PALISADE_COUNT = 15
-Config.PALISADE_SPAN_X = 40.0        -- 总宽，桩位在 ±SPAN_X/2 之间等分
-Config.PALISADE_POST = Vector3(0.26, 1.70, 0.26)
+----------------------------------------------------------------------
+-- 滩头防线 = 两座会自己开炮的友方炮塔（取代原来那排 15 根木桩的栅栏）
+--
+-- 为什么布点是表而不是写死两颗：塔数/塔位改了，血量池（Waves）、索敌（Turrets）、
+-- 视觉（Coast）都从这一张表出，不留第二份真相。下标即塔号。
+-- 塔位 x=±9 配 RANGE=10 正好把 LANES 四条航道（±4.5 / ±13）全覆盖。
+-- 台面刻意压成矮炮座而不是高塔：相机吊在主角后上方 35 度俯视朝海，塔一高就横切视线
+-- （瞭望塔被挪到 x=-12 就是同一个原因）。
+----------------------------------------------------------------------
+Config.TURRETS = { -9.0, 9.0 }       -- 每座塔的 x，z 恒取 DEFENSE_Z
+Config.TURRET_Z = Config.DEFENSE_Z
+Config.TURRET_HP = 150               -- 每塔血量：两座合计 300 = 原 DEFENSE_HP，总抗漏量一格没变（难度基线不飘）
+Config.TURRET_STAND_OFF = 1.6        -- 海盗砍塔时与塔中心的水平距离（停在台座外沿，不钻进模型里）
+-- 台面与炮座几何。Prop_Cannon 实测盒（解析 Cache 里 .mdl 顶点缓冲，同 Coast 头部那套方法）：
+-- x[-0.52,0.52] y[0.0009,1.1217] z[-0.8665,0.6138] —— 炮管往 -z 伸得更长，即原生炮口就朝海，
+-- 落位 yaw=0 不用转；原点在炮架底面，所以直接放台面上表面高度即可。
+Config.TURRET_DECK = Vector3(2.6, 0.30, 2.2)      -- 台面盒
+Config.TURRET_DECK_Y = 1.15                       -- 台面上表面高度（炮坐在这）
+Config.TURRET_POLE_INSET = 1.05                   -- 四根腿相对塔中心的内缩
+Config.TURRET_POLE_SCALE_Y = 1.15                 -- Dock_Pole 本地 y[-2.00,1.01]，缩后下半截埋进沙
+Config.TURRET_MUZZLE = Vector3(0.0, 1.62, -0.85)  -- 炮口相对塔中心（台面 1.15 + 炮身中段 0.47，朝海侧）
+Config.TURRET_GUN_PITCH_DEAD = 35.0               -- 失能时炮管歪下去的角度，一眼看出这座塔已哑
+
+-- 火控：定位是"漏防兜底"，不是第二路主力输出——割草的击杀必须还得是玩家自己打的，
+-- 所以塔不开火打到水里/还在船上的目标，且伤害不追高。要减弱塔的存在感，只动 INTERVAL 这一个旋钮。
+-- 但警戒线不能画得太靠防线：那样海盗大半在途中就被玩家消点，塔几乎没机会开火，
+-- 玩家会以为这两座炮塔是死的（大船炮台不见开炮同一个坑）。现在这行：一淌上滩头（z≈1）就纳入火控，
+-- 到防线有 ≈8m / ≈4s 的暴露窗口，足够一两次可见齐射。
+Config.TURRET_RANGE = 10.0                        -- XZ 索敌半径（米）
+Config.TURRET_ENGAGE_Z = Config.ShoreZMax() + 1.5   -- 警戒线：海盗 z 大于它才纳入火控
+Config.TURRET_FIRST = 0.5                         -- 开局首发迟（秒）
+Config.TURRET_INTERVAL = 2.2                      -- 两发间隔（秒）
+Config.TURRET_INTERVAL_SPREAD = 0.5               -- 间隔随机 ±，别让两塔齐射像节拍器
+Config.TURRET_DAMAGE = 2                          -- 普通海盗 HP=1 一炮一个，突袭型 HP=3 要两炮
+Config.TURRET_SPLASH_RADIUS = 2.2
+Config.TURRET_SHELL_SCALE = 0.42                  -- 弹丸大小（复用 Sphere.mdl，与大船炮弹同款）
+Config.TURRET_FLIGHT_TIME = 0.45                  -- 飞行时长：短弧，友方射击不需要预警盘
+Config.TURRET_LOB_HEIGHT = 2.6                    -- 抛物线拱高（米）
 
 ----------------------------------------------------------------------
 -- 相机（俯视角固定朝海，吊在主角正后上方；抖音小游戏刻意不需要玩家手动转视角）
@@ -361,7 +509,10 @@ Config.PLAYER_SPAWN = Vector3(0.0, Config.SAND_Y, 11.0)   -- 脚底出生点：�
 Config.PLAYER_MODEL_SCALE = 1.5
 Config.WALK_MIN_X = -18.0
 Config.WALK_MAX_X = 18.0
-Config.WALK_MIN_Z = 1.5              -- 别走进水里（水线 z=-0.5，留余量）
+-- 走位下界不是一个常量，而是“那个 x 处的岸线 + 余量”（见 Player:Move）：岸线是曲线，
+-- 写死一个 z 就会出现“在湾里已经踩进水里、判据还说你在沙上”。余量沿旧口径：旧版把
+-- 下界写死在 1.5，配直线水线 -0.5 等于留 2.0m，这里保持同一个 2.0m。
+Config.WALK_SHORE_MARGIN = 2.0       -- 别走进水里：相对岸线的余量
 Config.WALK_MAX_Z = 22.0             -- 别绕到塔后村子里
 
 -- 宠物狗（见 game/Dog.lua）：友方伴随单位，独立于 enemy.units（玩家子弹扫不到它、波次
@@ -419,7 +570,8 @@ Config.BOAT_INTERACT_DIST = 5.0      -- 角色与船水平距离小于此值可�
 Config.SEA_MIN_X = -60.0
 Config.SEA_MAX_X = 60.0
 Config.SEA_MIN_Z = -80.0             -- 往海方向能开很远
-Config.SEA_MAX_Z = Config.SHORE_Z + 3.0   -- 靠岸余量（下船不限制位置，随时可下）
+-- 靠岸线按“岸线最靠陆那处 + 余量”算：按平均值或按某个 x 算，船会在两个湾里搁浅。
+Config.SEA_MAX_Z = Config.ShoreZMax() + 3.0   -- 靠岸余量（下船不限制位置，随时可下）
 
 ----------------------------------------------------------------------
 -- 计分、连击、防线
@@ -449,8 +601,9 @@ function Config.ComboBlastEvery(pellets)
 end
 Config.COMBO_BLAST_RADIUS = 6      -- combo 爆炸杀伤半径（米），略大于爆桶连锁 4.6；非主要调平衡旋钮（后期无敌的靶心在弹丸×穿透而非此半径）
 Config.COMBO_BLAST_DAMAGE = 1        -- combo 爆炸伤害（降到只扫过一片、不再一发清屏；秒普通海盗靠 damage=1 就够）
-Config.DEFENSE_HP = 300              -- 潮水改后上岸量大增、又刚削了玩家穿透/爆炸，防线易穿；拉到 300 抗漏（约容忍 30 个漏防，不够再往上调）
-Config.LEAK_DAMAGE = 10              -- 一个海盗摸到防线扣多少
+-- 防线的总血量不再是一个标量：它住在 Config.TURRETS 每塔一份（见上方 TURRET 段），
+-- HUD 那一条读的是两塔合计，不存在第二份真相。
+Config.LEAK_DAMAGE = 10              -- 一个海盗砍到塔一刀扣多少
 -- 主角生命：突袭型海盗砍的是这条血。掉到 0 = 主角阵亡（与防线失守同为败局）。
 -- 口径从 100 改成 3 点整数：头顶血条（见下方 HP_BAR）就是 3 格，一格 = 1 点，不存在半格。
 -- 伤害同步重标（melee 10→1、炮弹 30→2），耐打次数与旧口径一致，难度没变。
@@ -475,6 +628,17 @@ Config.HP_BAR = {
     -- 贴图技术：引擎 Contents 里的 DiffUnlitAlpha（RmlWorldCanvas 内部用的同一个，无光照 + alpha 混合，
     -- 血条不会被太阳打暗、透明处不糊成一块黑）。
     technique = "Techniques/DiffUnlitAlpha.xml",
+}
+
+-- 炮塔头顶血条：与主角共用 HpBar.lua 那套世界面板，但走 ratio 模式——连续进度条
+-- （见 UI/TurretHpBar.rml），因为砍塔是缓慢持续掉血，3 格会把“还剩多少”量化得太粗。
+-- 锚点换成每座塔节点、血量上限换成 TURRET_HP（进度 = cur/TURRET_HP）。颜色绿色，与主角格血条同色系。
+-- 面板尺寸保持 5:1（与纹理 320x64 同比例）以免透视拉扁；悬浮高度按炮台实高定
+-- （台面 TURRET_DECK_Y 1.15 + 炮身上沿约 2.27），压在炮口上方一点。
+Config.TURRET_HP_BAR = {
+    overhead = 2.6,
+    worldW = 1.4,
+    worldH = 0.28,
 }
 
 -- 爆桶：无物理模块（抖音包禁用 URHO3D_PHYSICS），所以用距离遍历而不是球形查询
@@ -655,6 +819,10 @@ Config.Sfx = {
     shot = { "Sound/gun_shot/shooting-single.ogg" },
     cannonShot = { "Sound/gun_shot/powerful-cannon-shot.ogg" },   -- 大船炮台开炮专用
     cannonBlast = { "Sound/gun_shot/cannon-blast.ogg" },          -- 大船炮弹落地爆炸专用
+    -- 友方炮塔专用事件键（暂复用同一批素材）：不复用 cannonShot/cannonBlast，否则日后想
+    -- 把敌方重炮换成长音时会被连带改掉，而两个事件早就该分家了。
+    turretShot = { "Sound/gun_shot/powerful-cannon-shot.ogg" },
+    turretBlast = { "Sound/gun_shot/cannon-blast.ogg" },
     dogBark = { "Sound/gun_shot/dog-bark.ogg" },                  -- 宠物狗吠（追击时反复叫、被弹炸飞时叫一声）
     dogPant = { "Sound/gun_shot/dog-panting.ogg" },               -- 宠物狗喘气（一波清完原地休息时播）
     shotTail = Variants("impactMining_", 5),

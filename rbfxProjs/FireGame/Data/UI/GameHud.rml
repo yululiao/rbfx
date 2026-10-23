@@ -38,12 +38,12 @@
 <body class="fullscreen" style="pointer-events: none;">
 <div data-model="{{__data_model_id}}">
 
-    <!-- 左上：波次 + 防线血 + 局内成长（等级/经验条）。主角血不在这里——它改成了挂在人物
+    <!-- 左上：波次 + 炮塔血（两座合计）+ 局内成长（等级/经验条）。主角血不在这里——它改成了挂在人物
          头顶的 3 格血条（见 game/HpBar.lua + UI/HpBar.rml），这里不再留第二份显示，
          免得两个地方各自表达同一条血、不同步时说不清该信谁。 -->
     <div style="position: absolute; left: 28dp; top: 24dp; width: 300dp;">
         <div class="label">WAVE {{wave}}</div>
-        <div class="label" style="margin-top: 8dp; font-size: 18dp; color: #ffffffb3;">防线</div>
+        <div class="label" style="margin-top: 8dp; font-size: 18dp; color: #ffffffb3;">炮塔</div>
         <progress class="horizontal" data-value="defense" style="display: block; margin-top: 2dp; width: 260dp; height: 14dp;"/>
         <div class="label" style="margin-top: 10dp; font-size: 24dp; color: #ffd24dff;">LV {{level}}</div>
         <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4dp; width: 260dp; height: 10dp;"/>

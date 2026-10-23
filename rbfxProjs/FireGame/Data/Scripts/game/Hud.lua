@@ -39,7 +39,7 @@ function Hud.Build(scene, handlers)
     self.combo = 0
     self.ammo = Config.MAG_SIZE
     self.reload = 0.0          -- 0..1，绑定 <progress data-value="reload">
-    self.defense = 1.0         -- 0..1，绑定 <progress data-value="defense">
+    self.defense = 1.0         -- 0..1，绑定 <progress data-value="defense">（防线 = 两座炮塔的合计血量）
     -- 主角血不在 HUD 里：它住在 waves.playerHp，由头顶 3 格血条（game/HpBar.lua）每帧直读。
     self.narrate = ""
     self.narrateT = 0.0
@@ -165,9 +165,10 @@ function Hud:ShowPerf(b)
     self:Dirty("perfText")
 end
 
---- 防线血量（当前值 + 上限），内部换算成 0..1。
+--- 防线血量（两塔合计 + 合计上限），内部换算成 0..1。上限缺省按 Config.TURRETS 算，
+--- 不在这里写死一颗标量血量（那会变成第三处防线真相）。
 function Hud:SetDefense(cur, max)
-    max = (max and max > 0) and max or Config.DEFENSE_HP
+    max = (max and max > 0) and max or (#Config.TURRETS * Config.TURRET_HP)
     self.defense = clamp01((cur or 0) / max)
     self:Dirty("defense")
 end

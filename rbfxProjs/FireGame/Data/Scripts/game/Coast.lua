@@ -1,6 +1,9 @@
 -- Scripts/game/Coast.lua
 --
--- 海岸关卡的静态布景：天空、海、沙滩、瞭望塔、防线栅栏、栈桥与点缀。
+-- 海岸关卡的静态布景：天空、海、沙滩网格、瞭望塔、两座炮塔、栈桥与点缀。
+--
+-- 沙滩不是摆在场景里的资产，而是按 Config.ShoreZ(x) 现算的一张网格：岸线既是图形也是
+-- 判据（涉水/靠岸/走位下界），所以它只能从那张控制点表里长出来，不能两块矩形对对接。
 --
 -- 为什么全部程序化生成而不是在编辑器里手摆：
 --   * 这批 Quaternius / Kenney 资产是占位，后面会整套换掉，手摆的场景到时候要重摆一遍；
@@ -13,7 +16,8 @@
 -- Geometry 在 EndLoad 里算的盒子同源）：
 --   House2 3.78x9.38x3.74 y[0,9.38]、Dock/Dock_Pole y[-2.00,1.01]（桥面 1.01、桩到 -2）、
 --   PalmTree_1 高 3.58 y[0.01,3.59]、Rock_* 高 0.6 上下、Cliff2 8.0x6.9x7.1 y[-0.78,6.13]、
---   Skulls 高 3.81、Prop_Barrel 0.72x0.66x0.72 y[0,0.66]。
+--   Skulls 高 3.81、Prop_Barrel 0.72x0.66x0.72 y[0,0.66]、Prop_Cannon 1.04x1.12x1.48
+--   y[0.0009,1.12]、z[-0.87,0.61]（炮管往 -z 伸更长，即原生炮口朝海）。
 --   船族：ship-row-large 2.75x0.85x2.85 y[0,0.85]、ship-pirate-large 4.80x9.96x13.10 y[0,9.96]
 --   （旧 Ship_Small 5.14x1.99x3.60 / Ship_Large 已连资产删除，不再由本模块的 Place 落位）。
 -- 模型大多自带"底部略低于 y=0"的埋地量，所以按 y=0 摆就是站在地上，不要再手动抬。
@@ -73,6 +77,25 @@ local function PlacePirate(parent, assetName, position, yawDegrees, scale)
 end
 
 ----------------------------------------------------------------------
+-- 本模块手写网格用的索引打包助手（沙滩是唯一一处手写网格）
+--
+-- 顶点数据不再走“按属性分块”的助手：VertexBuffer 用 element map 声明的是交织（AoS）
+-- 布局，Update 吃的字节流必须逐顶点按元素顺序排（见 BuildSand 里的 string.pack），
+-- 不能先铺完所有位置再铺法线——那样引擎会把法线字节当位置读，整张网格坐标全乱。
+----------------------------------------------------------------------
+
+--- 索引表按 ushort 打包（顶点数远小于 65535，不用 largeIndices）。
+---@param values number[]
+---@return string
+local function PackUShorts(values)
+    local parts = {}
+    for i = 1, #values do
+        parts[i] = string.pack("<I2", values[i])
+    end
+    return table.concat(parts, "", 1, #values)
+end
+
+----------------------------------------------------------------------
 -- 天空 / 海 / 沙滩
 ----------------------------------------------------------------------
 
@@ -88,7 +111,8 @@ local function BuildSky(root)
     return node
 end
 
---- 海面：一张放大到 400x400 的 Plane，+z 边贴住水线，所以内陆方向不会露出蓝面。
+--- 海面：一张放大到 400x400 的 Plane，+z 边贴到岸线的最低那一处，所以曲线低谷里也不会
+--- 冒出蓝面（岸线见 Config.ShoreZ：它比沙滩高/低的那几段由沙滩网格自己跟着弯）。
 --- 水面材质见 Materials.Sea → Data/Materials/Water.xml（PBR + 法线波纹），
 --- 波纹流动由 main.lua 每帧滚动 UOffset/VOffset（海面只有一个用户，直接改共享材质）。
 ---@param root Node
@@ -101,13 +125,131 @@ local function BuildSea(root)
     return node
 end
 
---- 沙滩：从水线往内陆铺满的一张大 Plane。远端不封边，交给雾（FOG_END 210）吃掉。
+--- 沙滩：从 Config.ShoreZ(x) 那条曲线往内陆铺的一张手写网格。
+---
+--- 为什么不再是整块 Plane：轴对齐的矩形边就是屏幕上那条直岸线——岸线要弯，几何就必须
+--- 有顶点跟着弯。但整张网格不需要到处都细：只有贴水线那一条带是“岸线本体”，往内陆
+--- 是三级逐渐拉长的条带（密/中/稀），铺到雾外总共才几百个顶点。
+---
+--- 顶点布局跟引擎 Box.mdl/kenney 导入件对齐（POSITION/NORMAL/TEXCOORD0/TANGENT，逐顶点交织 stride 36）：
+--- 纯色材质是 DefaultWhite（LitOpaque+PBR）的 Clone，跟现在那块 Box 同一条渲染路径，
+--- 不会因为少个属性而在某些 pass 里取到未定义数据。UV 按“1 单 = 1 米”给，现在沙是纯色
+--- 用不上，但日后想换一张沙贴图只要调重复率，不用重烘网格。
+--- 三行分工：首行铺平到“最低水线再往海 0.6”（盖住海水矩形的 +z 边，整行都在曲线海侧），
+--- 第 2 行逐列贴 shoreZ(x)（它就是屏幕上那条岸线），第 3 行抬到整条曲线的包络之上。
+--- 为什么不能让首行去贴曲线：那它在低谷列只比海边靠陆 0.02（零头，抹不掉那条蓝边），
+--- 在岬角列反而退到海里 1.4m。为什么第 3 行不能铺平：海面 +z 边是个全局常数，而 x=0 处
+--- 岸线比它高 1.4m，平面行基址在局部岸线之下，会在岬角那侧漏出一条蓝楔子。
+--- 包络抬法还有个好处：行间间距在所有 x 处都非零，不会塌成退化四边形。
 ---@param root Node
+---@return Node
 local function BuildSand(root)
-    local centerZ = Config.SHORE_Z + Config.SAND_SIZE * 0.5
-    local node = Place(root, "Sand", Config.PLANE_MODEL, Materials.Tint("sand"),
-        Vector3(0.0, Config.SAND_Y, centerZ),
-        Vector3(Config.SAND_SIZE, 1.0, Config.SAND_SIZE), nil, false)
+    local spanX = Config.BEACH_SPAN_X
+    local nCols = Config.SHORE_SAMPLES + 1
+    local zShoreMin = Config.ShoreZMin()
+
+    -- x 列：等分（岸线方向要均匀，否则曲线会被分段不均拉得不对称）
+    local xs = {}
+    for i = 1, nCols do
+        xs[i] = -spanX + (2.0 * spanX) * (i - 1) / (nCols - 1)
+    end
+
+    -- z 行基址：首行贴岸线曲线（顶点处取 ShoreZ(x)，这里只放一个占位值兼作包围盒 z 下界），
+    -- 其后各行是纯沙滩，从“曲线包络 + 内移量”起往内陆铺——次行必须恒高于曲线最大值，
+    -- 首行→次行的四边形才既不会翻折、也不会把探进来的海面直边露出来。
+    local denseRows = 8
+    local nearTop = Config.ShoreZMax() + 0.8
+    local zs = { zShoreMin - 0.2 }
+    for i = 1, denseRows do
+        zs[#zs + 1] = nearTop + (Config.SHORE_BAND_MID_Z - nearTop) * i / denseRows
+    end
+    for i = 1, Config.SHORE_FAR_ROWS do
+        zs[#zs + 1] = Config.SHORE_BAND_MID_Z
+            + (Config.SHORE_FOG_END_Z - Config.SHORE_BAND_MID_Z) * i / Config.SHORE_FAR_ROWS
+    end
+    local nRows = #zs
+
+    local verts, idx = {}, {}
+    for r = 1, nRows do
+        local zBase = zs[r]
+        for c = 1, nCols do
+            local x = xs[c]
+            local z = zBase
+            if r == 1 then
+                z = Config.ShoreZ(x)               -- 岸线本体：首行逐列贴曲线，即可见的水陆交界
+            end
+            local k = (r - 1) * nCols + c
+            -- 逐顶点交织（AoS），字段顺序必须和下面 SetSize 的 VertexElement 完全一致：
+            -- POSITION(3 float) NORMAL(3 float) TEXCOORD(2 float) TANGENT(4 byte)，共 36 字节/顶点。
+            -- 平铺地面的切线 TX=(1,0,0)、TY=(0,1,0)，w=255 即正手性（引擎的约定）。
+            verts[k] = string.pack("<ffffff", x, Config.SAND_Y, z, 0.0, 1.0, 0.0)
+                .. string.pack("<ff", x, z)
+                .. string.pack("<BBBB", 255, 128, 128, 255)
+        end
+    end
+    -- 绕序：x 往右、z 往内陆。twist=0 的 (a,b,cc) 几何法线 = (+x)×(+z) = -y（朝下），
+    -- 俯视时被背面剔除 → 沙滩整片不可见；twist=1 的 (a,cc,b) 法线 = (+z)×(+x) = +y（朝上）
+    -- 才可见，故 Config.SAND_TWIST 默认取 1。之前误判成“0 即正面朝上”是坐标系手性搞反了。
+    local twist = (Config.SAND_TWIST or 0) ~= 0
+    for r = 1, nRows - 1 do
+        for c = 1, nCols - 1 do
+            local a = (r - 1) * nCols + c        -- (x0, z0)
+            local b = a + 1                      -- (x1, z0)
+            local cc = a + nCols                 -- (x0, z1)
+            local d = cc + 1                     -- (x1, z1)
+            if twist then
+                idx[#idx + 1] = a; idx[#idx + 1] = cc; idx[#idx + 1] = b
+                idx[#idx + 1] = b; idx[#idx + 1] = cc; idx[#idx + 1] = d
+            else
+                idx[#idx + 1] = a; idx[#idx + 1] = b; idx[#idx + 1] = cc
+                idx[#idx + 1] = b; idx[#idx + 1] = d; idx[#idx + 1] = cc
+            end
+        end
+    end
+
+    local vb = VertexBuffer()
+    vb:SetDebugName("BeachMesh.vb")
+    vb:SetShadowed(true)
+    vb:SetSize(#xs * #zs, {
+        VertexElement(VET.VECTOR3, VSEM.POSITION),
+        VertexElement(VET.VECTOR3, VSEM.NORMAL),
+        VertexElement(VET.VECTOR2, VSEM.TEXCOORD),
+        VertexElement(VET.UBYTE4_NORM, VSEM.TANGENT),
+    })
+    -- 一次 Update 喂满交织好的整段顶点流（每个顶点 36 字节，顺序见上面 string.pack）。
+    vb:Update(table.concat(verts))
+
+    local ib = IndexBuffer()
+    ib:SetDebugName("BeachMesh.ib")
+    ib:SetShadowed(true)
+    ib:SetSize(#idx, false, false)   -- 第三参 dynamic：C++ 有默认值，但这里是原生 LUA_MEMBER_FUNC 绑定，
+                                     -- sol3 不透传 C++ 默认参，Lua 必须显式喂满（漏了会报栈索引 4 expected boolean）
+    ib:Update(PackUShorts(idx))
+
+    local geom = Geometry()
+    geom:SetVertexBuffer(0, vb)
+    geom:SetIndexBuffer(ib)
+    geom:SetDrawRange(0, 0, #idx)      -- 0 == TRIANGLE_LIST
+
+    -- buffer 要列回 Model：不列也不会错画，但这份网格是运行期造的，没得序列化回去
+    local model = Model()
+    model:SetNumGeometries(1)
+    model:SetGeometry(0, 0, geom)
+    model:SetVertexBuffers({ vb }, { 0 }, { 0 })
+    model:SetIndexBuffers({ ib })
+    -- 包围盒：几何是按世界坐标写的（node 在原点），z 下界取首行基址（比“贴曲线那行”
+    -- 更靠海）、上界取末行——宁大不小：盒子小了会被距离/视锥误剔除，整片沙突然消失。
+    model:SetBoundingBox(BoundingBox(
+        Vector3(-spanX, Config.SAND_Y - 0.05, zs[1]),
+        Vector3(spanX, Config.SAND_Y + 0.05, zs[nRows])))
+
+    local node = root:CreateChild("Sand")
+    node:SetPosition(Vector3(0.0, 0.0, 0.0))
+    local sm = node:CreateComponent("StaticModel")
+    sm:SetModel(model)
+    sm:SetMaterial(Materials.Tint("sand"))
+    sm:SetCastShadows(false)
+    -- surface 变量：Shooting 打中没挂 unit 的东西时，靠它决定是水花还是尘土
     node:SetVar("surface", "sand")
     return node
 end
@@ -210,26 +352,58 @@ local function BuildTower(root)
     return deck
 end
 
---- 防线栅栏：一排木桩横贯滩头，海盗走到 DEFENSE_Z 就砍它。纯视觉 + 位置标记，
---- 血量在 Waves.lua 里；桩子不挂 unit 变量，所以打中它们算"打木头"。
+--- 防线 = 两座会自己开炮的炮塔（海盗淌到滩头就会挨它打，摸过来就砍它）。
+---
+--- 本函数只负责摆：血量住在 Waves、开火住在 Turrets，两边都读 Config.TURRETS 这一张表。
+--- 每塔一个空节点当逻辑中心（放在 (x, 0, DEFENSE_Z)），台面/腿/炮都挂它下面，所以
+--- Turrets 算炮口世界坐标就是「塔位 + Config.TURRET_MUZZLE」，不再重算一遍几何。
+--- 构型与瞭望塔同源（四根 Dock_Pole 架一块 Box 台面），但刻意矮：相机从主角后上方
+--- 35 度俯视朝海，塔一高就横切视线。
+--- 所有件都挂 noShoot：它们在主角（z≈11~22）与敌人（z<9）之间的枪线上，
+--- 不挂就会吃掉自己人的子弹（原栅栏就是这条理由）。
 ---@param root Node
----@return Node
-local function BuildPalisade(root)
+---@return { node: Node, gun: Node, x: number }[] 每塔句柄（下标与 Config.TURRETS 对齐）
+local function BuildTurrets(root)
     local line = root:CreateChild("DefenseLine")
-    local count = Config.PALISADE_COUNT
-    local span = Config.PALISADE_SPAN_X
-    local post = Config.PALISADE_POST
-    for i = 0, count - 1 do
-        local x = -span * 0.5 + span * (i / (count - 1))
-        -- 高低错落一点，一排完全等高的桩子看着像栅栏贴图而不是工事
-        local height = post.y * (0.82 + 0.36 * ((i * 7) % 5) / 4.0)
-        local p = Place(line, "Post", Config.BOX_MODEL, Materials.Tint("woodDark"),
-            Vector3(x, height * 0.5, Config.DEFENSE_Z),
-            Vector3(post.x, height, post.z), (i % 3) * 7.0 - 7.0, true)
-        -- 防线是自己的工事，不能挡住射向它后面敌人/桶的子弹
-        p:SetVar("noShoot", true)
+    local handles = {}
+    for i, x in ipairs(Config.TURRETS) do
+        local tower = line:CreateChild("Turret_" .. tostring(i))
+        tower:SetPosition(Vector3(x, 0.0, Config.TURRET_Z))
+
+        local inset = Config.TURRET_POLE_INSET
+        local poleScale = Vector3(1.0, Config.TURRET_POLE_SCALE_Y, 1.0)
+        local corners = {
+            Vector3(-inset, 0.0, -inset), Vector3(inset, 0.0, -inset),
+            Vector3(-inset, 0.0, inset), Vector3(inset, 0.0, inset),
+        }
+        for _, corner in ipairs(corners) do
+            -- 桩子本地 y[-2,1.01]，下半截埋进沙里，和瞭望塔同理
+            local pole = PlacePirate(tower, "Environment_Dock_Pole", corner, 0.0, poleScale)
+            pole:SetVar("noShoot", true)
+        end
+
+        local deck = Place(tower, "Deck", Config.BOX_MODEL, Materials.Tint("wood"),
+            Vector3(0.0, Config.TURRET_DECK_Y - Config.TURRET_DECK.y * 0.5, 0.0),
+            Config.TURRET_DECK, nil, true)
+        deck:SetVar("noShoot", true)
+
+        -- 台底交叉梁：少一层从低角度看就是一块悬空薄板（与瞭望塔同一处理）
+        local beam = Vector3(Config.TURRET_DECK.x * 0.9, 0.16, 0.22)
+        local beamY = Config.TURRET_DECK_Y - Config.TURRET_DECK.y - 0.12
+        local beam1 = Place(tower, "Beam1", Config.BOX_MODEL, Materials.Tint("woodDark"),
+            Vector3(0.0, beamY, 0.0), beam, 45.0, false)
+        local beam2 = Place(tower, "Beam2", Config.BOX_MODEL, Materials.Tint("woodDark"),
+            Vector3(0.0, beamY, 0.0), beam, -45.0, false)
+        beam1:SetVar("noShoot", true)
+        beam2:SetVar("noShoot", true)
+
+        -- 炮身：坐台面上表面（原点在炮架底），yaw=0 即炮口朝海。Turrets 失能时把它歪下来。
+        local gun = PlacePirate(tower, "Prop_Cannon", Vector3(0.0, Config.TURRET_DECK_Y, 0.0), 0.0)
+        gun:SetVar("noShoot", true)
+
+        handles[#handles + 1] = { node = tower, gun = gun, x = x }
     end
-    return line
+    return handles
 end
 
 --- 栈桥：Dock 模块沿 -z 一节节排到水里，桥面落在 SEA_Y + 1.01。
@@ -255,6 +429,29 @@ end
 local function BuildScenery(root)
     local scenery = root:CreateChild("Scenery")
     local groundY = Config.SAND_Y
+
+    -- 自检：这批表里的 z 全部写在直线水线（旧 -0.5）以内，而岸线现在是一条曲线。
+    -- 曲线最靠陆那处才 0.7m，按现有表没人会落到海里；但以后往表里加一个贴水线的件
+    -- 就会漂在水上（这些都是纯静态摆件，不报错也不响），所以这里把它变成看得见的。
+    -- z 的下标逐表不同（CLIFFS/VILLAGE 是 name,x,z,yaw；PALMS/ROCKS/DECOR 是 x,z,...
+    -- 或 name,x,z），靠猜会猜错（VILLAGE 的 [3] 是 yaw），以这里显式声明为准。
+    local shoreMax = Config.ShoreZMax()
+    local scatter = {
+        { list = Config.CLIFFS, zi = 3 },
+        { list = Config.PALMS, zi = 2 },
+        { list = Config.ROCKS, zi = 2 },
+        { list = Config.DECOR, zi = 3 },
+        { list = Config.VILLAGE, zi = 3 },
+    }
+    for _, group in ipairs(scatter) do
+        for _, entry in ipairs(group.list) do
+            local z = entry[group.zi]
+            if type(z) == "number" and z < shoreMax + 0.5 then
+                print(string.format("Coast: 摆件落在岸线以内 (%s z=%.1f < 岸线最大 %.1f)，会漂在水上",
+                    tostring(entry[1]), z, shoreMax))
+            end
+        end
+    end
 
     for _, entry in ipairs(Config.CLIFFS) do
         local name, x, z, yaw = entry[1], entry[2], entry[3], entry[4]
@@ -341,7 +538,7 @@ function Coast.Build(scene)
     local seaMaterial = Materials.Sea()
     local sand = BuildSand(root)
     local deck = BuildTower(root)
-    BuildPalisade(root)
+    local turrets = BuildTurrets(root)
     BuildDock(root)
     BuildScenery(root)
     local playerBoat = BuildPlayerBoat(root)
@@ -349,9 +546,11 @@ function Coast.Build(scene)
     local sun = BuildSun(scene)
     BuildZone(scene)
 
-    print(string.format("Coast MARK built: sea=%.0fm sand=%.0fm tower=(%.1f,%.1f,%.1f) deckY=%.2f defenseZ=%.1f",
-        Config.SEA_SIZE, Config.SAND_SIZE, Config.TOWER_POS.x, Config.TOWER_POS.y, Config.TOWER_POS.z,
-        Config.PLATFORM_Y, Config.DEFENSE_Z))
+    print(string.format("Coast MARK built: sea=%.0fm beach=%.0fx%.0f shore[%.2f,%.2f] tower=(%.1f,%.1f,%.1f) deckY=%.2f turrets=%d at z=%.1f",
+        Config.SEA_SIZE, 2.0 * Config.BEACH_SPAN_X, Config.SHORE_FOG_END_Z,
+        Config.ShoreZMin(), Config.ShoreZMax(),
+        Config.TOWER_POS.x, Config.TOWER_POS.y, Config.TOWER_POS.z,
+        Config.PLATFORM_Y, #turrets, Config.DEFENSE_Z))
 
     ---@class CoastHandles
     return {
@@ -366,6 +565,8 @@ function Coast.Build(scene)
         playerSpot = Config.TOWER_POS + Vector3(0.0, Config.PLATFORM_Y, 0.0),
         -- 玩家专属船节点（载具），main.lua 传给 Player
         playerBoat = playerBoat,
+        -- 两座炮塔句柄（{ node, gun, x }），main.lua 传给 Turrets；下标即塔号
+        turrets = turrets,
     }
 end
 
