@@ -154,16 +154,14 @@ local function BuildSand(root)
         xs[i] = -spanX + (2.0 * spanX) * (i - 1) / (nCols - 1)
     end
 
-    -- z 行基址：贴水线的密带 + 一条中带 + 几条大条带。首行是最低水线再往海一点，
-    -- 给共面闪烁留余量（那一段埋在海水里，看不见）。
+    -- z 行基址：首行贴岸线曲线（顶点处取 ShoreZ(x)，这里只放一个占位值兼作包围盒 z 下界），
+    -- 其后各行是纯沙滩，从“曲线包络 + 内移量”起往内陆铺——次行必须恒高于曲线最大值，
+    -- 首行→次行的四边形才既不会翻折、也不会把探进来的海面直边露出来。
     local denseRows = 8
-    local zs = { zShoreMin - 0.6 }
+    local nearTop = Config.ShoreZMax() + 0.8
+    local zs = { zShoreMin - 0.2 }
     for i = 1, denseRows do
-        zs[#zs + 1] = zShoreMin + Config.SHORE_BAND_Z * i / denseRows
-    end
-    for i = 1, 6 do
-        zs[#zs + 1] = (zShoreMin + Config.SHORE_BAND_Z)
-            + (Config.SHORE_BAND_MID_Z - zShoreMin - Config.SHORE_BAND_Z) * i / 6.0
+        zs[#zs + 1] = nearTop + (Config.SHORE_BAND_MID_Z - nearTop) * i / denseRows
     end
     for i = 1, Config.SHORE_FAR_ROWS do
         zs[#zs + 1] = Config.SHORE_BAND_MID_Z
@@ -172,18 +170,13 @@ local function BuildSand(root)
     local nRows = #zs
 
     local verts, idx = {}, {}
-    -- 贴曲线那一行的下界：整条曲线的包络再往内陆一个行间距。再往内的行基址（≥ 5.3）
-    -- 本来就高于岸线最大值，铺平 z 不会穿水。
-    local envelope = Config.ShoreZMax() + Config.SHORE_BAND_Z / denseRows
     for r = 1, nRows do
         local zBase = zs[r]
         for c = 1, nCols do
             local x = xs[c]
             local z = zBase
-            if r == 2 then
-                z = Config.ShoreZ(x) + 0.02       -- 岸线本体：逐列贴水线
-            elseif r == 3 and zBase < envelope then
-                z = envelope
+            if r == 1 then
+                z = Config.ShoreZ(x)               -- 岸线本体：首行逐列贴曲线，即可见的水陆交界
             end
             local k = (r - 1) * nCols + c
             -- 逐顶点交织（AoS），字段顺序必须和下面 SetSize 的 VertexElement 完全一致：
@@ -194,8 +187,9 @@ local function BuildSand(root)
                 .. string.pack("<BBBB", 255, 128, 128, 255)
         end
     end
-    -- 绕序：从上往下看 A(x0,z0) B(x1,z0) C(x0,z1) 是逆时针，即正面朝上。
-    -- 万一在这台引擎/这套后端上是反的，改 Config.SAND_TWIST=1 即可，不必动这里。
+    -- 绕序：x 往右、z 往内陆。twist=0 的 (a,b,cc) 几何法线 = (+x)×(+z) = -y（朝下），
+    -- 俯视时被背面剔除 → 沙滩整片不可见；twist=1 的 (a,cc,b) 法线 = (+z)×(+x) = +y（朝上）
+    -- 才可见，故 Config.SAND_TWIST 默认取 1。之前误判成“0 即正面朝上”是坐标系手性搞反了。
     local twist = (Config.SAND_TWIST or 0) ~= 0
     for r = 1, nRows - 1 do
         for c = 1, nCols - 1 do

@@ -32,19 +32,24 @@ Config.SEA_SCROLL_V = 0.02           -- 两个轴取不同速避免波纹整体�
 -- 唯一真源纪律：控制点只有 SHORE_PTS 这一张表，上面那 5 个消费点与 Coast 的沙滩网格
 -- 全从 Config.ShoreZ(x) 读，任何地方都不许再抄一个“-0.5”。
 -- 控制点按 x 递增；区间外按端值平推（钳制而不是外推斜率，否则沙滩边界会在远端翘飞）。
--- 中间那个峰是“岬”，两侧的下凹是两个小湾：幅度只有 ±0.7m，不改变任何玩法节奏，
--- 只是让水陆交界不再是一条尺子线。
+-- 岬（凸向海）与湾（凹向陆）交替，峰谷差约 4m——幅度调大到这个量级才能在俯视镜头下
+-- 真正看出“弯曲”，之前 ±0.7m 的单一缓拱只会被当成一条斜直线。幅度受两条边界约束：
+-- 上界 ShoreZMax 须远小于 DEFENSE_Z（走位下限 ShoreZ(x)+WALK_SHORE_MARGIN 不能顶到防线）、
+-- 且 < BEACH_END_Z（BuildScenery 摆件落海自检断言）；下界别太靠海免得沙滩过宽。
 Config.SHORE_PTS = {
-    { x = -34.0, z = -0.60 },
-    { x = -20.0, z = -0.25 },
-    { x = -8.0,  z =  0.55 },
-    { x =  0.0,  z =  0.70 },
-    { x =  9.0,  z =  0.35 },
-    { x = 21.0,  z = -0.35 },
-    { x = 34.0,  z = -0.70 },
+    { x = -34.0, z = -1.0 },
+    { x = -26.0, z =  2.2 },
+    { x = -17.0, z = -1.6 },
+    { x = -8.0,  z =  2.6 },
+    { x =  0.0,  z = -0.6 },
+    { x =  8.0,  z =  2.2 },
+    { x = 17.0,  z = -1.6 },
+    { x = 26.0,  z =  2.2 },
+    { x = 34.0,  z = -1.0 },
 }
 
---- 给定 x 处的水线 z（控制点间线性插值，区间外按端值平推）。
+--- 给定 x 处的水线 z（控制点间 Catmull-Rom 样条插值，区间外按端值平推）。
+--- 过全部控制点、切线连续，拐角圆滑；几何与玩法都读这一个函数，曲线全链路一致。
 ---@param x number
 ---@return number
 function Config.ShoreZ(x)
@@ -57,22 +62,39 @@ function Config.ShoreZ(x)
         return pts[n].z
     end
     for i = 1, n - 1 do
-        local a, b = pts[i], pts[i + 1]
-        if x <= b.x then
-            local t = (x - a.x) / (b.x - a.x)
-            return a.z + (b.z - a.z) * t
+        if x <= pts[i + 1].x then
+            -- 本段 [p1,p2]，取前后邻居 p0/p3（端点处夹取自身）做 Catmull-Rom
+            local p0 = pts[math.max(i - 1, 1)]
+            local p1 = pts[i]
+            local p2 = pts[i + 1]
+            local p3 = pts[math.min(i + 2, n)]
+            local t = (x - p1.x) / (p2.x - p1.x)
+            local z0, z1, z2, z3 = p0.z, p1.z, p2.z, p3.z
+            local t2 = t * t
+            local t3 = t2 * t
+            return 0.5 * ((2 * z1)
+                + (-z0 + z2) * t
+                + (2 * z0 - 5 * z1 + 4 * z2 - z3) * t2
+                + (-z0 + 3 * z1 - 3 * z2 + z3) * t3)
         end
     end
     return pts[n].z
 end
 
+-- 样条在控制点之间可能有微小过冲，极值不能只扫控制点，得密集采样曲线本身，
+-- 否则海直边/走位下限按“控制点极值”少留余量，过冲处会露出空洞或蓝面。
+local SHORE_EXTREMA_SAMPLES = 64
+
 --- 岸线的最靠海一处（下界）。海的矩形只能贴着它铺，否则曲线低谷里会露出蓝面。
 ---@return number
 function Config.ShoreZMin()
+    local pts = Config.SHORE_PTS
+    local x0, x1 = pts[1].x, pts[#pts].x
     local minZ = math.huge
-    for _, p in ipairs(Config.SHORE_PTS) do
-        if p.z < minZ then
-            minZ = p.z
+    for i = 0, SHORE_EXTREMA_SAMPLES do
+        local z = Config.ShoreZ(x0 + (x1 - x0) * i / SHORE_EXTREMA_SAMPLES)
+        if z < minZ then
+            minZ = z
         end
     end
     return minZ
@@ -81,10 +103,13 @@ end
 --- 岸线的最靠陆一处（上界）。所有“确保已上岸”的判据都按它算，不按平均值算。
 ---@return number
 function Config.ShoreZMax()
+    local pts = Config.SHORE_PTS
+    local x0, x1 = pts[1].x, pts[#pts].x
     local maxZ = -math.huge
-    for _, p in ipairs(Config.SHORE_PTS) do
-        if p.z > maxZ then
-            maxZ = p.z
+    for i = 0, SHORE_EXTREMA_SAMPLES do
+        local z = Config.ShoreZ(x0 + (x1 - x0) * i / SHORE_EXTREMA_SAMPLES)
+        if z > maxZ then
+            maxZ = z
         end
     end
     return maxZ
@@ -93,21 +118,23 @@ end
 -- 岸线的两个极值不另存常量：ShoreZMin()/ShoreZMax() 就是唯一算法，
 -- 存一份副本只会多一个“改了控制点但忘了改它”的对账点。
 
--- 海面中心：+z 边正好贴到岸线的最靠海一处（曲线低谷里不会露出蓝面）。写成“往海里
--- 偏一点”会让海面一直铺到内陆，从塔上回头看是一片蓝，所以这里必须贴着水线算。
--- （必须在 ShoreZMin 定义之后：文件级赋值时函数要是 nil，得到的是算术错误崩掉整个 Config）
-Config.SEA_CENTER_Z = Config.ShoreZMin() - Config.SEA_SIZE * 0.5
+-- 海面中心：+z 直边要探到“岸线最大值再往内陆一点”，水才漫得到那条曲线岸边的每一处
+-- （否则曲线比 ShoreZMin 靠陆的列会出现“该有水却没水”的空洞）。这条直线边藏在沙滩
+-- 底下——沙的前缘就是曲线，从曲线往内陆全是沙，正好盖过探进来的海边；tuck 只取一点点，
+-- 免得越过沙滩横向尽头（|x|>BEACH_SPAN_X）后在两侧露出内陆蓝面。
+-- （必须在 ShoreZMax 定义之后：文件级赋值时函数要是 nil，得到的是算术错误崩掉整个 Config）
+Config.SEA_SHORE_TUCK = 0.4        -- 海边探过岸线最大值的量，须小于 Coast 次行相对包络的内移量(0.8)
+Config.SEA_CENTER_Z = (Config.ShoreZMax() + Config.SEA_SHORE_TUCK) - Config.SEA_SIZE * 0.5
 
 -- 沙滩网格（Coast.BuildSand）。之前是一整块 400x400 的 Plane，现在换成真网格：
 -- 只有贴水线那一条带需要细（那是岸线本体），往内陆是三级拉伸的条带，
 -- 铺到雾尽头只要几百个顶点。x 跨度必须大于可动区（WALK/SEA 矩形 ±60 是船）：
 -- 现在取 ±34，船开不到沙上去，所以看不到沙滩的横向尽头。
 Config.BEACH_SPAN_X = 34.0
-Config.SHORE_SAMPLES = 32        -- 岸线方向分段数（±34m 分 32 段 ≈ 2.1m/格）
-Config.SHORE_BAND_Z = 6.0        -- 密网格带：从最低水线往内陆这么多米（涉水段全在里面）
+Config.SHORE_SAMPLES = 64        -- 岸线方向分段数（±34m 分 64 段 ≈ 1.06m/格；越密样条曲线越圆滑）
 Config.SHORE_BAND_MID_Z = 24.0   -- 中密度带外沿，再往外就是稀疏大条带
 Config.SHORE_FAR_ROWS = 4        -- 稀疏带行数（外沿到 SHORE_FOG_END_Z 均分）
-Config.SAND_TWIST = 0            -- 三角面绕序开关：沙滩要是看不见/发暗就改成 1（见 Coast 注释）
+Config.SAND_TWIST = 1            -- 三角面绕序：1=正面朝上（实测必须；0 的法线朝下会被背面剔除，沙滩整片不可见，见 Coast 注释）
 Config.BEACH_END_Z = 28.0        -- 装饰带内边界：棕榈/岩石/点缀只摆在这条线以内（必须大于岸线最大值，见 Coast.BuildScenery 的自检）
 Config.SAND_Y = 0.02                 -- 沙滩面高度，略高于海面以免共面闪烁
 Config.DEFENSE_Z = 9.0               -- 防线：海盗走到这里就攻击，掉防线血
