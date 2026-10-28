@@ -28,6 +28,14 @@
         .bar_track { position: relative; background-color: #00000066; border-radius: 6dp; overflow: hidden; }
         .label { color: #ffffffd9; font-size: 22dp; }
         .big { color: #ffffffff; font-size: 64dp; font-weight: bold; }
+        /* 摇杆外环改用抗锯齿圆盘贴图：border-radius 实心圆是 RmlUi 的多边形逼近、边缘不做 AA，
+           手机上（backbuffer 低于物理像素再拉伸）硬台阶特别明显。StickRing.png 已把“白 18% alpha”
+           烘进软边，decorator 按元素尺寸拉伸 + 双线性采样 → 不依赖 MSAA/分辨率也平滑。 */
+        @spritesheet joystick {
+            src: /Textures/StickRing.png;
+            ringDisc: 0dp 0dp 256dp 256dp;
+        }
+        #stick_ring { decorator: image(ringDisc); }
     </style>
 </head>
 <!-- body 设 pointer-events:none 的缘由：RmlUi 的 Context::OnFocusChange 在被聚焦元素所属文档
@@ -91,7 +99,7 @@
     <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。
          会动的只有 Knob.rml 那颗帽（Lua 逐帧 SetPosition）。这里原先套过一个深色内圆，
          看起来像帽却永远不动，极易被误认为“帽不跟手”，已移除。 -->
-    <div id="stick_ring" style="position: absolute; left: 40dp; bottom: 40dp; width: 224dp; height: 224dp; border-radius: 112dp; background-color: #ffffff2e;"></div>
+    <div id="stick_ring" style="position: absolute; left: 40dp; bottom: 40dp; width: 224dp; height: 224dp;"></div>
 
     <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
     <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">

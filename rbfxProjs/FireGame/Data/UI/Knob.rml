@@ -3,6 +3,15 @@
     <link type="text/rcss" href="rml.rcss"/>
     <link type="text/rcss" href="layout.rcss"/>
     <link type="text/rcss" href="default.rcss"/>
+    <style>
+        /* 帽同样改抗锯齿圆盘贴图（与 GameHud 外环同理，治手机上 border-radius 硬边锯齿）。
+           StickKnob.png 已把 #222831 / 90% alpha 烘进软边，decorator 拉伸 + 双线性采样。 */
+        @spritesheet knob {
+            src: /Textures/StickKnob.png;
+            knobDisc: 0dp 0dp 256dp 256dp;
+        }
+        #knob_cap { decorator: image(knobDisc); }
+    </style>
   </head>
   <!-- 虚拟摇杆帽（深色实心圆，即玩家眼中的“内圈”）：body 必须带 position:absolute，
        否则 SetPosition 写入根元素的 left/top 会被布局当作 static 盒丢弃；
@@ -12,6 +21,6 @@
        且帽文档创建在 CamDebug 之上（z 序更高），若吃指针，鼠标拖摇杆把帽甩到右上时
        会盖住相机按钮并吞掉它的点击（"相机点不动、像被挡住"的元凶）。 -->
   <body style="display: block; position: absolute; width: 96dp; height: 96dp; pointer-events: none;">
-    <div id="knob_cap" style="position: absolute; left: 0dp; top: 0dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #222831e6;"></div>
+    <div id="knob_cap" style="position: absolute; left: 0dp; top: 0dp; width: 96dp; height: 96dp;"></div>
   </body>
 </rml>
