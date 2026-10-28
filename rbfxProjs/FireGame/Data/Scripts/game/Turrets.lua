@@ -22,7 +22,6 @@
 -- 不共用一条代码路径（同一功能两个入口迟早各改各的）。
 
 local Config = require("game.Config")
-local Materials = require("game.Materials")
 
 ---@class Turrets 友方炮塔管理器
 local Turrets = {}
@@ -124,13 +123,23 @@ local function Fire(self, tw, toPos)
     self.fx:Flash(muzzle, Color(1.0, 0.78, 0.42), 7.0, 0.08)
     self.audio:Play("turretShot")
 
+    -- 弹丸实体：同用 pirate-kit 的 cannon-ball prefab（自带材质）。ball 是父节点，飞行/落点
+    -- 沿用 pr.ball:SetPosition / Remove。
     local ball = self.scene:CreateChild("TurretShell")
     ball:SetPosition(muzzle)
-    local sm = ball:CreateComponent("StaticModel")
-    sm:SetModel(GetResource("Model", "Models/Sphere.mdl"))
-    sm:SetMaterial(Materials.Tint("cannon"))
-    sm:SetCastShadows(false)
-    ball:SetScale(Config.TURRET_SHELL_SCALE)
+    local prefab = GetResource("PrefabResource", Config.PiratePrefab("cannon-ball"))
+    if prefab then
+        local model = ball:InstantiatePrefab(prefab, Vector3.ZERO, Quaternion.IDENTITY)
+        if model then
+            model:SetScale(Config.TURRET_SHELL_SCALE)
+            local smc = model:GetComponent("StaticModel")
+            if smc then
+                smc:SetCastShadows(false)
+            end
+        end
+    else
+        LogError("Turrets: 弹丸 prefab 加载失败 'cannon-ball'")
+    end
 
     self.projectiles[#self.projectiles + 1] = {
         ball = ball,

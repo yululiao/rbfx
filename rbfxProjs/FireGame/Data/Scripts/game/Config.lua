@@ -249,7 +249,7 @@ Config.TURRET_INTERVAL = 2.2                      -- 两发间隔（秒）
 Config.TURRET_INTERVAL_SPREAD = 0.5               -- 间隔随机 ±，别让两塔齐射像节拍器
 Config.TURRET_DAMAGE = 2                          -- 只咬船：小船 3 两炮、大船 8 四炮（对走路海盗已不出手）
 Config.TURRET_SPLASH_RADIUS = 2.2
-Config.TURRET_SHELL_SCALE = 0.42                  -- 弹丸大小（复用 Sphere.mdl，与大船炮弹同款）
+Config.TURRET_SHELL_SCALE = 0.65                  -- 弹丸大小：cannon-ball.prefab 原生≈0.64m，0.65 复刻旧弹≈0.42m 观感
 Config.TURRET_FLIGHT_TIME = 0.45                  -- 飞行时长：短弧，友方射击不需要预警盘
 Config.TURRET_LOB_HEIGHT = 2.6                    -- 抛物线拱高（米）
 
@@ -366,7 +366,7 @@ Config.BOAT_CANNON_FIRST = 1.0           -- 停船后首发射迟（秒）
 Config.BOAT_CANNON_INTERVAL = 3.0        -- 两发间隔（秒）
 Config.BOAT_CANNON_INTERVAL_SPREAD = 0.8 -- 间隔随机 ±
 Config.BOAT_CANNON_LINGER = 9.0          -- 卸完兵后大船滞留炮击的时长（秒），到点开走
-Config.CANNON_BALL_SCALE = 0.55          -- 炮弹实体大小（复用 Sphere.mdl）
+Config.CANNON_BALL_SCALE = 0.85          -- 炮弹大小：cannon-ball.prefab 原生≈0.64m，0.85 复刻旧弹≈0.55m 观感
 Config.CANNON_FLIGHT_TIME = 2.2          -- 炮弹飞行时长（秒）：慢，留躲避时间
 Config.CANNON_LOB_HEIGHT = 9.0           -- 抛物线拱高（米，峰在轨迹中点上方）
 Config.CANNON_SPLASH_RADIUS = 3.2        -- 落点杀伤半径（米）

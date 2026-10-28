@@ -640,14 +640,23 @@ function Enemy:FireCannon(fromPos)
     self.fx:Flash(fromPos, Color(1.0, 0.8, 0.4), 8.0, 0.08)
     self.audio:Play("cannonShot")
 
-    -- 炮弹实体（与子弹同款：实体球 + 纯色材质）
+    -- 炮弹实体：pirate-kit 的 cannon-ball prefab（自带 kennypirate 材质）。ball 仍是父节点，
+    -- 飞行/删除沿用 pr.ball:SetPosition / Remove，模型作子节点挂原点、按需缩放并关掉投影。
     local ball = self.scene:CreateChild("CannonBall")
     ball:SetPosition(fromPos)
-    local sm = ball:CreateComponent("StaticModel")
-    sm:SetModel(GetResource("Model", "Models/Sphere.mdl"))
-    sm:SetMaterial(Materials.Tint("cannon"))
-    sm:SetCastShadows(false)
-    ball:SetScale(Config.CANNON_BALL_SCALE)
+    local prefab = GetResource("PrefabResource", Config.PiratePrefab("cannon-ball"))
+    if prefab then
+        local model = ball:InstantiatePrefab(prefab, Vector3.ZERO, Quaternion.IDENTITY)
+        if model then
+            model:SetScale(Config.CANNON_BALL_SCALE)
+            local smc = model:GetComponent("StaticModel")
+            if smc then
+                smc:SetCastShadows(false)
+            end
+        end
+    else
+        LogError("Enemy: 炮弹 prefab 加载失败 'cannon-ball'")
+    end
 
     -- 落点预警盘：扁 Box 铺在沙滩上，随炮弹逼近放大（提示“别站在这”）。
     -- 尺寸故意不小于杀伤盘：玩家只要离开橙色盘就一定安全。
