@@ -1,0 +1,28 @@
+{
+	"nodes": [
+		{
+			"components": [
+				{
+					"_typeName": "StaticModel",
+					"attributes": [
+						{
+							"name": "Model",
+							"type": "ResourceRef",
+							"value": "Model;Models/Quaternius_pirate-kit/Fbx/Environment_House1.fbx.d/Models/Environment_House1.mdl"
+						},
+						{
+							"name": "Material",
+							"type": "ResourceRefList",
+							"value": "Material;Models/Quaternius_pirate-kit/Materials/pirate.material;Models/Quaternius_pirate-kit/Materials/pirate.material"
+						},
+						{
+							"name": "Cast Shadows",
+							"type": "Bool",
+							"value": true
+						}
+					]
+				}
+			]
+		}
+	]
+}
