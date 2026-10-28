@@ -39,8 +39,7 @@ function Hud.Build(scene, handlers)
     self.combo = 0
     self.ammo = Config.MAG_SIZE
     self.reload = 0.0          -- 0..1，绑定 <progress data-value="reload">
-    self.defense = 1.0         -- 0..1，绑定 <progress data-value="defense">（防线 = 两座炮塔的合计血量）
-    -- 主角血不在 HUD 里：它住在 waves.playerHp，由头顶 3 格血条（game/HpBar.lua）每帧直读。
+    -- 主角血、炮塔血都不往 HUD 喂：分挂在人物/炮塔头顶的世界空间血条（game/HpBar.lua）每帧直读。
     self.narrate = ""
     self.narrateT = 0.0
     -- hitmarker 靠两个 bool + data-if 二选一显示（内联 style 绑不了 opacity/color）
@@ -76,7 +75,6 @@ function Hud.Build(scene, handlers)
                 return self.combo > 1 and ("x" .. self.combo) or ""
             end)
             -- progress 条：0..1 数值，RmlUi <progress data-value> 直接吃
-            w:BindReadonlyProperty("defense", function() return clamp01(self.defense) end)
             w:BindReadonlyProperty("reload", function() return clamp01(self.reload) end)
             -- data-if 显隐：bool
             w:BindReadonlyProperty("hitNormal", function() return self.hitNormal end)
@@ -163,14 +161,6 @@ function Hud:ShowPerf(b)
     self.showPerf = b and true or false
     self:Dirty("showPerf")
     self:Dirty("perfText")
-end
-
---- 防线血量（两塔合计 + 合计上限），内部换算成 0..1。上限缺省按 Config.TURRETS 算，
---- 不在这里写死一颗标量血量（那会变成第三处防线真相）。
-function Hud:SetDefense(cur, max)
-    max = (max and max > 0) and max or (#Config.TURRETS * Config.TURRET_HP)
-    self.defense = clamp01((cur or 0) / max)
-    self:Dirty("defense")
 end
 
 --- 命中标记闪一下。strong（爆头/击杀）时显红色那组，否则白色。~0.15s 后由 Update 自动灭。

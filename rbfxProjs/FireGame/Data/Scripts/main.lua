@@ -463,11 +463,12 @@ SubscribeToEvent("Update", function(data)
 
     hud:Update(dt)
 
-    -- 摇杆帽回写：浮动原点式，帽锚在“按下点”并按偏转量跟随指针（用未取反的 stickX，保证与鼠标同向）。
-    -- SetPosition 写的是帽文档左上角的画布像素，减去半宽让圆心落在“原点 + 偏转量*行程”上。
-    local ox, oy = joystick:GetOrigin()
-    knob:SetPosition(Vector2(ox + stickX * STICK.travel - STICK.knobHalf,
-        oy + stickY * STICK.travel - STICK.knobHalf))
+    -- 摇杆帽回写：锚在固定外环中心，只按偏转量在行程内偏移。GetVector 幅值已钳 ≤1，故帽始终
+    -- 贴在外环附近、不再跟着手指拖到屏幕任意处（用未取反的 stickX 保证与手指同向）。
+    -- SetPosition 写的是帽文档左上角的画布像素，减半宽让圆心落在“环心 + 偏转量*行程”上。
+    local ccx, ccy = StickCenter(canvasH)
+    knob:SetPosition(Vector2(ccx + stickX * STICK.travel - STICK.knobHalf,
+        ccy + stickY * STICK.travel - STICK.knobHalf))
 
     -- 性能诊断（Config.PERF_OVERLAY 开启时）：每 3 秒一次。drawcalls/tris 是引擎设备级真值
     -- （上一帧提交量），pirates/boats 是当前存活同屏数——同时喂给屏幕 Overlay 与日志。

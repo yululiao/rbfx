@@ -84,7 +84,7 @@ function Joystick:Apply(ocx, ocy, dx, dy)
     local len = math.sqrt(ox * ox + oy * oy)
     if len > 1.0 then
         -- 原点追手：拖出最大行程时原点向指针方向推进（vector 仍 clamp 满偏），
-        -- 帽始终贴在指针正下方——否则满偏后手指继续拖、帽原地不动，手感“不跟手”。
+        -- 让手指继续拖时偏转相对推进后的原点重新计量、方向与量程保持灵敏（纯输入手感；帽另锚固定环心、不贴指针）。
         local nx, ny = ox / len, oy / len
         local push = (len - 1.0) * self.radius_
         self.acx_ = ocx + nx * push
@@ -175,15 +175,6 @@ end
 ---@return boolean
 function Joystick:IsEngaged()
     return self.ptrId_ ~= nil
-end
-
---- 当前拖拽原点（画布像素）：激活时是按下点，否则是静止环心。供 HUD 摇杆帽跟随指针。
----@return number, number
-function Joystick:GetOrigin()
-    if self.ptrId_ ~= nil then
-        return self.acx_, self.acy_
-    end
-    return self.cx_, self.cy_
 end
 
 ---@return boolean 当前是否有有效输入

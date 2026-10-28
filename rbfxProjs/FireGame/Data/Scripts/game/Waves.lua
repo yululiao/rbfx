@@ -56,8 +56,7 @@ function Waves:Reset()
         if self.hud.SetScore then self.hud:SetScore(0) end
         if self.hud.SetCombo then self.hud:SetCombo(0) end
         if self.hud.SetWave then self.hud:SetWave(1) end
-        self:SyncDefenseHud()
-        -- 主角血不往 HUD 喂：头顶 3 格血条（game/HpBar.lua）每帧直读 self.playerHp。
+        -- 主角血、炮塔血都不往 HUD 喂：各走头顶世界空间血条（game/HpBar.lua）每帧直读。
     end
     self.audio:Voice(Config.Voice.prepare)
 end
@@ -205,7 +204,6 @@ function Waves:DamageTurret(index, dmg)
         return
     end
     self.turretHp[index] = math.max(0, self.turretHp[index] - (dmg or 0))
-    self:SyncDefenseHud()
 end
 
 --- 某塔当前/上限血量（Turrets 读它决定这座塔还能不能开火、要不要把炮管歪下来）。
@@ -236,20 +234,6 @@ function Waves:DefenseIntact()
         end
     end
     return true
-end
-
---- HUD 那一条防线血读的是两塔合计（合计/合计上限）。不改 RML、不加第二条血条：
---- "哪座塔快塌了"由塔自己的 3D 表现（炮管歪下 + 烟）说，不在屏幕上再开一处真相。
-function Waves:SyncDefenseHud()
-    if not (self.hud and self.hud.SetDefense) then
-        return
-    end
-    local cur, max = 0, 0
-    for i = 1, #Config.TURRETS do
-        cur = cur + math.max(0, self.turretHp[i] or 0)
-        max = max + Config.TURRET_HP
-    end
-    self.hud:SetDefense(cur, max)
 end
 
 --- 突袭型海盗砍到主角 / 大船炮弹炸到主角。只动数值，不在这里渲染：
