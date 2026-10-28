@@ -225,27 +225,29 @@ Config.TURRETS = { -9.0, 9.0 }       -- 每座塔的 x，z 恒取 DEFENSE_Z
 Config.TURRET_Z = Config.DEFENSE_Z
 Config.TURRET_HP = 150               -- 每塔血量：两座合计 300 = 原 DEFENSE_HP，总抗漏量一格没变（难度基线不飘）
 Config.TURRET_STAND_OFF = 1.6        -- 海盗砍塔时与塔中心的水平距离（停在台座外沿，不钻进模型里）
--- 台面与炮座几何。Prop_Cannon 实测盒（解析 Cache 里 .mdl 顶点缓冲，同 Coast 头部那套方法）：
--- x[-0.52,0.52] y[0.0009,1.1217] z[-0.8665,0.6138] —— 炮管往 -z 伸得更长，即原生炮口就朝海，
--- 落位 yaw=0 不用转；原点在炮架底面，所以直接放台面上表面高度即可。
-Config.TURRET_DECK = Vector3(2.6, 0.30, 2.2)      -- 台面盒
-Config.TURRET_DECK_Y = 1.15                       -- 台面上表面高度（炮坐在这）
-Config.TURRET_POLE_INSET = 1.05                   -- 四根腿相对塔中心的内缩
-Config.TURRET_POLE_SCALE_Y = 1.15                 -- Dock_Pole 本地 y[-2.00,1.01]，缩后下半截埋进沙
-Config.TURRET_MUZZLE = Vector3(0.0, 1.62, -0.85)  -- 炮口相对塔中心（台面 1.15 + 炮身中段 0.47，朝海侧）
+-- 炮台 = pirate-kit 瞭望塔 prefab（tower-complete-small）缩小一档坐地，塔顶再架一门 Prop_Cannon 当炮
+-- （失能时 Turrets 把那根炮管歪下来）。塔身实测高 6.78m（解析 Cache 里 .mdl 顶点缓冲，同 Coast 头部
+-- 那套方法），原尺寸会横切相机 35°俯视朝海的视线，所以按 Config.TURRET_TOWER_SCALE 缩到约 4.4m。
+-- Prop_Cannon 实测盒 x[-0.52,0.52] y[0.0009,1.1217] z[-0.8665,0.6138]：炮管往 -z 伸得更长，即原生
+-- 炮口就朝海，落位 yaw=0 不用转；原点在炮架底面，所以直接放塔顶高度即可。
+Config.TURRET_TOWER_PREFAB = "tower-complete-small"
+Config.TURRET_TOWER_SCALE = 0.65                            -- 6.78m 的塔缩一档 ≈4.4m，别挡视线
+Config.TURRET_TOP_Y = 6.78 * Config.TURRET_TOWER_SCALE      -- 塔顶最高点（失能烟/爆闪、血条悬浮的基准）
+-- 炮座：塔模型 6.78 是尖顶，能架炮的平台比它低一截，按塔顶放炮会悬空，故下压 0.2 坐进平台。
+Config.TURRET_CANNON_SEAT_Y = Config.TURRET_TOP_Y - 0.2     -- 炮架底面落点（比塔顶低 0.2）
+Config.TURRET_MUZZLE = Vector3(0.0, Config.TURRET_CANNON_SEAT_Y + 0.47, -0.85)  -- 炮口相对塔中心（炮座 + 炮身中段 0.47，朝海侧）
 Config.TURRET_GUN_PITCH_DEAD = 35.0               -- 失能时炮管歪下去的角度，一眼看出这座塔已哑
 
--- 火控：定位是"漏防兜底"，不是第二路主力输出——割草的击杀必须还得是玩家自己打的，
--- 所以塔不开火打到水里/还在船上的目标，且伤害不追高。要减弱塔的存在感，只动 INTERVAL 这一个旋钮。
--- 但警戒线不能画得太靠防线：那样海盗大半在途中就被玩家消点，塔几乎没机会开火，
--- 玩家会以为这两座炮塔是死的（大船炮台不见开炮同一个坑）。现在这行：一淌上滩头（z≈1）就纳入火控，
--- 到防线有 ≈8m / ≈4s 的暴露窗口，足够一两次可见齐射。
-Config.TURRET_RANGE = 10.0                        -- XZ 索敌半径（米）
-Config.TURRET_ENGAGE_Z = Config.ShoreZMax() + 1.5   -- 警戒线：海盗 z 大于它才纳入火控
+-- 火控：定位是"漏防兜底"，且已收紧成只打海盗船——单发才 2 点，打 HP=1 的涌岸海盗是一炮一个、
+-- 把玩家该割的草全抢了（用户反馈"海盗被完虐"），故只咬血厚的船（小船 3 / 大船 8），让它退回
+-- "帮忙拆船、不抢人头"的位置。船停在海面 BOAT_STOP_Z、塔在 z=9，直线≈16m；旧的"上岸警戒线"
+-- 那道 z 门槛本是给海盗设的、船永远在其外，所以删掉它，改成纯粹按 XZ 射程索敌，半径够到停船的航道。
+-- 要再调炮台强弱只动 DAMAGE / INTERVAL 两个旋钮，别再把它放回打海盗。
+Config.TURRET_RANGE = 20.0                        -- 对船 XZ 索敌半径（米）：够到停船处最近两列航道
 Config.TURRET_FIRST = 0.5                         -- 开局首发迟（秒）
 Config.TURRET_INTERVAL = 2.2                      -- 两发间隔（秒）
 Config.TURRET_INTERVAL_SPREAD = 0.5               -- 间隔随机 ±，别让两塔齐射像节拍器
-Config.TURRET_DAMAGE = 2                          -- 普通海盗 HP=1 一炮一个，突袭型 HP=3 要两炮
+Config.TURRET_DAMAGE = 2                          -- 只咬船：小船 3 两炮、大船 8 四炮（对走路海盗已不出手）
 Config.TURRET_SPLASH_RADIUS = 2.2
 Config.TURRET_SHELL_SCALE = 0.42                  -- 弹丸大小（复用 Sphere.mdl，与大船炮弹同款）
 Config.TURRET_FLIGHT_TIME = 0.45                  -- 飞行时长：短弧，友方射击不需要预警盘
@@ -634,9 +636,9 @@ Config.HP_BAR = {
 -- （见 UI/TurretHpBar.rml），因为砍塔是缓慢持续掉血，3 格会把“还剩多少”量化得太粗。
 -- 锚点换成每座塔节点、血量上限换成 TURRET_HP（进度 = cur/TURRET_HP）。颜色绿色，与主角格血条同色系。
 -- 面板尺寸保持 5:1（与纹理 320x64 同比例）以免透视拉扁；悬浮高度按炮台实高定
--- （台面 TURRET_DECK_Y 1.15 + 炮身上沿约 2.27），压在炮口上方一点。
+-- （瞭望塔缩小后塔顶 TURRET_TOP_Y ≈4.4m，炮身上沿再高出约 1.1），压在炮口上方一点。
 Config.TURRET_HP_BAR = {
-    overhead = 2.6,
+    overhead = Config.TURRET_TOP_Y + 1.3,
     worldW = 1.4,
     worldH = 0.28,
 }

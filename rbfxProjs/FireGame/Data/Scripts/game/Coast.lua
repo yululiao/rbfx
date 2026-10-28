@@ -355,12 +355,10 @@ end
 --- 防线 = 两座会自己开炮的炮塔（海盗淌到滩头就会挨它打，摸过来就砍它）。
 ---
 --- 本函数只负责摆：血量住在 Waves、开火住在 Turrets，两边都读 Config.TURRETS 这一张表。
---- 每塔一个空节点当逻辑中心（放在 (x, 0, DEFENSE_Z)），台面/腿/炮都挂它下面，所以
---- Turrets 算炮口世界坐标就是「塔位 + Config.TURRET_MUZZLE」，不再重算一遍几何。
---- 构型与瞭望塔同源（四根 Dock_Pole 架一块 Box 台面），但刻意矮：相机从主角后上方
---- 35 度俯视朝海，塔一高就横切视线。
---- 所有件都挂 noShoot：它们在主角（z≈11~22）与敌人（z<9）之间的枪线上，
---- 不挂就会吃掉自己人的子弹（原栅栏就是这条理由）。
+--- 每塔一个空节点当逻辑中心（放在 (x, 0, DEFENSE_Z)），炮口世界坐标就是「塔位 + Config.TURRET_MUZZLE」。
+--- 塔身改用 pirate-kit 瞭望塔 prefab（tower-complete-small）缩小一档坐地，塔顶架一门 Prop_Cannon 当炮
+--- （失能时 Turrets 把这根炮管歪下来）。原塔高 6.78m 会横切相机 35°俯视朝海的视线，故按 Config 缩放。
+--- 塔身与炮都挂 noShoot：它们在主角（z≈11~22）与敌人（z<9）之间的枪线上，不挂就会吃掉自己人的子弹。
 ---@param root Node
 ---@return { node: Node, gun: Node, x: number }[] 每塔句柄（下标与 Config.TURRETS 对齐）
 local function BuildTurrets(root)
@@ -370,35 +368,22 @@ local function BuildTurrets(root)
         local tower = line:CreateChild("Turret_" .. tostring(i))
         tower:SetPosition(Vector3(x, 0.0, Config.TURRET_Z))
 
-        local inset = Config.TURRET_POLE_INSET
-        local poleScale = Vector3(1.0, Config.TURRET_POLE_SCALE_Y, 1.0)
-        local corners = {
-            Vector3(-inset, 0.0, -inset), Vector3(inset, 0.0, -inset),
-            Vector3(-inset, 0.0, inset), Vector3(inset, 0.0, inset),
-        }
-        for _, corner in ipairs(corners) do
-            -- 桩子本地 y[-2,1.01]，下半截埋进沙里，和瞭望塔同理
-            local pole = PlacePirate(tower, "Environment_Dock_Pole", corner, 0.0, poleScale)
-            pole:SetVar("noShoot", true)
+        -- 塔身：prefab 缩小后坐地（模型底 y=0）。scale 走 Vector3 三分量，单值曾被解析成 ZERO。
+        local prefab = GetResource("PrefabResource", Config.PiratePrefab(Config.TURRET_TOWER_PREFAB))
+        if prefab then
+            local hull = tower:InstantiatePrefab(prefab, Vector3.ZERO, Quaternion.IDENTITY)
+            if hull then
+                local s = Config.TURRET_TOWER_SCALE
+                hull:SetScale(Vector3(s, s, s))
+                hull:SetVar("noShoot", true)
+            end
+        else
+            LogError("Coast: 炮塔 prefab 加载失败 '" .. Config.PiratePrefab(Config.TURRET_TOWER_PREFAB) .. "'")
         end
-
-        local deck = Place(tower, "Deck", Config.BOX_MODEL, Materials.Tint("wood"),
-            Vector3(0.0, Config.TURRET_DECK_Y - Config.TURRET_DECK.y * 0.5, 0.0),
-            Config.TURRET_DECK, nil, true)
-        deck:SetVar("noShoot", true)
-
-        -- 台底交叉梁：少一层从低角度看就是一块悬空薄板（与瞭望塔同一处理）
-        local beam = Vector3(Config.TURRET_DECK.x * 0.9, 0.16, 0.22)
-        local beamY = Config.TURRET_DECK_Y - Config.TURRET_DECK.y - 0.12
-        local beam1 = Place(tower, "Beam1", Config.BOX_MODEL, Materials.Tint("woodDark"),
-            Vector3(0.0, beamY, 0.0), beam, 45.0, false)
-        local beam2 = Place(tower, "Beam2", Config.BOX_MODEL, Materials.Tint("woodDark"),
-            Vector3(0.0, beamY, 0.0), beam, -45.0, false)
-        beam1:SetVar("noShoot", true)
-        beam2:SetVar("noShoot", true)
-
-        -- 炮身：坐台面上表面（原点在炮架底），yaw=0 即炮口朝海。Turrets 失能时把它歪下来。
-        local gun = PlacePirate(tower, "Prop_Cannon", Vector3(0.0, Config.TURRET_DECK_Y, 0.0), 0.0)
+        
+        -- 炮身：架在塔顶平台上（炮座比尖顶塔顶低 0.2 免得悬空；Prop_Cannon 原点在炮架底面），
+        -- yaw=0 即炮口朝海。Turrets 失能时把它歪下来。
+        local gun = PlacePirate(tower, "Prop_Cannon", Vector3(0.0, Config.TURRET_CANNON_SEAT_Y, 0.0), 0.0)
         gun:SetVar("noShoot", true)
 
         handles[#handles + 1] = { node = tower, gun = gun, x = x }

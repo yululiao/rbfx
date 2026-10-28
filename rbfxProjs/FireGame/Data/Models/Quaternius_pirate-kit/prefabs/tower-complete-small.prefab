@@ -1,0 +1,28 @@
+{
+	"nodes": [
+		{
+			"components": [
+				{
+					"_typeName": "StaticModel",
+					"attributes": [
+						{
+							"name": "Model",
+							"type": "ResourceRef",
+							"value": "Model;Models/Quaternius_pirate-kit/Fbx/tower-complete-small.fbx.d/Models/tower-complete-small.mdl"
+						},
+						{
+							"name": "Material",
+							"type": "ResourceRefList",
+							"value": "Material;Models/Quaternius_pirate-kit/Materials/kennypirate.material"
+						},
+						{
+							"name": "Cast Shadows",
+							"type": "Bool",
+							"value": true
+						}
+					]
+				}
+			]
+		}
+	]
+}
