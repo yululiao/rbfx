@@ -126,7 +126,7 @@ function Waves:Update(dt)
     end
 
     if self.phase == "ended" or self.phase == "freeRoam" then return end
-    if self:TurretsAllDown() then
+    if self:AnyTurretDown() then
         self:Lose("defense")
     elseif self.playerHp <= 0 then
         self:Lose("hero")
@@ -215,15 +215,16 @@ function Waves:GetTurretHp(index)
     return (self.turretHp and self.turretHp[index]) or 0, Config.TURRET_HP
 end
 
---- 所有塔都哑了才算防线失守：单塔被打掉只是少一路火力，不直接判负。
+--- 任一塔被打掉即判防线失守（用户口径：两座塔缺一不可，掉一座就算输）。
+--- 只要有一塔 hp<=0 就返回 true；两塔都还站着才 false。
 ---@return boolean
-function Waves:TurretsAllDown()
+function Waves:AnyTurretDown()
     for i = 1, #Config.TURRETS do
-        if (self.turretHp[i] or 0) > 0 then
-            return false
+        if (self.turretHp[i] or 0) <= 0 then
+            return true
         end
     end
-    return true
+    return false
 end
 
 --- 两塔都满血（即原 flawless 判据 defenseHp >= DEFENSE_HP 的等价式）。
