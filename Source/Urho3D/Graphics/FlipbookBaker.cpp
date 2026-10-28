@@ -89,6 +89,7 @@ void FlipbookBaker::Reset()
     fps_ = 15.0f;
     cellSize_ = 256;
     rotations_ = 1;
+    frameScaleX_ = frameScaleY_ = 1.0f;
     yawRad_ = 0.0f;
     ClearBakeState();
     outputPath_.clear();
@@ -123,6 +124,8 @@ bool FlipbookBaker::PlanAtlas(Model* model, const ea::vector<Animation*>& animat
     fps_ = params.fps_ > 0.0f ? params.fps_ : 15.0f;
     cellSize_ = params.cellSize_ ? params.cellSize_ : 256;
     rotations_ = params.rotations_ ? params.rotations_ : 1;
+    frameScaleX_ = params.frameScaleX_ > 0.0f ? params.frameScaleX_ : 1.0f;
+    frameScaleY_ = params.frameScaleY_ > 0.0f ? params.frameScaleY_ : 1.0f;
     yawRad_ = params.yaw_ * (2.0f * M_PI) / 360.0f;
 
     // Assign consecutive cell ranges to the clips (frames * rotations each) at the requested fps.
@@ -245,7 +248,13 @@ bool FlipbookBaker::BuildBakeScene(Model* model)
     // large range of motion (death falls, overhead axe swings) would otherwise overflow their cell
     // and bleed into neighbouring cells of the atlas.
     ComputeBakeFraming(model);
-    camera_->SetOrthoSize(bakeRadius_ * 1.15f);
+    // The auto-fitted view is square (half extent = bakeRadius_ * 1.15). The frame multipliers let the
+    // editor widen / heighten that box independently, so tall silhouettes are not cropped at the top.
+    // Urho3D's ortho size is the vertical half extent and half width = orthoSize * aspectRatio.
+    const float halfHeight = bakeRadius_ * 1.15f * frameScaleY_;
+    const float halfWidth = bakeRadius_ * 1.15f * frameScaleX_;
+    camera_->SetOrthoSize(halfHeight);
+    camera_->SetAspectRatio(halfWidth / Max(halfHeight, M_EPSILON));
     camera_->SetNearClip(Max(0.01f, bakeRadius_));
     camera_->SetFarClip(bakeRadius_ * 8.0f + 1.0f);
 

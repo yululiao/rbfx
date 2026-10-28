@@ -1211,6 +1211,8 @@ void ResourceBrowserTab::StartFlipbookBake()
     params.cellSize_ = static_cast<unsigned>(Clamp(flipbookBake_.cellSize_, 16, 2048));
     params.rotations_ = static_cast<unsigned>(Clamp(flipbookBake_.rotations_, 1, 64));
     params.yaw_ = flipbookBake_.yaw_;
+    params.frameScaleX_ = Clamp(flipbookBake_.frameScaleX_, 0.1f, 8.0f);
+    params.frameScaleY_ = Clamp(flipbookBake_.frameScaleY_, 0.1f, 8.0f);
 
     // Optional bake material: the offscreen model is rendered with it so the atlas carries the
     // real colors (vertex-color / atlas materials); left empty, the model's own slots apply.
@@ -1301,6 +1303,16 @@ void ResourceBrowserTab::RenderFlipbookBakeDialog()
         ui::SameLine();
         ui::SetNextItemWidth(90.0f);
         ui::InputFloat("Yaw", &flipbookBake_.yaw_);
+
+        // Framing overrides: scale the auto-fitted orthographic view box per axis. Raising Frame H is
+        // the fix when a tall silhouette (a captain's hat, a raised weapon) gets cropped at the top.
+        ui::SetNextItemWidth(90.0f);
+        ui::InputFloat("Frame W", &flipbookBake_.frameScaleX_, 0.0f, 0.0f, "%.2f");
+        ui::SameLine();
+        ui::SetNextItemWidth(90.0f);
+        ui::InputFloat("Frame H", &flipbookBake_.frameScaleY_, 0.0f, 0.0f, "%.2f");
+        ui::TextWrapped("Frame W/H: scale the auto-fitted view box (1 = unchanged). Raise Frame H if a tall "
+            "silhouette (hat, raised weapon) is cropped at the top of a cell.");
 
         // Bake material picker: required for models whose color lives in vertex colors or an
         // external atlas (the offscreen render would otherwise come out flat gray).

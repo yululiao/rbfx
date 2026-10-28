@@ -72,6 +72,11 @@ struct FlipbookBakeParams
     /// Yaw in degrees applied to the model node around the Y axis before baking. Models whose
     /// front faces -Z (e.g. Quaternius FBX convention) need 180 so the view shows the face, not the back.
     float yaw_{180.0f};
+    /// Independent width / height multipliers on the auto-fitted orthographic cell view (1 = the
+    /// automatic framing unchanged). Raise the height to fit tall silhouettes (e.g. a captain's hat
+    /// or an overhead weapon) that the automatic framing would otherwise crop at the cell's top.
+    float frameScaleX_{1.0f};
+    float frameScaleY_{1.0f};
     /// Hard upper bound on the atlas width in texels (the column count is clamped to respect it).
     unsigned maxAtlasWidth_{2048};
 };
@@ -212,6 +217,9 @@ private:
     float fps_{15.0f};
     unsigned cellSize_{256};
     unsigned rotations_{1};
+    /// Framing multipliers applied to the orthographic cell view (from FlipbookBakeParams).
+    float frameScaleX_{1.0f};
+    float frameScaleY_{1.0f};
     /// Radians the model node is rotated around Y during the bake (from FlipbookBakeParams::yaw_).
     float yawRad_{0.0f};
     unsigned columns_{1};

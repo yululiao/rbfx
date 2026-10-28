@@ -305,6 +305,8 @@ private:
         int cellSize_{256};
         int rotations_{1};
         float yaw_{180.0f};            // camera orbit start angle (Quaternius fronts face -Z)
+        float frameScaleX_{1.0f};      // orthographic framing width multiplier (1 = auto-fit unchanged)
+        float frameScaleY_{1.0f};      // orthographic framing height multiplier; raise to fit tall hats/weapons
         StringHash materialType_{"Material"};  // resource-reference picker type for the bake material
         ea::string materialName_;              // optional material applied to the model while baking
         bool openPending_{};
