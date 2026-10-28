@@ -1,0 +1,22 @@
+<!--
+    沙滩：PBR 不透明纯色（无贴图）。由 Config.Tint.sand (0.86 0.78 0.56) +
+    Config.Roughness.sand (0.95) 烘成独立资产，配方与运行期 Materials.Tint("sand")
+    克隆自 CoreData/Materials/DefaultWhite.xml 的结果完全一致，所以画面与现在一模一样。
+
+    为什么要落成文件：程序化沙滩（Coast.BuildSand）后续会弃用、改由编辑器手摆；手摆的
+    geometry 需要一个能直接引用的材质资产，而不是依赖 Lua 运行期克隆 DefaultWhite + 调色。
+
+    绕序/剔除提醒：本材质沿用 DefaultWhite 的默认单面剔除（没写 cull）。当前程序化沙滩靠
+    Config.SAND_TWIST=1 让正面朝上才可见。若手摆的沙滩 mesh 法线朝向不确定、出现整片看不见，
+    临时加一行 cull value="none" 即可双面可见（代价是背面也画）。
+
+    过渡期注意：sand 色现在有两处来源，本文件（手摆用）与 Config.Tint.sand（程序化用）。
+    程序化弃用后以本文件为唯一真源；这期间若要改色，要么两处都改，要么让 Materials 直接指向本文件。
+-->
+<material>
+    <technique name="Techniques/LitOpaque.xml" />
+    <shader vsdefines="PBR" psdefines="PBR" />
+    <parameter name="MatDiffColor" value="0.86 0.78 0.56 1" />
+    <parameter name="Roughness" value="0.95" />
+    <parameter name="Metallic" value="0" />
+</material>
