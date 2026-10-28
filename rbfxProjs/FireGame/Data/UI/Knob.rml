@@ -7,8 +7,11 @@
   <!-- 虚拟摇杆帽（深色实心圆，即玩家眼中的“内圈”）：body 必须带 position:absolute，
        否则 SetPosition 写入根元素的 left/top 会被布局当作 static 盒丢弃；
        尺寸 96x96 dp（= 96×UI_SCALE 画布像素），位置由 main.lua 每帧 SetPosition 驱动
-       （SetPosition 走画布像素，故 main 侧的帽半宽也是 dp 基础值×UI_SCALE）。 -->
-  <body style="display: block; position: absolute; width: 96dp; height: 96dp;">
+       （SetPosition 走画布像素，故 main 侧的帽半宽也是 dp 基础值×UI_SCALE）。
+       pointer-events:none——帽只是视觉，摇杆输入由 Lua 直读原始鼠标/触摸、不经此文档；
+       且帽文档创建在 CamDebug 之上（z 序更高），若吃指针，鼠标拖摇杆把帽甩到右上时
+       会盖住相机按钮并吞掉它的点击（"相机点不动、像被挡住"的元凶）。 -->
+  <body style="display: block; position: absolute; width: 96dp; height: 96dp; pointer-events: none;">
     <div id="knob_cap" style="position: absolute; left: 0dp; top: 0dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #222831e6;"></div>
   </body>
 </rml>
