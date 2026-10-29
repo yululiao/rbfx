@@ -69,6 +69,10 @@ private:
     ea::string selectedPlatform_;
     /// Set by any widget that changed a value, cleared once the file has been written.
     bool dirty_{};
+    /// Whether the Quality field shows its free-form input instead of the preset combo. Transient
+    /// view state, never persisted. It flips on automatically when the stored token is not a preset,
+    /// so a hand-authored Build.json quality value stays editable.
+    bool qualityCustom_{};
 };
 
 } // namespace Urho3D

@@ -67,6 +67,46 @@ bool Contains(const ea::vector<ea::string>& list, const ea::string& value)
         != list.end();
 }
 
+/// Combo over a closed string set, mirroring PathField's contract: it returns whether the value
+/// changed, so callers feed it straight into Touch(). A leading defaultLabel entry (nullable) writes
+/// back the empty string that means "use the platform default". Any stored value that is none of the
+/// options is still listed as the selected row, so a hand-authored token stays visible and editable
+/// instead of silently vanishing from the widget the moment it is opened.
+bool ComboField(const char* label, ea::string& value, const ea::vector<ea::string>& options,
+    const char* defaultLabel)
+{
+    const ea::string preview = value.empty()
+        ? ea::string(defaultLabel ? defaultLabel : "(empty)")
+        : value;
+
+    if (!ui::BeginCombo(label, preview.c_str()))
+        return false;
+
+    bool changed = false;
+    if (defaultLabel && ui::Selectable(defaultLabel, value.empty()))
+    {
+        value.clear();
+        changed = true;
+    }
+
+    for (const ea::string& option : options)
+    {
+        if (ui::Selectable(option.c_str(), option == value))
+        {
+            value = option;
+            changed = true;
+        }
+    }
+
+    // The stored value is outside the presets: show it selected so the combo never lies about what
+    // Build.json holds. Clicking it is intentionally a no-op.
+    if (!value.empty() && !Contains(options, value))
+        ui::Selectable(value.c_str(), true);
+
+    ui::EndCombo();
+    return changed;
+}
+
 } // namespace
 
 void Build_BuildTab(Context* context, Project* project)
@@ -474,26 +514,62 @@ void BuildTab::RenderTextureCompressionOptions(BuildPlatformData& platform)
     if (tc.enabled_)
         tc = platform.GetEffectiveTextureCompression();
 
-    Touch(ui::InputText("Color format (no alpha)", &tc.colorFormatNoAlpha_));
-    if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop BC1, mobile and web ETC2_RGB");
+    // Only the formats this platform's runtime can actually sample are offered. A token the loader
+    // does not map cooks a texture that then fails to load at runtime, so the mobile list stays short
+    // on purpose: ASTC, EAC_RG11 and ETC2_RGB8A1 are not wired into the Diligent backend yet.
+    const bool mobile = platform.IsAndroid() || platform.IsWebBased();
+    const ea::vector<ea::string> noAlphaFormats = mobile ? ea::vector<ea::string>{"ETC2_RGB"}
+                                                         : ea::vector<ea::string>{"BC1"};
+    const ea::vector<ea::string> alphaFormats = mobile ? ea::vector<ea::string>{"ETC2_RGBA"}
+                                                       : ea::vector<ea::string>{"BC3", "BC2"};
+    const ea::vector<ea::string> normalFormats = mobile ? ea::vector<ea::string>{"ETC2_RGBA"}
+                                                        : ea::vector<ea::string>{"BC5", "BC4"};
+    const ea::vector<ea::string> containers = mobile ? ea::vector<ea::string>{"ktx"}
+                                                     : ea::vector<ea::string>{"dds"};
 
-    Touch(ui::InputText("Color format (alpha)", &tc.colorFormatAlpha_));
+    Touch(ComboField("Color format (no alpha)", tc.colorFormatNoAlpha_, noAlphaFormats,
+        "(platform default)"));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop BC3, mobile and web ETC2_RGBA");
+        ui::SetTooltip("Color textures without an alpha channel. Desktop BC1, mobile and web ETC2_RGB");
 
-    Touch(ui::InputText("Normal map format", &tc.normalFormat_));
+    Touch(ComboField("Color format (alpha)", tc.colorFormatAlpha_, alphaFormats,
+        "(platform default)"));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop BC5 (two channel, linear). Diligent has no two channel mobile or "
-            "web format, so normal maps fall back to ETC2_RGBA there");
+        ui::SetTooltip("Color textures with a meaningful alpha channel. Desktop BC3 (BC2 is 4-bit "
+            "index alpha), mobile and web ETC2_RGBA");
 
-    Touch(ui::InputText("Container", &tc.container_));
+    Touch(ComboField("Normal map format", tc.normalFormat_, normalFormats, "(platform default)"));
     if (ui::IsItemHovered())
-        ui::SetTooltip("Desktop dds, mobile and web ktx");
+        ui::SetTooltip(mobile
+            ? "Normal maps. Diligent has no two-channel mobile or web format, so these fall back to "
+              "ETC2_RGBA there"
+            : "Normal maps. BC5 keeps both channels; BC4 is single-channel. Encoded linear");
 
-    Touch(ui::InputText("Quality", &tc.quality_));
+    Touch(ComboField("Container", tc.container_, containers, "(platform default)"));
     if (ui::IsItemHovered())
-        ui::SetTooltip("PVRTexTool -q token; empty uses the tool default");
+        ui::SetTooltip("Wrapper and extension of the cooked files. Desktop dds, mobile and web ktx");
+
+    // Quality is the one field PVRTexTool lets you go past the presets on, so keep a hand-write
+    // hatch beside the dropdown instead of locking the user to three tokens.
+    const ea::vector<ea::string> qualityPresets = {"etcslow", "etcmedium", "etcfast"};
+    const bool presetQuality = tc.quality_.empty() || Contains(qualityPresets, tc.quality_);
+    if (qualityCustom_ || !presetQuality)
+    {
+        Touch(ui::InputText("Quality (custom)", &tc.quality_));
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Free-form PVRTexTool -q token; empty uses the tool default");
+        if (ui::SmallButton("Pick a preset..."))
+            qualityCustom_ = false;
+    }
+    else
+    {
+        Touch(ComboField("Quality", tc.quality_, qualityPresets, "(tool default)"));
+        if (ui::IsItemHovered())
+            ui::SetTooltip("PVRTexTool -q preset; empty uses the tool default. Note: this token only "
+                "moves encoder effort and quality, it never changes the compressed file size");
+        if (ui::SmallButton("Type a custom token..."))
+            qualityCustom_ = true;
+    }
 
     Touch(ui::Checkbox("Generate mipmaps", &tc.mipmaps_));
 
