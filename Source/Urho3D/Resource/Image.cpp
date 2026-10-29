@@ -391,6 +391,24 @@ bool Image::BeginLoad(Deserializer& source)
             components_ = 4;
             break;
 
+        // sRGB ETC2 variants PVRTexTool writes for ordinary color textures on mobile/web
+        // (0x9275 GL_COMPRESSED_SRGB8_ETC2, 0x9279 GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC). Keep the
+        // linear compressedFormat_ so the CPU-decode fallback still matches (Decompress keys on the
+        // UNORM enum), and set sRGB_ so the GPU upload re-promotes to the _SRGB format - same
+        // convention as the DDS path above. Without these the loader rejected every compressed color
+        // texture ("Unsupported texture format in KTX file"), including the flipbook atlases.
+        case 0x9275:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_ETC2_RGB8_UNORM;
+            sRGB_ = true;
+            components_ = 3;
+            break;
+
+        case 0x9279:
+            compressedFormat_ = TextureFormat::TEX_FORMAT_ETC2_RGBA8_UNORM;
+            sRGB_ = true;
+            components_ = 4;
+            break;
+
         case 0x8c00:
             compressedFormat_ = EmulatedTextureFormat::TEX_FORMAT_PVRTC_RGB_4BPP;
             components_ = 3;
