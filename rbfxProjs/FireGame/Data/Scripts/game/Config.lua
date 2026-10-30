@@ -397,7 +397,7 @@ Config.PERF_OVERLAY = true
 -- 本节全部相机常量并打印可直接粘回本文件的数值（见 game/CamDebug.lua + UI/CamDebug.rml）。
 -- 上线前必须置 false：为 false 时 main.lua 根本不创建那个 RmlUI 组件，按钮与面板都不存在，
 -- 不是“隐藏了”而是没有这份 UI。
-Config.DEBUG_CAM_PANEL = true
+Config.DEBUG_CAM_PANEL = false
 
 -- 帧率上限（省电/降热）。真机（抖音 wasm）由引擎主循环按此值节流；桌面/编辑器同步生效。
 -- 0 或 nil = 不改引擎默认（wasm 默认 30）。改这个值只需重打包（不碰 wasm），main.lua 启动时
