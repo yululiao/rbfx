@@ -2,8 +2,8 @@
 <resource _id="1">
 	<attributes>
 		<attribute name="Elapsed Time" type="Float" value="1.633224" />
-		<attribute name="Next Node ID" type="Int" value="5" />
-		<attribute name="Next Component ID" type="Int" value="14" />
+		<attribute name="Next Node ID" type="Int" value="7" />
+		<attribute name="Next Component ID" type="Int" value="20" />
 	</attributes>
 	<components>
 		<component _id="1" _typeName="Octree" />
@@ -129,6 +129,20 @@
 				<component _id="6" _typeName="Camera">
 					<attributes>
 						<attribute name="Far Clip" type="Float" value="200.000000" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+		<node _id="6">
+			<attributes>
+				<attribute name="Name" type="String" value="patch-sand" />
+				<attribute name="Position" type="Vector3" value="-2.72 -0.1 25.886738" />
+				<attribute name="Scale" type="Vector3" value="10 0.5 10" />
+			</attributes>
+			<components>
+				<component _id="19" _typeName="PrefabReference">
+					<attributes>
+						<attribute name="Prefab" type="ResourceRef" value="PrefabResource;Models/Quaternius_pirate-kit/prefabs/patch-sand.prefab" />
 					</attributes>
 				</component>
 			</components>

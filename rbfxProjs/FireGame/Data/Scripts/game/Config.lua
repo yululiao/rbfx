@@ -4,8 +4,8 @@
 -- 其它模块一律从这里读，不写魔数。
 --
 -- 坐标约定：+z 是内陆（主角与防线在这侧），-z 是外海（敌人从这侧来），y 向上。
--- 水线不是一个 z，而是 Config.ShoreZ(x) 一条曲线（见下方 SHORE 段）：沙滩从这条线往 +z
--- 铺到 SHORE_FOG_END_Z，防线在 DEFENSE_Z，塔在 TOWER_POS。
+-- 水线不是一个 z，而是 Config.ShoreZ(x) 一条曲线（见下方 SHORE 段）：它是涉水/靠岸/走位
+-- 判据与海面铺位的真源，防线在 DEFENSE_Z，塔在 TOWER_POS。（沙滩网格已删，改由场景手摆 prefab。）
 -- 单位是米（rbfx 约定 1 单位 = 1 米，FBX 导入已按 unit_meters 自动换算）。
 
 ---@class GameConfig 只读配置表，不实例化
@@ -119,22 +119,18 @@ end
 -- 存一份副本只会多一个“改了控制点但忘了改它”的对账点。
 
 -- 海面中心：+z 直边要探到“岸线最大值再往内陆一点”，水才漫得到那条曲线岸边的每一处
--- （否则曲线比 ShoreZMin 靠陆的列会出现“该有水却没水”的空洞）。这条直线边藏在沙滩
--- 底下——沙的前缘就是曲线，从曲线往内陆全是沙，正好盖过探进来的海边；tuck 只取一点点，
--- 免得越过沙滩横向尽头（|x|>BEACH_SPAN_X）后在两侧露出内陆蓝面。
+-- （否则曲线比 ShoreZMin 靠陆的列会出现“该有水却没水”的空洞）。沙滩网格已删，这条直线
+-- 边不再由程序化沙盖住——它是否露出取决于场景里手摆的 patch-sand prefab 铺到哪。
 -- （必须在 ShoreZMax 定义之后：文件级赋值时函数要是 nil，得到的是算术错误崩掉整个 Config）
-Config.SEA_SHORE_TUCK = 0.4        -- 海边探过岸线最大值的量，须小于 Coast 次行相对包络的内移量(0.8)
-Config.SEA_CENTER_Z = (Config.ShoreZMax() + Config.SEA_SHORE_TUCK) - Config.SEA_SIZE * 0.5
+Config.SEA_SHORE_TUCK = 0.4        -- 海边探过岸线最大值的量，保证曲线低谷列也有水覆盖
+-- 海面整体朝内陆(+z)平移量：水线从岸线再往里推 100m（只平移、不扩海面，SEA_SIZE 不变）。
+-- 注意：原本 +z 直边只 tuck 0.4 藏在沙底；这一推会让直边落到岸线以内 100m 处，
+-- 水会漫过那一段沙滩（直边仍是直线，不再是曲线岸线）。
+Config.SEA_INLAND_PUSH = 100.0
+Config.SEA_CENTER_Z = (Config.ShoreZMax() + Config.SEA_SHORE_TUCK) - Config.SEA_SIZE * 0.5 + Config.SEA_INLAND_PUSH
 
--- 沙滩网格（Coast.BuildSand）。之前是一整块 400x400 的 Plane，现在换成真网格：
--- 只有贴水线那一条带需要细（那是岸线本体），往内陆是三级拉伸的条带，
--- 铺到雾尽头只要几百个顶点。x 跨度必须大于可动区（WALK/SEA 矩形 ±60 是船）：
--- 现在取 ±34，船开不到沙上去，所以看不到沙滩的横向尽头。
-Config.BEACH_SPAN_X = 34.0
-Config.SHORE_SAMPLES = 64        -- 岸线方向分段数（±34m 分 64 段 ≈ 1.06m/格；越密样条曲线越圆滑）
-Config.SHORE_BAND_MID_Z = 24.0   -- 中密度带外沿，再往外就是稀疏大条带
-Config.SHORE_FAR_ROWS = 4        -- 稀疏带行数（外沿到 SHORE_FOG_END_Z 均分）
-Config.SAND_TWIST = 1            -- 三角面绕序：1=正面朝上（实测必须；0 的法线朝下会被背面剔除，沙滩整片不可见，见 Coast 注释）
+-- 沙滩网格（Coast.BuildSand）已删除，海岛地面改由场景手摆 patch-sand prefab 提供。
+-- 下面只保留仍被玩法消费的量：BEACH_END_Z=装饰带内边界，SAND_Y=全局地面高度（Dog/Enemy/出生点读）。
 Config.BEACH_END_Z = 28.0        -- 装饰带内边界：棕榈/岩石/点缀只摆在这条线以内（必须大于岸线最大值，见 Coast.BuildScenery 的自检）
 Config.SAND_Y = 0.02                 -- 沙滩面高度，略高于海面以免共面闪烁
 Config.DEFENSE_Z = 9.0               -- 防线：海盗走到这里就攻击，掉防线血
@@ -152,8 +148,6 @@ Config.TOWER_POLE_SCALE_Y = 4.11
 Config.FOG_COLOR = Color(0.65, 0.74, 0.82)   -- 与 Sky.png 的地平线色 (166,188,208) 对齐
 Config.FOG_START = 55.0
 Config.FOG_END = 210.0
--- 沙滩往内陆铺到雾外（所以必须在 FOG_END 之后算）：网格不封边，尽头自然进了雾里。
-Config.SHORE_FOG_END_Z = Config.FOG_END + 20.0
 -- 环境光偏蓝（天光）而不是中性灰：沙子和木头受光面暖、背光面冷，画面才有早晚户外感。
 -- 场景里原本写的是 0.35 0.35 0.4，这里接管过来，调光不用再去改 .scene。
 Config.AMBIENT_COLOR = Color(0.32, 0.37, 0.46)

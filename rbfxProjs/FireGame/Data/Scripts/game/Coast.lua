@@ -1,9 +1,10 @@
 -- Scripts/game/Coast.lua
 --
--- 海岸关卡的静态布景：天空、海、沙滩网格、瞭望塔、两座炮塔、栈桥与点缀。
+-- 海岸关卡的静态布景：天空、海、瞭望塔、两座炮塔、栈桥与点缀（沙滩不再程序化生成，改由场景里手摆的 prefab 提供）。
 --
--- 沙滩不是摆在场景里的资产，而是按 Config.ShoreZ(x) 现算的一张网格：岸线既是图形也是
--- 判据（涉水/靠岸/走位下界），所以它只能从那张控制点表里长出来，不能两块矩形对对接。
+-- 沙滩（BuildSand）已删除：海岛地面改由场景里手摆的 patch-sand prefab 提供。
+-- Config.ShoreZ(x) 那条曲线仍保留——它还是玩法判据（涉水/靠岸/走位下界）与海面铺位的
+-- 真源，只是不再驱动一张程序化的沙网格。
 --
 -- 为什么全部程序化生成而不是在编辑器里手摆：
 --   * 这批 Quaternius / Kenney 资产是占位，后面会整套换掉，手摆的场景到时候要重摆一遍；
@@ -77,26 +78,7 @@ local function PlacePirate(parent, assetName, position, yawDegrees, scale)
 end
 
 ----------------------------------------------------------------------
--- 本模块手写网格用的索引打包助手（沙滩是唯一一处手写网格）
---
--- 顶点数据不再走“按属性分块”的助手：VertexBuffer 用 element map 声明的是交织（AoS）
--- 布局，Update 吃的字节流必须逐顶点按元素顺序排（见 BuildSand 里的 string.pack），
--- 不能先铺完所有位置再铺法线——那样引擎会把法线字节当位置读，整张网格坐标全乱。
-----------------------------------------------------------------------
-
---- 索引表按 ushort 打包（顶点数远小于 65535，不用 largeIndices）。
----@param values number[]
----@return string
-local function PackUShorts(values)
-    local parts = {}
-    for i = 1, #values do
-        parts[i] = string.pack("<I2", values[i])
-    end
-    return table.concat(parts, "", 1, #values)
-end
-
-----------------------------------------------------------------------
--- 天空 / 海 / 沙滩
+-- 天空 / 海
 ----------------------------------------------------------------------
 
 --- 天空盒。Skybox 组件的 ProcessRayQuery 是空实现（Skybox.cpp:59），所以它既不会挡住
@@ -125,134 +107,7 @@ local function BuildSea(root)
     return node
 end
 
---- 沙滩：从 Config.ShoreZ(x) 那条曲线往内陆铺的一张手写网格。
----
---- 为什么不再是整块 Plane：轴对齐的矩形边就是屏幕上那条直岸线——岸线要弯，几何就必须
---- 有顶点跟着弯。但整张网格不需要到处都细：只有贴水线那一条带是“岸线本体”，往内陆
---- 是三级逐渐拉长的条带（密/中/稀），铺到雾外总共才几百个顶点。
----
---- 顶点布局跟引擎 Box.mdl/kenney 导入件对齐（POSITION/NORMAL/TEXCOORD0/TANGENT，逐顶点交织 stride 36）：
---- 纯色材质是 DefaultWhite（LitOpaque+PBR）的 Clone，跟现在那块 Box 同一条渲染路径，
---- 不会因为少个属性而在某些 pass 里取到未定义数据。UV 按“1 单 = 1 米”给，现在沙是纯色
---- 用不上，但日后想换一张沙贴图只要调重复率，不用重烘网格。
---- 三行分工：首行铺平到“最低水线再往海 0.6”（盖住海水矩形的 +z 边，整行都在曲线海侧），
---- 第 2 行逐列贴 shoreZ(x)（它就是屏幕上那条岸线），第 3 行抬到整条曲线的包络之上。
---- 为什么不能让首行去贴曲线：那它在低谷列只比海边靠陆 0.02（零头，抹不掉那条蓝边），
---- 在岬角列反而退到海里 1.4m。为什么第 3 行不能铺平：海面 +z 边是个全局常数，而 x=0 处
---- 岸线比它高 1.4m，平面行基址在局部岸线之下，会在岬角那侧漏出一条蓝楔子。
---- 包络抬法还有个好处：行间间距在所有 x 处都非零，不会塌成退化四边形。
----@param root Node
----@return Node
-local function BuildSand(root)
-    local spanX = Config.BEACH_SPAN_X
-    local nCols = Config.SHORE_SAMPLES + 1
-    local zShoreMin = Config.ShoreZMin()
-
-    -- x 列：等分（岸线方向要均匀，否则曲线会被分段不均拉得不对称）
-    local xs = {}
-    for i = 1, nCols do
-        xs[i] = -spanX + (2.0 * spanX) * (i - 1) / (nCols - 1)
-    end
-
-    -- z 行基址：首行贴岸线曲线（顶点处取 ShoreZ(x)，这里只放一个占位值兼作包围盒 z 下界），
-    -- 其后各行是纯沙滩，从“曲线包络 + 内移量”起往内陆铺——次行必须恒高于曲线最大值，
-    -- 首行→次行的四边形才既不会翻折、也不会把探进来的海面直边露出来。
-    local denseRows = 8
-    local nearTop = Config.ShoreZMax() + 0.8
-    local zs = { zShoreMin - 0.2 }
-    for i = 1, denseRows do
-        zs[#zs + 1] = nearTop + (Config.SHORE_BAND_MID_Z - nearTop) * i / denseRows
-    end
-    for i = 1, Config.SHORE_FAR_ROWS do
-        zs[#zs + 1] = Config.SHORE_BAND_MID_Z
-            + (Config.SHORE_FOG_END_Z - Config.SHORE_BAND_MID_Z) * i / Config.SHORE_FAR_ROWS
-    end
-    local nRows = #zs
-
-    local verts, idx = {}, {}
-    for r = 1, nRows do
-        local zBase = zs[r]
-        for c = 1, nCols do
-            local x = xs[c]
-            local z = zBase
-            if r == 1 then
-                z = Config.ShoreZ(x)               -- 岸线本体：首行逐列贴曲线，即可见的水陆交界
-            end
-            local k = (r - 1) * nCols + c
-            -- 逐顶点交织（AoS），字段顺序必须和下面 SetSize 的 VertexElement 完全一致：
-            -- POSITION(3 float) NORMAL(3 float) TEXCOORD(2 float) TANGENT(4 byte)，共 36 字节/顶点。
-            -- 平铺地面的切线 TX=(1,0,0)、TY=(0,1,0)，w=255 即正手性（引擎的约定）。
-            verts[k] = string.pack("<ffffff", x, Config.SAND_Y, z, 0.0, 1.0, 0.0)
-                .. string.pack("<ff", x, z)
-                .. string.pack("<BBBB", 255, 128, 128, 255)
-        end
-    end
-    -- 绕序：x 往右、z 往内陆。twist=0 的 (a,b,cc) 几何法线 = (+x)×(+z) = -y（朝下），
-    -- 俯视时被背面剔除 → 沙滩整片不可见；twist=1 的 (a,cc,b) 法线 = (+z)×(+x) = +y（朝上）
-    -- 才可见，故 Config.SAND_TWIST 默认取 1。之前误判成“0 即正面朝上”是坐标系手性搞反了。
-    local twist = (Config.SAND_TWIST or 0) ~= 0
-    for r = 1, nRows - 1 do
-        for c = 1, nCols - 1 do
-            local a = (r - 1) * nCols + c        -- (x0, z0)
-            local b = a + 1                      -- (x1, z0)
-            local cc = a + nCols                 -- (x0, z1)
-            local d = cc + 1                     -- (x1, z1)
-            if twist then
-                idx[#idx + 1] = a; idx[#idx + 1] = cc; idx[#idx + 1] = b
-                idx[#idx + 1] = b; idx[#idx + 1] = cc; idx[#idx + 1] = d
-            else
-                idx[#idx + 1] = a; idx[#idx + 1] = b; idx[#idx + 1] = cc
-                idx[#idx + 1] = b; idx[#idx + 1] = d; idx[#idx + 1] = cc
-            end
-        end
-    end
-
-    local vb = VertexBuffer()
-    vb:SetDebugName("BeachMesh.vb")
-    vb:SetShadowed(true)
-    vb:SetSize(#xs * #zs, {
-        VertexElement(VET.VECTOR3, VSEM.POSITION),
-        VertexElement(VET.VECTOR3, VSEM.NORMAL),
-        VertexElement(VET.VECTOR2, VSEM.TEXCOORD),
-        VertexElement(VET.UBYTE4_NORM, VSEM.TANGENT),
-    })
-    -- 一次 Update 喂满交织好的整段顶点流（每个顶点 36 字节，顺序见上面 string.pack）。
-    vb:Update(table.concat(verts))
-
-    local ib = IndexBuffer()
-    ib:SetDebugName("BeachMesh.ib")
-    ib:SetShadowed(true)
-    ib:SetSize(#idx, false, false)   -- 第三参 dynamic：C++ 有默认值，但这里是原生 LUA_MEMBER_FUNC 绑定，
-                                     -- sol3 不透传 C++ 默认参，Lua 必须显式喂满（漏了会报栈索引 4 expected boolean）
-    ib:Update(PackUShorts(idx))
-
-    local geom = Geometry()
-    geom:SetVertexBuffer(0, vb)
-    geom:SetIndexBuffer(ib)
-    geom:SetDrawRange(0, 0, #idx)      -- 0 == TRIANGLE_LIST
-
-    -- buffer 要列回 Model：不列也不会错画，但这份网格是运行期造的，没得序列化回去
-    local model = Model()
-    model:SetNumGeometries(1)
-    model:SetGeometry(0, 0, geom)
-    model:SetVertexBuffers({ vb }, { 0 }, { 0 })
-    model:SetIndexBuffers({ ib })
-    -- 包围盒：几何是按世界坐标写的（node 在原点），z 下界取首行基址（比“贴曲线那行”
-    -- 更靠海）、上界取末行——宁大不小：盒子小了会被距离/视锥误剔除，整片沙突然消失。
-    model:SetBoundingBox(BoundingBox(
-        Vector3(-spanX, Config.SAND_Y - 0.05, zs[1]),
-        Vector3(spanX, Config.SAND_Y + 0.05, zs[nRows])))
-
-    local node = root:CreateChild("Sand")
-    node:SetPosition(Vector3(0.0, 0.0, 0.0))
-    local sm = node:CreateComponent("StaticModel")
-    sm:SetModel(model)
-    sm:SetMaterial(Materials.Tint("sand"))
-    sm:SetCastShadows(false)
-    -- surface 变量：Shooting 打中没挂 unit 的东西时，靠它决定是水花还是尘土
-    node:SetVar("surface", "sand")
-    return node
-end
+-- （BuildSand 已删除：沙滩网格不再于运行期生成。）
 
 ----------------------------------------------------------------------
 -- 光照与雾
@@ -521,7 +376,6 @@ function Coast.Build(scene)
     BuildSky(root)
     local sea = BuildSea(root)
     local seaMaterial = Materials.Sea()
-    local sand = BuildSand(root)
     local deck = BuildTower(root)
     local turrets = BuildTurrets(root)
     BuildDock(root)
@@ -531,8 +385,8 @@ function Coast.Build(scene)
     local sun = BuildSun(scene)
     BuildZone(scene)
 
-    print(string.format("Coast MARK built: sea=%.0fm beach=%.0fx%.0f shore[%.2f,%.2f] tower=(%.1f,%.1f,%.1f) deckY=%.2f turrets=%d at z=%.1f",
-        Config.SEA_SIZE, 2.0 * Config.BEACH_SPAN_X, Config.SHORE_FOG_END_Z,
+    print(string.format("Coast MARK built: sea=%.0fm shore[%.2f,%.2f] tower=(%.1f,%.1f,%.1f) deckY=%.2f turrets=%d at z=%.1f",
+        Config.SEA_SIZE,
         Config.ShoreZMin(), Config.ShoreZMax(),
         Config.TOWER_POS.x, Config.TOWER_POS.y, Config.TOWER_POS.z,
         Config.PLATFORM_Y, #turrets, Config.DEFENSE_Z))
@@ -543,7 +397,6 @@ function Coast.Build(scene)
         sea = sea,
         -- 海面材质（与 Sea 节点同源）：main.lua 每帧滚动它的 UOffset/VOffset 做波纹流动
         seaMaterial = seaMaterial,
-        sand = sand,
         sun = sun,
         deck = deck,
         -- 主角站位：平台上表面中心。脚底 y = PLATFORM_Y，别把角色原点当脚底用。
