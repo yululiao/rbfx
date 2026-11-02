@@ -28,11 +28,13 @@ Juice.__index = Juice
 -- 每种击杀的强度配比：hit-stop 时长（秒）/ 震屏 trauma 增量。
 -- 大船击沉是全场最高潮（沉船动画 2.2s），给它最长的定格；海盗 1 发死，给最短的
 -- 一顿——连杀时 0.06s 的顿挫像鼓点而不是卡死。
+-- 爆桶刻意给得小：爆炸本身已经有闪光/粒子/低频轰鸣三重视听，震屏再顶满只会让人看不清；
+-- 而且一炸常常连着炸（爆桶连锁、连杀爆炸一次结算好几条击杀），叠起来比击沉大船还猛。
 local KILL_PROFILE = {
     pirate  = { stop = 0.06, trauma = 0.25 },
     boat    = { stop = 0.10, trauma = 0.45 },
     bigboat = { stop = 0.14, trauma = 0.70 },
-    barrel  = { stop = 0.08, trauma = 0.50 },
+    barrel  = { stop = 0.08, trauma = 0.30 },
 }
 local DEFAULT_PROFILE = { stop = 0.08, trauma = 0.35 }
 
@@ -64,6 +66,11 @@ function Juice.Build(scene, deps)
     self.stopT = 0.0        -- hit-stop 剩余时长（真实秒）
     self.trauma = 0.0       -- 震屏强度 0..1
     self.shakeT = 0.0       -- 噪声相位种子（真实时间推进，hit-stop 期间照走）
+    -- 帧内增益记账（见 AddTrauma）：一次爆炸可能在同一帧结算多条击杀，
+    -- 线性相加会把 trauma 直接顶满，抖幅=trauma² 下等于满屏地震。
+    self.frameId = 0        -- 帧序号（BeginFrame 每帧 +1）
+    self.gainFrame = -1     -- 上一次加震屏所在的帧号
+    self.gainMax = 0.0      -- 那一帧里已经加过的最大增量
 
     self.pops = {}
     self.popCursor = 1
@@ -94,7 +101,7 @@ function Juice:OnKill(unit, score)
         self.stopT = profile.stop
     end
 
-    self.trauma = math.min(self.trauma + profile.trauma, 1.0)
+    self:AddTrauma(profile.trauma)
 
     if unit and unit.node then
         -- 世界锚定在单位头顶（船 1.6 ≈ 甲板上方、海盗 1.6 ≈ 头顶）
@@ -104,9 +111,24 @@ function Juice:OnKill(unit, score)
 end
 
 --- 只加震屏不加定格（防线被砍这类“受挫”时刻：停时间只会让玩家困惑）。
+--- 同一帧内只按最强的一次计：爆炸连锁/连杀爆炸会在同一瞬间结算好几条击杀，若线性相加，
+--- trauma 会直接顶到 1（抖幅 = trauma²，等于满屏地震），一次爆炸比击沉大船还晃。
 ---@param amount number
 function Juice:AddTrauma(amount)
-    self.trauma = math.min(self.trauma + (amount or 0.3), 1.0)
+    local gain = amount or 0.3
+    if self.gainFrame == self.frameId then
+        -- 本帧已经加过：只补上“比它更强”的那部分，等价于整帧取 max 而不是累加
+        local delta = gain - self.gainMax
+        if delta <= 0.0 then
+            return
+        end
+        self.gainMax = gain
+        gain = delta
+    else
+        self.gainFrame = self.frameId
+        self.gainMax = gain
+    end
+    self.trauma = math.min(self.trauma + gain, 1.0)
 end
 
 --- 从池里轮询一个槽位显示飘字（老槽还在飞就被顶掉，最多同屏 POP_POOL 条）。
@@ -130,6 +152,7 @@ end
 ---@param dt number 真实帧步长
 ---@return number
 function Juice:BeginFrame(dt)
+    self.frameId = self.frameId + 1   -- 帧号推进：AddTrauma 的“同一帧取最大”靠它判界
     if self.stopT > 0.0 then
         self.stopT = self.stopT - dt
         if self.stopT < 0.0 then
@@ -196,6 +219,8 @@ end
 function Juice:Reset()
     self.stopT = 0.0
     self.trauma = 0.0
+    self.gainFrame = -1
+    self.gainMax = 0.0
     for _, slot in ipairs(self.pops) do
         if slot.visible then
             slot.visible = false
