@@ -149,16 +149,18 @@
             <!-- 宽 640dp（窄横竖屏画布约 700dp：即使 box-sizing 按 content-box 算，加 24dp 两侧 padding 仍不超宽） -->
             <div style="position: absolute; left: -320dp; top: 130dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">自定义语音</div>
-                <div class="label" style="margin-top: 8dp; font-size: 20dp; color: #ffffff99;">录一句，战场上放你自己的声音（最长 3 秒）</div>
+                <div class="label" style="margin-top: 8dp; font-size: 20dp; color: #ffffff99;">录一句，战场上放你自己的声音（最长 3 秒）；清除后回到预置旁白</div>
 
                 <div style="margin-top: 22dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">失守吐槽 · 防线被攻破时播</div>
                     <button data-event-click="voice_rec_lose" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
+                    <button data-event-click="voice_clear_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #444a55e6; color: #ffffffff; border-radius: 10dp;">清除</button>
                 </div>
 
                 <div style="margin-top: 18dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">连杀战吼 · 5 连杀起每档播</div>
                     <button data-event-click="voice_rec_kill" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
+                    <button data-event-click="voice_clear_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #444a55e6; color: #ffffffff; border-radius: 10dp;">清除</button>
                 </div>
 
                 <div data-if="voiceRecording" style="margin-top: 16dp; color: #ff6b6bff; font-size: 24dp; font-weight: bold;">● 录音中…</div>

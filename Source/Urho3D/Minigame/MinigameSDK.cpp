@@ -115,6 +115,21 @@ ea::string EscapeJson(const ea::string& value)
     return result;
 }
 
+/// Slot names become part of the stored file name on the host; keep them conservative
+/// (letters/digits/underscore/dash) so exotic game-side names cannot escape the user data
+/// directory.
+ea::string SanitizeSlotName(const ea::string& slotName)
+{
+    ea::string safeSlot;
+    for (char ch : slotName)
+    {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+            || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+        safeSlot += ok ? ch : '_';
+    }
+    return safeSlot.empty() ? ea::string("default") : safeSlot;
+}
+
 }
 
 // The native completion hook. extern "C" keeps the name exact (the JavaScript side calls
@@ -229,18 +244,7 @@ int MinigameSDK::RequestPrivacyAuthorization()
 
 int MinigameSDK::RecordVoice(const ea::string& slotName, int maxDurationSec)
 {
-    // The slot name becomes part of the stored file name on the host; keep it
-    // conservative (letters/digits/underscore) so exotic game-side names cannot
-    // escape the user data directory.
-    ea::string safeSlot;
-    for (char ch : slotName)
-    {
-        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
-            || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
-        safeSlot += ok ? ch : '_';
-    }
-    if (safeSlot.empty())
-        safeSlot = "default";
+    const ea::string safeSlot = SanitizeSlotName(slotName);
 
     ea::string payload;
     payload += "{\"slot\":";
@@ -253,15 +257,7 @@ int MinigameSDK::RecordVoice(const ea::string& slotName, int maxDurationSec)
 
 int MinigameSDK::PlayUserAudio(const ea::string& slotName, float playbackRate)
 {
-    ea::string safeSlot;
-    for (char ch : slotName)
-    {
-        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
-            || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
-        safeSlot += ok ? ch : '_';
-    }
-    if (safeSlot.empty())
-        safeSlot = "default";
+    const ea::string safeSlot = SanitizeSlotName(slotName);
 
     // Clamp to the rate range the vendors document (0.5..2.0); 1.0 is the natural pitch.
     const float rate = std::min(std::max(playbackRate, 0.5f), 2.0f);
@@ -278,6 +274,15 @@ int MinigameSDK::PlayUserAudio(const ea::string& slotName, float playbackRate)
 int MinigameSDK::StopUserAudio()
 {
     return Invoke(MinigameSDKRequestKind::StopUserAudio, "{}");
+}
+
+int MinigameSDK::ClearUserAudio(const ea::string& slotName)
+{
+    ea::string payload;
+    payload += "{\"slot\":";
+    payload += EscapeJson(SanitizeSlotName(slotName));
+    payload += '}';
+    return Invoke(MinigameSDKRequestKind::ClearUserAudio, payload);
 }
 
 int MinigameSDK::PlayGameAudio(const ea::string& path, float gain, bool looped)

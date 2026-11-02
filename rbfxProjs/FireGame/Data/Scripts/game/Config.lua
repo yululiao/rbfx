@@ -465,8 +465,9 @@ Config.POPSCORE_LIFE = 0.9        -- 飘字寿命（秒）
 Config.POPSCORE_RISE = 90.0       -- 飘字上浮速度（画布像素/秒，随寿命减速到 30%）
 
 ----------------------------------------------------------------------
--- 自定义语音（麦克风录音→宿主侧存 mp3→变声回放）：全链路在 MinigameSDK/
--- minigame_sdk.js（引擎只发请求收事件，不碰音频解码）。音色 playbackRate 必须
+-- 自定义语音（麦克风录音→宿主侧存 aac→变声回放）：全链路在 MinigameSDK/
+-- minigame_sdk.js（引擎只发请求收事件，不碰音频解码）。格式只能是宿主录音器
+-- 收的 aac/pcm/wav（抖音实测 mp3 被拒），音色 playbackRate 必须
 -- 取宿主支持的档位（0.5/0.8/1.0/1.25/1.5/2.0），非档位值会被平台钳到最近档。
 ----------------------------------------------------------------------
 Config.VOICE_MAX_SEC = 3          -- 单句录音上限（秒），到时自动停
@@ -476,7 +477,7 @@ Config.VOICE_FILTERS = {
     { name = "哈士奇",   rate = 1.5 },
 }
 Config.VOICE_DEFAULT_FILTER = 2   -- 默认原声（VOICES_FILTERS 下标）
--- 槽位：宿主侧存为 rbfx_voice_<slot>.mp3，Lua 与 JS 共享的唯一契约
+-- 槽位：宿主侧存为 rbfx_voice_<slot>.aac，Lua 与 JS 共享的唯一契约
 Config.VOICE_SLOT_LOSE = "lose"        -- 防线失守时播
 Config.VOICE_SLOT_KILLSTREAK = "killstreak"  -- 连杀里程碑播（阈值同 COMBO_VOICE_AT）
 

@@ -58,6 +58,10 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
                 return sdk ? sdk->PlayUserAudio(slot, playbackRate.value_or(1.0f)) : 0;
             })
             LUA_MEMBER_FUNC(StopUserAudio)
+            // Clearing a slot returns it to the game's own audio; recording recreates the clip.
+            LUA_MEMBER_FUNC_RAW(ClearUserAudio, [](MinigameSDK* sdk, const ea::string& slot) -> int {
+                return sdk ? sdk->ClearUserAudio(slot) : 0;
+            })
             // Game audio (sfx/music) through the host player: gain defaults to 1.0,
             // looped to false. The packaging step ships m4a for these paths.
             LUA_MEMBER_FUNC_RAW(PlayGameAudio, [](MinigameSDK* sdk, const ea::string& path,
@@ -114,6 +118,7 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
         "RECORD_VOICE", static_cast<int>(MinigameSDKRequestKind::RecordVoice),
         "PLAY_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayUserAudio),
         "STOP_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopUserAudio),
+        "CLEAR_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::ClearUserAudio),
         "PLAY_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayGameAudio),
         "STOP_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopGameAudio));
 }

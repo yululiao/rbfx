@@ -40,6 +40,9 @@ enum class MinigameSDKRequestKind
     PlayGameAudio = 8,
     /// Stop game-audio playback for a path (or for everything when the path is empty).
     StopGameAudio = 9,
+    /// Delete the recorded voice clip of a slot, so playback falls back to the game's own
+    /// audio. Recording the slot again creates a new clip.
+    ClearUserAudio = 10,
 };
 
 /// Bridge to the host SDK capabilities (login, share, rewarded ads, payment, privacy).
@@ -100,6 +103,10 @@ public:
     int PlayUserAudio(const ea::string& slotName, float playbackRate);
     /// Stop the current user-audio playback immediately. Completes right away.
     int StopUserAudio();
+
+    /// Delete the recorded voice clip of a slot. Succeeds when the slot ends up without a clip,
+    /// including when it had none to begin with.
+    int ClearUserAudio(const ea::string& slotName);
 
     /// Play a packaged audio file through the host audio player. path is the engine-visible
     /// resource path of the packaged file ("Data/Sound/shot.m4a"); gain maps onto the host

@@ -142,6 +142,16 @@ function Hud.Build(scene, handlers)
                     handlers.onVoicePreview()
                 end
             end)
+            w:BindEvent("voice_clear_lose", function()
+                if handlers.onVoiceClear then
+                    handlers.onVoiceClear(Config.VOICE_SLOT_LOSE)
+                end
+            end)
+            w:BindEvent("voice_clear_kill", function()
+                if handlers.onVoiceClear then
+                    handlers.onVoiceClear(Config.VOICE_SLOT_KILLSTREAK)
+                end
+            end)
             w:BindEvent("voice_filter", function()
                 if handlers.onVoiceFilter then
                     handlers.onVoiceFilter()

@@ -27,7 +27,8 @@
         play_user_audio: 6,
         stop_user_audio: 7,
         play_game_audio: 8,
-        stop_game_audio: 9
+        stop_game_audio: 9,
+        clear_user_audio: 10
     };
 
     function complete(request_id, success, payload) {
@@ -191,18 +192,28 @@
     };
 
     // ---------- voice (record / play / stop) ----------
-    // Clips live entirely on the host side: the recorder writes mp3 files into the
-    // user data directory under rbfx_voice_<slot>.mp3, playback goes through
+    // Clips live entirely on the host side: the recorder writes aac files into the
+    // user data directory under rbfx_voice_<slot>.aac, playback goes through
     // InnerAudioContext. The engine never decodes these (its Sound loaders only
     // know ogg/wav); the slot name is the only contract between both worlds.
+    //
+    // aac, not mp3: the Douyin recorder rejects anything outside "aac" / "pcm" / "wav"
+    // (RecorderManager.start:fail expect inputs[0].format to be one of ...), and both vendors
+    // decode aac in InnerAudioContext. The extension is a hint only - the bytes are what play.
 
     function user_data_path() {
         return (wx_tt && wx_tt.env && wx_tt.env.USER_DATA_PATH) || "";
     }
 
     function voice_file_path(slot) {
-        return user_data_path() + "/rbfx_voice_" + String(slot || "default") + ".mp3";
+        return user_data_path() + "/rbfx_voice_" + String(slot || "default") + ".aac";
     }
+
+    /// Suffix a fresh clip is written under before it replaces the slot's current clip.
+    var VOICE_STAGING_SUFFIX = ".new";
+
+    /// The only compressed container both vendors' recorders accept (Douyin: aac / pcm / wav).
+    var RECORD_FORMAT = "aac";
 
     var recorder_manager = null;
     var recording_request = 0;
@@ -238,6 +249,21 @@
         }, budget_ms);
     }
 
+    /// Swap a staged clip into the slot. The old clip stays playable until the new one is safely
+    /// on disk, and a host that cannot move files never loses it either.
+    function commit_staged_clip(fs, staging, target) {
+        if (typeof fs.renameSync !== "function") {
+            if (typeof fs.copyFileSync !== "function")
+                throw new Error("the host file system cannot move files");
+            try { fs.unlinkSync(target); } catch (e) { /* the slot was empty */ }
+            fs.copyFileSync(staging, target);
+            try { fs.unlinkSync(staging); } catch (e) { /* already gone */ }
+            return;
+        }
+        try { fs.unlinkSync(target); } catch (e) { /* the slot was empty */ }
+        fs.renameSync(staging, target);
+    }
+
     /// The recorder is one host-wide manager with callback-style listeners: create it once, and
     /// wire both outcome paths here - this is the only place a clip is written to disk.
     function get_recorder_manager() {
@@ -253,14 +279,21 @@
             try {
                 var fs = wx_tt.getFileSystemManager();
                 var target = recorder_manager.__voice_target;
-                // Remove a stale clip first: saveFile refuses to overwrite existing files.
-                try { fs.unlinkSync(target); } catch (e) { /* not there yet, fine */ }
+                // Land the new clip beside the old one first: saveFile refuses to overwrite, and
+                // dropping the old clip up front would lose it whenever this save fails.
+                var staging = target + VOICE_STAGING_SUFFIX;
+                try { fs.unlinkSync(staging); } catch (e) { /* leftovers from an aborted save */ }
                 fs.saveFile({
                     tempFilePath: res.tempFilePath,
-                    filePath: target,
+                    filePath: staging,
                     success: function () {
-                        settle_record(request_id, true,
-                            JSON.stringify({ durationMs: res.duration || 0 }));
+                        try {
+                            commit_staged_clip(fs, staging, target);
+                            settle_record(request_id, true,
+                                JSON.stringify({ durationMs: res.duration || 0 }));
+                        } catch (error) {
+                            settle_record(request_id, false, fail_text(error, "saving the clip failed"));
+                        }
                     },
                     fail: function (error) {
                         settle_record(request_id, false, fail_text(error, "saving the clip failed"));
@@ -273,7 +306,7 @@
         recorder_manager.onError(function (error) {
             var request_id = recording_request;
             if (request_id)
-                settle_record(request_id, false, fail_text(error, "recording failed"));
+                settle_record(request_id, false, record_failure(error, "recording failed"));
             else
                 dispose_record_watchdog();
         });
@@ -287,61 +320,43 @@
             var manager = get_recorder_manager();
             manager.__voice_target = voice_file_path(slot);
             recording_request = request_id;
-            manager.start({ duration: duration, format: "mp3" });
+            manager.start({ duration: duration, format: RECORD_FORMAT });
         } catch (error) {
             // A synchronous throw would otherwise leak recording_request and block every future
             // recording with "already in progress".
             recording_request = 0;
-            settle_record(request_id, false, fail_text(error, "recording failed"));
+            settle_record(request_id, false, record_failure(error, "recording failed"));
         }
     }
 
     // ---------- microphone permission ----------
-    // Both vendors gate the recorder behind scope.record. Calling start() straight away leaves a
-    // denial to surface through onError, where the errMsg is vendor-specific ("start fail",
-    // "auth deny", ...) and reads like a device failure - which is what the game then reports.
-    // Resolving the scope first costs one async hop and buys an answer the player can act on:
-    // prompt while undetermined, and say "denied" once they answered no, because the prompt does
-    // not come back on its own (only the host settings page reverses it).
+    // The recorder is started inside the request call on purpose. A press reaches this file through
+    // the game's click handler, which makes it the user gesture the host wants for a microphone;
+    // querying the scope first (getSetting, authorize) costs an async hop and throws that gesture
+    // away, and the strict hosts then fail the recording the moment it is asked to run. So the
+    // recorder asks for the microphone itself, and its answer is what the game reports.
     var RECORD_SCOPE = "scope.record";
-
-    /// How long to wait for the host's answer before treating the scope as undetermined: a host
-    /// that never calls back must not cost the player the feature.
-    var SCOPE_ANSWER_TIMEOUT_MS = 2000;
-
-    function record_scope_state(callback) {
-        var answered = false;
-        function answer(state) {
-            if (answered)
-                return;
-            answered = true;
-            callback(state);
-        }
-        if (!wx_tt || typeof wx_tt.getSetting !== "function")
-            return answer("unknown");
-        setTimeout(function () { answer("unknown"); }, SCOPE_ANSWER_TIMEOUT_MS);
-        try {
-            wx_tt.getSetting({
-                success: function (res) {
-                    var setting = (res && res.authSetting) || {};
-                    answer(setting[RECORD_SCOPE] === true ? "granted"
-                        : setting[RECORD_SCOPE] === false ? "denied" : "unknown");
-                },
-                fail: function () { answer("unknown"); }
-            });
-        } catch (error) {
-            answer("unknown");
-        }
-    }
 
     /// The game turns this exact wording into its "open the microphone in settings" hint.
     var RECORD_DENIED = "microphone permission denied (" + RECORD_SCOPE + ")";
 
     function looks_like_denial(error) {
         var text = fail_text(error, "").toLowerCase();
-        return text.indexOf("deny") >= 0 || text.indexOf("denied") >= 0 ||
-            text.indexOf("permission") >= 0 || text.indexOf("reject") >= 0 ||
-            text.indexOf("拒绝") >= 0 || text.indexOf("权限") >= 0;
+        // The vendors word the same denial differently depending on the call it came back from:
+        // "authorize:fail auth deny" on the prompt, "operateRecorder:fail ... unauthorized" or
+        // "no permission" from the recorder itself on a system level refusal.
+        return text.indexOf("deny") >= 0 || text.indexOf("unauthoriz") >= 0 ||
+            text.indexOf("not allowed") >= 0 || text.indexOf("permission") >= 0 ||
+            text.indexOf("reject") >= 0 || text.indexOf("refuse") >= 0 ||
+            text.indexOf("拒绝") >= 0 || text.indexOf("权限") >= 0 ||
+            text.indexOf("未授权") >= 0 || text.indexOf("麦克风") >= 0;
+    }
+
+    /// Whatever the recorder reports is turned into the answer the game shows. A refusal is a
+    /// refusal no matter which call reported it: the recorder's own "no permission" has to reach
+    /// the player as the settings hint, not as a generic retry.
+    function record_failure(error, fallback) {
+        return looks_like_denial(error) ? RECORD_DENIED : fail_text(error, fallback);
     }
 
     handlers[KIND.record_voice] = function (request_id, payload) {
@@ -357,37 +372,25 @@
         // Covers the whole road to a result: the permission prompt, the recording, the save. The
         // prompt is what makes the budget generous - a player can sit on that dialog.
         arm_record_watchdog(request_id, duration + 30000);
+        start_recording(request_id, slot, duration);
+    };
 
-        record_scope_state(function (state) {
-            try {
-                if (state === "granted")
-                    return start_recording(request_id, slot, duration);
-                if (state === "denied") {
-                    console.warn("[rbfx] " + RECORD_DENIED);
-                    return settle_record(request_id, false, RECORD_DENIED);
-                }
-                // Undetermined (first use) or a host without getSetting: ask, and fall back to the
-                // recorder's own prompt when authorize is missing or rejects the scope name - an
-                // unknown scope must not cost the player the feature.
-                if (typeof wx_tt.authorize !== "function")
-                    return start_recording(request_id, slot, duration);
-                wx_tt.authorize({
-                    scope: RECORD_SCOPE,
-                    success: function () { start_recording(request_id, slot, duration); },
-                    fail: function (error) {
-                        console.warn("[rbfx] microphone authorization failed", error);
-                        if (looks_like_denial(error))
-                            settle_record(request_id, false, RECORD_DENIED);
-                        else
-                            start_recording(request_id, slot, duration);
-                    }
-                });
-            } catch (error) {
-                // The host's async callbacks run outside rbfx.sdk.invoke's try/catch: an exception
-                // here would reach nobody, and the game would wait on "recording" forever.
-                settle_record(request_id, false, fail_text(error, "recording failed"));
-            }
-        });
+    /// Clearing a slot deletes its clip, so playback falls back to the game's own audio. A slot
+    /// without a clip is already where the request wants it, so that is a success too.
+    handlers[KIND.clear_user_audio] = function (request_id, payload) {
+        if (recording_request)
+            return complete(request_id, false, "a recording is in progress");
+        var args = parse_payload(payload);
+        var target = voice_file_path(args.slot ? String(args.slot) : "default");
+        try {
+            var fs = wx_tt.getFileSystemManager();
+            var cleared = false;
+            try { fs.unlinkSync(target); cleared = true; } catch (e) { /* nothing recorded */ }
+            try { fs.unlinkSync(target + VOICE_STAGING_SUFFIX); } catch (e) { /* no aborted save */ }
+            complete(request_id, true, JSON.stringify({ cleared: cleared }));
+        } catch (error) {
+            complete(request_id, false, fail_text(error, "clearing the clip failed"));
+        }
     };
 
     var voice_audio = null;

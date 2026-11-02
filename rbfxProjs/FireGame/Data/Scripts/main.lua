@@ -247,6 +247,9 @@ hud = Hud.Build(scene, {
     onVoicePreview = function()
         if voice then voice:Preview() end
     end,
+    onVoiceClear = function(slot)
+        if voice then voice:Clear(slot) end
+    end,
     onVoiceFilter = function()
         if voice and hud then
             hud:SetVoiceFilterName(voice:CycleFilter())

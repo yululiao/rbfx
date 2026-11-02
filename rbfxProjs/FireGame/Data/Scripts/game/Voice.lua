@@ -7,8 +7,8 @@
 --   * 引擎侧（MinigameSDK）只发请求收事件——RecordVoice/PlayUserAudio/StopUserAudio，
 --     每个请求返回 id，结果经 "MinigameSdkResult" 事件回来（data.Kind 对照
 --     MINIGAME_REQUEST_KIND 表）。
---   * 宿主 JS 侧（minigame_sdk.js）拿 recorderManager 录 mp3 存进用户目录
---     （rbfx_voice_<slot>.mp3，跨局持久），InnerAudioContext 按档位变声回放。
+--   * 宿主 JS 侧（minigame_sdk.js）拿 recorderManager 录 aac 存进用户目录
+--     （rbfx_voice_<slot>.aac，跨局持久），InnerAudioContext 按档位变声回放。
 --     引擎的 Sound 解码器全程不参与（它只认 ogg/wav）。
 --   * 编辑器/桌面宿主没有 SDK（IsAvailable()=false，请求立即失败）——UI 入口
 --     由 Hud 按 voiceAvailable 隐藏，本模块的调用全部静默返回，不会报错。
@@ -36,6 +36,7 @@ function Voice.Build(scene, deps)
     self.previewing = false      -- 是否有试听请求在途（结果回写 HUD 状态行）
     self.lastSlot = nil          -- 最近录成功的槽位（试听默认播它）
     self.pendingSlot = nil       -- 本次录音请求的槽位（结果回来时才落进 lastSlot）
+    self.pendingClearSlot = nil  -- 本次清除请求的槽位（成功后才清 lastSlot）
     -- 玩法触发回放（Play）的回落约定：宿主回放失败 → 播预置旁白。只认“这一次请求”的
     -- 失败：JS 侧新的回放会顶掉旧的并以 success=false("playback stopped") 结算，若不看 id，
     -- 被顶掉的那次会误触发回落，出现“既有你的声音又有 Kenney 旁白”的双响。
@@ -164,6 +165,22 @@ function Voice:Stop()
     self.sdk:StopUserAudio()
 end
 
+--- 清除某个槽位的录音（面板按钮）：删掉宿主里那句，该槽位从此回到预置旁白。
+--- 录过再清、清完再录都行；没录过就点清除也算成功（本来就是没录过的状态）。
+---@param slot string Config.VOICE_SLOT_*
+function Voice:Clear(slot)
+    if not self:IsAvailable() then
+        return
+    end
+    if self.recording then
+        return  -- 录音中不清（面板是模态的，正常走不到）
+    end
+    -- 先停下回放：不去删一个正被宿主音频上下文打开的文件
+    self:Stop()
+    self.pendingClearSlot = slot
+    self.sdk:ClearUserAudio(slot)
+end
+
 --- MinigameSdkResult 事件分发：录音/试听结果回写 HUD 状态行。
 function Voice:OnSdkResult(data)
     local kind = data.Kind
@@ -188,11 +205,27 @@ function Voice:OnSdkResult(data)
             print("Voice: recording failed: " .. reason)
             if self.hud and self.hud.SetVoiceStatus then
                 if string.find(reason, "permission denied", 1, true) then
-                    self.hud:SetVoiceStatus("麦克风没开权限：设置里允许后重进")
+                    self.hud:SetVoiceStatus("麦克风没开权限：小游戏和抖音 App 都要允许")
                 else
-                    self.hud:SetVoiceStatus("录音失败，再试一次")
+                    -- 定位期把宿主原话带出来：设备忙、格式不支持、系统层未授权在真机上
+                    -- 留下的只有 errMsg 这一条线索，状态行只截前 32 字。
+                    self.hud:SetVoiceStatus("录音失败：" .. string.sub(reason, 1, 32))
                 end
             end
+        end
+    elseif kind == MINIGAME_REQUEST_KIND.CLEAR_USER_AUDIO then
+        local slot = self.pendingClearSlot
+        self.pendingClearSlot = nil
+        if data.Success then
+            -- 试听的默认槽位不能还指向一个已经没了的文件
+            if self.lastSlot == slot then
+                self.lastSlot = nil
+            end
+            if self.hud and self.hud.SetVoiceStatus then
+                self.hud:SetVoiceStatus("已清除，改回预置旁白")
+            end
+        elseif self.hud and self.hud.SetVoiceStatus then
+            self.hud:SetVoiceStatus("清除失败，再试一次")
         end
     elseif kind == MINIGAME_REQUEST_KIND.PLAY_USER_AUDIO then
         -- 玩法回放失败（该槽位没录过 / 录音文件被清理）：补播预置旁白。
