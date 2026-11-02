@@ -21,13 +21,17 @@ local WaveGen = require("game.WaveGen")
 local Waves = {}
 Waves.__index = Waves
 
----@param deps { enemy: Enemy, audio: Audio, hud: any, onGameOver: fun(outcome:string, score:number)|nil }
+---@param deps { enemy: Enemy, audio: Audio, hud: any, voice: any|nil,
+---               onGameOver: fun(outcome:string, score:number)|nil }
 ---@return Waves
 function Waves.Build(deps)
     local self = setmetatable({}, Waves)
     self.enemy = deps.enemy
     self.audio = deps.audio
     self.hud = deps.hud
+    -- 自定义语音（可空）：失守/连杀两句“本可以是你自己录的”，没录过就回落预置旁白。
+    -- 不把它写进 audio（那个模块只管预置音效库），两边职责分开。
+    self.voice = deps.voice
     self.onGameOver = deps.onGameOver
     self.onWaveCleared = deps.onWaveCleared   -- 一波清完的回调（main.lua 传入：让宠物狗原地休息）
     self:Reset()
@@ -156,6 +160,19 @@ end
 -- 计分 / combo / 防线
 ----------------------------------------------------------------------
 
+--- 播一句"可以是你自己录的"语音：录过就播你的，没录过/宿主不支持→回落预置旁白。
+--- 回落只在回放真的失败时发生（见 Voice:Play），所以这里不必事先知道有没有录音。
+---@param slot string Config.VOICE_SLOT_*
+---@param canned string|nil Config.Voice 里的预置旁白键
+function Waves:PlayerVoice(slot, canned)
+    local fallback = canned and function() self.audio:Voice(canned) end or nil
+    if self.voice then
+        self.voice:Play(slot, fallback)
+    elseif fallback then
+        fallback()
+    end
+end
+
 --- 一次击杀的结算（Shooting 与爆桶连锁都调这个）。
 ---@param result { killed: boolean, score: number }
 ---@param unit any
@@ -177,10 +194,15 @@ function Waves:AddKill(result, unit, headshot, fromChain)
         if self.hud.SetCombo then self.hud:SetCombo(self.combo) end
     end
 
-    -- combo 里程碑旁白
+    -- combo 里程碑旁白。3 连杀仍用预置音（太频繁，拿来播 3 秒录音会连续相互顶掉），
+    -- 5/8 连杀才开始“如果是玩家自己录的就播玩家的”。
     for _, threshold in ipairs(Config.COMBO_VOICE_AT) do
         if self.combo == threshold then
-            self.audio:Voice(threshold >= 5 and Config.Voice.multiKill or Config.Voice.combo)
+            if threshold >= 5 then
+                self:PlayerVoice(Config.VOICE_SLOT_KILLSTREAK, Config.Voice.multiKill)
+            else
+                self.audio:Voice(Config.Voice.combo)
+            end
         end
     end
 
@@ -273,7 +295,8 @@ function Waves:Lose(reason)
         return
     end
     self.phase = "ended"
-    self.audio:Voice(Config.Voice.lose)
+    -- 失守吐槽：玩家自己录的（没录回落 you_lose）
+    self:PlayerVoice(Config.VOICE_SLOT_LOSE, Config.Voice.lose)
     local title = (reason == "hero") and "主角阵亡" or "防线失守"
     if self.hud and self.hud.ShowEnd then
         self.hud:ShowEnd(false, self.score, title)

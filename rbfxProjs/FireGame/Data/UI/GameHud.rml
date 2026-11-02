@@ -36,6 +36,26 @@
             ringDisc: 0dp 0dp 256dp 256dp;
         }
         #stick_ring { decorator: image(ringDisc); }
+        /* 圆形按钮同一套解法：border-radius 实心圆是多边形逼近、边缘不做 AA，再加上真机
+           backbuffer 低于物理像素再拉伸，边上的硬台阶特别明显。改用 256x256 软边圆盘贴图，
+           靠 decorator 的双线性缩放到元素尺寸（画多大都平滑）。
+           贴图与颜色由 _gen_hud_disc.py 生成（颜色烘进贴图：decorator 不能染色，改配色要重跑）。
+           注意：三张图必须用不同的 sprite 名，同名会在全局精灵表里互相覆盖。 */
+        @spritesheet hud_voice {
+            src: /Textures/BtnVoice.png;
+            voiceDisc: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet hud_board {
+            src: /Textures/BtnBoard.png;
+            boardDisc: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet hud_disembark {
+            src: /Textures/BtnDisembark.png;
+            disembarkDisc: 0dp 0dp 256dp 256dp;
+        }
+        #voice_btn { decorator: image(voiceDisc); }
+        #board_btn { decorator: image(boardDisc); }
+        #disembark_btn { decorator: image(disembarkDisc); }
     </style>
 </head>
 <!-- body 设 pointer-events:none 的缘由：RmlUi 的 Context::OnFocusChange 在被聚焦元素所属文档
@@ -62,6 +82,12 @@
         <div class="label" style="font-size: 30dp; color: #ffd24dff;">{{comboText}}</div>
     </div>
 
+    <!-- 右上角：自定义语音入口。data-if="voiceAvailable"：编辑器/桌面宿主没有麦克风通路，
+         整块不渲染（与“语音按钮点了没反应”的假入口区分开）。 -->
+    <div data-if="voiceAvailable" id="voice_btn" data-event-click="voice_open" style="position: absolute; right: 28dp; top: 152dp; width: 88dp; height: 88dp; text-align: center; pointer-events: auto;">
+        <div style="position: relative; top: 26dp; color: #ffffffff; font-size: 26dp; font-weight: bold;">语音</div>
+    </div>
+
     <!-- 准星已移除：改为王者式自动吸附开火（见 Shooting.lua），命中确认靠下面的 hitmarker。 -->
 
     <!-- 性能 Overlay（调试）：靠 data-if="showPerf" 整体显隐，文本由 Lua 拼好喂 perfText。
@@ -82,10 +108,10 @@
     </div>
 
     <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua -->
-    <div data-if="showBoard" data-event-click="board" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #2e8b8be6; text-align: center; pointer-events: auto;">
+    <div data-if="showBoard" id="board_btn" data-event-click="board" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">登船</div>
     </div>
-    <div data-if="showDisembark" data-event-click="disembark" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; border-radius: 48dp; background-color: #8b6b2ee6; text-align: center; pointer-events: auto;">
+    <div data-if="showDisembark" id="disembark_btn" data-event-click="disembark" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">下船</div>
     </div>
 
@@ -107,6 +133,43 @@
             <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
             <div class="label" style="margin-top: 16dp; font-size: 34dp;">SCORE {{endScore}}</div>
             <button data-event-click="restart" style="margin-top: 48dp; padding: 18dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
+            <!-- 失守这一刻才是吐槽冲动的最高点：再给一个语音入口（面板在 DOM 后面，盖在它之上） -->
+            <div data-if="voiceAvailable">
+                <button data-event-click="voice_open" style="margin-top: 24dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义语音面板：模态。data-if="voiceOpen" 关闭时整块不进渲染树；
+         打开时 main.lua 把世界 dt 压成 0（录音 3 秒里不刷怪、不开火、不能走位）。 -->
+    <div data-if="voiceOpen" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
+        <!-- 居中锚点：left 50% 的零尺寸盒 + 内层左移半个卡片宽（不依赖负 margin，与旧面板同一手法）。
+             面板自身 pointer-events:auto，否则会从 body 的 none 继承成点不动。 -->
+        <div style="position: absolute; left: 50%; top: 0; width: 0; height: 0;">
+            <!-- 宽 640dp（窄横竖屏画布约 700dp：即使 box-sizing 按 content-box 算，加 24dp 两侧 padding 仍不超宽） -->
+            <div style="position: absolute; left: -320dp; top: 130dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+                <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">自定义语音</div>
+                <div class="label" style="margin-top: 8dp; font-size: 20dp; color: #ffffff99;">录一句，战场上放你自己的声音（最长 3 秒）</div>
+
+                <div style="margin-top: 22dp;">
+                    <div class="label" style="font-size: 24dp; color: #ffffffd9;">失守吐槽 · 防线被攻破时播</div>
+                    <button data-event-click="voice_rec_lose" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
+                </div>
+
+                <div style="margin-top: 18dp;">
+                    <div class="label" style="font-size: 24dp; color: #ffffffd9;">连杀战吼 · 5 连杀起每档播</div>
+                    <button data-event-click="voice_rec_kill" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
+                </div>
+
+                <div data-if="voiceRecording" style="margin-top: 16dp; color: #ff6b6bff; font-size: 24dp; font-weight: bold;">● 录音中…</div>
+                <div class="label" style="margin-top: 12dp; font-size: 20dp; color: #9fe0ffd9;">{{voiceStatus}}</div>
+
+                <div style="margin-top: 22dp;">
+                    <button data-event-click="voice_preview" style="padding: 10dp 28dp; font-size: 24dp; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10dp;">试听</button>
+                    <button data-event-click="voice_filter" style="margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">音色 {{voiceFilterName}}</button>
+                    <button data-event-click="voice_close" style="margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">关闭</button>
+                </div>
+            </div>
         </div>
     </div>
 

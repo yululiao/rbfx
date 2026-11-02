@@ -27,7 +27,9 @@ local function clamp01(v)
 end
 
 ---@param scene Scene
----@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil }|nil
+---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil,
+---                   onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil,
+---                   onVoiceFilter: fun()|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -60,6 +62,14 @@ function Hud.Build(scene, handlers)
     -- 性能 Overlay（调试）：perfText 是 Lua 拼好的一行文本，showPerf 控制 data-if 整体显隐。
     self.perfText = ""
     self.showPerf = false
+    -- 自定义语音（game/Voice.lua 推）：入口只在宿主 SDK 可用时出现（编辑器/桌面没有
+    -- 麦克风通路）；voiceOpen 是模态面板，main.lua 帧循环据此把世界 dt 压成 0——
+    -- 录一句要 3 秒，不暂停就是“调个性调着调着被偷家”。
+    self.voiceAvailable = false
+    self.voiceOpen = false
+    self.voiceRecording = false
+    self.voiceStatus = ""
+    self.voiceFilterName = ""
 
     local comp = scene:CreateComponent("LuaRmlUIComponent")
     self.comp = comp
@@ -91,6 +101,12 @@ function Hud.Build(scene, handlers)
             -- 性能 Overlay（调试）：文本 + 显隐开关
             w:BindReadonlyProperty("perfText", function() return self.perfText end)
             w:BindReadonlyProperty("showPerf", function() return self.showPerf end)
+            -- 自定义语音：入口显隐 / 面板显隐 / 录音中标记 / 状态行 / 当前音色名
+            w:BindReadonlyProperty("voiceAvailable", function() return self.voiceAvailable end)
+            w:BindReadonlyProperty("voiceOpen", function() return self.voiceOpen end)
+            w:BindReadonlyProperty("voiceRecording", function() return self.voiceRecording end)
+            w:BindReadonlyProperty("voiceStatus", function() return self.voiceStatus end)
+            w:BindReadonlyProperty("voiceFilterName", function() return self.voiceFilterName end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -106,6 +122,29 @@ function Hud.Build(scene, handlers)
             w:BindEvent("disembark", function()
                 if handlers.onDisembark then
                     handlers.onDisembark()
+                end
+            end)
+            -- 自定义语音：开/关面板是纯 UI 状态（就地切），录/试听/换音色转发给 Voice
+            w:BindEvent("voice_open", function() self:OpenVoice() end)
+            w:BindEvent("voice_close", function() self:CloseVoice() end)
+            w:BindEvent("voice_rec_lose", function()
+                if handlers.onVoiceRecord then
+                    handlers.onVoiceRecord(Config.VOICE_SLOT_LOSE)
+                end
+            end)
+            w:BindEvent("voice_rec_kill", function()
+                if handlers.onVoiceRecord then
+                    handlers.onVoiceRecord(Config.VOICE_SLOT_KILLSTREAK)
+                end
+            end)
+            w:BindEvent("voice_preview", function()
+                if handlers.onVoicePreview then
+                    handlers.onVoicePreview()
+                end
+            end)
+            w:BindEvent("voice_filter", function()
+                if handlers.onVoiceFilter then
+                    handlers.onVoiceFilter()
                 end
             end)
         end,
@@ -263,6 +302,56 @@ end
 function Hud:SetWeaponText(text)
     self.weaponText = text or ""
     self:Dirty("weaponText")
+end
+
+----------------------------------------------------------------------
+-- 自定义语音（game/Voice.lua）
+----------------------------------------------------------------------
+
+--- 是否显示语音入口（宿主 SDK 可用才显示；编辑器/桌面整块不渲染）。
+function Hud:SetVoiceAvailable(b)
+    self.voiceAvailable = b and true or false
+    self:Dirty("voiceAvailable")
+end
+
+--- 打开语音面板（模态，main.lua 据此暂停世界推进）。
+function Hud:OpenVoice()
+    if not self.voiceOpen then
+        self.voiceOpen = true
+        self:Dirty("voiceOpen")
+    end
+end
+
+function Hud:CloseVoice()
+    if self.voiceOpen then
+        self.voiceOpen = false
+        self:Dirty("voiceOpen")
+    end
+end
+
+---@return boolean 语音面板是否开着（帧循环用它把世界 dt 压成 0）
+function Hud:IsVoiceModal()
+    return self.voiceOpen
+end
+
+--- 录音中标记（面板上亮红点）。
+function Hud:SetVoiceRecording(b)
+    self.voiceRecording = b and true or false
+    self:Dirty("voiceRecording")
+end
+
+--- 面板状态行（录好了 / 没授权麦克风 / 还没录过）。
+---@param text string
+function Hud:SetVoiceStatus(text)
+    self.voiceStatus = text or ""
+    self:Dirty("voiceStatus")
+end
+
+--- 当前变声音色名（Voice:CycleFilter 的返回值）。
+---@param name string
+function Hud:SetVoiceFilterName(name)
+    self.voiceFilterName = name or ""
+    self:Dirty("voiceFilterName")
 end
 
 --- 每帧：hitmarker 到点自动关闭 + 旁白到期清除。

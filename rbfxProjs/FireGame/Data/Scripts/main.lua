@@ -28,6 +28,7 @@ local Juice = require("game.Juice")
 local Grow = require("game.Grow")
 local Dog = require("game.Dog")
 local HpBar = require("game.HpBar")
+local Voice = require("game.Voice")
 
 ----------------------------------------------------------------------
 -- 帧率上限：真机（抖音 wasm）主循环按 Config.MAX_FPS 节流，省电/降热。
@@ -118,7 +119,7 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice
 
 local function RestartGame()
     if enemy then
@@ -148,6 +149,10 @@ local function RestartGame()
     end
     if hud then
         hud:HideEnd()
+        hud:CloseVoice()   -- 上一局开着的语音面板不带进新局（否则新局一开就定格）
+    end
+    if voice then
+        voice:Stop()       -- 上一局的语音/试听不拖进新局
     end
 end
 
@@ -235,7 +240,22 @@ hud = Hud.Build(scene, {
     onRestart = RestartGame,
     onBoard = OnBoard,
     onDisembark = OnDisembark,
+    -- 自定义语音：面板只管 UI，录/试听/换音色转发给 Voice（本函数之后才 build，闭包运行时解引用）
+    onVoiceRecord = function(slot)
+        if voice then voice:Record(slot) end
+    end,
+    onVoicePreview = function()
+        if voice then voice:Preview() end
+    end,
+    onVoiceFilter = function()
+        if voice and hud then
+            hud:SetVoiceFilterName(voice:CycleFilter())
+        end
+    end,
 })
+-- 自定义语音（麦克风录一句→变声回放到失守/连杀）：必须在 Hud 之后建（面板状态推给它）、
+-- Waves 之前建（失守与连杀触发点要拿它回放）。宿主不支持时它自身全部静默，UI 也不显示入口。
+voice = Voice.Build(scene, { hud = hud })
 -- 相机参数调试面板（仅 Config.DEBUG_CAM_PANEL=true）：右上角一颗按钮，真机上实时拖相机常量
 -- 并把可粘回 Config.lua 的数值打到日志。必须在 player 之后建（它要调 player:ApplyCameraFit）。
 -- 开关为 false 时下面整块不存在——上线包里连 UI 组件都不会创建。
@@ -251,7 +271,7 @@ enemy:SpawnStaticBarrels()
 -- 故在两者之后建；建完回填 enemy.dog，使大船炮弹落地时能把狗炸飞（Enemy:CannonImpact）。
 dog = Dog.Build({ scene = scene, player = player, enemies = enemy, audio = audio })
 enemy.dog = dog
-waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, onGameOver = OnGameOver,
+waves = Waves.Build({ enemy = enemy, audio = audio, hud = hud, voice = voice, onGameOver = OnGameOver,
     onWaveCleared = function() if dog then dog:GoRest() end end })
 -- 友方炮塔：需 enemy（索敌）+ waves（血量）+ coast.turrets（句柄），故在两者之后建；
 -- 建完回填 enemy.turrets，使冲塔型海盗能问“最近哪座塔还活着、该走到哪”（与 dog 同一条路子）。
@@ -374,6 +394,11 @@ SubscribeToEvent("Update", function(data)
     -- 引擎侧骨骼动画/粒子不受它影响（走自己的 Frame::timeStep），定格里死亡动画
     -- 照常播——这正是要的效果。世界 dt 只眼世界逻辑：海面滚动/开火/敌人/波次/主角。
     local worldDt = juice:BeginFrame(dt)
+    -- 语音面板是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
+    -- 走引擎自己的 timeStep 不受影响）。录音上限 3 秒，不暂停就是“调个音色被偷家”。
+    if hud and hud:IsVoiceModal() then
+        worldDt = 0.0
+    end
 
     -- 海面波纹流动：滚动法线贴图 UV（xy 的平铺密度与 Water.xml 的 UOffset/VOffset 同源，
     -- 提成了 Config.SEA_TILE，改密度只动那一处；w 是平移量）。
@@ -408,9 +433,10 @@ SubscribeToEvent("Update", function(data)
     if kx ~= 0.0 or ky ~= 0.0 then
         stickX, stickY = kx, ky
     end
-    -- 相机调试面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：小画布（编辑器
-    -- GameView）下面板会盖住左下抓取区，否则拖滑条的同时人物在走，构图边变边看，调不准。
-    if camDebug and camDebug:IsModal() then
+    -- 相机调试面板/语音面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：小画布（编辑器
+    -- GameView）下面板会盖住左下抓取区，否则拖滑条的同时人物在走，构图边变边看，调不准；
+    -- 语音面板同理，录音时摇杆帽乱跑看着像卡了。
+    if (camDebug and camDebug:IsModal()) or (hud and hud:IsVoiceModal()) then
         stickX, stickY = 0.0, 0.0
     end
 

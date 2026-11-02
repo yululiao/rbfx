@@ -292,11 +292,21 @@
         // vendors; other values get snapped by the host. Game code passes the steps.
         var rate = Number(args.rate) || 1.0;
 
+        // A slot that was never recorded (or whose clip was cleaned up) is not a
+        // playback error the game should wait on: report it immediately so the caller
+        // can fall back to its canned cue on the very next frame.
+        var src = voice_file_path(slot);
+        try {
+            wx_tt.getFileSystemManager().accessSync(src);
+        } catch (e) {
+            return complete(request_id, false, "no clip recorded for this slot");
+        }
+
         // One audio instance at a time: a new playback replaces the previous one and
         // completes its request as "stopped" so no callback leaks.
         stop_voice_audio();
         voice_audio = wx_tt.createInnerAudioContext();
-        voice_audio.src = voice_file_path(slot);
+        voice_audio.src = src;
         voice_audio.playbackRate = rate;
         var settled = false;
         var settle = function (ok, text) {
@@ -308,7 +318,12 @@
         voice_audio.__settle = settle;
         voice_audio.onEnded(function () { settle(true); });
         voice_audio.onError(function (error) { settle(false, fail_text(error, "playback failed")); });
-        voice_audio.play();
+        try {
+            voice_audio.play();
+        } catch (error) {
+            // A synchronous throw would otherwise leak the request (never completed).
+            settle(false, fail_text(error, "playback failed"));
+        }
     };
 
     handlers[KIND.stop_user_audio] = function (request_id) {

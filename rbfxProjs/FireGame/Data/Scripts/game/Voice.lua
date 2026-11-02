@@ -34,11 +34,27 @@ function Voice.Build(scene, deps)
     self.recording = false       -- 是否有录音请求在途（防止重入）
     self.previewing = false      -- 是否有试听请求在途（结果回写 HUD 状态行）
     self.lastSlot = nil          -- 最近录成功的槽位（试听默认播它）
+    self.pendingSlot = nil       -- 本次录音请求的槽位（结果回来时才落进 lastSlot）
+    -- 玩法触发回放（Play）的回落约定：宿主回放失败 → 播预置旁白。只认“这一次请求”的
+    -- 失败：JS 侧新的回放会顶掉旧的并以 success=false("playback stopped") 结算，若不看 id，
+    -- 被顶掉的那次会误触发回落，出现“既有你的声音又有 Kenney 旁白”的双响。
+    self.pendingPlayId = 0       -- 0 = 没有待回落的玩法回放
+    self.pendingFallback = nil   -- 该次回放失败时要补播的预置旁白（fun）
 
     -- 录音/试听结果都从这里回来（BEGINFRAME 边界派发，见 MinigameSDK.cpp）
     SubscribeToEvent("MinigameSdkResult", function(data)
         self:OnSdkResult(data)
     end)
+
+    -- UI 侧初始状态：入口按宿主能力显隐（编辑器/桌面整块不渲染），音色名先显示默认档
+    if self.hud then
+        if self.hud.SetVoiceAvailable then
+            self.hud:SetVoiceAvailable(self:IsAvailable())
+        end
+        if self.hud.SetVoiceFilterName then
+            self.hud:SetVoiceFilterName(Config.VOICE_FILTERS[self.filterIdx].name)
+        end
+    end
     return self
 end
 
@@ -84,26 +100,36 @@ function Voice:Preview()
     end
     local slot = self.lastSlot or Config.VOICE_SLOT_LOSE
     self.previewing = true
+    -- 新的回放顶掉上一条：那条玩法回放是被主动打断的，不该再回落预置旁白
+    self.pendingPlayId = 0
+    self.pendingFallback = nil
     self.sdk:PlayUserAudio(slot, self:CurrentRate())
 end
 
---- 玩法触发回放（失败吐槽/连杀战吼）。文件不存在时宿主回失败，这里静默——
---- 玩法触发点不弹 UI（战场上突然冒“没录过音”比没声音更糟）。
----@param slot string
-function Voice:Play(slot)
+--- 玩法触发回放（失守吐槽/连杀战吼）：录过就播你的，没录过回落预置旁白。
+--- 触发点不弹 UI（战场上突然冒“没录过音”比没声音更糟），所以回落靠宿主回放失败事件。
+---@param slot string Config.VOICE_SLOT_*
+---@param fallback fun()|nil 宿主里没有这段录音时补播的那句旁白
+function Voice:Play(slot, fallback)
     if not self:IsAvailable() then
+        if fallback then
+            fallback()
+        end
         return
     end
-    self.sdk:PlayUserAudio(slot, self:CurrentRate())
+    self.pendingFallback = fallback
+    self.pendingPlayId = self.sdk:PlayUserAudio(slot, self:CurrentRate())
 end
 
 --- 停掉当前回放（换局时调，避免上一局的语音拖进新局）。
 function Voice:Stop()
+    self.pendingPlayId = 0
+    self.pendingFallback = nil
+    self.previewing = false
     if not self:IsAvailable() then
         return
     end
     self.sdk:StopUserAudio()
-    self.previewing = false
 end
 
 --- MinigameSdkResult 事件分发：录音/试听结果回写 HUD 状态行。
@@ -118,14 +144,26 @@ function Voice:OnSdkResult(data)
             -- Payload 形如 {"durationMs":2143}；槽位由发起方记在 pendingSlot
             self.lastSlot = self.pendingSlot or self.lastSlot
             if self.hud and self.hud.SetVoiceStatus then
-                self.hud:SetVoiceStatus("录好了！点“试听”听听效果")
+                self.hud:SetVoiceStatus("录好了！听听变声效果")
             end
+            -- 录完立刻回放一遍：变声的听感就是这功能的全部，别让玩家自己再点一次
+            self:Preview()
         else
             if self.hud and self.hud.SetVoiceStatus then
                 self.hud:SetVoiceStatus("录音失败（可能是没授权麦克风）")
             end
         end
     elseif kind == MINIGAME_REQUEST_KIND.PLAY_USER_AUDIO then
+        -- 玩法回放失败（该槽位没录过 / 录音文件被清理）：补播预置旁白。
+        -- 按请求 id 认领，被后一次回放顶掉的旧请求在这里对不上，不会误触发。
+        if self.pendingPlayId ~= 0 and data.RequestId == self.pendingPlayId then
+            local fallback = self.pendingFallback
+            self.pendingPlayId = 0
+            self.pendingFallback = nil
+            if not data.Success and fallback then
+                fallback()
+            end
+        end
         if self.previewing then
             self.previewing = false
             if self.hud and self.hud.SetVoiceStatus then
