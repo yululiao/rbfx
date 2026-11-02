@@ -32,6 +32,7 @@ function Voice.Build(scene, deps)
 
     self.filterIdx = math.min(math.max(Config.VOICE_DEFAULT_FILTER, 1), #Config.VOICE_FILTERS)
     self.recording = false       -- 是否有录音请求在途（防止重入）
+    self.recordDeadline = 0      -- 录音看门狗的剩余秒数（0 = 没有在途请求）
     self.previewing = false      -- 是否有试听请求在途（结果回写 HUD 状态行）
     self.lastSlot = nil          -- 最近录成功的槽位（试听默认播它）
     self.pendingSlot = nil       -- 本次录音请求的槽位（结果回来时才落进 lastSlot）
@@ -44,6 +45,12 @@ function Voice.Build(scene, deps)
     -- 录音/试听结果都从这里回来（BEGINFRAME 边界派发，见 MinigameSDK.cpp）
     SubscribeToEvent("MinigameSdkResult", function(data)
         self:OnSdkResult(data)
+    end)
+
+    -- 录音看门狗：宿主若既不给结果也不报错（shim 侧已见到过一次这种吞回调），面板会永远
+    -- 停在“录音中”。shim 自带 duration+30s 的结算，这里再留几秒余量，谁先到谁解锁。
+    SubscribeToEvent("Update", function(data)
+        self:OnUpdate(data.TimeStep)
     end)
 
     -- UI 侧初始状态：入口按宿主能力显隐（编辑器/桌面整块不渲染），音色名先显示默认档
@@ -87,10 +94,35 @@ function Voice:Record(slot)
     end
     self.recording = true
     self.pendingSlot = slot
+    -- 上限秒数 + 余量：shim 侧在 duration+30s 结算，这个只兜“连 shim 都没回”的情况
+    self.recordDeadline = Config.VOICE_MAX_SEC + 35
     if self.hud and self.hud.SetVoiceRecording then
         self.hud:SetVoiceRecording(true)
     end
     self.sdk:RecordVoice(slot, Config.VOICE_MAX_SEC)
+end
+
+--- 录音看门狗（订阅见 Build）：超时还在挂着就解锁面板，别让玩家对着“录音中”干等。
+---@param dt number
+function Voice:OnUpdate(dt)
+    if not self.recording or self.recordDeadline <= 0 then
+        return
+    end
+    self.recordDeadline = self.recordDeadline - (dt or 0)
+    if self.recordDeadline > 0 then
+        return
+    end
+    self.recordDeadline = 0
+    self.recording = false
+    print("Voice: recording never settled; unlocking the panel")
+    if self.hud then
+        if self.hud.SetVoiceRecording then
+            self.hud:SetVoiceRecording(false)
+        end
+        if self.hud.SetVoiceStatus then
+            self.hud:SetVoiceStatus("录音没响应，再试一次")
+        end
+    end
 end
 
 --- 试听（面板按钮）：优先播最近录的槽位（没录过则播 lose 槽）。
@@ -137,6 +169,7 @@ function Voice:OnSdkResult(data)
     local kind = data.Kind
     if kind == MINIGAME_REQUEST_KIND.RECORD_VOICE then
         self.recording = false
+        self.recordDeadline = 0
         if self.hud and self.hud.SetVoiceRecording then
             self.hud:SetVoiceRecording(false)
         end
@@ -149,8 +182,16 @@ function Voice:OnSdkResult(data)
             -- 录完立刻回放一遍：变声的听感就是这功能的全部，别让玩家自己再点一次
             self:Preview()
         else
+            -- 宿主回来的失败原文（errMsg/errCode）进日志：真机上只有这一条线索能把
+            -- “没授权”“设备忙”“格式不支持”区分开，状态行只放玩家能动作的那一句。
+            local reason = tostring(data.Payload or "")
+            print("Voice: recording failed: " .. reason)
             if self.hud and self.hud.SetVoiceStatus then
-                self.hud:SetVoiceStatus("录音失败（可能是没授权麦克风）")
+                if string.find(reason, "permission denied", 1, true) then
+                    self.hud:SetVoiceStatus("麦克风没开权限：设置里允许后重进")
+                else
+                    self.hud:SetVoiceStatus("录音失败，再试一次")
+                end
             end
         end
     elseif kind == MINIGAME_REQUEST_KIND.PLAY_USER_AUDIO then

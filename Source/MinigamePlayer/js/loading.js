@@ -15,6 +15,12 @@
 // weighted together into pre_engine_init_rate of the bar - and an engine initialization
 // phase taking the rest. The engine reports its own progress through setEngineInitStatus().
 
+// How long a failed boot attempt is given to be replaced by a successful one before the player
+// is told the game is broken. It has to outlast the subpackage retry (1s) plus the time that
+// attempt needs to reach its first frame; the loading screen keeps animating meanwhile, so a
+// false alarm is worse than a late one.
+const ENGINE_FAILURE_GRACE_MS = 8000;
+
 class RbfxBlitter {
     // Draws a 2D canvas as a full-screen textured quad. The engine later shares this GL
     // context, so every piece of state this class touches is set explicitly on every blit:
@@ -202,6 +208,7 @@ class RbfxLoading {
         this.compile_done = false;     // wasm instantiation finished
         this.engine_init_rate = 0;     // engine-reported initialization progress, 0..1
         this.engine_started = false;   // the module factory has been called
+        this.failure_timer = null;     // pending "did it really fail" check (see onEngineFactoryFailed)
         this.info = "启动中";
         this.last_info = null;
         this.frame_count = 0;
@@ -417,6 +424,9 @@ class RbfxLoading {
         let attempt = 0;
         const load = () => {
             ++attempt;
+            // A retry means work is in flight again; the previous attempt's failure says
+            // nothing about whether the engine will come up.
+            this._cancel_failure_report();
             const task = wx_tt.loadSubpackage({
                 name: entry.name,
                 success: () => {
@@ -499,10 +509,18 @@ class RbfxLoading {
     }
 
     _instantiate_engine(factory) {
-        if (this.done || this.engine_started)
+        // The engine, the GL context on the canvas and the package file bridge are all
+        // process-wide singletons: a second module instance cannot boot beside the first one.
+        // A vendor may run the package entry (and with it the subpackage entry) more than once,
+        // so this flag lives on globalThis rather than on the rbfx bootstrap object, which
+        // rbfx_env.js rebuilds from scratch when the entry is evaluated again.
+        if (this.done || this.engine_started || globalThis.rbfx_engine_running) {
+            console.warn("[rbfx] ignoring a duplicate engine factory request");
             return;
+        }
         this.pending_factory = null;
         this.engine_started = true;
+        this._cancel_failure_report();
         this.downloadRate = 1.0;
         this.info = "编译引擎";
 
@@ -516,10 +534,37 @@ class RbfxLoading {
         }
     }
 
+    /// Drop a pending failure report: something is in flight again, so "the engine never came
+    /// up" is not a conclusion yet.
+    _cancel_failure_report() {
+        if (!this.failure_timer)
+            return;
+        clearTimeout(this.failure_timer);
+        this.failure_timer = null;
+    }
+
+    /// A boot attempt reported a failure. That report is not proof of a dead game: a failed
+    /// subpackage download is retried a second later, and the retry runs the subpackage entry
+    /// again, which starts the engine for real. Showing a modal for the first attempt is what
+    /// leaves the player with "engine failed" over a game that runs fine behind it - the
+    /// long-standing false alarm on device. So a report only clears the way for the next
+    /// attempt; the modal waits until the engine is still down after a grace window.
     onEngineFactoryFailed(error) {
         console.error("[rbfx] engine module failed to start", error);
-        if (globalThis.wx_tt && wx_tt.showModal)
-            wx_tt.showModal({content: "游戏引擎启动失败，请重新进入游戏", showCancel: false});
+        // This attempt is over: let a later delivery of the factory try again.
+        this.engine_started = false;
+
+        if (this.done || globalThis.rbfx_engine_running || this.failure_timer)
+            return;
+
+        this.failure_timer = setTimeout(() => {
+            this.failure_timer = null;
+            if (this.done || globalThis.rbfx_engine_running)
+                return;
+            console.error("[rbfx] engine never came up after the grace window");
+            if (globalThis.wx_tt && wx_tt.showModal)
+                wx_tt.showModal({content: "游戏引擎启动失败，请重新进入游戏", showCancel: false});
+        }, ENGINE_FAILURE_GRACE_MS);
     }
 
     /// Reported by the pre-js platform layer around the wasm compilation step.
@@ -549,6 +594,10 @@ class RbfxLoading {
 
     _finish() {
         this.done = true;
+        // From here on the engine is not "starting" any more: a failure reported later belongs
+        // to a duplicate instance or to an attempt that lost a race, and must stay silent.
+        globalThis.rbfx_engine_running = true;
+        this._cancel_failure_report();
         if (this.blitter) {
             this.blitter.destroy();
             this.blitter = null;

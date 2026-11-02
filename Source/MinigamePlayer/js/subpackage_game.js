@@ -5,6 +5,10 @@
 // The Emscripten glue beside this file is built with MODULARIZE=1: requiring it only defines
 // the module factory (createRbfxModule). The factory is handed to the loading manager, which
 // owns the canvas and calls it. Nothing here may start the engine directly.
+//
+// A vendor also runs this file again when it retries a subpackage, so a throw below is not
+// necessarily fatal: the loading manager treats the report as a failed attempt and only gives
+// up once the engine stays down (see onEngineFactoryFailed).
 (function () {
     try {
         var factory = require("./MinigamePlayer");

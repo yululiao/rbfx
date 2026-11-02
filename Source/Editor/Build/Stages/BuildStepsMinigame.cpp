@@ -57,6 +57,61 @@ bool WriteTextFile(Context* context, const ea::string& path, const ea::string& t
     return true;
 }
 
+/// Read a whole text file; false when it cannot be opened.
+bool ReadTextFile(Context* context, const ea::string& path, ea::string& text)
+{
+    File file(context, path, FILE_READ);
+    if (!file.IsOpen())
+        return false;
+    const unsigned size = file.GetSize();
+    text.resize(size);
+    return size == 0 || file.Read(&text[0], size) == size;
+}
+
+/// The main-package bootstrap scripts, in the order MinigamePlayer/CMakeLists.txt stages them.
+constexpr const char* BootstrapScripts[] = {
+    "game.js", "rbfx_env.js", "rbfx_game_config.js", "weapp-adapter.js", "minigame_runtime.js",
+    "minigame_files.js", "minigame_sdk.js", "loading_config.js", "loading.js"};
+
+/// The wasm subpackage entry script, staged as that subpackage's game.js.
+constexpr const char* SubpackageEntryScript = "subpackage_game.js";
+
+/// Directory the build tree staged its bootstrap from, as recorded by the engine build (see
+/// MinigamePlayer/CMakeLists.txt). Empty for a tree staged before that marker existed.
+ea::string ReadBootstrapSourceDir(Context* context, const ea::string& bin)
+{
+    ea::string text;
+    if (!ReadTextFile(context, bin + "rbfx_minigame_source.txt", text))
+        return {};
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
+        text.pop_back();
+    return text.empty() ? ea::string{} : NormalizeDir(text);
+}
+
+/// Overwrite one staged script with its source when the two differ. The bootstrap scripts are
+/// plain files the engine build copies while staging, so editing one dirties no target: a package
+/// assembled against a pre-built engine would ship the copies from the last engine build, for as
+/// long as nobody happens to rebuild it. Refreshing here keeps what ships in step with the sources.
+bool RefreshStagedScript(Context* context, const ea::string& sourceDir, const ea::string& sourceName,
+    const ea::string& targetPath, unsigned& refreshed, ea::string& message)
+{
+    const ea::string source = sourceDir + sourceName;
+    ea::string sourceText;
+    if (!ReadTextFile(context, source, sourceText))
+        return true; // the sources are not reachable from here: keep what the build staged
+    ea::string targetText;
+    if (ReadTextFile(context, targetPath, targetText) && targetText == sourceText)
+        return true;
+    auto* fs = context->GetSubsystem<FileSystem>();
+    if (!fs->Copy(source, targetPath))
+    {
+        message = Format("Could not refresh '{}' from '{}'.", targetPath, source);
+        return false;
+    }
+    ++refreshed;
+    return true;
+}
+
 /// Subpackage directory names the build tree may carry, in the order the config prefers them: the
 /// standard variant first, the legacy-compatible one as the fallback for devices that need it.
 ea::vector<ea::string> FindWasmSubpackages(FileSystem* fs, const ea::string& bin)
@@ -182,6 +237,27 @@ bool DouyinRuntimeStep::StageBootstrap(const ea::string& bin, ea::string& messag
         message = Format("Could not copy the bootstrap scripts from '{}'.", bin + "minigame");
         return false;
     }
+
+    // Copied, but not necessarily current: the staging runs when the engine target is built, and
+    // the editor assembles packages against whatever build tree 'EngineBin' points at.
+    const ea::string sourceDir = ReadBootstrapSourceDir(owner_.context(), bin);
+    if (!sourceDir.empty())
+    {
+        unsigned refreshed = 0;
+        for (const char* const script : BootstrapScripts)
+        {
+            const ea::string targetPath = outputDir + script;
+            if (!RefreshStagedScript(owner_.context(), sourceDir, ea::string("js/") + script,
+                targetPath, refreshed, message))
+                return false;
+        }
+        if (refreshed > 0)
+        {
+            URHO3D_LOGINFO("[Build] refreshed {} bootstrap script(s) from '{}js': the staged copies "
+                "were older than the sources", refreshed, sourceDir);
+        }
+    }
+
     if (!fs->FileExists(outputDir + "game.js"))
     {
         message = Format("'{}' contains no game.js; the package would have no entry point.",
@@ -206,6 +282,19 @@ bool DouyinRuntimeStep::StageWasmSubpackage(const ea::string& bin, const ea::str
         message = Format("Could not copy the wasm subpackage from '{}'.", bin + name);
         return false;
     }
+
+    // The entry script is staged the same way the bootstrap is, and drifts the same way.
+    const ea::string sourceDir = ReadBootstrapSourceDir(owner_.context(), bin);
+    if (!sourceDir.empty())
+    {
+        unsigned refreshed = 0;
+        if (!RefreshStagedScript(owner_.context(), sourceDir, ea::string("js/") + SubpackageEntryScript,
+            destination + "game.js", refreshed, message))
+            return false;
+        if (refreshed > 0)
+            URHO3D_LOGINFO("[Build] refreshed the '{}' entry script from the sources", name);
+    }
+
     if (!fs->FileExists(destination + "game.js"))
     {
         message = Format("'{}' has no game.js entry script.", bin + name + "/");

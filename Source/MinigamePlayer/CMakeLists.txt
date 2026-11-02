@@ -170,8 +170,17 @@ set (MINIGAME_BOOTSTRAP_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/js/loading.js"
 )
 
+# The bootstrap scripts are plain files: editing one rebuilds nothing, so a build tree that is
+# not rebuilt (the editor assembles packages against a pre-built engine) keeps staging the copies
+# from the last engine build. Record where the sources live beside the staged set, so the
+# assembler can refresh whatever drifted instead of packaging the old scripts in silence.
+file (WRITE "${CMAKE_CURRENT_BINARY_DIR}/rbfx_minigame_source.txt" "${CMAKE_CURRENT_SOURCE_DIR}")
+
 install (FILES ${MINIGAME_BOOTSTRAP_FILES}
     DESTINATION ${CMAKE_INSTALL_BINDIR}/minigame)
+# Beside 'minigame', not inside it: the assembler copies that directory into the package verbatim.
+install (FILES "${CMAKE_CURRENT_BINARY_DIR}/rbfx_minigame_source.txt"
+    DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 install (FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/MinigamePlayer.js"
     DESTINATION ${CMAKE_INSTALL_BINDIR}/${MINIGAME_SUBPACKAGE})
@@ -190,6 +199,9 @@ add_custom_command (TARGET MinigamePlayer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:MinigamePlayer>/minigame"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MINIGAME_BOOTSTRAP_FILES}
         "$<TARGET_FILE_DIR:MinigamePlayer>/minigame"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_BINARY_DIR}/rbfx_minigame_source.txt"
+        "$<TARGET_FILE_DIR:MinigamePlayer>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:MinigamePlayer>/${MINIGAME_SUBPACKAGE}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/js/subpackage_game.js"

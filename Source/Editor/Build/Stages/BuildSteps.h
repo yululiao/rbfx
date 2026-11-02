@@ -253,10 +253,12 @@ public:
 
 private:
     /// Copy the main-package bootstrap scripts out of the build tree to the package root, where the
-    /// vendor runtime looks for its entry document.
+    /// vendor runtime looks for its entry document, refreshing any script the sources have moved on
+    /// from (a package is assembled without rebuilding the engine that staged them).
     bool StageBootstrap(const ea::string& bin, ea::string& message);
     /// Copy one wasm subpackage: its entry script as staged by the build, plus the module the entry
-    /// requires beside itself, brotli-compressed for the vendor loader.
+    /// requires beside itself, brotli-compressed for the vendor loader. The entry script is refreshed
+    /// against its source for the same reason the bootstrap is.
     bool StageWasmSubpackage(const ea::string& bin, const ea::string& name, ea::string& message);
     /// Place the compressed engine module into the subpackage: the wasm from 'bin' through the node
     /// emsdk ships, landing as <module>.wasm.br beside the entry script.
