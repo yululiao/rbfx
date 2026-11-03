@@ -44,6 +44,9 @@ function Hud.Build(scene, handlers)
     -- 主角血、炮塔血都不往 HUD 喂：分挂在人物/炮塔头顶的世界空间血条（game/HpBar.lua）每帧直读。
     self.narrate = ""
     self.narrateT = 0.0
+    -- 开始画面：会话首次默认盖着战场（data-if="showStart"），点“开始”收起后
+    -- 本会话不再出现；开着的期间 main.lua 把世界 dt 压成 0（波间倒计时不走）。
+    self.showStart = true
     -- hitmarker 靠两个 bool + data-if 二选一显示（内联 style 绑不了 opacity/color）
     self.hitNormal = false
     self.hitStrong = false
@@ -51,6 +54,9 @@ function Hud.Build(scene, handlers)
     self.gameOver = false      -- data-if="gameOver"：结算面板显隐
     self.endTitle = ""
     self.endScore = 0
+    -- 结算页分享入口：与语音入口同源的宿主能力判定（编辑器/桌面没有分享通路），
+    -- main.lua 在 Build 后按 sdk:IsAvailable() 打开。
+    self.shareAvailable = false
     -- 登船/下船按钮显隐（data-if）：main.lua 帧循环里根据交互条件 Show/Hide
     self.showBoard = false
     self.showDisembark = false
@@ -90,10 +96,12 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("hitNormal", function() return self.hitNormal end)
             w:BindReadonlyProperty("hitStrong", function() return self.hitStrong end)
             w:BindReadonlyProperty("gameOver", function() return self.gameOver end)
+            w:BindReadonlyProperty("showStart", function() return self.showStart end)
             w:BindReadonlyProperty("showBoard", function() return self.showBoard end)
             w:BindReadonlyProperty("showDisembark", function() return self.showDisembark end)
             w:BindReadonlyProperty("narrate", function() return self.narrate end)
             w:BindReadonlyProperty("endTitle", function() return self.endTitle end)
+            w:BindReadonlyProperty("shareAvailable", function() return self.shareAvailable end)
             -- 局内成长：等级、经验条(0..1)、武器文本
             w:BindReadonlyProperty("level", function() return self.level end)
             w:BindReadonlyProperty("xp", function() return clamp01(self.xpProg) end)
@@ -113,6 +121,13 @@ function Hud.Build(scene, handlers)
                     handlers.onRestart()
                 end
             end)
+            -- 开始画面：收起面板并放行世界（game_start 埋点在 main.lua 的回调里报，
+            -- 那才是“用户主动决定开始”的漏斗起点）
+            w:BindEvent("start", function()
+                if handlers.onStart then
+                    handlers.onStart()
+                end
+            end)
             -- 载具交互：登船/下船
             w:BindEvent("board", function()
                 if handlers.onBoard then
@@ -122,6 +137,12 @@ function Hud.Build(scene, handlers)
             w:BindEvent("disembark", function()
                 if handlers.onDisembark then
                     handlers.onDisembark()
+                end
+            end)
+            -- 结算页分享：战绩由 main.lua 的回调从 Waves 取（分数/波数只在局终有意义）
+            w:BindEvent("share", function()
+                if handlers.onShare then
+                    handlers.onShare()
                 end
             end)
             -- 自定义语音：开/关面板是纯 UI 状态（就地切），录/试听/换音色转发给 Voice
@@ -254,6 +275,25 @@ function Hud:ShowEnd(win, score, title)
     self:Dirty("gameOver")
     self:Dirty("endTitle")
     self:Dirty("endScore")
+end
+
+--- 收起开始画面（点“开始”后；会话内不再出现）。
+function Hud:HideStart()
+    if self.showStart then
+        self.showStart = false
+        self:Dirty("showStart")
+    end
+end
+
+---@return boolean 开始画面是否盖着（帧循环用它把世界 dt 压成 0，波间倒计时不走）
+function Hud:IsStartModal()
+    return self.showStart
+end
+
+--- 结算页分享入口显隐（宿主 SDK 可用才显示）。
+function Hud:SetShareAvailable(b)
+    self.shareAvailable = b and true or false
+    self:Dirty("shareAvailable")
 end
 
 function Hud:HideEnd()

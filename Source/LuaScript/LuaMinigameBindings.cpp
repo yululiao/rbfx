@@ -73,6 +73,12 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
                 sol::optional<ea::string> path) -> int {
                 return sdk ? sdk->StopGameAudio(path.value_or(EMPTY_STRING)) : 0;
             })
+            // Analytics: params is a ready-made flat JSON object string; missing on
+            // events that carry no fields.
+            LUA_MEMBER_FUNC_RAW(ReportAnalytics, [](MinigameSDK* sdk, const ea::string& event,
+                sol::optional<ea::string> paramsJson) -> int {
+                return sdk ? sdk->ReportAnalytics(event, paramsJson.value_or(EMPTY_STRING)) : 0;
+            })
             LUA_MEMBER_FUNC_RET(IsAvailable, bool)
         );
     }
@@ -120,7 +126,8 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
         "STOP_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopUserAudio),
         "CLEAR_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::ClearUserAudio),
         "PLAY_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayGameAudio),
-        "STOP_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopGameAudio));
+        "STOP_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopGameAudio),
+        "REPORT_ANALYTICS", static_cast<int>(MinigameSDKRequestKind::ReportAnalytics));
 }
 
 } // namespace Urho3D

@@ -37,6 +37,14 @@ if (rbfx.env.is_wechat) {
 // object: on browsers that is `window`, in the minigame runtimes it is `GameGlobal`.
 globalThis.rbfx = rbfx;
 
+// The boot clock: this file is the first code the vendor runtime executes, so the delta to
+// the engine's first frame is the cold-start time the analytics "boot" event reports. The
+// guard keeps the original start across a duplicate entry evaluation (the vendor re-runs
+// this file on a subpackage retry, and the first evaluation is when the player started
+// waiting).
+if (typeof globalThis.rbfx_boot_t0 !== "number")
+    globalThis.rbfx_boot_t0 = Date.now();
+
 // WeChat and Douyin APIs are mostly identical; `wx_tt` resolves to the vendor object for the
 // current runtime so the rest of the bootstrap never branches on the platform name.
 globalThis.wx_tt = rbfx.env.is_wechat ? wx : (rbfx.env.is_douyin ? tt : null);

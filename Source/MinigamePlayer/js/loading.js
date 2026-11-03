@@ -609,6 +609,20 @@ class RbfxLoading {
         this.game_canvas = null;
         if (globalThis.wx_tt && typeof wx_tt.triggerGC === "function")
             wx_tt.triggerGC();
+        // The loading screen is the only component that spans the whole boot, so it owns the
+        // cold-start measurement: hand the number to the analytics dashboard. Fire-and-forget
+        // and fully guarded - the handover to the engine must not be disturbed by reporting.
+        try {
+            if (globalThis.rbfx && globalThis.rbfx.sdk && typeof globalThis.rbfx.sdk.report === "function") {
+                const boot_ms = (typeof globalThis.rbfx_boot_t0 === "number")
+                    ? Date.now() - globalThis.rbfx_boot_t0 : -1;
+                globalThis.rbfx.sdk.report("boot", {
+                    ms: boot_ms,
+                    platform: globalThis.rbfx.env.name,
+                    devtools: !!globalThis.rbfx.env.is_devtools
+                });
+            }
+        } catch (error) { /* boot reporting is best-effort */ }
         console.info("[rbfx] engine initialization finished, loading screen released");
     }
 }

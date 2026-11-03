@@ -17,6 +17,7 @@
 -- Config.VOICE_FILTERS；循环切换（CycleFilter）给试听/回放共用。
 
 local Config = require("game.Config")
+local Tracker = require("game.Tracker")
 
 ---@class Voice 自定义语音的请求编排与状态
 local Voice = {}
@@ -196,6 +197,7 @@ function Voice:OnSdkResult(data)
             if self.hud and self.hud.SetVoiceStatus then
                 self.hud:SetVoiceStatus("录好了！听听变声效果")
             end
+            Tracker.Report("voice_record", { slot = self.pendingSlot, ok = true })
             -- 录完立刻回放一遍：变声的听感就是这功能的全部，别让玩家自己再点一次
             self:Preview()
         else
@@ -203,19 +205,24 @@ function Voice:OnSdkResult(data)
             -- “没授权”“设备忙”“格式不支持”区分开，状态行只放玩家能动作的那一句。
             local reason = tostring(data.Payload or "")
             print("Voice: recording failed: " .. reason)
+            Tracker.Report("voice_record", {
+                slot = self.pendingSlot,
+                ok = false,
+                denied = string.find(reason, "permission denied", 1, true) ~= nil,
+            })
             if self.hud and self.hud.SetVoiceStatus then
                 if string.find(reason, "permission denied", 1, true) then
                     self.hud:SetVoiceStatus("麦克风没开权限：小游戏和抖音 App 都要允许")
                 else
-                    -- 定位期把宿主原话带出来：设备忙、格式不支持、系统层未授权在真机上
-                    -- 留下的只有 errMsg 这一条线索，状态行只截前 32 字。
-                    self.hud:SetVoiceStatus("录音失败：" .. string.sub(reason, 1, 32))
+                    -- 日志里已有宿主原话（上面那条 print），状态行给玩家能动作的文案。
+                    self.hud:SetVoiceStatus("录音失败，再试一次")
                 end
             end
         end
     elseif kind == MINIGAME_REQUEST_KIND.CLEAR_USER_AUDIO then
         local slot = self.pendingClearSlot
         self.pendingClearSlot = nil
+        Tracker.Report("voice_clear", { slot = slot, ok = data.Success })
         if data.Success then
             -- 试听的默认槽位不能还指向一个已经没了的文件
             if self.lastSlot == slot then

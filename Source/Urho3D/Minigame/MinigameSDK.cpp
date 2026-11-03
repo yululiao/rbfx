@@ -307,6 +307,20 @@ int MinigameSDK::StopGameAudio(const ea::string& path)
     return Invoke(MinigameSDKRequestKind::StopGameAudio, payload);
 }
 
+int MinigameSDK::ReportAnalytics(const ea::string& eventName, const ea::string& paramsJson)
+{
+    // The params string is embedded raw: the game already serialized it as a JSON object,
+    // and double-escaping it here would turn the whole object into an opaque string.
+    // A malformed object degrades to "no params" on the JavaScript side (parse fallback).
+    ea::string payload;
+    payload += "{\"event\":";
+    payload += EscapeJson(eventName);
+    payload += ",\"params\":";
+    payload += paramsJson.empty() ? "null" : paramsJson;
+    payload += '}';
+    return Invoke(MinigameSDKRequestKind::ReportAnalytics, payload);
+}
+
 int MinigameSDK::Invoke(MinigameSDKRequestKind kind, const ea::string& payloadJson)
 {
     const int requestId = nextRequestId_++;

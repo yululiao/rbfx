@@ -29,6 +29,7 @@ local Grow = require("game.Grow")
 local Dog = require("game.Dog")
 local HpBar = require("game.HpBar")
 local Voice = require("game.Voice")
+local Tracker = require("game.Tracker")
 
 ----------------------------------------------------------------------
 -- 帧率上限：真机（抖音 wasm）主循环按 Config.MAX_FPS 节流，省电/降热。
@@ -122,6 +123,11 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice
 
 local function RestartGame()
+    -- 重开埋点在 Reset 之前取数：局终数据只存在 waves 里，Reset 一跑就清零了。
+    -- restart 与 game_start 分开计数，两者相除就是重开率。
+    if waves then
+        Tracker.Report("restart", { wave = waves.waveIndex, score = waves.score })
+    end
     if enemy then
         enemy:Clear()
         enemy:SpawnStaticBarrels()
@@ -238,8 +244,36 @@ audio = Audio.Build(scene)
 audio:PlayBGM("Sound/back_ground/mixkit-dirty-thinkin-989.ogg", 0.25)
 hud = Hud.Build(scene, {
     onRestart = RestartGame,
+    -- 开始画面：收起面板、放行世界；game_start 在这里报——点击才是“用户主动决定开始”，
+    -- 与 boot（加载完成）分开，冷启动流失和玩法流失才能分开算。
+    onStart = function()
+        if hud then
+            hud:HideStart()
+        end
+        Tracker.Report("game_start")
+        -- 补播 Waves.Build 时被跳过的“准备”旁白：倒计时从这一刻走，语音同步响，
+        -- 与重开（RestartGame 里 waves:Reset 带语音）保持同一体验。
+        if audio and audio.Voice then
+            audio:Voice(Config.Voice.prepare)
+        end
+    end,
     onBoard = OnBoard,
     onDisembark = OnDisembark,
+    -- 结算页分享：战绩标题带波数与分数（query 留给以后进入侧解析/看板），分享面板由宿主拉起。
+    -- waves 是 upvalue，点击发生在 Build 之后很久，运行时解引用必然就绪。
+    onShare = function()
+        if not waves then
+            return
+        end
+        Tracker.Report("share", { score = waves.score, wave = waves.waveIndex })
+        local sdk = GetSubsystem("MinigameSDK")
+        if sdk and sdk:IsAvailable() then
+            sdk:Share(
+                string.format("我在海盗防线守到第 %d 波，拿下 %d 分，来试试？", waves.waveIndex, waves.score),
+                "",
+                string.format("score=%d&wave=%d", waves.score, waves.waveIndex))
+        end
+    end,
     -- 自定义语音：面板只管 UI，录/试听/换音色转发给 Voice（本函数之后才 build，闭包运行时解引用）
     onVoiceRecord = function(slot)
         if voice then voice:Record(slot) end
@@ -256,6 +290,13 @@ hud = Hud.Build(scene, {
         end
     end,
 })
+-- 结算页分享入口：与语音入口同源的宿主能力判定（编辑器/桌面没有分享通路）。
+do
+    local sdk = GetSubsystem("MinigameSDK")
+    if sdk and sdk:IsAvailable() and hud.SetShareAvailable then
+        hud:SetShareAvailable(true)
+    end
+end
 -- 自定义语音（麦克风录一句→变声回放到失守/连杀）：必须在 Hud 之后建（面板状态推给它）、
 -- Waves 之前建（失守与连杀触发点要拿它回放）。宿主不支持时它自身全部静默，UI 也不显示入口。
 voice = Voice.Build(scene, { hud = hud })
@@ -350,6 +391,14 @@ print(string.format("FireGame MARK boot: canvas=%.0fx%.0f uiScale=%.2f aspect=%.
     canvasW, canvasH, uiScale, canvasAspect or 0.0,
     Config.TOWER_POS.x, Config.TOWER_POS.y, Config.TOWER_POS.z))
 
+-- 引擎侧启动事件：画布尺寸是机型分布的主要维度（低端机占比看这里）。
+-- 冷启动毫秒在 JS 侧（loading.js 的 boot），这里不重复。
+Tracker.Report("game_boot", {
+    w = math.floor(canvasW or 0),
+    h = math.floor(canvasH or 0),
+    fpsCap = Config.MAX_FPS or 0,
+})
+
 ----------------------------------------------------------------------
 -- PC / 编辑器验证用键盘走位：WASD + 方向键，与左摇杆同一出口。
 -- 注意：编辑器 GameView 必须先在其内部点一下抢占输入，游戏才收得到键鼠。
@@ -397,9 +446,10 @@ SubscribeToEvent("Update", function(data)
     -- 引擎侧骨骼动画/粒子不受它影响（走自己的 Frame::timeStep），定格里死亡动画
     -- 照常播——这正是要的效果。世界 dt 只眼世界逻辑：海面滚动/开火/敌人/波次/主角。
     local worldDt = juice:BeginFrame(dt)
-    -- 语音面板是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
-    -- 走引擎自己的 timeStep 不受影响）。录音上限 3 秒，不暂停就是“调个音色被偷家”。
-    if hud and hud:IsVoiceModal() then
+    -- 开始画面/语音面板都是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
+    -- 走引擎自己的 timeStep 不受影响）。开始画面盖着时波间倒计时不走——开局由玩家点击放行；
+    -- 录音上限 3 秒，不暂停就是“调个音色被偷家”。
+    if hud and (hud:IsStartModal() or hud:IsVoiceModal()) then
         worldDt = 0.0
     end
 
@@ -436,10 +486,10 @@ SubscribeToEvent("Update", function(data)
     if kx ~= 0.0 or ky ~= 0.0 then
         stickX, stickY = kx, ky
     end
-    -- 相机调试面板/语音面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：小画布（编辑器
-    -- GameView）下面板会盖住左下抓取区，否则拖滑条的同时人物在走，构图边变边看，调不准；
-    -- 语音面板同理，录音时摇杆帽乱跑看着像卡了。
-    if (camDebug and camDebug:IsModal()) or (hud and hud:IsVoiceModal()) then
+    -- 开始画面/相机调试面板/语音面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
+    -- 开始画面盖着时人物不该提前乱跑；小画布（编辑器 GameView）下面板会盖住左下抓取区，否则拖滑条的
+    -- 同时人物在走，构图边变边看，调不准；语音面板同理，录音时摇杆帽乱跑看着像卡了。
+    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and hud:IsVoiceModal()) then
         stickX, stickY = 0.0, 0.0
     end
 

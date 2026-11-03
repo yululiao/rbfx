@@ -43,6 +43,9 @@ enum class MinigameSDKRequestKind
     /// Delete the recorded voice clip of a slot, so playback falls back to the game's own
     /// audio. Recording the slot again creates a new clip.
     ClearUserAudio = 10,
+    /// Report an analytics event to the vendor dashboard. Fire-and-forget: the answer
+    /// only tells whether the request reached the shim, a missing host API is not an error.
+    ReportAnalytics = 11,
 };
 
 /// Bridge to the host SDK capabilities (login, share, rewarded ads, payment, privacy).
@@ -116,6 +119,12 @@ public:
     int PlayGameAudio(const ea::string& path, float gain, bool looped);
     /// Stop the game-audio playbacks of path (empty path: everything). Completes right away.
     int StopGameAudio(const ea::string& path);
+
+    /// Report an analytics event to the vendor dashboard. paramsJson is a flat JSON object
+    /// ("{\"score\":3,\"reason\":\"defense\"}") forwarded verbatim; the game owns its keys.
+    /// Analytics must never disturb the game: the request always completes successfully,
+    /// including on hosts without any reporting API.
+    int ReportAnalytics(const ea::string& eventName, const ea::string& paramsJson = EMPTY_STRING);
 
     /// Return whether the JavaScript SDK shim is attached.
     /// @property

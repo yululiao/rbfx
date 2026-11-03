@@ -127,12 +127,27 @@
          看起来像帽却永远不动，极易被误认为“帽不跟手”，已移除。 -->
     <div id="stick_ring" style="position: absolute; left: 40dp; bottom: 40dp; width: 224dp; height: 224dp;"></div>
 
+    <!-- 开始画面：会话首次进入时盖住战场（背景=战场实景+半透明遮罩，不占包体）。
+         点击“开始”才放行波间倒计时（main.lua 据此把世界 dt 压成 0）；重开不再出现。 -->
+    <div id="start_panel" data-if="showStart" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
+        <div style="position: relative; top: 300dp;">
+            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
+            <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，开火全自动</div>
+            <button data-event-click="start" style="margin-top: 64dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
+        </div>
+    </div>
+
     <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
     <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 320dp;">
             <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
             <div class="label" style="margin-top: 16dp; font-size: 34dp;">SCORE {{endScore}}</div>
             <button data-event-click="restart" style="margin-top: 48dp; padding: 18dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
+            <!-- 战绩分享：宿主可用才显示（编辑器/桌面没有分享通路）；战绩文字由 Lua 拼，
+                 分享面板由宿主自己拉起 -->
+            <div data-if="shareAvailable">
+                <button data-event-click="share" style="margin-top: 24dp; padding: 12dp 36dp; font-size: 26dp; background-color: #4a8f4ae6; color: #ffffffff; border-radius: 10dp;">分享战绩</button>
+            </div>
             <!-- 失守这一刻才是吐槽冲动的最高点：再给一个语音入口（面板在 DOM 后面，盖在它之上） -->
             <div data-if="voiceAvailable">
                 <button data-event-click="voice_open" style="margin-top: 24dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>

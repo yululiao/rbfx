@@ -337,10 +337,26 @@
         }
     })();
 
-    // Uncaught errors never reach console on some hosts; mirror them explicitly.
+    // Uncaught errors never reach console on some hosts; mirror them explicitly. The report
+    // goes to the vendor analytics as well: the mirrored file sits on the player's device
+    // where nobody reads it, the dashboard is where a crash rate becomes visible.
+    function report_js_error(where, reason) {
+        try {
+            if (!rbfx.sdk || typeof rbfx.sdk.report !== "function")
+                return;
+            var message = format_log_argument(reason);
+            if (typeof message !== "string")
+                message = String(message);
+            rbfx.sdk.report("js_error", { where: where, message: message.substring(0, 256) });
+        } catch (error) {
+            // Analytics must never break the error path it reports on.
+        }
+    }
+
     if (wx_tt && typeof wx_tt.onError === "function") {
         wx_tt.onError(function (error) {
             mirror_log("[uncaught] " + ((error && (error.message || error.stack)) || String(error)));
+            report_js_error("uncaught", error && (error.message || error.stack));
             flush_log();
         });
     }
@@ -349,6 +365,7 @@
     if (wx_tt && typeof wx_tt.onUnhandledRejection === "function") {
         wx_tt.onUnhandledRejection(function (res) {
             mirror_log("[unhandled rejection] " + format_log_argument(res && res.reason));
+            report_js_error("rejection", res && res.reason);
             flush_log();
         });
     }

@@ -28,7 +28,8 @@
         stop_user_audio: 7,
         play_game_audio: 8,
         stop_game_audio: 9,
-        clear_user_audio: 10
+        clear_user_audio: 10,
+        report_analytics: 11
     };
 
     function complete(request_id, success, payload) {
@@ -603,11 +604,75 @@
         complete(request_id, true, "{}");
     };
 
+    // ---------- host lifecycle ----------
+    // The runtime layer suspends the WebAudio contexts, but the hosts this player is for
+    // expose no WebAudio at all: their music runs on InnerAudioContext here, and a host
+    // that keeps it playing in the background is a review rejection. Looping music is the
+    // only persistent audio, so it is the one worth pausing; one-shots are over before the
+    // switch matters. wx_tt.onHide accepts multiple listeners, so this rides along the
+    // runtime layer's own hook without replacing it.
+
+    var music_paused = false;
+
+    if (wx_tt && typeof wx_tt.onHide === "function") {
+        wx_tt.onHide(function () {
+            music_paused = true;
+            for (var path in looped_audio) {
+                if (Object.prototype.hasOwnProperty.call(looped_audio, path)) {
+                    try { looped_audio[path].pause(); } catch (error) { /* the map entry survives regardless */ }
+                }
+            }
+        });
+    }
+    if (wx_tt && typeof wx_tt.onShow === "function") {
+        wx_tt.onShow(function () {
+            if (!music_paused)
+                return;
+            music_paused = false;
+            for (var path in looped_audio) {
+                if (Object.prototype.hasOwnProperty.call(looped_audio, path)) {
+                    try { looped_audio[path].play(); } catch (error) { /* a dead instance cleans itself up via onError */ }
+                }
+            }
+        });
+    }
+
+    // ---------- analytics ----------
+    // Fire-and-forget by design: the vendor dashboard is a side channel, and a lost event
+    // must never disturb the game, so every failure (missing API, bad data, host throw) is
+    // swallowed and the request still answers "ok".
+
+    function report_event(event, params) {
+        if (!wx_tt)
+            return;
+        try {
+            var data = {};
+            if (params && typeof params === "object")
+                data = params;
+            var name = String(event);
+            if (typeof wx_tt.reportAnalytics === "function")
+                wx_tt.reportAnalytics(name, data);
+            else if (typeof wx_tt.reportEvent === "function")
+                wx_tt.reportEvent(name, data);
+        } catch (error) {
+            // Swallowed on purpose (see above).
+        }
+    }
+
+    handlers[KIND.report_analytics] = function (request_id, payload) {
+        var args = parse_payload(payload);
+        report_event(args.event, args.params);
+        complete(request_id, true, "{}");
+    };
+
     // ---------- publish ----------
 
     rbfx.sdk = {
         kind: KIND,
         handlers: handlers,
+        // Direct report for the bootstrap layers (loading screen, runtime error hooks):
+        // they live outside the engine request path and cannot wait for a wasm round-trip.
+        report: report_event,
         invoke: function (kind, request_id, payload) {
             var handler = handlers[kind];
             if (typeof handler !== "function") {

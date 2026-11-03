@@ -16,6 +16,10 @@
 
 local Config = require("game.Config")
 local WaveGen = require("game.WaveGen")
+local Tracker = require("game.Tracker")
+
+-- 首局操作提示只在会话第一次第 1 波显示：重开的玩家已经会了，再弹只是打扰。
+local first_run_hint_shown = false
 
 ---@class Waves 波次导演
 local Waves = {}
@@ -34,14 +38,21 @@ function Waves.Build(deps)
     self.voice = deps.voice
     self.onGameOver = deps.onGameOver
     self.onWaveCleared = deps.onWaveCleared   -- 一波清完的回调（main.lua 传入：让宠物狗原地休息）
-    self:Reset()
+    -- 首次 Reset 静音：Build 时开始画面还盖着战场（worldDt=0，倒计时没走），
+    -- “准备”旁白此时响会很怪——它改由 main.lua 的 onStart（点击“开始游戏”）补播；
+    -- RestartGame 的 Reset 照旧带语音：重开即播“准备”是对的（玩家刚点完再来一局）。
+    self:Reset(true)
+    -- game_start 埋点不在这里报：开始画面盖着时 Waves 已装配但倒计时被压着，
+    -- “用户主动开始”的时点在 main.lua 的 onStart（点击“开始游戏”）。
     return self
 end
 
 --- 回到开局状态（新局/重开都走这里）。
-function Waves:Reset()
+---@param skipVoice boolean|nil true 时跳过“准备”旁白（Build 时开始画面盖着，语音改由点击开始触发）
+function Waves:Reset(skipVoice)
     self.score = 0
     self.combo = 0
+    self.maxCombo = 0                -- 本局 combo 峰值（game_over 维度，区别于实时 combo）
     self.comboT = 0.0
     self.turretHp = {}
     for i = 1, #Config.TURRETS do
@@ -62,7 +73,9 @@ function Waves:Reset()
         if self.hud.SetWave then self.hud:SetWave(1) end
         -- 主角血、炮塔血都不往 HUD 喂：各走头顶世界空间血条（game/HpBar.lua）每帧直读。
     end
-    self.audio:Voice(Config.Voice.prepare)
+    if not skipVoice then
+        self.audio:Voice(Config.Voice.prepare)
+    end
 end
 
 --- 设定连杀爆炸触发间隔（随玩家弹丸数动态变）。main.lua 在 onWeapon 武器升级时调。
@@ -89,6 +102,17 @@ function Waves:BeginWave()
     self.audio:Voice(wave.voice)
     if self.hud and self.hud.SetWave then
         self.hud:SetWave(self.waveIndex)
+    end
+    -- 新手提示：第一波将到未到时给一次操作提示（本作开火全自动，要教的只有走位）。
+    -- 挂在 BeginWave 而不是 Reset：间歇倒计时还在刷 narrate，太早会被盖掉。
+    if self.waveIndex == 1 and not first_run_hint_shown and self.hud and self.hud.Narrate then
+        first_run_hint_shown = true
+        self.hud:Narrate("拖动摇杆走位躲海盗，开火是全自动的", 3.5)
+    end
+    -- 波次里程碑：第 1 波必报（漏斗起点），其后每 5 波一条；无尽模式一局几十波，
+    -- 逐波上报太吵，局终波数由 game_over 兜底。
+    if self.waveIndex == 1 or self.waveIndex % 5 == 0 then
+        Tracker.Report("wave", { wave = self.waveIndex })
     end
 end
 
@@ -184,6 +208,9 @@ function Waves:AddKill(result, unit, headshot, fromChain)
     end
 
     self.combo = self.combo + 1
+    if self.combo > self.maxCombo then
+        self.maxCombo = self.combo
+    end
     self.comboT = Config.COMBO_WINDOW
 
     local gained = (result.score or 0) + math.max(0, self.combo - 1) * Config.COMBO_BONUS_STEP
@@ -288,6 +315,12 @@ function Waves:Win()
     if self.hud and self.hud.Narrate then
         self.hud:Narrate("海盗已清空，出海自由探索吧！", 4.0)
     end
+    Tracker.Report("game_over", {
+        outcome = "win",
+        score = self.score,
+        wave = self.waveIndex,
+        maxCombo = self.maxCombo,
+    })
 end
 
 function Waves:Lose(reason)
@@ -304,6 +337,13 @@ function Waves:Lose(reason)
     if self.onGameOver then
         self.onGameOver("lose", self.score)
     end
+    Tracker.Report("game_over", {
+        outcome = "lose",
+        reason = reason,
+        score = self.score,
+        wave = self.waveIndex,
+        maxCombo = self.maxCombo,
+    })
 end
 
 ---@return number score
