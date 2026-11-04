@@ -131,7 +131,7 @@
          点击“开始”才放行波间倒计时（main.lua 据此把世界 dt 压成 0）；重开不再出现。 -->
     <div id="start_panel" data-if="showStart" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 300dp;">
-            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">消灭海盗</div>
+            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
             <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，开火全自动</div>
             <button data-event-click="start" style="margin-top: 64dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
         </div>

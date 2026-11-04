@@ -309,7 +309,7 @@ hud = Hud.Build(scene, {
         local sdk = GetSubsystem("MinigameSDK")
         if sdk and sdk:IsAvailable() then
             sdk:Share(
-                string.format("我在消灭海盗守到第 %d 波，拿下 %d 分，来试试？", waves.waveIndex, waves.score),
+                string.format("我在海盗防线守到第 %d 波，拿下 %d 分，来试试？", waves.waveIndex, waves.score),
                 "",
                 string.format("score=%d&wave=%d", waves.score, waves.waveIndex))
         end
