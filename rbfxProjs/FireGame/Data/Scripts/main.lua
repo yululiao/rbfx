@@ -339,8 +339,8 @@ hud = Hud.Build(scene, {
     onVoiceRecord = function(slot)
         if voice then voice:Record(slot) end
     end,
-    onVoicePreview = function()
-        if voice then voice:Preview() end
+    onVoicePreview = function(slot)
+        if voice then voice:Preview(slot) end
     end,
     onVoiceClear = function(slot)
         if voice then voice:Clear(slot) end

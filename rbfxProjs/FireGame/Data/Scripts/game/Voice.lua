@@ -127,12 +127,14 @@ function Voice:OnUpdate(dt)
     end
 end
 
---- 试听（面板按钮）：优先播最近录的槽位（没录过则播 lose 槽）。
-function Voice:Preview()
+--- 试听（面板按钮，按槽位）：指定槽位就播它（没录过则报“还没录过音”）；
+--- 不指定时回落最近录的槽位（录完自动回放走这条路，lastSlot 刚被置为本次录音的槽）。
+---@param slot string|nil Config.VOICE_SLOT_*
+function Voice:Preview(slot)
     if not self:IsAvailable() then
         return
     end
-    local slot = self.lastSlot or Config.VOICE_SLOT_LOSE
+    slot = slot or self.lastSlot or Config.VOICE_SLOT_LOSE
     self.previewing = true
     -- 新的回放顶掉上一条：那条玩法回放是被主动打断的，不该再回落预置旁白
     self.pendingPlayId = 0

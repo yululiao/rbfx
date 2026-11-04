@@ -366,6 +366,13 @@
         if (recording_request)
             return complete(request_id, false, "a recording is already in progress");
 
+        // The clip being re-recorded is the one that was just previewed (the game
+        // auto-plays it after every successful save). Release that player before the
+        // save swaps the file out from under it: an instance left holding the old
+        // bytes makes the swap fail or the old audio keep playing as if the new
+        // recording never landed.
+        stop_voice_audio();
+
         var args = parse_payload(payload);
         var slot = args.slot ? String(args.slot) : "default";
         var duration = Math.max(1000, Math.min(args.maxDurationMs | 0 || 3000, 60000));
@@ -386,8 +393,15 @@
         try {
             var fs = wx_tt.getFileSystemManager();
             var cleared = false;
-            try { fs.unlinkSync(target); cleared = true; } catch (e) { /* nothing recorded */ }
+            try { fs.unlinkSync(target); cleared = true; } catch (e) { /* nothing recorded, or the file is held */ }
             try { fs.unlinkSync(target + VOICE_STAGING_SUFFIX); } catch (e) { /* no aborted save */ }
+            // If the clip is still on disk the clear did not actually happen: report
+            // failure instead of success, or the game goes on playing the "cleared"
+            // clip and the button looks broken (a held player above is one cause).
+            var still_present = true;
+            try { fs.accessSync(target); } catch (e) { still_present = false; }
+            if (still_present)
+                return complete(request_id, false, "the clip could not be removed (still in use?)");
             complete(request_id, true, JSON.stringify({ cleared: cleared }));
         } catch (error) {
             complete(request_id, false, fail_text(error, "clearing the clip failed"));
@@ -395,6 +409,25 @@
     };
 
     var voice_audio = null;
+
+    /// While a user clip plays, the music bed ducks under it: a phone-mic recording is
+    /// the quietest thing in the mix, and that clip IS the feature - it must be heard.
+    var VOICE_DUCK_FACTOR = 0.15;
+    var voice_ducking = false;
+
+    /// Retune every looped music instance to (or back from) the ducked level. Music
+    /// gains are remembered on __rbfx_gain so a retune arriving mid-duck still restores
+    /// to the right level afterwards.
+    function duck_music_for_voice(on) {
+        if (voice_ducking === on)
+            return;
+        voice_ducking = on;
+        for (var path in looped_audio) {
+            var music = looped_audio[path];
+            var gain = (music.__rbfx_gain === undefined) ? music.volume : music.__rbfx_gain;
+            music.volume = on ? gain * VOICE_DUCK_FACTOR : gain;
+        }
+    }
 
     function stop_voice_audio() {
         if (!voice_audio)
@@ -407,6 +440,9 @@
         try { if (audio.__settle) audio.__settle(false, "playback stopped"); } catch (e) { /* ignore */ }
         try { audio.stop(); } catch (e) { /* already stopped */ }
         try { audio.destroy(); } catch (e) { /* already destroyed */ }
+        // A replacement playback re-ducks on its own; a real teardown (stop request,
+        // clear, restart) must hand the music bed back.
+        duck_music_for_voice(false);
     }
 
     handlers[KIND.play_user_audio] = function (request_id, payload) {
@@ -432,9 +468,14 @@
         // One audio instance at a time: a new playback replaces the previous one and
         // completes its request as "stopped" so no callback leaks.
         stop_voice_audio();
-        voice_audio = wx_tt.createInnerAudioContext();
-        voice_audio.src = src;
-        voice_audio.playbackRate = rate;
+        var instance = wx_tt.createInnerAudioContext();
+        voice_audio = instance;
+        instance.src = src;
+        instance.playbackRate = rate;
+        // The user's own clip is the point of the feature: full volume (the game's
+        // sfx/music pool always sets volume explicitly, and default is not to be
+        // trusted), plus the music bed ducks under it so it is not buried in the mix.
+        instance.volume = 1.0;
         var settled = false;
         var settle = function (ok, text) {
             if (settled)
@@ -442,14 +483,25 @@
             settled = true;
             complete(request_id, ok, text || "{}");
         };
-        voice_audio.__settle = settle;
-        voice_audio.onEnded(function () { settle(true); });
-        voice_audio.onError(function (error) { settle(false, fail_text(error, "playback failed")); });
+        // Teardown on every ending path, natural or not: an instance left alive keeps
+        // the clip's file open, which breaks the next recording's save (it replaces
+        // that very file) and can make a clear of the slot silently fail.
+        var finish = function () {
+            if (voice_audio === instance)
+                voice_audio = null;
+            destroy_audio(instance);
+            duck_music_for_voice(false);
+        };
+        instance.__settle = settle;
+        instance.onEnded(function () { settle(true); finish(); });
+        instance.onError(function (error) { settle(false, fail_text(error, "playback failed")); finish(); });
+        duck_music_for_voice(true);
         try {
-            voice_audio.play();
+            instance.play();
         } catch (error) {
             // A synchronous throw would otherwise leak the request (never completed).
             settle(false, fail_text(error, "playback failed"));
+            finish();
         }
     };
 
@@ -504,14 +556,18 @@
             // instead of stacking a second track, and completes immediately.
             var existing = looped_audio[path];
             if (existing) {
-                existing.volume = gain;
+                // Remember the wanted gain: a retune that lands while the user's voice
+                // ducks the music must still restore to THIS level afterwards.
+                existing.__rbfx_gain = gain;
+                existing.volume = voice_ducking ? gain * VOICE_DUCK_FACTOR : gain;
                 complete(request_id, true, "{}");
                 return;
             }
             var music = wx_tt.createInnerAudioContext();
             music.src = src;
             music.loop = true;
-            music.volume = gain;
+            music.__rbfx_gain = gain;
+            music.volume = voice_ducking ? gain * VOICE_DUCK_FACTOR : gain;
             looped_audio[path] = music;
             music.onError(function (error) {
                 if (looped_audio[path] === music)

@@ -175,12 +175,14 @@
                 <div style="margin-top: 22dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">失守吐槽 · 防线被攻破时播</div>
                     <button data-event-click="voice_rec_lose" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
+                    <button data-event-click="voice_preview_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10dp;">试听</button>
                     <button data-event-click="voice_clear_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #444a55e6; color: #ffffffff; border-radius: 10dp;">清除</button>
                 </div>
 
                 <div style="margin-top: 18dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">连杀战吼 · 5 连杀起每档播</div>
                     <button data-event-click="voice_rec_kill" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
+                    <button data-event-click="voice_preview_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10dp;">试听</button>
                     <button data-event-click="voice_clear_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #444a55e6; color: #ffffffff; border-radius: 10dp;">清除</button>
                 </div>
 
@@ -188,8 +190,7 @@
                 <div class="label" style="margin-top: 12dp; font-size: 20dp; color: #9fe0ffd9;">{{voiceStatus}}</div>
 
                 <div style="margin-top: 22dp;">
-                    <button data-event-click="voice_preview" style="padding: 10dp 28dp; font-size: 24dp; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10dp;">试听</button>
-                    <button data-event-click="voice_filter" style="margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">音色 {{voiceFilterName}}</button>
+                    <button data-event-click="voice_filter" style="padding: 10dp 28dp; font-size: 24dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">音色 {{voiceFilterName}}</button>
                     <button data-event-click="voice_close" style="margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">关闭</button>
                 </div>
             </div>

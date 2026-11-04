@@ -170,9 +170,16 @@ function Hud.Build(scene, handlers)
                     handlers.onVoiceRecord(Config.VOICE_SLOT_KILLSTREAK)
                 end
             end)
-            w:BindEvent("voice_preview", function()
+            -- 试听按槽位各自入：两个槽各自录/清/听，互不指涉（单一全局试听按钮会
+            -- 播“最近录的那个”，清掉另一个槽后试听仍出声，看着就像清除没生效）
+            w:BindEvent("voice_preview_lose", function()
                 if handlers.onVoicePreview then
-                    handlers.onVoicePreview()
+                    handlers.onVoicePreview(Config.VOICE_SLOT_LOSE)
+                end
+            end)
+            w:BindEvent("voice_preview_kill", function()
+                if handlers.onVoicePreview then
+                    handlers.onVoicePreview(Config.VOICE_SLOT_KILLSTREAK)
                 end
             end)
             w:BindEvent("voice_clear_lose", function()
