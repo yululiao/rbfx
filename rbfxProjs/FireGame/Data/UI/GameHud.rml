@@ -131,7 +131,7 @@
          点击“开始”才放行波间倒计时（main.lua 据此把世界 dt 压成 0）；重开不再出现。 -->
     <div id="start_panel" data-if="showStart" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 300dp;">
-            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
+            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">消灭海盗</div>
             <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，开火全自动</div>
             <button data-event-click="start" style="margin-top: 64dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
         </div>
@@ -142,6 +142,12 @@
         <div style="position: relative; top: 320dp;">
             <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
             <div class="label" style="margin-top: 16dp; font-size: 34dp;">SCORE {{endScore}}</div>
+            <!-- 看广告复活（休眠链路）：reviveAvailable 三层全真才亮——败局未用过 + 宿主 SDK 可用
+                 + Config.AD.REWARDED_UNIT_ID 非空。当前没广告位时整条不渲染，玩家看不到任何广告痕迹；
+                 金色放在“再来一局”之上：败局这一刻是“不甘心”的峰值，续战是首选动作。 -->
+            <div data-if="reviveAvailable">
+                <button data-event-click="revive" style="margin-top: 36dp; padding: 18dp 48dp; font-size: 30dp; background-color: #c8901ee6; color: #ffffffff; border-radius: 12dp;">看广告复活</button>
+            </div>
             <button data-event-click="restart" style="margin-top: 48dp; padding: 18dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
             <!-- 战绩分享：宿主可用才显示（编辑器/桌面没有分享通路）；战绩文字由 Lua 拼，
                  分享面板由宿主自己拉起 -->

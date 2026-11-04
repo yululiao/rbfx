@@ -391,7 +391,7 @@ Config.FAR_UNIT_DISTANCE = 55.0      -- 超过这个距离的单位关掉不可�
 
 -- 性能Overlay（调试开关）：true 时屏幕顶中叠加一行 FPS/drawcall/三角面/同屏单位数（每 3 秒刷）。
 -- 上线前必须置 false（关掉就不显不刷）。真机（抖音）没有引擎 DebugHud（SystemUI 已禁用），靠这个看指标。
-Config.PERF_OVERLAY = true
+Config.PERF_OVERLAY = false
 
 -- 相机参数调试面板（调试开关）：true 时 HUD 右上角多一颗“相机”按钮，点开可在真机上实时拖
 -- 本节全部相机常量并打印可直接粘回本文件的数值（见 game/CamDebug.lua + UI/CamDebug.rml）。
@@ -403,6 +403,24 @@ Config.DEBUG_CAM_PANEL = false
 -- 0 或 nil = 不改引擎默认（wasm 默认 30）。改这个值只需重打包（不碰 wasm），main.lua 启动时
 -- 经 engine:SetWebFrameRate(Config.MAX_FPS) 落地。
 Config.MAX_FPS = 40
+
+----------------------------------------------------------------------
+-- 广告（休眠链路）：激励视频「死亡复活」。引擎侧 ShowRewardedAd 已全通
+-- （C++ → Lua 绑定 → JS handler，看完整判定 isEnded），游戏侧只在这里取广告位 ID。
+--
+-- 休眠语义：REWARDED_UNIT_ID 为空字符串时，结算面板的复活按钮整条不渲染
+-- （data-if 链路零暴露，玩家看不到任何广告痕迹）——当前状态。
+-- 拿到流量主广告位后的启用步骤：填入 adUnitId → 重打包 → 抖音后台提交快审更新
+-- （1-3 天），无需重编 wasm、无需改其它代码。
+-- 官方口径：仅线上状态的小游戏调用广告才产生收益，未上线版本埋广告代码不违规。
+--
+-- 远程覆盖预留位：将来有 HTTPS 备案域名后，可在此处加一个远程 JSON 拉取，
+-- 读到的远程 adUnitId 覆盖本地常量（读取收口在 main.lua 一处，改 adUnitId 即免重审）。
+-- 现在只留本地常量，不做任何网络请求。
+----------------------------------------------------------------------
+Config.AD = {
+    REWARDED_UNIT_ID = "",          -- 抖音流量主激励视频广告位 ID；空 = 复活按钮不显示
+}
 
 Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako", "Characters_Sharky" }
 Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbarossa" }

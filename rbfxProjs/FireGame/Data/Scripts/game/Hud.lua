@@ -57,6 +57,10 @@ function Hud.Build(scene, handlers)
     -- 结算页分享入口：与语音入口同源的宿主能力判定（编辑器/桌面没有分享通路），
     -- main.lua 在 Build 后按 sdk:IsAvailable() 打开。
     self.shareAvailable = false
+    -- 结算页「看广告复活」按钮显隐：三层全真才亮——败局且未用过（Waves:CanRevive）+
+    -- 宿主 SDK 可用 + Config.AD.REWARDED_UNIT_ID 非空（休眠链路：没广告位就整条不渲染）。
+    -- main.lua 的 OnGameOver 点亮，ReviveGame/RestartGame 熄灭。
+    self.reviveAvailable = false
     -- 登船/下船按钮显隐（data-if）：main.lua 帧循环里根据交互条件 Show/Hide
     self.showBoard = false
     self.showDisembark = false
@@ -102,6 +106,7 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("narrate", function() return self.narrate end)
             w:BindReadonlyProperty("endTitle", function() return self.endTitle end)
             w:BindReadonlyProperty("shareAvailable", function() return self.shareAvailable end)
+            w:BindReadonlyProperty("reviveAvailable", function() return self.reviveAvailable end)
             -- 局内成长：等级、经验条(0..1)、武器文本
             w:BindReadonlyProperty("level", function() return self.level end)
             w:BindReadonlyProperty("xp", function() return clamp01(self.xpProg) end)
@@ -143,6 +148,13 @@ function Hud.Build(scene, handlers)
             w:BindEvent("share", function()
                 if handlers.onShare then
                     handlers.onShare()
+                end
+            end)
+            -- 结算页看广告复活：真正的广告拉起/看完判定在 main.lua 的回调里，
+            -- 这里只转发点击；按钮本身靠 reviveAvailable 的 data-if 控制显隐。
+            w:BindEvent("revive", function()
+                if handlers.onRevive then
+                    handlers.onRevive()
                 end
             end)
             -- 自定义语音：开/关面板是纯 UI 状态（就地切），录/试听/换音色转发给 Voice
@@ -294,6 +306,12 @@ end
 function Hud:SetShareAvailable(b)
     self.shareAvailable = b and true or false
     self:Dirty("shareAvailable")
+end
+
+--- 结算页复活按钮显隐（main.lua：OnGameOver 亮、ReviveGame/RestartGame 灭）。
+function Hud:SetReviveAvailable(b)
+    self.reviveAvailable = b and true or false
+    self:Dirty("reviveAvailable")
 end
 
 function Hud:HideEnd()

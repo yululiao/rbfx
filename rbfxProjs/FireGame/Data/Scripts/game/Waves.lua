@@ -59,6 +59,7 @@ function Waves:Reset(skipVoice)
         self.turretHp[i] = Config.TURRET_HP
     end
     self.playerHp = Config.PLAYER_HP    -- 主角生命（突袭型海盗砍的是这条）
+    self.reviveUsed = false              -- 本局是否已用「看广告复活」；每局限一次，Reset 复位
     self.waveIndex = 0                 -- 已开始的波数；当前波 = Config.WAVES[waveIndex]
     self.phase = "intermission"        -- intermission -> active -> ended
     self.phaseT = Config.WAVE_INTERMISSION
@@ -343,7 +344,46 @@ function Waves:Lose(reason)
         score = self.score,
         wave = self.waveIndex,
         maxCombo = self.maxCombo,
+        revived = self.reviveUsed,       -- 本局是否用过复活（false=首死即终局，true=复活后再败）
     })
+end
+
+--- 结算面板的复活按钮此刻可不可用：确实处于败局且本局还没用过。
+--- 复活资格归 Waves 管（局内状态），广告链路归 main.lua（宿主能力），两层分开。
+---@return boolean
+function Waves:CanRevive()
+    return self.phase == "ended" and not self.reviveUsed
+end
+
+--- 看广告复活（main.lua 在激励视频确认看完后调）：战绩/成长全保留，血回满，接着打。
+--- 只改波次机自身的状态；清场、主角/炮塔姿态复位等由 main.lua 的 ReviveGame 统一做。
+---@return boolean 是否复活成功（非败局或已用过则 false，调用方据此不发放奖励）
+function Waves:Revive()
+    if not self:CanRevive() then
+        return false
+    end
+    self.reviveUsed = true
+    for i = 1, #Config.TURRETS do
+        self.turretHp[i] = Config.TURRET_HP
+    end
+    self.playerHp = Config.PLAYER_HP
+    self.combo = 0
+    if self.hud and self.hud.SetCombo then
+        self.hud:SetCombo(0)
+    end
+    -- 当前波作废：生成表清空 + allFired，让 Update 的 active 分支不再刷怪，
+    -- 直接走间歇倒计时从下一波重开（waveIndex 不动，BeginWave 自会 +1）。
+    -- 场上残敌由 main.lua 调 enemy:Clear() 清场。
+    self.queue = {}
+    self.allFired = true
+    self.phase = "intermission"
+    self.phaseT = Config.WAVE_INTERMISSION
+    -- 复活后重新走一遍开场播报，给玩家一个“重新准备”的仪式感与缓冲。
+    self.audio:Voice(Config.Voice.prepare)
+    if self.hud and self.hud.Narrate then
+        self.hud:Narrate("满血复活，接着打！", 3.0)
+    end
+    return true
 end
 
 ---@return number score

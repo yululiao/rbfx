@@ -121,6 +121,11 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
 local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice
+-- 激励视频复活链路两状态：ad_showing=广告在途（世界 dt 压 0、吞摇杆，结果事件结算时清）；
+-- reviveAdEnabled=链路总开关（宿主 SDK 可用 + Config.AD.REWARDED_UNIT_ID 非空，Build 后定值）。
+-- 休眠语义：没配广告位时恒 false，结算面板根本不出现复活按钮，玩家看不到任何广告痕迹。
+local ad_showing = false
+local reviveAdEnabled = false
 
 local function RestartGame()
     -- 重开埋点在 Reset 之前取数：局终数据只存在 waves 里，Reset 一跑就清零了。
@@ -156,9 +161,38 @@ local function RestartGame()
     if hud then
         hud:HideEnd()
         hud:CloseVoice()   -- 上一局开着的语音面板不带进新局（否则新局一开就定格）
+        if hud.SetReviveAvailable then hud:SetReviveAvailable(false) end
     end
     if voice then
         voice:Stop()       -- 上一局的语音/试听不拖进新局
+    end
+    -- 广告结果事件没回来就点了重开（宿主异常等）：清 ad_showing，别让新局世界卡在暂停。
+    ad_showing = false
+end
+
+-- 看广告复活的结算（激励视频确认看完后调）：这一局继续，不是换一局——
+-- 战绩/成长/狗/已打掉的爆桶全保留，只回满血、清场残敌、复位主角与炮塔姿态。
+-- 资格判定在 Waves:Revive 内（每局一次 + 确实处于败局），不满足则什么都不动。
+local function ReviveGame()
+    if not (waves and waves:Revive()) then
+        return
+    end
+    if enemy then
+        enemy:Clear()   -- 残敌清场：复活后不再接着挨上一波的围殴（静态爆桶不重摆，保持"这局继续"语义）
+    end
+    if player then
+        player:Reset()  -- 满血、解除阵亡定格（hero 死因必须；defense 死因时无伤大雅）
+    end
+    if turrets then
+        turrets:Reset() -- 在飞弹丸清空、塌下的炮管收回去（defense 死因必须）
+    end
+    if voice then
+        voice:Stop()    -- 败局播报的录音/试听不拖进续战
+    end
+    if hud then
+        hud:HideEnd()
+        hud:CloseVoice()
+        if hud.SetReviveAvailable then hud:SetReviveAvailable(false) end
     end
 end
 
@@ -220,6 +254,12 @@ end
 
 local function OnGameOver(outcome, score)
     print(string.format("FireGame MARK game over: %s score=%d", tostring(outcome), score or 0))
+    -- 败局且未用过复活 + 链路总开关开着：结算面板点亮「看广告复活」。
+    -- 三层缺一即整条不亮（休眠链路：没配广告位/宿主不支持时按钮不存在，不是隐藏）。
+    if outcome == "lose" and reviveAdEnabled and waves and waves:CanRevive()
+        and hud and hud.SetReviveAvailable then
+        hud:SetReviveAvailable(true)
+    end
 end
 
 -- 载具交互（HUD 按钮回调）：登船/下船（player 在下方装配后才存在，这里是闭包运行时才解引用）
@@ -269,10 +309,31 @@ hud = Hud.Build(scene, {
         local sdk = GetSubsystem("MinigameSDK")
         if sdk and sdk:IsAvailable() then
             sdk:Share(
-                string.format("我在海盗防线守到第 %d 波，拿下 %d 分，来试试？", waves.waveIndex, waves.score),
+                string.format("我在消灭海盗守到第 %d 波，拿下 %d 分，来试试？", waves.waveIndex, waves.score),
                 "",
                 string.format("score=%d&wave=%d", waves.score, waves.waveIndex))
         end
+    end,
+    -- 结算页看广告复活：拉起激励视频，结果经顶层 MinigameSdkResult 订阅回来在那里结算复活。
+    -- 这里只做资格校验与请求：非败局/已用过/链路休眠/广告在途 → 静默不动（按钮本就不亮，
+    -- 这里是防伪造/防连点的第二道闸）。世界暂停靠 ad_showing，与开始画面同一手法。
+    onRevive = function()
+        if ad_showing or not reviveAdEnabled then
+            return
+        end
+        if not (waves and waves:CanRevive()) then
+            return
+        end
+        local sdk = GetSubsystem("MinigameSDK")
+        if not (sdk and sdk.IsAvailable and sdk:IsAvailable()) then
+            return
+        end
+        ad_showing = true
+        if hud and hud.SetReviveAvailable then
+            hud:SetReviveAvailable(false)   -- 广告期间按钮收起，防连点重入
+        end
+        Tracker.Report("ad_request", { wave = waves.waveIndex, score = waves.score })
+        sdk:ShowRewardedAd(Config.AD.REWARDED_UNIT_ID)
     end,
     -- 自定义语音：面板只管 UI，录/试听/换音色转发给 Voice（本函数之后才 build，闭包运行时解引用）
     onVoiceRecord = function(slot)
@@ -296,6 +357,10 @@ do
     if sdk and sdk:IsAvailable() and hud.SetShareAvailable then
         hud:SetShareAvailable(true)
     end
+    -- 复活链路总开关：宿主可用 + 广告位已配。空 ID = 休眠（按钮永不出现）。
+    -- 将来有 HTTPS 备案域名后，远程拉到的 adUnitId 在这里覆盖本地常量即可升级免重审。
+    reviveAdEnabled = (sdk and sdk:IsAvailable()
+        and (Config.AD.REWARDED_UNIT_ID or "") ~= "") and true or false
 end
 -- 自定义语音（麦克风录一句→变声回放到失守/连杀）：必须在 Hud 之后建（面板状态推给它）、
 -- Waves 之前建（失守与连杀触发点要拿它回放）。宿主不支持时它自身全部静默，UI 也不显示入口。
@@ -399,6 +464,33 @@ Tracker.Report("game_boot", {
     fpsCap = Config.MAX_FPS or 0,
 })
 
+-- 激励视频广告结果（BEGINFRAME 边界派发，与 Voice 的 MinigameSdkResult 同一事件）：
+-- 只认 REWARDED_AD 且确有广告在途的回包。看完(Success 且仍可复活)→复活续战；
+-- 中途关掉/宿主报错→回结算面板（每局一次的资格还在，可以再点；抖音侧广告自身有频控）。
+-- 无论成败必须清 ad_showing，否则世界永远卡在暂停。
+SubscribeToEvent("MinigameSdkResult", function(data)
+    if data.Kind ~= MINIGAME_REQUEST_KIND.REWARDED_AD or not ad_showing then
+        return
+    end
+    ad_showing = false
+    if data.Success and waves and waves:CanRevive() then
+        Tracker.Report("ad_complete", { wave = waves.waveIndex, score = waves.score })
+        ReviveGame()
+    else
+        if data.Success then
+            -- 看完了但败局已被重开/复活抢先——极少见的时序交叠，只记日志不发奖。
+            print("Ad: rewarded ad done but run is no longer revivable")
+        else
+            -- 宿主回来的失败原文（中途关闭/加载失败/无填充）进日志：真机上只有这一条线索。
+            print("Ad: rewarded ad failed: " .. tostring(data.Payload or ""))
+        end
+        Tracker.Report("ad_skip", { wave = (waves and waves.waveIndex) or 0 })
+        if hud and hud.SetReviveAvailable and waves and waves:CanRevive() then
+            hud:SetReviveAvailable(true)
+        end
+    end
+end)
+
 ----------------------------------------------------------------------
 -- PC / 编辑器验证用键盘走位：WASD + 方向键，与左摇杆同一出口。
 -- 注意：编辑器 GameView 必须先在其内部点一下抢占输入，游戏才收得到键鼠。
@@ -448,8 +540,9 @@ SubscribeToEvent("Update", function(data)
     local worldDt = juice:BeginFrame(dt)
     -- 开始画面/语音面板都是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
     -- 走引擎自己的 timeStep 不受影响）。开始画面盖着时波间倒计时不走——开局由玩家点击放行；
-    -- 录音上限 3 秒，不暂停就是“调个音色被偷家”。
-    if hud and (hud:IsStartModal() or hud:IsVoiceModal()) then
+    -- 录音上限 3 秒，不暂停就是“调个音色被偷家”。激励视频广告在途（ad_showing）同理：
+    -- 全屏视频盖住游戏，回来前不能刷怪/掉血/走位。
+    if (hud and (hud:IsStartModal() or hud:IsVoiceModal())) or ad_showing then
         worldDt = 0.0
     end
 
@@ -488,8 +581,10 @@ SubscribeToEvent("Update", function(data)
     end
     -- 开始画面/相机调试面板/语音面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
     -- 开始画面盖着时人物不该提前乱跑；小画布（编辑器 GameView）下面板会盖住左下抓取区，否则拖滑条的
-    -- 同时人物在走，构图边变边看，调不准；语音面板同理，录音时摇杆帽乱跑看着像卡了。
-    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and hud:IsVoiceModal()) then
+    -- 同时人物在走，构图边变边看，调不准；语音面板同理，录音时摇杆帽乱跑看着像卡了；
+    -- 激励视频在途时全屏广告盖着画面，触摸归宿主，摇杆帽也不该跟着残留输入乱动。
+    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and hud:IsVoiceModal())
+        or ad_showing then
         stickX, stickY = 0.0, 0.0
     end
 
