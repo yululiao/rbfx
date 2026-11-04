@@ -78,6 +78,7 @@
 				"Include": [
 					"Models/Quaternius_pirate-kit",
 					"Models/Characters-001",
+					"Models/Island",
 					"Materials",
 					"Particle",
 					"Textures",

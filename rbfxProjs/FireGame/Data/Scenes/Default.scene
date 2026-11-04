@@ -2,8 +2,8 @@
 <resource _id="1">
 	<attributes>
 		<attribute name="Elapsed Time" type="Float" value="1.633224" />
-		<attribute name="Next Node ID" type="Int" value="7" />
-		<attribute name="Next Component ID" type="Int" value="20" />
+		<attribute name="Next Node ID" type="Int" value="8" />
+		<attribute name="Next Component ID" type="Int" value="25" />
 	</attributes>
 	<components>
 		<component _id="1" _typeName="Octree" />
@@ -133,16 +133,16 @@
 				</component>
 			</components>
 		</node>
-		<node _id="6">
+		<node _id="7">
 			<attributes>
-				<attribute name="Name" type="String" value="patch-sand" />
-				<attribute name="Position" type="Vector3" value="-2.72 -0.1 25.886738" />
-				<attribute name="Scale" type="Vector3" value="10 0.5 10" />
+				<attribute name="Name" type="String" value="island" />
+				<attribute name="Position" type="Vector3" value="0 -3.2 39" />
+				<attribute name="Scale" type="Vector3" value="2 1 2" />
 			</attributes>
 			<components>
-				<component _id="19" _typeName="PrefabReference">
+				<component _id="24" _typeName="PrefabReference">
 					<attributes>
-						<attribute name="Prefab" type="ResourceRef" value="PrefabResource;Models/Quaternius_pirate-kit/prefabs/patch-sand.prefab" />
+						<attribute name="Prefab" type="ResourceRef" value="PrefabResource;Models/Island/island.prefab" />
 					</attributes>
 				</component>
 			</components>
