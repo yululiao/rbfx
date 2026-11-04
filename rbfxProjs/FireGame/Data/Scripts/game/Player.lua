@@ -106,6 +106,8 @@ function Player.Build(scene, spot, playerBoat, aspect)
     end
     local model = modelNode and modelNode:GetComponent("AnimatedModel")
     if model then
+        -- 不投影：prefab 烘的默认值是开，这里运行期显式关掉（与 Dog 一致，重进 Play 复用实例也幂等）
+        model:SetCastShadows(false)
         -- 远处降频用不上（主角永远在近处），显式关掉不可见时更新，省一点蒙皮开销
         model:SetUpdateInvisible(false)
     end

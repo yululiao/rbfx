@@ -43,7 +43,7 @@ function Dog.Build(deps)
     local model = node:CreateComponent("AnimatedModel")
     model:SetModel(GetResource("Model", Config.DogModel()))
     model:SetMaterial(Materials.Character())   -- 与主角共用 Zombie_Atlas 图集材质
-    model:SetCastShadows(true)
+    model:SetCastShadows(false)  -- 与主角一致：不投影（投影烘在 prefab 里归 true，运行期显式关掉）
     model:SetUpdateInvisible(false)
 
     self.anim = node:CreateComponent("AnimationController")

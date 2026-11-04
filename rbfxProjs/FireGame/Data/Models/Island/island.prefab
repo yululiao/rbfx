@@ -279,12 +279,7 @@
 						{
 							"name": "Material",
 							"type": "ResourceRefList",
-							"value": "Material;Materials/Sand.xml;"
-						},
-						{
-							"name": "Cast Shadows",
-							"type": "Bool",
-							"value": true
+							"value": "Material;Materials/Sand.xml;Materials/Sand.xml"
 						}
 					]
 				}

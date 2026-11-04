@@ -12,10 +12,17 @@
 
     过渡期注意：sand 色现在有两处来源，本文件（手摆用）与 Config.Tint.sand（程序化用）。
     程序化弃用后以本文件为唯一真源；这期间若要改色，要么两处都改，要么让 Materials 直接指向本文件。
+
+    IGNOREVERTEXCOLOR：rbfx v2 shader 与经典 Urho 相反——只要顶点缓冲带 COLOR 元素，
+    albedo 默认就乘顶点色，technique 里声明不声明 VERTEXCOLOR 都拦不住（开关是这个
+    反向 define，见 CoreData/Shaders/GLSL/v2/_Config_Material.glsl）。本材质语义是
+    "纯 MatDiffColor 纯色"，顶点色一律无视：patch-sand.mdl 本就无 COLOR 元素不受影响；
+    island.mdl 带 FbxImporter 烘焙的棕/绿材质色（#713914 / #1D2607），不加这个 define
+    会被乘进去，把沙色染成橄榄绿。vs/ps 两侧都加，保持 varying 声明一致。
 -->
 <material>
     <technique name="Techniques/LitOpaque.xml" />
-    <shader vsdefines="PBR" psdefines="PBR" />
+    <shader vsdefines="PBR IGNOREVERTEXCOLOR" psdefines="PBR IGNOREVERTEXCOLOR" />
     <parameter name="MatDiffColor" value="0.86 0.78 0.56 1" />
     <parameter name="Roughness" value="0.95" />
     <parameter name="Metallic" value="0" />
