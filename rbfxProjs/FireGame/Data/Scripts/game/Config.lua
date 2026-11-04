@@ -237,15 +237,22 @@ Config.TURRET_GUN_PITCH_DEAD = 35.0               -- 失能时炮管歪下去的
 -- "帮忙拆船、不抢人头"的位置。船停在海面 BOAT_STOP_Z、塔在 z=9，直线≈16m；旧的"上岸警戒线"
 -- 那道 z 门槛本是给海盗设的、船永远在其外，所以删掉它，改成纯粹按 XZ 射程索敌，半径够到停船的航道。
 -- 要再调炮台强弱只动 DAMAGE / INTERVAL 两个旋钮，别再把它放回打海盗。
-Config.TURRET_RANGE = 20.0                        -- 对船 XZ 索敌半径（米）：够到停船处最近两列航道
+Config.TURRET_RANGE = 40.0                        -- 对船 XZ 索敌半径（米）：船还在驶来途中就换炮（出生点 z=-44 离塔约 53m，仍够不到）
 Config.TURRET_FIRST = 0.5                         -- 开局首发迟（秒）
-Config.TURRET_INTERVAL = 2.2                      -- 两发间隔（秒）
+Config.TURRET_INTERVAL = 4.0                      -- 两发间隔（秒）：小船两炮 8s、大船四炮 16s，兜底炮降一档
 Config.TURRET_INTERVAL_SPREAD = 0.5               -- 间隔随机 ±，别让两塔齐射像节拍器
 Config.TURRET_DAMAGE = 2                          -- 只咬船：小船 3 两炮、大船 8 四炮（对走路海盗已不出手）
 Config.TURRET_SPLASH_RADIUS = 2.2
 Config.TURRET_SHELL_SCALE = 0.65                  -- 弹丸大小：cannon-ball.prefab 原生≈0.64m，0.65 复刻旧弹≈0.42m 观感
 Config.TURRET_FLIGHT_TIME = 0.45                  -- 飞行时长：短弧，友方射击不需要预警盘
 Config.TURRET_LOB_HEIGHT = 2.6                    -- 抛物线拱高（米）
+-- 开炮表现（纯演出，上面任何火控数值都不动）：炮管缓动转向 + 开炮后坐力回座。
+Config.TURRET_AIM_TURN_RATE = 5.0    -- 转向趋近速率（指数）：半角程约 0.14s，快而不僵
+Config.TURRET_AIM_FIRE_TOL = 15.0    -- 点火对准容差（度）：炮口没咬住目标先不开炮
+Config.TURRET_RECOIL_AMPLITUDE = 0.3 -- 后坐力首退幅度（米）：炮管沿炮尾方向一挫
+Config.TURRET_RECOIL_DECAY = 6.0     -- 晃动衰减率（1/秒）：一退一扑越晃越小
+Config.TURRET_RECOIL_FREQ = 10.0     -- 晃动频率（弧度/秒）：回座的节拍
+Config.TURRET_RECOIL_TIME = 1.0      -- 后坐力总时长（秒）：到点强制归位（此时幅度已衰减到不足 0.001，纯保险）
 
 ----------------------------------------------------------------------
 -- 相机（俯视角固定朝海，吊在主角正后上方；抖音小游戏刻意不需要玩家手动转视角）

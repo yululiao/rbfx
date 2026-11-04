@@ -34,6 +34,21 @@ local function distXZ(ax, az, bx, bz)
     return math.sqrt(dx * dx + dz * dz)
 end
 
+--- 塔心指向 pos 的 yaw（弧度）。炮管与角色模型同一约定（原生朝 -z）：
+--- yaw = atan(dx, -dz) 配 Quaternion(-deg(yaw), UP)，Enemy/Player 已验证的同款公式。
+---@param tw table
+---@param pos Vector3
+---@return number
+local function yawTo(tw, pos)
+    return math.atan(pos.x - tw.x, -(pos.z - tw.z))
+end
+
+--- 两 yaw 的最小带符号角差（弧度，归一到 [-π,π]）：跨 ±180 取短弧，转向不走远路整圈甩。
+---@return number
+local function yawDiff(a, b)
+    return (a - b + math.pi) % (2.0 * math.pi) - math.pi
+end
+
 ---@param deps { scene: Scene, handles: { node: Node, gun: Node, x: number }[], enemies: Enemy, waves: Waves, fx: Fx, audio: Audio, onTowerDown: fun(index:number,x:number)|nil }
 ---@return Turrets
 function Turrets.Build(deps)
@@ -47,7 +62,8 @@ function Turrets.Build(deps)
     -- 免得 UI 词汇往玩法模块里渗。
     self.onTowerDown = deps.onTowerDown
 
-    ---@type { node: Node, gun: Node, x: number, z: number, cd: number, dead: boolean }[]
+    ---@type { node: Node, gun: Node, x: number, z: number, cd: number, dead: boolean,
+    ---         aimYaw: number, gunRest: Vector3, recoilT: number|nil }[]
     self.towers = {}
     for i, h in ipairs(deps.handles) do
         self.towers[#self.towers + 1] = {
@@ -57,6 +73,9 @@ function Turrets.Build(deps)
             z = Config.TURRET_Z,
             cd = Config.TURRET_FIRST,
             dead = false,
+            aimYaw = 0.0,                    -- 炮管当前朝向（弧度；0 = 炮口朝海）
+            gunRest = h.gun:GetPosition(),   -- 炮管静止局部位置，后坐力绕它振荡
+            recoilT = nil,                   -- 后坐力计时（nil = 没在晃）
         }
     end
     ---@type { ball: Node, from: Vector3, to: Vector3, t: number, dur: number }[]
@@ -119,7 +138,16 @@ end
 ---@param tw table
 ---@param toPos Vector3
 local function Fire(self, tw, toPos)
-    local muzzle = tw.node:GetWorldPosition() + Config.TURRET_MUZZLE
+    -- 后坐力起跳：这一帧起炮管沿炮尾方向被顶出去，之后由 UpdateRecoil 阻尼振荡回座。
+    tw.recoilT = 0.0
+    -- 炮口位随炮管转向同步转：TURRET_MUZZLE 是 yaw=0 时的偏移，gun 已咬向目标后
+    -- 把它绕 Y 转过去，否则炮管横向指着船、炮弹却从朝海侧的固定点冒出来（近看穿帮）。
+    local m = Config.TURRET_MUZZLE
+    local yaw = tw.aimYaw
+    local muzzle = tw.node:GetWorldPosition() + Vector3(
+        m.x * math.cos(yaw) - m.z * math.sin(yaw),
+        m.y,
+        m.x * math.sin(yaw) + m.z * math.cos(yaw))
     self.fx:Flash(muzzle, Color(1.0, 0.78, 0.42), 7.0, 0.08)
     self.audio:Play("turretShot")
 
@@ -228,12 +256,63 @@ function Turrets:SyncTowerState()
 end
 
 ----------------------------------------------------------------------
+-- 开炮表现：缓动转向 + 后坐力回座（纯演出层，不碰火控数值与命中判定）
+----------------------------------------------------------------------
+
+--- 炮管缓动转向：有船则平滑咬向射程内最近的船，没船则平滑回正（炮口朝海）。
+--- 弹道落点在 Fire 里按目标独立计算，gun 指没指准都不影响命中；点火的
+--- 对准门槛在 Update 里另行把关。失能塔不转（炮管由 SyncTowerState 歪着）。
+---@param dt number
+function Turrets:UpdateAim(dt)
+    for _, tw in ipairs(self.towers) do
+        if not tw.dead then
+            local targetYaw = 0.0
+            local _, pos = FindTarget(tw, self.enemies)
+            if pos then
+                targetYaw = yawTo(tw, pos)
+            end
+            -- 指数趋近（每帧走剩余角差的一小口）：快而不僵，跨 ±180 走短弧。
+            local diff = yawDiff(targetYaw, tw.aimYaw)
+            tw.aimYaw = tw.aimYaw + diff * math.min(1.0, dt * Config.TURRET_AIM_TURN_RATE)
+            tw.gun:SetRotation(Quaternion(-math.deg(tw.aimYaw), Vector3.UP))
+        end
+    end
+end
+
+--- 后坐力回座：开炮瞬间炮管沿自身朝向的反方向被顶退，随后按阻尼余弦振荡
+--- （一退、一扑、再小退……）衰减回静止位。方向随 aimYaw 转——炮管指向哪、
+--- 就朝哪的反方向挫；失能塔也照走完，位置动画不碰 SyncTowerState 管的旋转。
+---@param dt number
+function Turrets:UpdateRecoil(dt)
+    for _, tw in ipairs(self.towers) do
+        if tw.recoilT then
+            tw.recoilT = tw.recoilT + dt
+            if tw.recoilT >= Config.TURRET_RECOIL_TIME then
+                tw.recoilT = nil
+                tw.gun:SetPosition(tw.gunRest)
+            else
+                local t = tw.recoilT
+                local s = Config.TURRET_RECOIL_AMPLITUDE
+                    * math.exp(-Config.TURRET_RECOIL_DECAY * t)
+                    * math.cos(Config.TURRET_RECOIL_FREQ * t)
+                tw.gun:SetPosition(Vector3(
+                    tw.gunRest.x - math.sin(tw.aimYaw) * s,
+                    tw.gunRest.y,
+                    tw.gunRest.z + math.cos(tw.aimYaw) * s))
+            end
+        end
+    end
+end
+
+----------------------------------------------------------------------
 -- 帧更新与换局
 ----------------------------------------------------------------------
 
 ---@param dt number
 function Turrets:Update(dt)
     self:SyncTowerState()
+    self:UpdateAim(dt)
+    self:UpdateRecoil(dt)
     -- 结算面板期间不放炮（也不再攒冷却）：这时候战场已经判死，炮声只是噪音。
     if self.waves and self.waves.phase == "ended" then
         return
@@ -247,8 +326,12 @@ function Turrets:Update(dt)
             if tw.cd <= 0.0 then
                 local _, pos = FindTarget(tw, self.enemies)
                 if pos then
-                    tw.cd = Config.TURRET_INTERVAL + (math.random() * 2.0 - 1.0) * Config.TURRET_INTERVAL_SPREAD
-                    Fire(self, tw, pos)
+                    -- 转向没咬住先不开炮（±TURRET_AIM_FIRE_TOL）：等待期间 cd 不回填，
+                    -- 炮口一对准这一帧就点火，转向耗时（约 0.3s）不会被算进间隔里。
+                    if math.abs(yawDiff(yawTo(tw, pos), tw.aimYaw)) <= math.rad(Config.TURRET_AIM_FIRE_TOL) then
+                        tw.cd = Config.TURRET_INTERVAL + (math.random() * 2.0 - 1.0) * Config.TURRET_INTERVAL_SPREAD
+                        Fire(self, tw, pos)
+                    end
                 end
             end
         end
@@ -257,7 +340,7 @@ function Turrets:Update(dt)
     self:UpdateProjectiles(dt)
 end
 
---- 新局/重开：在飞弹丸清空、冷却回首发迟、失能表现收回。血量归零由 Waves:Reset 负责。
+--- 新局/重开：在飞弹丸清空、冷却回首发迟、炮管回正回座、失能表现收回。血量归零由 Waves:Reset 负责。
 function Turrets:Reset()
     for _, pr in ipairs(self.projectiles) do
         if pr.ball then
@@ -267,10 +350,11 @@ function Turrets:Reset()
     self.projectiles = {}
     for _, tw in ipairs(self.towers) do
         tw.cd = Config.TURRET_FIRST
-        if tw.dead then
-            tw.dead = false
-            tw.gun:SetRotation(Quaternion.IDENTITY)
-        end
+        tw.aimYaw = 0.0
+        tw.recoilT = nil
+        tw.gun:SetPosition(tw.gunRest)
+        tw.gun:SetRotation(Quaternion.IDENTITY)
+        tw.dead = false
     end
 end
 
