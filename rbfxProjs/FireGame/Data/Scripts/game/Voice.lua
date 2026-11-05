@@ -9,7 +9,8 @@
 --     MINIGAME_REQUEST_KIND 表）。
 --   * 宿主 JS 侧（minigame_sdk.js）拿 recorderManager 录 aac 存进用户目录
 --     （每次全新路径，槽位→路径的映射持久化在宿主 storage，跨局/跨会话存活），
---     InnerAudioContext 按档位变声回放。
+--     回放优先走 WebAudio 解码并按峰值归一放大（手机麦电平太低，InnerAudioContext
+--     的 volume 上限 1.0 拉不动），按档位变声；宿主不支持时回落 InnerAudioContext。
 --     引擎的 Sound 解码器全程不参与（它只认 ogg/wav）。
 --   * 编辑器/桌面宿主没有 SDK（IsAvailable()=false，请求立即失败）——UI 入口
 --     由 Hud 按 voiceAvailable 隐藏，本模块的调用全部静默返回，不会报错。

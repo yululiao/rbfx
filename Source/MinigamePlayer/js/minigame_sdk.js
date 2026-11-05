@@ -493,12 +493,22 @@
         complete(request_id, true, JSON.stringify({ cleared: true }));
     };
 
-    var voice_audio = null;
+    var voice_audio = null;   // the plain player's live instance
+    var voice_boost = null;   // the boosted player's in-flight attempt, if any
 
     /// While a user clip plays, the music bed ducks under it: a phone-mic recording is
     /// the quietest thing in the mix, and that clip IS the feature - it must be heard.
     var VOICE_DUCK_FACTOR = 0.15;
     var voice_ducking = false;
+
+    /// Ducking alone cannot save a phone-mic clip: InnerAudioContext.volume tops out at
+    /// 1.0 and such recordings peak far below full scale. Where the host offers a
+    /// WebAudio-style context the clip is decoded and boosted through a GainNode
+    /// instead, normalized against its own peak: TARGET is the ceiling the loudest
+    /// sample is lifted to, CAP is the most amplification one take may get (past it the
+    /// room noise rises faster than the voice does).
+    var VOICE_BOOST_TARGET = 0.92;
+    var VOICE_BOOST_CAP = 6.0;
 
     /// Retune every looped music instance to (or back from) the ducked level. Music
     /// gains are remembered on __rbfx_gain so a retune arriving mid-duck still restores
@@ -515,19 +525,35 @@
     }
 
     function stop_voice_audio() {
-        if (!voice_audio)
-            return;
-        var audio = voice_audio;
-        voice_audio = null;
-        // Settle the running request before tearing the instance down: destroy()
-        // detaches the listeners, so relying on onStop alone could drop the
-        // completion of a playback that is being replaced.
-        try { if (audio.__settle) audio.__settle(false, "playback stopped"); } catch (e) { /* ignore */ }
-        try { audio.stop(); } catch (e) { /* already stopped */ }
-        try { audio.destroy(); } catch (e) { /* already destroyed */ }
+        var had = false;
+        if (voice_boost) {
+            var boost = voice_boost;
+            voice_boost = null;
+            had = true;
+            if (boost.watchdog)
+                clearTimeout(boost.watchdog);
+            // Same contract as the instance branch below: settle first, tear down after,
+            // so the request of a playback being replaced does not leak.
+            try { if (boost.settle) boost.settle(false, "playback stopped"); } catch (e) { /* ignore */ }
+            try { if (boost.source) boost.source.stop(); } catch (e) { /* already stopped */ }
+            try { if (boost.source) boost.source.disconnect(); } catch (e) { /* ignore */ }
+            try { if (boost.gain) boost.gain.disconnect(); } catch (e) { /* ignore */ }
+        }
+        if (voice_audio) {
+            var audio = voice_audio;
+            voice_audio = null;
+            had = true;
+            // Settle the running request before tearing the instance down: destroy()
+            // detaches the listeners, so relying on onStop alone could drop the
+            // completion of a playback that is being replaced.
+            try { if (audio.__settle) audio.__settle(false, "playback stopped"); } catch (e) { /* ignore */ }
+            try { audio.stop(); } catch (e) { /* already stopped */ }
+            try { audio.destroy(); } catch (e) { /* already destroyed */ }
+        }
         // A replacement playback re-ducks on its own; a real teardown (stop request,
         // clear, restart) must hand the music bed back.
-        duck_music_for_voice(false);
+        if (had)
+            duck_music_for_voice(false);
     }
 
     handlers[KIND.play_user_audio] = function (request_id, payload) {
@@ -557,9 +583,16 @@
         if (!src)
             return complete(request_id, false, "no clip recorded for this slot");
 
-        // One audio instance at a time: a new playback replaces the previous one and
-        // completes its request as "stopped" so no callback leaks.
+        // One playback at a time: a new request replaces the previous one and completes
+        // its request as "stopped" so no callback leaks. The boosted player takes it
+        // first and hands the request over to the plain one on any failure.
         stop_voice_audio();
+        play_user_audio_boosted(request_id, src, rate);
+    };
+
+    /// The plain player - exactly what shipped before the boost existed, and the
+    /// fallback for every failure on the boosted path.
+    function play_user_audio_plain(request_id, src, rate) {
         var instance = wx_tt.createInnerAudioContext();
         voice_audio = instance;
         instance.src = src;
@@ -595,7 +628,181 @@
             settle(false, fail_text(error, "playback failed"));
             finish();
         }
-    };
+    }
+
+    /// One shared WebAudio-style context for every user clip (hosts cap how many may
+    /// exist); remembered as unavailable after the first miss so later plays skip the
+    /// hop. WeChat exposes createWebAudioContext, Douyin getAudioContext.
+    var voice_webaudio = null;
+    var voice_webaudio_dead = false;
+
+    function get_voice_webaudio() {
+        if (voice_webaudio || voice_webaudio_dead)
+            return voice_webaudio;
+        try {
+            if (wx_tt && typeof wx_tt.createWebAudioContext === "function")
+                voice_webaudio = wx_tt.createWebAudioContext();
+            else if (wx_tt && typeof wx_tt.getAudioContext === "function")
+                voice_webaudio = wx_tt.getAudioContext();
+        } catch (e) { /* not offered on this host */ }
+        if (!voice_webaudio)
+            voice_webaudio_dead = true;
+        return voice_webaudio;
+    }
+
+    /// Loudest sample across all channels - the normalization reference.
+    function sample_peak(buffer) {
+        var peak = 0;
+        var channels = buffer.numberOfChannels || 0;
+        for (var c = 0; c < channels; ++c) {
+            var data = buffer.getChannelData(c);
+            for (var i = 0; i < data.length; ++i) {
+                var v = data[i] < 0 ? -data[i] : data[i];
+                if (v > peak)
+                    peak = v;
+            }
+        }
+        return peak;
+    }
+
+    /// Drop an in-flight boost attempt without settling its request: the plain player
+    /// is taking that very request over, so it must stay the one to answer it.
+    function abandon_voice_boost(entry) {
+        if (voice_boost === entry)
+            voice_boost = null;
+        if (entry.watchdog)
+            clearTimeout(entry.watchdog);
+        try { if (entry.source) entry.source.stop(); } catch (e) { /* ignore */ }
+        try { if (entry.source) entry.source.disconnect(); } catch (e) { /* ignore */ }
+        try { if (entry.gain) entry.gain.disconnect(); } catch (e) { /* ignore */ }
+    }
+
+    /// Phone-mic clips cannot be lifted over the mix through InnerAudioContext (volume
+    /// caps at 1.0), so this path decodes the clip and boosts it through a GainNode,
+    /// normalized against the clip's own peak. Any failure - no context, unreadable
+    /// file, undecodable bytes, callbacks that never answer - falls back to the plain
+    /// player, so the worst case is exactly the volume that already works.
+    function play_user_audio_boosted(request_id, src, rate) {
+        var ctx = get_voice_webaudio();
+        if (!ctx)
+            return play_user_audio_plain(request_id, src, rate);
+
+        var settled = false;
+        var settle = function (ok, text) {
+            if (settled)
+                return;
+            settled = true;
+            complete(request_id, ok, text || "{}");
+        };
+        // Registered before the first async hop: a stop or a replacement that lands
+        // while the file is still being read must still abort this attempt.
+        var entry = { settle: settle, source: null, gain: null, watchdog: 0 };
+        voice_boost = entry;
+
+        var fallback = function (reason) {
+            console.warn("[rbfx] boosted voice playback fell back to plain: " + reason);
+            abandon_voice_boost(entry);
+            play_user_audio_plain(request_id, src, rate);
+        };
+
+        try {
+            wx_tt.getFileSystemManager().readFile({
+                filePath: src,
+                success: function (res) {
+                    if (voice_boost !== entry)
+                        return;
+                    decode(res && res.data);
+                },
+                fail: function (error) {
+                    if (voice_boost !== entry)
+                        return;
+                    fallback(fail_text(error, "reading the clip failed"));
+                }
+            });
+        } catch (error) {
+            fallback(fail_text(error, "reading the clip failed"));
+        }
+
+        function decode(bytes) {
+            if (!bytes)
+                return fallback("the clip read back empty");
+            var answered = false;
+            var on_decoded = function (buffer) {
+                if (answered || voice_boost !== entry)
+                    return;
+                answered = true;
+                start(buffer);
+            };
+            var on_failed = function (error) {
+                if (answered || voice_boost !== entry)
+                    return;
+                answered = true;
+                fallback(fail_text(error, "decoding the clip failed"));
+            };
+            try {
+                // Callback form first; a host that only answers through the returned
+                // promise gets that wired too, and `answered` keeps whichever replies
+                // first from double-firing.
+                var maybe = ctx.decodeAudioData(bytes, on_decoded, on_failed);
+                if (maybe && typeof maybe.then === "function")
+                    maybe.then(on_decoded, on_failed);
+            } catch (error) {
+                on_failed(error);
+            }
+        }
+
+        function start(buffer) {
+            var peak = sample_peak(buffer);
+            if (!(peak > 0))
+                return fallback("the clip is silent");
+            var gain = Math.min(VOICE_BOOST_CAP, VOICE_BOOST_TARGET / peak);
+            var finish = function () {
+                if (voice_boost === entry)
+                    voice_boost = null;
+                if (entry.watchdog) {
+                    clearTimeout(entry.watchdog);
+                    entry.watchdog = 0;
+                }
+                try { entry.source.stop(); } catch (e) { /* already stopped */ }
+                try { entry.source.disconnect(); } catch (e) { /* ignore */ }
+                try { entry.gain.disconnect(); } catch (e) { /* ignore */ }
+                duck_music_for_voice(false);
+            };
+            try {
+                // iOS keeps a context created outside a user gesture suspended: nudge it
+                // and play anyway - the first clip usually plays from the preview button
+                // (a gesture), which leaves the context running for the gameplay cues.
+                if (typeof ctx.state === "string" && ctx.state === "suspended" && ctx.resume) {
+                    try { ctx.resume(); } catch (e) { /* ignore */ }
+                }
+                var source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.playbackRate.value = rate;  // same pitch+speed steps as InnerAudioContext
+                var node = ctx.createGain();
+                node.gain.value = gain;
+                source.connect(node);
+                node.connect(ctx.destination);
+                entry.source = source;
+                entry.gain = node;
+                source.onended = function () { settle(true); finish(); };
+                duck_music_for_voice(true);
+                source.start();
+                // A host that swallows onended (this project has met its kin on the
+                // recorder side) would leave the request unsettled forever: settle by
+                // the clip's own playing time, whichever comes first.
+                var budget = (buffer.duration || 1.0) / (rate || 1.0) + 1.0;
+                entry.watchdog = setTimeout(function () {
+                    if (voice_boost !== entry)
+                        return;
+                    settle(true);
+                    finish();
+                }, budget * 1000);
+            } catch (error) {
+                settle(false, fail_text(error, "playback failed"));
+                finish();
+            }
+        }
+    }
 
     handlers[KIND.stop_user_audio] = function (request_id) {
         stop_voice_audio();
