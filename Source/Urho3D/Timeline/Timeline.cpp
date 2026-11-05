@@ -13,6 +13,7 @@
 #include <Urho3D/Timeline/TimelineControlTrack.h>
 #include <Urho3D/Timeline/TimelineMarkerTrack.h>
 #include <Urho3D/Timeline/TimelinePlayer.h>
+#include <Urho3D/Timeline/TimelinePropertyTrack.h>
 #include <Urho3D/Timeline/TimelineResource.h>
 #include <Urho3D/Timeline/TimelineSignalTrack.h>
 #include <Urho3D/Timeline/TimelineTrack.h>
@@ -27,6 +28,7 @@ void RegisterTimelineLibrary(Context* context)
 
     TimelineAnimationTrack::RegisterObject(context);
     TimelineActivationTrack::RegisterObject(context);
+    TimelinePropertyTrack::RegisterObject(context);
     TimelineControlTrack::RegisterObject(context);
     TimelineAudioTrack::RegisterObject(context);
     TimelineSignalTrack::RegisterObject(context);

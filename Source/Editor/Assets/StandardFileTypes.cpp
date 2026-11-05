@@ -38,6 +38,7 @@
 #include <Urho3D/Scene/PrefabResource.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/Scene/SceneResource.h>
+#include <Urho3D/Timeline/TimelineResource.h>
 #include <Urho3D/UI/Font.h>
 #include <Urho3D/Utility/AssetPipeline.h>
 
@@ -144,6 +145,14 @@ void Assets_StandardFileTypes(Context* context, Project* project)
         if (desc.HasExtension({".sdf", ".ttf"}))
         {
             desc.AddObjectType<Font>();
+        }
+    });
+
+    project->AddAnalyzeFileCallback([](ResourceFileDescriptor& desc, const AnalyzeFileContext& ctx)
+    {
+        if (desc.HasExtension({".timeline"}) || ctx.HasXMLRoot("timeline"))
+        {
+            desc.AddObjectType<TimelineResource>();
         }
     });
 

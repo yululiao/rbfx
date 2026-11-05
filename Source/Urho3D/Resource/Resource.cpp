@@ -246,7 +246,7 @@ bool SimpleResource::Save(Serializer& dest, InternalResourceFormat format) const
     }
     catch (const ArchiveException& e)
     {
-        URHO3D_LOGERROR("Cannot save SimpleResource: ", e.what());
+        URHO3D_LOGERROR("Cannot save SimpleResource: {}", e.what());
         return false;
     }
 }
@@ -319,7 +319,7 @@ bool SimpleResource::BeginLoad(Deserializer& source)
     }
     catch (const ArchiveException& e)
     {
-        URHO3D_LOGERROR("Cannot load SimpleResource: ", e.what());
+        URHO3D_LOGERROR("Cannot load SimpleResource: {}", e.what());
         return false;
     }
 }

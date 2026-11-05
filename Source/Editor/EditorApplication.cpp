@@ -55,6 +55,7 @@
 #include "Tabs/TextEditorTab.h"
 #include "Tabs/Texture2DViewTab.h"
 #include "Tabs/TextureCubeViewTab.h"
+#include "Tabs/TimelineViewTab.h"
 #include "Tabs/UIViewTab/UIViewTab.h"
 #include "Tabs/Glue/UIViewGlue.h"
 
@@ -116,6 +117,7 @@ EditorApplication::EditorApplication(Context* context)
     editorPluginManager_->AddPlugin("Tabs.Inspector", &Tabs_InspectorTab);
     editorPluginManager_->AddPlugin("Tabs.UIView", &Tabs_UIViewTab);
     editorPluginManager_->AddPlugin("Tabs.TextEditor", &Tabs_TextEditorTab);
+    editorPluginManager_->AddPlugin("Tabs.TimelineView", &Tabs_TimelineViewTab);
 
     editorPluginManager_->AddPlugin("Tabs.Settings.KeyBindings", &Tabs_KeyBindingsPage);
     editorPluginManager_->AddPlugin("Tabs.Settings.Launch", &Tabs_LaunchPage);
