@@ -27,8 +27,10 @@
 
 #include <Urho3D/Graphics/AnimatedModel.h>
 #include <Urho3D/Graphics/AnimationController.h>
-#include <Urho3D/Graphics/Texture3D.h>
+#include <Urho3D/Graphics/Model.h>
 #include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/SystemUI/AnimationPreviewHelpers.h>
+#include <Urho3D/SystemUI/DragDropPayload.h>
 #include <Urho3D/SystemUI/Widgets.h>
 
 namespace Urho3D
@@ -59,7 +61,6 @@ AnimationViewTab::~AnimationViewTab()
 
 bool AnimationViewTab::CanOpenResource(const ResourceFileDescriptor& desc)
 {
-    auto name = desc.typeNames_.begin()->c_str();
     return desc.HasObjectType<Animation>();
 }
 
@@ -69,21 +70,42 @@ void AnimationViewTab::RenderTitle()
 
     auto* cache = GetSubsystem<ResourceCache>();
 
-    static const StringVector allowedTextureTypes{
+    static const StringVector allowedModelTypes{
         Model::GetTypeNameStatic(),
     };
 
-    StringHash textureType = model_ ? model_->GetType() : Texture2D::GetTypeStatic();
-    ea::string textureName = model_ ? model_->GetName() : "";
-    if (Widgets::EditResourceRef(textureType, textureName, &allowedTextureTypes))
+    StringHash modelType = Model::GetTypeStatic();
+    ea::string modelName = model_ ? model_->GetName() : "";
+    if (Widgets::EditResourceRef(modelType, modelName, &allowedModelTypes))
     {
-        model_ = cache->GetResource<Model>(textureName);
-        animatedModel_->SetModel(model_);
-        if (model_)
-        {
-            ResetCamera();
-        }
+        // Model can also be bound by dragging it onto the reference field
+        SetModel(cache->GetResource<Model>(modelName));
     }
+}
+
+void AnimationViewTab::SetModel(Model* model)
+{
+    model_ = model;
+    animatedModel_->SetModel(model_);
+
+    if (model_)
+    {
+        ApplyDefaultMaterials(animatedModel_);
+        ResetCamera();
+    }
+
+    PlayAnimation();
+}
+
+void AnimationViewTab::PlayAnimation()
+{
+    if (!animation_ || !model_ || !animationController_)
+        return;
+
+    auto params = AnimationParameters{animation_}.Layer(0);
+    params.looped_ = true;
+    animationController_->StopAll();
+    animationController_->PlayNewExclusive(params);
 }
 
 void AnimationViewTab::ResetCamera()
@@ -101,6 +123,21 @@ void AnimationViewTab::RenderContent()
         return;
 
     CustomSceneViewTab::RenderContent();
+
+    // Bind model by dragging it onto the viewport
+    if (!ui::BeginDragDropTarget())
+        return;
+
+    const auto* payload = dynamic_cast<const ResourceDragDropPayload*>(DragDropPayload::Get());
+    if (payload && payload->resources_.size() == 1 && payload->resources_[0].HasObjectType<Model>())
+    {
+        if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str()))
+        {
+            auto* cache = GetSubsystem<ResourceCache>();
+            SetModel(cache->GetResource<Model>(payload->resources_[0].resourceName_));
+        }
+    }
+    ui::EndDragDropTarget();
 }
 
 void AnimationViewTab::OnResourceLoaded(const ea::string& resourceName)
@@ -108,10 +145,11 @@ void AnimationViewTab::OnResourceLoaded(const ea::string& resourceName)
     auto cache = GetSubsystem<ResourceCache>();
     animation_ = cache->GetResource<Animation>(resourceName, false);
 
-    auto params = AnimationParameters{animation_}.Layer(0);
-    params.looped_ = true;
-    animationController_->StopAll();
-    animationController_->PlayNewExclusive(params);
+    // Rebind model automatically if it is missing or incompatible with the animation
+    if (animation_ && (!model_ || !IsModelCompatibleWithAnimation(*animation_, *model_)))
+        SetModel(FindModelForAnimation(context_, animation_));
+    else
+        PlayAnimation();
 }
 
 void AnimationViewTab::OnResourceUnloaded(const ea::string& resourceName)

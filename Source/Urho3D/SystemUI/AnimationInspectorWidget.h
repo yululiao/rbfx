@@ -27,6 +27,12 @@
 namespace Urho3D
 {
 
+class AnimatedModel;
+class Animation;
+class AnimationController;
+class Model;
+class SceneWidget;
+
 /// SystemUI widget used to edit animation.
 class URHO3D_API AnimationInspectorWidget : public ResourceInspectorWidget
 {
@@ -37,9 +43,26 @@ public:
     ~AnimationInspectorWidget() override;
 
     bool CanSave() const override { return false; }
+    void RenderContent() override;
 
 private:
     static const ea::vector<PropertyDesc> properties;
+
+    Animation* GetAnimation() const;
+
+    void SetModel(Model* model);
+    void RestartAnimation();
+    void RenderModelRef();
+    void RenderPlaybackControls();
+    void RenderPreviewViewport();
+
+    SharedPtr<SceneWidget> preview_;
+    SharedPtr<Model> model_;
+    AnimatedModel* animatedModel_{};
+    AnimationController* animationController_{};
+
+    bool paused_{};
+    bool looped_{true};
 };
 
 } // namespace Urho3D

@@ -67,6 +67,9 @@ protected:
     void RenderTitle() override;
 
 private:
+    void SetModel(Model* model);
+    void PlayAnimation();
+
     SharedPtr<Model> model_;
     SharedPtr<Animation> animation_;
     Node* modelNode_;
