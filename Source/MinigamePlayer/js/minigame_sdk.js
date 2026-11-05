@@ -194,9 +194,16 @@
 
     // ---------- voice (record / play / stop) ----------
     // Clips live entirely on the host side: the recorder writes aac files into the
-    // user data directory under rbfx_voice_<slot>.aac, playback goes through
-    // InnerAudioContext. The engine never decodes these (its Sound loaders only
-    // know ogg/wav); the slot name is the only contract between both worlds.
+    // user data directory, playback goes through InnerAudioContext. The engine never
+    // decodes these (its Sound loaders only know ogg/wav); the slot name is the only
+    // contract between both worlds.
+    //
+    // Storage scheme (v2, after the fixed-path scheme broke on real devices twice):
+    // the earlier rbfx_voice_<slot>.aac path replaced through unlink+rename failed
+    // when an audio pipeline still held the file (re-record and clear both silently
+    // stuck on the first clip), and same-path playback served cached bytes anyway.
+    // Now every save lands under a fresh path and the slot registry below decides
+    // what plays.
     //
     // aac, not mp3: the Douyin recorder rejects anything outside "aac" / "pcm" / "wav"
     // (RecorderManager.start:fail expect inputs[0].format to be one of ...), and both vendors
@@ -206,15 +213,89 @@
         return (wx_tt && wx_tt.env && wx_tt.env.USER_DATA_PATH) || "";
     }
 
-    function voice_file_path(slot) {
-        return user_data_path() + "/rbfx_voice_" + String(slot || "default") + ".aac";
+    function voice_file_path(slot, unique) {
+        var base = user_data_path() + "/rbfx_voice_" + String(slot || "default");
+        return unique ? base + "_" + String(Date.now()) + ".aac" : base + ".aac";
     }
 
-    /// Suffix a fresh clip is written under before it replaces the slot's current clip.
+    /// Legacy suffix from the era of in-place replacement; swept for, never written again.
     var VOICE_STAGING_SUFFIX = ".new";
 
     /// The only compressed container both vendors' recorders accept (Douyin: aac / pcm / wav).
     var RECORD_FORMAT = "aac";
+
+    // ---------- slot -> clip path registry ----------
+    // Deleting or replacing a file that an audio pipeline still references fails on real
+    // devices in ways this layer cannot diagnose, let alone fix. So the fixed-path scheme
+    // is gone: every recording lands under a fresh path, and this table is the single
+    // source of truth for what playback serves. A file that cannot be deleted becomes an
+    // orphan on disk, never a wrong sound - the map stops pointing at it first. It also
+    // sidesteps the host's same-path playback cache (a replaced clip played as its old
+    // bytes). The map survives restarts through the host's storage.
+    var VOICE_MAP_KEY = "rbfx_voice_slots";
+    var voice_paths = {};
+    var voice_gc_done = false;
+
+    function load_voice_map() {
+        try {
+            var stored = wx_tt.getStorageSync(VOICE_MAP_KEY);
+            if (stored && typeof stored === "object")
+                voice_paths = stored;
+        } catch (e) { /* a host without storage keeps the map in memory only */ }
+    }
+
+    function save_voice_map() {
+        try { wx_tt.setStorageSync(VOICE_MAP_KEY, voice_paths); } catch (e) { /* see above */ }
+    }
+
+    /// Drop entries whose file is gone: the host wipes the user dir on uninstall and
+    /// system cleanup passes while storage survives both.
+    function prune_voice_map() {
+        if (!wx_tt || typeof wx_tt.getFileSystemManager !== "function")
+            return;
+        var changed = false;
+        try {
+            var fs = wx_tt.getFileSystemManager();
+            for (var slot in voice_paths) {
+                try { fs.accessSync(voice_paths[slot]); }
+                catch (e) { delete voice_paths[slot]; changed = true; }
+            }
+        } catch (e) { /* no file system: leave the map alone */ }
+        if (changed)
+            save_voice_map();
+    }
+
+    /// Orphan sweep, once before the first voice request: deletes rbfx_voice_* files no
+    /// slot points at (replaced clips that could not be unlinked, and files left behind
+    /// by the fixed-path build). Best effort - an orphan is harmless.
+    function ensure_voice_gc() {
+        if (voice_gc_done)
+            return;
+        voice_gc_done = true;
+        try {
+            var fs = wx_tt.getFileSystemManager();
+            var names = fs.readdirSync(user_data_path()) || [];
+            for (var i = 0; i < names.length; ++i) {
+                var name = String(names[i]);
+                if (name.indexOf("rbfx_voice_") !== 0)
+                    continue;
+                var live = false;
+                for (var slot in voice_paths) {
+                    var path = voice_paths[slot];
+                    if (path && path.indexOf("/" + name) >= 0) {
+                        live = true;
+                        break;
+                    }
+                }
+                if (!live) {
+                    try { fs.unlinkSync(user_data_path() + "/" + name); } catch (e) { /* harmless */ }
+                }
+            }
+        } catch (e) { /* readdir unsupported: skip the sweep */ }
+    }
+
+    load_voice_map();
+    prune_voice_map();
 
     var recorder_manager = null;
     var recording_request = 0;
@@ -250,21 +331,6 @@
         }, budget_ms);
     }
 
-    /// Swap a staged clip into the slot. The old clip stays playable until the new one is safely
-    /// on disk, and a host that cannot move files never loses it either.
-    function commit_staged_clip(fs, staging, target) {
-        if (typeof fs.renameSync !== "function") {
-            if (typeof fs.copyFileSync !== "function")
-                throw new Error("the host file system cannot move files");
-            try { fs.unlinkSync(target); } catch (e) { /* the slot was empty */ }
-            fs.copyFileSync(staging, target);
-            try { fs.unlinkSync(staging); } catch (e) { /* already gone */ }
-            return;
-        }
-        try { fs.unlinkSync(target); } catch (e) { /* the slot was empty */ }
-        fs.renameSync(staging, target);
-    }
-
     /// The recorder is one host-wide manager with callback-style listeners: create it once, and
     /// wire both outcome paths here - this is the only place a clip is written to disk.
     function get_recorder_manager() {
@@ -277,24 +343,28 @@
                 return;
             if (!res || !res.tempFilePath)
                 return settle_record(request_id, false, "recorder returned no file");
+            var slot = recorder_manager.__voice_slot || "default";
             try {
                 var fs = wx_tt.getFileSystemManager();
-                var target = recorder_manager.__voice_target;
-                // Land the new clip beside the old one first: saveFile refuses to overwrite, and
-                // dropping the old clip up front would lose it whenever this save fails.
-                var staging = target + VOICE_STAGING_SUFFIX;
-                try { fs.unlinkSync(staging); } catch (e) { /* leftovers from an aborted save */ }
+                // A fresh path per save: nothing to overwrite, nothing for a live player to
+                // hold on to. Douyin saveFile MOVES the temp file here, so the temp path
+                // dies with this call either way.
+                var target = voice_file_path(slot, true);
                 fs.saveFile({
                     tempFilePath: res.tempFilePath,
-                    filePath: staging,
-                    success: function () {
-                        try {
-                            commit_staged_clip(fs, staging, target);
-                            settle_record(request_id, true,
-                                JSON.stringify({ durationMs: res.duration || 0 }));
-                        } catch (error) {
-                            settle_record(request_id, false, fail_text(error, "saving the clip failed"));
+                    filePath: target,
+                    success: function (saved) {
+                        voice_paths[slot] = (saved && saved.savedFilePath) || target;
+                        save_voice_map();
+                        // The replaced clip is already unreachable through the map. Unlink
+                        // it when the host lets us; on a host that keeps a handle open it
+                        // simply becomes an orphan the startup sweep collects.
+                        var previous = recorder_manager.__voice_previous;
+                        if (previous && previous !== voice_paths[slot]) {
+                            try { fs.unlinkSync(previous); } catch (e) { /* harmless orphan */ }
                         }
+                        settle_record(request_id, true,
+                            JSON.stringify({ durationMs: res.duration || 0 }));
                     },
                     fail: function (error) {
                         settle_record(request_id, false, fail_text(error, "saving the clip failed"));
@@ -319,7 +389,10 @@
     function start_recording(request_id, slot, duration) {
         try {
             var manager = get_recorder_manager();
-            manager.__voice_target = voice_file_path(slot);
+            // Remember the slot (to file the clip under) and the clip being replaced (to
+            // unlink once the new one is safely registered).
+            manager.__voice_slot = slot;
+            manager.__voice_previous = voice_paths[slot] || null;
             recording_request = request_id;
             manager.start({ duration: duration, format: RECORD_FORMAT });
         } catch (error) {
@@ -372,6 +445,7 @@
         // bytes makes the swap fail or the old audio keep playing as if the new
         // recording never landed.
         stop_voice_audio();
+        ensure_voice_gc();
 
         var args = parse_payload(payload);
         var slot = args.slot ? String(args.slot) : "default";
@@ -383,29 +457,40 @@
         start_recording(request_id, slot, duration);
     };
 
-    /// Clearing a slot deletes its clip, so playback falls back to the game's own audio. A slot
-    /// without a clip is already where the request wants it, so that is a success too.
+    /// Clearing a slot means dropping it from the map, so playback falls back to the game's
+    /// own audio. The file unlink is best effort: a host that still holds the bytes keeps
+    /// them, but nothing points at them anymore - the next recording or the startup sweep
+    /// collects the orphan. A slot without a clip is already where the request wants it,
+    /// so that is a success too; with the map as the truth, "clear failed" no longer exists.
     handlers[KIND.clear_user_audio] = function (request_id, payload) {
         if (recording_request)
             return complete(request_id, false, "a recording is in progress");
         var args = parse_payload(payload);
-        var target = voice_file_path(args.slot ? String(args.slot) : "default");
+        var slot = args.slot ? String(args.slot) : "default";
+
+        // Release any player still on this slot's clip before unlinking under it.
+        stop_voice_audio();
+
         try {
             var fs = wx_tt.getFileSystemManager();
-            var cleared = false;
-            try { fs.unlinkSync(target); cleared = true; } catch (e) { /* nothing recorded, or the file is held */ }
-            try { fs.unlinkSync(target + VOICE_STAGING_SUFFIX); } catch (e) { /* no aborted save */ }
-            // If the clip is still on disk the clear did not actually happen: report
-            // failure instead of success, or the game goes on playing the "cleared"
-            // clip and the button looks broken (a held player above is one cause).
-            var still_present = true;
-            try { fs.accessSync(target); } catch (e) { still_present = false; }
-            if (still_present)
-                return complete(request_id, false, "the clip could not be removed (still in use?)");
-            complete(request_id, true, JSON.stringify({ cleared: cleared }));
+            // Legacy artifacts from the fixed-path build: swept for, never written again.
+            var legacy = [voice_file_path(slot), voice_file_path(slot) + VOICE_STAGING_SUFFIX];
+            for (var i = 0; i < legacy.length; ++i) {
+                try { fs.unlinkSync(legacy[i]); } catch (e) { /* nothing recorded, or held */ }
+            }
+            var previous = voice_paths[slot];
+            delete voice_paths[slot];
+            save_voice_map();
+            if (previous) {
+                try { fs.unlinkSync(previous); } catch (e) { /* harmless orphan */ }
+            }
         } catch (error) {
-            complete(request_id, false, fail_text(error, "clearing the clip failed"));
+            // No file system at all: the map drop above still happened through storage, and
+            // that alone is what playback consults, so the clear stands.
+            delete voice_paths[slot];
+            save_voice_map();
         }
+        complete(request_id, true, JSON.stringify({ cleared: true }));
     };
 
     var voice_audio = null;
@@ -457,13 +542,20 @@
 
         // A slot that was never recorded (or whose clip was cleaned up) is not a
         // playback error the game should wait on: report it immediately so the caller
-        // can fall back to its canned cue on the very next frame.
-        var src = voice_file_path(slot);
-        try {
-            wx_tt.getFileSystemManager().accessSync(src);
-        } catch (e) {
-            return complete(request_id, false, "no clip recorded for this slot");
+        // can fall back to its canned cue on the very next frame. The map is the truth;
+        // the access check catches a wiped user dir and prunes the stale entry on the spot.
+        var src = voice_paths[slot];
+        if (src) {
+            try {
+                wx_tt.getFileSystemManager().accessSync(src);
+            } catch (e) {
+                delete voice_paths[slot];
+                save_voice_map();
+                src = null;
+            }
         }
+        if (!src)
+            return complete(request_id, false, "no clip recorded for this slot");
 
         // One audio instance at a time: a new playback replaces the previous one and
         // completes its request as "stopped" so no callback leaks.

@@ -8,7 +8,8 @@
 --     每个请求返回 id，结果经 "MinigameSdkResult" 事件回来（data.Kind 对照
 --     MINIGAME_REQUEST_KIND 表）。
 --   * 宿主 JS 侧（minigame_sdk.js）拿 recorderManager 录 aac 存进用户目录
---     （rbfx_voice_<slot>.aac，跨局持久），InnerAudioContext 按档位变声回放。
+--     （每次全新路径，槽位→路径的映射持久化在宿主 storage，跨局/跨会话存活），
+--     InnerAudioContext 按档位变声回放。
 --     引擎的 Sound 解码器全程不参与（它只认 ogg/wav）。
 --   * 编辑器/桌面宿主没有 SDK（IsAvailable()=false，请求立即失败）——UI 入口
 --     由 Hud 按 voiceAvailable 隐藏，本模块的调用全部静默返回，不会报错。
