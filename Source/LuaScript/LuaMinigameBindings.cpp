@@ -79,6 +79,15 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
                 sol::optional<ea::string> paramsJson) -> int {
                 return sdk ? sdk->ReportAnalytics(event, paramsJson.value_or(EMPTY_STRING)) : 0;
             })
+            // Sidebar revisit (Douyin compliance): launch info doubles as the "guide done"
+            // persist call (markGuideDone=true writes the flag on the host); the payload of
+            // the answer carries {"sidebar":bool,"guideDone":bool}. Navigation answers
+            // whether the host's sidebar panel opened.
+            LUA_MEMBER_FUNC_RAW(GetLaunchInfo, [](MinigameSDK* sdk,
+                sol::optional<bool> markGuideDone) -> int {
+                return sdk ? sdk->GetLaunchInfo(markGuideDone.value_or(false)) : 0;
+            })
+            LUA_MEMBER_FUNC(NavigateToSidebar)
             LUA_MEMBER_FUNC_RET(IsAvailable, bool)
         );
     }
@@ -127,7 +136,9 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
         "CLEAR_USER_AUDIO", static_cast<int>(MinigameSDKRequestKind::ClearUserAudio),
         "PLAY_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::PlayGameAudio),
         "STOP_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopGameAudio),
-        "REPORT_ANALYTICS", static_cast<int>(MinigameSDKRequestKind::ReportAnalytics));
+        "REPORT_ANALYTICS", static_cast<int>(MinigameSDKRequestKind::ReportAnalytics),
+        "GET_LAUNCH_INFO", static_cast<int>(MinigameSDKRequestKind::GetLaunchInfo),
+        "NAVIGATE_TO_SIDEBAR", static_cast<int>(MinigameSDKRequestKind::NavigateToSidebar));
 }
 
 } // namespace Urho3D

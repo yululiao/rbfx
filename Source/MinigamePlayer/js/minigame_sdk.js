@@ -29,7 +29,9 @@
         play_game_audio: 8,
         stop_game_audio: 9,
         clear_user_audio: 10,
-        report_analytics: 11
+        report_analytics: 11,
+        get_launch_info: 12,
+        navigate_to_sidebar: 13
     };
 
     function complete(request_id, success, payload) {
@@ -959,6 +961,63 @@
         complete(request_id, true, "{}");
     };
 
+    // ---------- sidebar revisit (Douyin compliance) ----------
+    // The home sidebar is Douyin's required re-entry surface: the game must reward players
+    // coming back through it and guide the others there once. The scene code the vendor
+    // reports for a sidebar entry lives here, together with the launch scene itself.
+    //
+    // The scene is captured once at load and refreshed on every onShow: re-entering from
+    // the sidebar while the game is alive does not cold-boot it, so the onShow options are
+    // the only place that arrival is announced. The engine asks again on MinigameShow and
+    // reads the value through the get_launch_info handler below.
+    var SIDEBAR_SCENE = "021236";
+    var SIDEBAR_GUIDE_KEY = "rbfx_sidebar_guide_done";
+    var launch_scene = "";
+
+    function read_launch_scene(options) {
+        if (options && options.scene !== undefined && options.scene !== null)
+            launch_scene = String(options.scene);
+    }
+
+    try { read_launch_scene(wx_tt && wx_tt.getLaunchOptionsSync && wx_tt.getLaunchOptionsSync()); }
+    catch (e) { /* a host without launch options keeps the last known scene */ }
+
+    function sidebar_guide_done() {
+        try { return !!wx_tt.getStorageSync(SIDEBAR_GUIDE_KEY); }
+        catch (e) { return false; }
+    }
+
+    // Launch info doubles as the "guide done" persist call: markGuideDone=true writes the
+    // host-side flag so the guide never comes back after a reinstall-free restart. The
+    // answer always carries the full state; a host without storage degrades to "not done".
+    handlers[KIND.get_launch_info] = function (request_id, payload) {
+        var args = parse_payload(payload);
+        var marked = false;
+        if (args.markGuideDone) {
+            try { wx_tt.setStorageSync(SIDEBAR_GUIDE_KEY, true); marked = true; } catch (e) { /* best effort */ }
+        }
+        complete(request_id, true, JSON.stringify({
+            sidebar: launch_scene === SIDEBAR_SCENE,
+            guideDone: sidebar_guide_done() || marked
+        }));
+    };
+
+    // Open the host's sidebar panel. Douyin's navigateToScene is the only documented way;
+    // a host without it (WeChat, desktop browsers) answers with a failure the game ignores.
+    handlers[KIND.navigate_to_sidebar] = function (request_id) {
+        if (!wx_tt || typeof wx_tt.navigateToScene !== "function")
+            return complete(request_id, false, "navigating to the sidebar is not supported by the host");
+        try {
+            wx_tt.navigateToScene({
+                scene: "sidebar",
+                success: function () { complete(request_id, true, "{}"); },
+                fail: function (error) { complete(request_id, false, fail_text(error, "navigateToScene failed")); }
+            });
+        } catch (error) {
+            complete(request_id, false, fail_text(error, "navigateToScene failed"));
+        }
+    };
+
     // ---------- host lifecycle ----------
     // The runtime layer suspends the WebAudio contexts, but the hosts this player is for
     // expose no WebAudio at all: their music runs on InnerAudioContext here, and a host
@@ -980,7 +1039,8 @@
         });
     }
     if (wx_tt && typeof wx_tt.onShow === "function") {
-        wx_tt.onShow(function () {
+        wx_tt.onShow(function (options) {
+            read_launch_scene(options);
             if (!music_paused)
                 return;
             music_paused = false;

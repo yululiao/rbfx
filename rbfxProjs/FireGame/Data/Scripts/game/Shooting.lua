@@ -9,6 +9,7 @@
 -- 装弹：打空 MAG_SIZE 发后自动装弹，装弹期间不开火。
 
 local Config = require("game.Config")
+local Sidebar = require("game.Sidebar")
 
 ---@class Shooting 全自动开火 + 子弹管理
 local Shooting = {}
@@ -230,7 +231,8 @@ end
 --- 打中单位：结算伤害 + 反馈。
 function Shooting:DamageUnit(unit, hitPos, headshot)
     if not unit.alive then return end
-    local result = unit:TakeDamage(self.damage or 1, hitPos, false)
+    -- 侧边栏回归增益（game/Sidebar.lua）在伤害唯一入口处乘：无宿主/未生效时倍率恒 1.0。
+    local result = unit:TakeDamage((self.damage or 1) * Sidebar.DmgMult(), hitPos, false)
     local fb = FEEDBACK[unit.kind] or FEEDBACK.pirate
     local killed = result and result.killed
     local pick = killed and fb.kill or fb.hit

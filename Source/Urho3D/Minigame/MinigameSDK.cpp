@@ -321,6 +321,17 @@ int MinigameSDK::ReportAnalytics(const ea::string& eventName, const ea::string& 
     return Invoke(MinigameSDKRequestKind::ReportAnalytics, payload);
 }
 
+int MinigameSDK::GetLaunchInfo(bool markGuideDone)
+{
+    return Invoke(MinigameSDKRequestKind::GetLaunchInfo,
+        markGuideDone ? "{\"markGuideDone\":true}" : "{}");
+}
+
+int MinigameSDK::NavigateToSidebar()
+{
+    return Invoke(MinigameSDKRequestKind::NavigateToSidebar, "{}");
+}
+
 int MinigameSDK::Invoke(MinigameSDKRequestKind kind, const ea::string& payloadJson)
 {
     const int requestId = nextRequestId_++;

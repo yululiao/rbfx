@@ -17,6 +17,7 @@
 local Config = require("game.Config")
 local WaveGen = require("game.WaveGen")
 local Tracker = require("game.Tracker")
+local Sidebar = require("game.Sidebar")
 
 -- 首局操作提示只在会话第一次第 1 波显示：重开的玩家已经会了，再弹只是打扰。
 local first_run_hint_shown = false
@@ -58,7 +59,10 @@ function Waves:Reset(skipVoice)
     for i = 1, #Config.TURRETS do
         self.turretHp[i] = Config.TURRET_HP
     end
-    self.playerHp = Config.PLAYER_HP    -- 主角生命（突袭型海盗砍的是这条）
+    -- 主角生命上限（血量唯一真相住本模块）：侧边栏回归增益在这里乘
+    -- （game/Sidebar.lua；无宿主/未生效时倍率恒 1.0）。HpBar 的血量刻度也读它。
+    self.playerMaxHp = Config.PLAYER_HP * Sidebar.HpMult()
+    self.playerHp = self.playerMaxHp          -- 主角生命（突袭型海盗砍的是这条）
     self.reviveUsed = false              -- 本局是否已用「看广告复活」；每局限一次，Reset 复位
     self.waveIndex = 0                 -- 已开始的波数；当前波 = Config.WAVES[waveIndex]
     self.phase = "intermission"        -- intermission -> active -> ended
@@ -366,7 +370,7 @@ function Waves:Revive()
     for i = 1, #Config.TURRETS do
         self.turretHp[i] = Config.TURRET_HP
     end
-    self.playerHp = Config.PLAYER_HP
+    self.playerHp = self.playerMaxHp
     self.combo = 0
     if self.hud and self.hud.SetCombo then
         self.hud:SetCombo(0)

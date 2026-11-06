@@ -29,6 +29,7 @@ local Grow = require("game.Grow")
 local Dog = require("game.Dog")
 local HpBar = require("game.HpBar")
 local Voice = require("game.Voice")
+local Sidebar = require("game.Sidebar")
 local Tracker = require("game.Tracker")
 
 ----------------------------------------------------------------------
@@ -120,7 +121,7 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice, sidebar
 -- 激励视频复活链路两状态：ad_showing=广告在途（世界 dt 压 0、吞摇杆，结果事件结算时清）；
 -- reviveAdEnabled=链路总开关（宿主 SDK 可用 + Config.AD.REWARDED_UNIT_ID 非空，Build 后定值）。
 -- 休眠语义：没配广告位时恒 false，结算面板根本不出现复活按钮，玩家看不到任何广告痕迹。
@@ -291,6 +292,11 @@ hud = Hud.Build(scene, {
             hud:HideStart()
         end
         Tracker.Report("game_start")
+        -- 侧边栏复访：冷启动查到的引导/奖励播报一直被开始画面压着，收起后才放出来
+        -- （game/Sidebar.lua 的 OnGameStart）。
+        if sidebar then
+            sidebar:OnGameStart()
+        end
         -- 补播 Waves.Build 时被跳过的“准备”旁白：倒计时从这一刻走，语音同步响，
         -- 与重开（RestartGame 里 waves:Reset 带语音）保持同一体验。
         if audio and audio.Voice then
@@ -350,6 +356,14 @@ hud = Hud.Build(scene, {
             hud:SetVoiceFilterName(voice:CycleFilter())
         end
     end,
+    -- 侧边栏引导弹窗：「去侧边栏」拉起宿主面板 + 持久化已引导；「知道了」只持久化。
+    -- 持久化与面板拉起都在 game/Sidebar.lua，这里只转发点击。
+    onSidebarGo = function()
+        if sidebar then sidebar:GoSidebar() end
+    end,
+    onSidebarClose = function()
+        if sidebar then sidebar:DismissGuide() end
+    end,
 })
 -- 结算页分享入口：与语音入口同源的宿主能力判定（编辑器/桌面没有分享通路）。
 do
@@ -365,6 +379,12 @@ end
 -- 自定义语音（麦克风录一句→变声回放到失守/连杀）：必须在 Hud 之后建（面板状态推给它）、
 -- Waves 之前建（失守与连杀触发点要拿它回放）。宿主不支持时它自身全部静默，UI 也不显示入口。
 voice = Voice.Build(scene, { hud = hud })
+-- 侧边栏复访（抖音必接合规）：必须在 Hud 之后建（引导弹窗/旁白推给它）、waves 建好前
+-- 只需 getWaves 回调（结果最早下一帧回来时 waves 已在）。编辑器无 SDK 时整个静默。
+sidebar = Sidebar.Build(scene, {
+    hud = hud,
+    getWaves = function() return waves end,
+})
 -- 相机参数调试面板（仅 Config.DEBUG_CAM_PANEL=true）：右上角一颗按钮，真机上实时拖相机常量
 -- 并把可粘回 Config.lua 的数值打到日志。必须在 player 之后建（它要调 player:ApplyCameraFit）。
 -- 开关为 false 时下面整块不存在——上线包里连 UI 组件都不会创建。
@@ -396,7 +416,9 @@ hpBar = HpBar.Build(scene, {
     name = "PlayerHpBar",
     cameraNode = player.cameraNode,
     getAnchorPos = function() return player.node:GetWorldPosition() end,
-    getHp = function() return waves.playerHp, Config.PLAYER_HP end,
+    -- 血量刻度读 waves.playerMaxHp（侧边栏回归增益抬上限时血条同刻度放大），
+    -- 异常缺字段时回落 Config 值。
+    getHp = function() return waves.playerHp, waves.playerMaxHp or Config.PLAYER_HP end,
     overhead = Config.HP_BAR.overhead,
     isHidden = function() return player.dying end,
 })
@@ -538,11 +560,11 @@ SubscribeToEvent("Update", function(data)
     -- 引擎侧骨骼动画/粒子不受它影响（走自己的 Frame::timeStep），定格里死亡动画
     -- 照常播——这正是要的效果。世界 dt 只眼世界逻辑：海面滚动/开火/敌人/波次/主角。
     local worldDt = juice:BeginFrame(dt)
-    -- 开始画面/语音面板都是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
+    -- 开始画面/语音面板/侧边栏引导都是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
     -- 走引擎自己的 timeStep 不受影响）。开始画面盖着时波间倒计时不走——开局由玩家点击放行；
     -- 录音上限 3 秒，不暂停就是“调个音色被偷家”。激励视频广告在途（ad_showing）同理：
     -- 全屏视频盖住游戏，回来前不能刷怪/掉血/走位。
-    if (hud and (hud:IsStartModal() or hud:IsVoiceModal())) or ad_showing then
+    if (hud and (hud:IsStartModal() or hud:IsVoiceModal() or hud:IsSidebarGuideModal())) or ad_showing then
         worldDt = 0.0
     end
 
@@ -579,11 +601,11 @@ SubscribeToEvent("Update", function(data)
     if kx ~= 0.0 or ky ~= 0.0 then
         stickX, stickY = kx, ky
     end
-    -- 开始画面/相机调试面板/语音面板展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
+    -- 开始画面/相机调试面板/语音面板/侧边栏引导展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
     -- 开始画面盖着时人物不该提前乱跑；小画布（编辑器 GameView）下面板会盖住左下抓取区，否则拖滑条的
     -- 同时人物在走，构图边变边看，调不准；语音面板同理，录音时摇杆帽乱跑看着像卡了；
     -- 激励视频在途时全屏广告盖着画面，触摸归宿主，摇杆帽也不该跟着残留输入乱动。
-    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and hud:IsVoiceModal())
+    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and (hud:IsVoiceModal() or hud:IsSidebarGuideModal()))
         or ad_showing then
         stickX, stickY = 0.0, 0.0
     end

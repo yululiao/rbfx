@@ -29,7 +29,7 @@ end
 ---@param scene Scene
 ---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil,
 ---                   onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil,
----                   onVoiceFilter: fun()|nil }|nil
+---                   onVoiceFilter: fun()|nil, onSidebarGo: fun()|nil, onSidebarClose: fun()|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -80,6 +80,9 @@ function Hud.Build(scene, handlers)
     self.voiceRecording = false
     self.voiceStatus = ""
     self.voiceFilterName = ""
+    -- 侧边栏复访引导（game/Sidebar.lua 推）：非侧边栏首次进入、开始画面收起后弹一次。
+    -- 模态：开着的期间 main.lua 把世界 dt 压成 0（与开始画面/语音面板同一手法）。
+    self.sidebarGuide = false
 
     local comp = scene:CreateComponent("LuaRmlUIComponent")
     self.comp = comp
@@ -120,6 +123,7 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("voiceRecording", function() return self.voiceRecording end)
             w:BindReadonlyProperty("voiceStatus", function() return self.voiceStatus end)
             w:BindReadonlyProperty("voiceFilterName", function() return self.voiceFilterName end)
+            w:BindReadonlyProperty("sidebarGuide", function() return self.sidebarGuide end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -195,6 +199,17 @@ function Hud.Build(scene, handlers)
             w:BindEvent("voice_filter", function()
                 if handlers.onVoiceFilter then
                     handlers.onVoiceFilter()
+                end
+            end)
+            -- 侧边栏引导：「去侧边栏」拉起宿主面板、「知道了」只关；持久化在 game/Sidebar.lua
+            w:BindEvent("sidebar_go", function()
+                if handlers.onSidebarGo then
+                    handlers.onSidebarGo()
+                end
+            end)
+            w:BindEvent("sidebar_close", function()
+                if handlers.onSidebarClose then
+                    handlers.onSidebarClose()
                 end
             end)
         end,
@@ -427,6 +442,30 @@ end
 function Hud:SetVoiceFilterName(name)
     self.voiceFilterName = name or ""
     self:Dirty("voiceFilterName")
+end
+
+----------------------------------------------------------------------
+-- 侧边栏复访引导（game/Sidebar.lua）
+----------------------------------------------------------------------
+
+--- 打开引导弹窗（模态，main.lua 据此暂停世界推进）。
+function Hud:OpenSidebarGuide()
+    if not self.sidebarGuide then
+        self.sidebarGuide = true
+        self:Dirty("sidebarGuide")
+    end
+end
+
+function Hud:CloseSidebarGuide()
+    if self.sidebarGuide then
+        self.sidebarGuide = false
+        self:Dirty("sidebarGuide")
+    end
+end
+
+---@return boolean 引导弹窗是否开着（帧循环用它把世界 dt 压成 0）
+function Hud:IsSidebarGuideModal()
+    return self.sidebarGuide
 end
 
 --- 每帧：hitmarker 到点自动关闭 + 旁白到期清除。

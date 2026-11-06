@@ -429,6 +429,18 @@ Config.AD = {
     REWARDED_UNIT_ID = "",          -- 抖音流量主激励视频广告位 ID；空 = 复活按钮不显示
 }
 
+----------------------------------------------------------------------
+-- 侧边栏复访（抖音必接合规）：从侧边栏进入的老用户给一档会话增益作回归奖励；
+-- 非侧边栏首次进入弹一次引导（去侧边栏 / 知道了，见 game/Sidebar.lua）。
+-- 增益数值要显性可感知：攻击快、活得久——审核与玩家两头都好交代。
+-- 会话级生效：每次从侧边栏冷启动/回前台的游戏会话都带，提示只发一次防来回刷。
+----------------------------------------------------------------------
+Config.SIDEBAR_DMG_MULT = 1.2      -- 侧边栏回归：每发子弹伤害倍率（主角自动开火那一条路）
+Config.SIDEBAR_HP_MULT = 1.25      -- 侧边栏回归：主角生命上限倍率（Waves.playerMaxHp）
+-- 调试模拟（编辑器里没有宿主 SDK，真机链路走不到）："reward" 模拟侧边栏进入发增益，
+-- "guide" 模拟首次非侧边栏进入弹引导，false = 上线值走真实 SDK。
+Config.DEBUG_SIDEBAR = false
+
 Config.PIRATE_SKINS = { "Characters_Anne", "Characters_Henry", "Characters_Mako", "Characters_Sharky" }
 Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbarossa" }
 

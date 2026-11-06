@@ -197,6 +197,26 @@
         </div>
     </div>
 
+    <!-- 侧边栏复访引导（抖音必接合规，game/Sidebar.lua）：非侧边栏首次进入、开始画面收起后弹一次。
+         「去侧边栏」经 navigateToScene 拉起宿主侧边栏面板，「知道了」只关面板；点过任一后宿主
+         storage 记住，之后不再弹。模态：main.lua 据此把世界 dt 压成 0。面板在 DOM 最后 = 盖最上层。 -->
+    <div data-if="sidebarGuide" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
+        <!-- 居中锚点：与语音面板同一手法（left 50% 零尺寸盒 + 内层左移半个卡片宽） -->
+        <div style="position: absolute; left: 50%; top: 0; width: 0; height: 0;">
+            <div style="position: absolute; left: -300dp; top: 180dp; width: 600dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+                <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">添加到侧边栏</div>
+                <div class="label" style="margin-top: 12dp; font-size: 22dp; color: #ffffffcc;">把游戏固定在抖音侧边栏，下次一键进入</div>
+                <div class="label" style="margin-top: 6dp; font-size: 22dp; color: #ffd24dff;">回归奖励：攻击 +20%，生命 +25%</div>
+                <div style="margin-top: 30dp;">
+                    <button data-event-click="sidebar_go" style="padding: 14dp 44dp; font-size: 28dp; background-color: #c8901ee6; color: #ffffffff; border-radius: 10dp;">去侧边栏</button>
+                </div>
+                <div style="margin-top: 14dp;">
+                    <button data-event-click="sidebar_close" style="padding: 10dp 32dp; font-size: 24dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">知道了</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
 </body>
 </rml>

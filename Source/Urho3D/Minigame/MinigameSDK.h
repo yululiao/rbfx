@@ -46,6 +46,14 @@ enum class MinigameSDKRequestKind
     /// Report an analytics event to the vendor dashboard. Fire-and-forget: the answer
     /// only tells whether the request reached the shim, a missing host API is not an error.
     ReportAnalytics = 11,
+    /// Ask where the game was launched from (whether through the host's home sidebar) and
+    /// whether the sidebar guide was already shown. markGuideDone additionally persists the
+    /// guide flag in the host storage, which is how the game retires the guide for good.
+    /// The answer payload carries {"sidebar":bool,"guideDone":bool}.
+    GetLaunchInfo = 12,
+    /// Open the host's sidebar panel (Douyin's mandatory sidebar revisit surface: the game
+    /// guides the player to pin it there and come back for a reward).
+    NavigateToSidebar = 13,
 };
 
 /// Bridge to the host SDK capabilities (login, share, rewarded ads, payment, privacy).
@@ -125,6 +133,14 @@ public:
     /// Analytics must never disturb the game: the request always completes successfully,
     /// including on hosts without any reporting API.
     int ReportAnalytics(const ea::string& eventName, const ea::string& paramsJson = EMPTY_STRING);
+
+    /// Ask the host where the game was launched from and whether the sidebar guide is done.
+    /// markGuideDone=true persists the guide flag on the host before answering. The answer
+    /// always completes successfully: a host without launch options reports "not sidebar".
+    int GetLaunchInfo(bool markGuideDone = false);
+    /// Open the host's sidebar panel (Douyin sidebar revisit compliance). The answer tells
+    /// whether the panel opened; a host without the API answers with a failure.
+    int NavigateToSidebar();
 
     /// Return whether the JavaScript SDK shim is attached.
     /// @property
