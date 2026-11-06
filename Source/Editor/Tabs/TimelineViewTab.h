@@ -92,6 +92,9 @@ private:
         float trackX0, bool rowSelected, bool windowHovered);
     void RenderTrackContent(TimelineTrack* track, unsigned trackIndex, const ImVec2& rowMin, const ImVec2& rowMax,
         float trackX0, float trackX1, bool rowSelected);
+    /// Drop target over the clip area of the row: a dropped Animation resource becomes a clip.
+    void RenderTrackDropTarget(TimelineTrack* track, unsigned trackIndex, const ImVec2& contentMin,
+        const ImVec2& contentMax, float trackX0);
     void RenderSelectionPanel();
     void RenderTrackProperties(TimelineTrack* track);
     void RenderClipProperties(TimelineTrack* track);

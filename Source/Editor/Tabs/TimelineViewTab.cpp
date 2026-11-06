@@ -27,6 +27,7 @@
 #include "../Project/ProjectRequest.h"
 
 #include <Urho3D/Core/StringUtils.h>
+#include <Urho3D/Graphics/Animation.h>
 #include <Urho3D/Graphics/AnimationController.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -272,6 +273,21 @@ void AddDefaultClip(TimelineTrack* track, float startTime)
         }
         clips.push_back(clip);
     });
+}
+
+// Create an animation clip from a dropped Animation resource. The clip plays the animation at
+// its natural speed, so its duration is the animation length.
+void AddAnimationClipFromResource(TimelineAnimationTrack& track, Animation* animation, float startTime)
+{
+    if (!animation)
+        return;
+
+    TimelineAnimationClip clip;
+    clip.start_ = Max(startTime, 0.0f);
+    clip.duration_ = Max(animation->GetLength(), MinClipDuration);
+    clip.animation_ = animation;
+    clip.animationRef_ = GetResourceRef(animation, Animation::GetTypeStatic());
+    track.clips_.push_back(clip);
 }
 
 void RemoveClipAt(TimelineTrack* track, unsigned index)
@@ -1781,6 +1797,51 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, unsigned trackInd
     }
 
     drawList->PopClipRect();
+
+    // Dropping a resource on the clip area creates a clip of the track
+    RenderTrackDropTarget(track, trackIndex, ImVec2(trackX0, rowMin.y), ImVec2(trackX1, rowMax.y), trackX0);
+}
+
+void TimelineViewTab::RenderTrackDropTarget(TimelineTrack* track, unsigned trackIndex, const ImVec2& contentMin,
+    const ImVec2& contentMax, float trackX0)
+{
+    auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(track);
+    if (!animationTrack)
+        return;
+
+    ImGuiIO& io = ui::GetIO();
+    ui::PushID(static_cast<int>(trackIndex));
+    if (ui::BeginDragDropTargetCustom(ImRect(contentMin, contentMax), ui::GetID("track_clip_drop")))
+    {
+        const auto* payload = dynamic_cast<const ResourceDragDropPayload*>(DragDropPayload::Get());
+        if (payload && payload->resources_.size() == 1 && payload->resources_[0].HasObjectType<Animation>())
+        {
+            if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str(),
+                    ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+            {
+                const float startTime = SnapTime(Max(XToTime(io.MousePos.x, trackX0), 0.0f), !io.KeyCtrl);
+
+                // Feedback: the whole row accepts the drop, the line marks where the clip will start
+                ImDrawList* drawList = ui::GetWindowDrawList();
+                drawList->AddRectFilled(contentMin, contentMax, WithAlpha(GetTrackColor(track), 48));
+                const float startX = TimeToX(startTime, trackX0);
+                drawList->AddLine(ImVec2(startX, contentMin.y + 2.0f), ImVec2(startX, contentMax.y - 2.0f),
+                    ColorBindingSlotHighlightBorder, 2.0f);
+
+                if (ui::GetDragDropPayload()->IsDelivery())
+                {
+                    if (auto* animation = GetSubsystem<ResourceCache>()
+                            ->GetResource<Animation>(payload->resources_[0].resourceName_))
+                    {
+                        BeginModify();
+                        AddAnimationClipFromResource(*animationTrack, animation, startTime);
+                    }
+                }
+            }
+        }
+        ui::EndDragDropTarget();
+    }
+    ui::PopID();
 }
 
 void TimelineViewTab::ProcessRowHitTesting(TimelineTrack* track, unsigned trackIndex,
