@@ -24,7 +24,10 @@
 
 #include "ResourceEditorTab.h"
 
+#include <Urho3D/Core/Variant.h>
 #include <Urho3D/Timeline/TimelineDefs.h>
+
+#include <EASTL/unordered_map.h>
 
 namespace Urho3D
 {
@@ -33,6 +36,7 @@ class ModifyResourceAction;
 class Node;
 class ProjectRequest;
 class TimelineMarkerTrack;
+class TimelinePlayer;
 class TimelinePropertyTrack;
 class TimelineResource;
 class TimelineTrack;
@@ -76,6 +80,8 @@ private:
 
     // Rendering
     void RenderToolbar();
+    /// Play/Pause/Stop and Record buttons followed by the recording state.
+    void RenderPlaybackControls();
     void RenderSequencer();
     void RenderRuler(float duration, float majorStep, float minorStep, float trackX0, float trackX1);
     void RenderBody(float duration, float majorStep, float minorStep);
@@ -136,6 +142,18 @@ private:
     /// Create a timeline file, bind it to the selected node and start editing it.
     void CreateTimelineForNode();
 
+    // Preview and recording
+    /// TimelinePlayer of the context node playing the displayed timeline, if any.
+    TimelinePlayer* GetContextPlayer() const;
+    /// Start the preview session on demand (Player::Play plus pause for scrubbing).
+    TimelinePlayer* EnsurePreviewPlayer();
+    /// Advance the preview clock and sample attributes while recording.
+    void UpdatePreviewAndRecording();
+    /// Stop preview. Player::Stop releases instances and restores animated attributes.
+    void StopPreview();
+    /// Store attributes changed in the Inspector as keys at the cursor.
+    void UpdateRecording(TimelinePlayer* player);
+
     // View state
     /// Reset zoom, cursor and selection for the currently displayed resource.
     void ResetViewState();
@@ -177,6 +195,28 @@ private:
     bool subscribedToProject_{};
     /// Set when the node selection changed and the view must re-sync on render.
     bool pendingNodeSync_{};
+    /// Selection that is applied on mouse release: clicking a node starts both selection and drag&drop.
+    WeakPtr<Node> pendingContextNode_;
+    bool pendingSyncWaitsForRelease_{};
+
+    // Preview. The editor does not run scene updates, so the tab drives the timeline itself.
+    enum class PreviewState
+    {
+        Off,
+        Playing,
+        Paused,
+    };
+    PreviewState previewState_{PreviewState::Off};
+    /// Player that owns the preview session. Stop() finalizes it when the preview ends.
+    WeakPtr<TimelinePlayer> previewPlayer_;
+    /// The cursor was moved this frame (scrub) and must be applied to the scene.
+    bool cursorScrubbed_{};
+    double previewLastTime_{};
+
+    // Recording: attributes changed in the Inspector become keys at the cursor.
+    bool recording_{};
+    /// Last sampled value of every recorded attribute, keyed by target and attribute name.
+    ea::unordered_map<ea::string, Variant> recordedValues_;
 
     // Context menu state
     unsigned popupTrack_{M_MAX_UNSIGNED};

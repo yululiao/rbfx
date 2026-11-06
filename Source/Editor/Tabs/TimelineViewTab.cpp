@@ -27,9 +27,11 @@
 #include "../Project/ProjectRequest.h"
 
 #include <Urho3D/Core/StringUtils.h>
+#include <Urho3D/Graphics/AnimationController.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/Scene/Animatable.h>
 #include <Urho3D/Scene/Component.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Scene.h>
@@ -527,6 +529,133 @@ const char* curveTypeNames[] = {"Float", "Double", "Int", "Bool", "Vector2", "Ve
 const VariantType curveTypes[] = {VAR_FLOAT, VAR_DOUBLE, VAR_INT, VAR_BOOL,
     VAR_VECTOR2, VAR_VECTOR3, VAR_VECTOR4, VAR_COLOR, VAR_QUATERNION};
 
+// Find attribute of the target by exact name, used by preview and recording.
+const AttributeInfo* FindAttributeByName(const Animatable& target, const ea::string& name)
+{
+    const auto* attributes = target.GetAttributes();
+    if (!attributes)
+        return nullptr;
+
+    for (const AttributeInfo& info : *attributes)
+    {
+        if (info.name_ == name)
+            return &info;
+    }
+    return nullptr;
+}
+
+// Resolve the object bound to the track using the player's binding rules (override, then path).
+// A throwaway runtime is enough: the result is used immediately.
+Object* ResolveTrackTarget(TimelinePlayer* player, TimelineTrack* track)
+{
+    if (!player || !track)
+        return nullptr;
+
+    ea::unique_ptr<TimelineTrackRuntime> runtime = track->CreateRuntime();
+    return player->ResolveTrackBinding(*track, *runtime);
+}
+
+// Property clip that is active at the given timeline time. The last active clip wins,
+// matching the evaluation order of TimelinePropertyTrack. Only the clip time range is
+// considered: recording targets the clip the cursor is placed on, not extrapolated ones.
+TimelinePropertyClip* FindActivePropertyClip(TimelinePropertyTrack& track, float time, float& localTime)
+{
+    TimelinePropertyClip* result = nullptr;
+    for (TimelinePropertyClip& clip : track.clips_)
+    {
+        if (clip.curves_.empty())
+            continue;
+
+        if (time >= clip.start_ && time <= clip.GetEndTime())
+        {
+            result = &clip;
+            localTime = time - clip.start_;
+        }
+    }
+    return result;
+}
+
+// Insert the key into the sorted key list, or update the value of the existing key.
+void SetCurveKeyValue(TimelinePropertyCurve& curve, float localTime, const Variant& value)
+{
+    for (TimelinePropertyKey& key : curve.keys_)
+    {
+        if (Abs(key.time_ - localTime) < 0.001f)
+        {
+            key.value_ = value;
+            return;
+        }
+    }
+
+    TimelinePropertyKey newKey;
+    newKey.time_ = localTime;
+    newKey.value_ = value;
+
+    unsigned insertAt = 0;
+    while (insertAt < curve.keys_.size() && curve.keys_[insertAt].time_ < localTime)
+        ++insertAt;
+    curve.keys_.insert(curve.keys_.begin() + static_cast<long>(insertAt), newKey);
+}
+
+// Whether any property curve can be recorded at the given time: there is an active clip with
+// a curve that matches an attribute of the object bound to the track.
+bool HasRecordableProperty(TimelinePlayer* player, TimelineResource* timeline, float time)
+{
+    if (!player || !timeline)
+        return false;
+
+    for (unsigned ti = 0; ti < timeline->GetNumTracks(); ++ti)
+    {
+        TimelinePropertyTrack* track = AsPropertyTrack(timeline->GetTrack(ti));
+        if (!track || track->IsMuted())
+            continue;
+
+        float localTime = 0.0f;
+        const TimelinePropertyClip* clip = FindActivePropertyClip(*track, time, localTime);
+        if (!clip)
+            continue;
+
+        auto* target = dynamic_cast<Animatable*>(ResolveTrackTarget(player, track));
+        if (!target)
+            continue;
+
+        for (const TimelinePropertyCurve& curve : clip->curves_)
+        {
+            const AttributeInfo* attributeInfo = FindAttributeByName(*target, curve.name_);
+            if (attributeInfo && (curve.valueType_ == VAR_NONE || attributeInfo->type_ == curve.valueType_))
+                return true;
+        }
+    }
+    return false;
+}
+
+// The editor does not run scene updates, so animation instances created by animation tracks
+// are never committed to the skeleton. Committing with a zero time step applies the pose at
+// the evaluated time without advancing it (TimelinePlayer reports a zero scene time step).
+void CommitAnimationControllers(TimelinePlayer* player, TimelineResource* timeline)
+{
+    if (!player || !timeline)
+        return;
+
+    for (unsigned ti = 0; ti < timeline->GetNumTracks(); ++ti)
+    {
+        auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(timeline->GetTrack(ti));
+        if (!animationTrack || animationTrack->IsMuted())
+            continue;
+
+        Object* bound = ResolveTrackTarget(player, animationTrack);
+        AnimationController* controller = dynamic_cast<AnimationController*>(bound);
+        if (!controller)
+        {
+            if (auto* node = dynamic_cast<Node*>(bound))
+                controller = node->GetComponent<AnimationController>();
+        }
+
+        if (controller)
+            controller->Update(0.0f);
+    }
+}
+
 // Normalize native path separators to '/' (resource names are '/'-delimited).
 void NormalizePath(ea::string& s)
 {
@@ -589,7 +718,11 @@ TimelineViewTab::TimelineViewTab(Context* context)
 {
 }
 
-TimelineViewTab::~TimelineViewTab() = default;
+TimelineViewTab::~TimelineViewTab()
+{
+    // The preview may have driven scene attributes: put them back on close.
+    StopPreview();
+}
 
 bool TimelineViewTab::CanOpenResource(const ResourceFileDescriptor& desc)
 {
@@ -598,9 +731,14 @@ bool TimelineViewTab::CanOpenResource(const ResourceFileDescriptor& desc)
 
 void TimelineViewTab::ResetViewState()
 {
+    StopPreview();
+    recording_ = false;
+    recordedValues_.clear();
+
     viewStartTime_ = 0.0f;
     pixelsPerSecond_ = 100.0f;
     cursorTime_ = 0.0f;
+    cursorScrubbed_ = false;
     ClearSelection();
     dragKind_ = DragKind::None;
     pendingAction_ = nullptr;
@@ -650,19 +788,26 @@ void TimelineViewTab::OnProjectRequest(ProjectRequest* request)
     if (!inspectRequest)
         return;
 
+    Node* requestedNode = nullptr;
     const auto& nodes = inspectRequest->GetNodes();
     if (!nodes.empty())
+        requestedNode = nodes[0];
+    else
     {
-        contextNode_ = nodes[0];
-        pendingNodeSync_ = true;
+        const auto& components = inspectRequest->GetComponents();
+        if (!components.empty() && components[0])
+            requestedNode = components[0]->GetNode();
+    }
+
+    if (!requestedNode)
         return;
-    }
-    const auto& components = inspectRequest->GetComponents();
-    if (!components.empty() && components[0])
-    {
-        contextNode_ = components[0]->GetNode();
-        pendingNodeSync_ = true;
-    }
+
+    // The same click that selects a node also starts a drag&drop of that node to a binding slot.
+    // Switching the displayed timeline right away would destroy the slot before the payload is
+    // delivered, so the switch is deferred until the mouse is released without dragging.
+    pendingContextNode_ = requestedNode;
+    pendingNodeSync_ = true;
+    pendingSyncWaitsForRelease_ = ui::GetIO().MouseDown[0];
 }
 
 void TimelineViewTab::SyncWithSelectedNode()
@@ -678,9 +823,25 @@ void TimelineViewTab::SyncWithSelectedNode()
 
     if (!pendingNodeSync_)
         return;
-    pendingNodeSync_ = false;
 
-    Node* node = contextNode_.Get();
+    // Wait for the release: a node dragged from the hierarchy must not switch the view
+    // while it is being carried to a binding slot of the displayed timeline.
+    if (pendingSyncWaitsForRelease_ && ui::GetIO().MouseDown[0])
+        return;
+
+    pendingNodeSync_ = false;
+    const bool selectionWasClick = pendingSyncWaitsForRelease_;
+    pendingSyncWaitsForRelease_ = false;
+
+    Node* node = pendingContextNode_.Get();
+    pendingContextNode_.Reset();
+
+    ImGuiIO& io = ui::GetIO();
+    const float dragThreshold = io.MouseDragThreshold;
+    if (selectionWasClick && io.MouseDragMaxDistanceSqr[0] > dragThreshold * dragThreshold)
+        return; // the selection was dragged: keep the current view and binding slots intact
+
+    contextNode_ = node;
     if (!node)
         return; // selection cleared or node deleted: keep the current view
 
@@ -791,6 +952,238 @@ void TimelineViewTab::CreateTimelineForNode()
     OpenResource(resourceName);
 }
 
+TimelinePlayer* TimelineViewTab::GetContextPlayer() const
+{
+    Node* node = contextNode_.Get();
+    if (!node || !timeline_)
+        return nullptr;
+
+    // Preview and recording need a player of the displayed timeline: it defines
+    // the binding space for the track paths and the objects to drive.
+    auto* player = node->GetComponent<TimelinePlayer>();
+    if (!player || player->GetTimeline() != timeline_.Get())
+        return nullptr;
+    return player;
+}
+
+void TimelineViewTab::RenderPlaybackControls()
+{
+    TimelinePlayer* player = GetContextPlayer();
+    const float duration = timeline_->GetDuration();
+
+    // Playback controls drive the scene through the player, so they need a bound player.
+    // While recording the scene is driven by the Inspector instead.
+    ui::BeginDisabled(!player || recording_);
+
+    const bool playing = previewState_ == PreviewState::Playing;
+    if (playing)
+        ui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.20f, 1.0f));
+    if (ui::Button("Play"))
+    {
+        if (cursorTime_ >= duration - M_EPSILON)
+            cursorTime_ = 0.0f;
+        if (TimelinePlayer* activePlayer = EnsurePreviewPlayer())
+        {
+            activePlayer->SetPaused(false);
+            previewState_ = PreviewState::Playing;
+            previewLastTime_ = ui::GetTime();
+            activePlayer->SetTime(cursorTime_);
+        }
+    }
+    if (playing)
+        ui::PopStyleColor();
+
+    ui::SameLine();
+    ui::BeginDisabled(previewState_ != PreviewState::Playing);
+    if (ui::Button("Pause"))
+    {
+        if (TimelinePlayer* activePlayer = previewPlayer_.Get())
+            activePlayer->SetPaused(true);
+        previewState_ = PreviewState::Paused;
+    }
+    ui::EndDisabled();
+
+    ui::SameLine();
+    if (ui::Button("Stop"))
+    {
+        StopPreview();
+        cursorTime_ = 0.0f;
+    }
+
+    ui::EndDisabled();
+
+    ui::SameLine();
+    ui::BeginDisabled(!player && !recording_);
+    if (recording_)
+        ui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.15f, 0.15f, 1.0f));
+    const bool toggleRecording = ui::Button(recording_ ? "Stop Rec" : "Record");
+    if (recording_)
+        ui::PopStyleColor();
+    ui::EndDisabled();
+
+    if (toggleRecording)
+    {
+        if (recording_)
+        {
+            recording_ = false;
+            recordedValues_.clear();
+        }
+        else
+        {
+            // Recording samples the values edited in the Inspector: the preview must
+            // stop driving them, otherwise every frame would be recorded instead.
+            StopPreview();
+            recording_ = true;
+            recordedValues_.clear();
+        }
+    }
+
+    if (recording_)
+    {
+        ui::SameLine();
+        ui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "REC");
+
+        // Warn when nothing can be recorded at the cursor: Inspector changes would be lost.
+        if (!HasRecordableProperty(player, timeline_, cursorTime_))
+        {
+            ui::SameLine();
+            ui::TextColored(ImVec4(1.0f, 0.75f, 0.30f, 1.0f), "nothing to record at the cursor: place it over a property clip");
+        }
+    }
+}
+
+TimelinePlayer* TimelineViewTab::EnsurePreviewPlayer()
+{
+    if (previewState_ != PreviewState::Off)
+        return previewPlayer_.Get();
+
+    TimelinePlayer* player = GetContextPlayer();
+    if (!player)
+        return nullptr;
+
+    previewPlayer_ = player;
+    // Enter a playback session and freeze it right away. The tab owns the clock, and the
+    // paused session still evaluates when the time is set, so scrubbing works as well.
+    player->Play();
+    player->SetPaused(true);
+    previewState_ = PreviewState::Paused;
+    return player;
+}
+
+void TimelineViewTab::UpdatePreviewAndRecording()
+{
+    TimelinePlayer* player = GetContextPlayer();
+
+    // The player or the displayed timeline can change while the preview is running.
+    if (previewState_ != PreviewState::Off)
+    {
+        TimelinePlayer* activePlayer = previewPlayer_.Get();
+        if (!activePlayer || activePlayer != player)
+            StopPreview();
+    }
+
+    // The editor does not run scene updates, so the tab advances the play head itself
+    // instead of relying on TimelinePlayer::Update.
+    if (previewState_ == PreviewState::Playing)
+    {
+        if (TimelinePlayer* activePlayer = previewPlayer_.Get())
+        {
+            const double now = ui::GetTime();
+            const float timeStep = Clamp(static_cast<float>(now - previewLastTime_), 0.0f, 0.1f);
+            cursorTime_ = Min(cursorTime_ + timeStep, timeline_->GetDuration());
+            if (cursorTime_ >= timeline_->GetDuration())
+            {
+                cursorTime_ = timeline_->GetDuration();
+                activePlayer->SetPaused(true);
+                previewState_ = PreviewState::Paused;
+            }
+            activePlayer->SetTime(cursorTime_);
+            CommitAnimationControllers(activePlayer, timeline_);
+        }
+        previewLastTime_ = ui::GetTime();
+    }
+    else if (cursorScrubbed_ && !recording_)
+    {
+        // Scrubbing previews the timeline even if playback was never started.
+        if (TimelinePlayer* activePlayer = EnsurePreviewPlayer())
+        {
+            activePlayer->SetTime(cursorTime_);
+            CommitAnimationControllers(activePlayer, timeline_);
+            previewLastTime_ = ui::GetTime();
+        }
+    }
+    cursorScrubbed_ = false;
+
+    if (recording_ && player)
+        UpdateRecording(player);
+}
+
+void TimelineViewTab::StopPreview()
+{
+    if (TimelinePlayer* player = previewPlayer_.Get())
+    {
+        // Stop finalizes the playback session: tracks release their instances and restore
+        // the attributes they drove, so no preview state is left in the scene.
+        player->Stop();
+    }
+
+    previewPlayer_.Reset();
+    previewState_ = PreviewState::Off;
+    previewLastTime_ = 0.0;
+}
+
+void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
+{
+    if (!player || !timeline_)
+        return;
+
+    bool modificationStarted = false;
+    for (unsigned ti = 0; ti < timeline_->GetNumTracks(); ++ti)
+    {
+        TimelinePropertyTrack* track = AsPropertyTrack(timeline_->GetTrack(ti));
+        if (!track || track->IsMuted())
+            continue;
+
+        auto* target = dynamic_cast<Animatable*>(ResolveTrackTarget(player, track));
+        if (!target)
+            continue;
+
+        // Keys are written only where the cursor is covered by a clip of the track.
+        float localTime = 0.0f;
+        TimelinePropertyClip* clip = FindActivePropertyClip(*track, cursorTime_, localTime);
+        if (!clip)
+            continue;
+
+        for (TimelinePropertyCurve& curve : clip->curves_)
+        {
+            const AttributeInfo* attributeInfo = FindAttributeByName(*target, curve.name_);
+            if (!attributeInfo || (curve.valueType_ != VAR_NONE && attributeInfo->type_ != curve.valueType_))
+                continue;
+
+            Variant value;
+            target->OnGetAttribute(*attributeInfo, value);
+
+            const ea::string cacheKey = Format("{}:{}", static_cast<const void*>(target), curve.name_);
+            const auto iter = recordedValues_.find(cacheKey);
+            if (iter != recordedValues_.end() && iter->second == value)
+                continue;
+
+            // The first sample only establishes the baseline, it does not create keys.
+            const bool hasBaseline = iter != recordedValues_.end();
+            recordedValues_[cacheKey] = value;
+            if (!hasBaseline)
+                continue;
+
+            if (!modificationStarted)
+            {
+                BeginModify();
+                modificationStarted = true;
+            }
+            SetCurveKeyValue(curve, localTime, value);
+        }
+    }
+}
+
 float TimelineViewTab::TimeToX(float time, float trackX0) const
 {
     return trackX0 + (time - viewStartTime_) * pixelsPerSecond_;
@@ -872,6 +1265,7 @@ void TimelineViewTab::RenderContent()
     }
 
     ValidateSelection();
+    UpdatePreviewAndRecording();
 
     // The selection panel is taller when a property clip is selected (curve list)
     bool propertyClipSelected = false;
@@ -899,6 +1293,8 @@ void TimelineViewTab::RenderToolbar()
     if (!timeline_)
         return;
 
+    RenderPlaybackControls();
+    ui::SameLine();
     if (ui::Button("Add Track"))
         ui::OpenPopup("AddTrackPopup");
 
@@ -985,6 +1381,18 @@ void TimelineViewTab::RenderSequencer()
     const float trackX0 = rulerPos.x + HeaderWidth;
     const float trackX1 = rulerPos.x + ui::GetContentRegionAvail().x;
 
+    // Follow the play head so that playback stays visible without manual panning.
+    // The ruler and the body share the same view offset, so pan before drawing either.
+    if (previewState_ == PreviewState::Playing)
+    {
+        const float rightMargin = 60.0f;
+        const float cursorX = TimeToX(cursorTime_, trackX0);
+        if (cursorX > trackX1 - rightMargin)
+            viewStartTime_ = Max(cursorTime_ - (trackX1 - rightMargin - trackX0) / pixelsPerSecond_, 0.0f);
+        else if (cursorX < trackX0)
+            viewStartTime_ = Max(cursorTime_ - 10.0f / pixelsPerSecond_, 0.0f);
+    }
+
     RenderRuler(duration, majorStep, minorStep, trackX0, trackX1);
 
     ui::BeginChild("timeline_body", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, 0);
@@ -1041,7 +1449,12 @@ void TimelineViewTab::RenderRuler(float duration, float majorStep, float minorSt
         if (!io.MouseDown[0])
             dragKind_ = DragKind::None;
         else
-            cursorTime_ = Max(XToTime(io.MousePos.x, trackX0), 0.0f);
+        {
+            const float newCursorTime = Max(XToTime(io.MousePos.x, trackX0), 0.0f);
+            if (newCursorTime != cursorTime_)
+                cursorScrubbed_ = true;
+            cursorTime_ = newCursorTime;
+        }
     }
 
     // Cursor marker in the ruler
