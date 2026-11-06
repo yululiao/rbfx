@@ -578,12 +578,7 @@ Config.BOAT_SPAWN = Vector3(-6.0, Config.SEA_Y, 5.0)   -- 船停在码头旁水�
 -- 角色坐船的局部高度（相对船节点）。坐太低会被船舷从俯视相机角度看进“舱里”看不见，故抬到甲板
 -- 附近。新船 ship-row-large 实测高 0.85（y[0,0.85]，旧 Ship_Small 是 1.98），主角髋部大约在甲板。
 Config.BOAT_SEAT_Y = 0.45
--- 船上双炮（船头左右两侧）：每发在两舷间轮换，子弹从对应炮位出膛
--- 数值按新船实测盒同比折算（旧船 5.14宽 x 3.60长 x 1.98高 → 新船 2.75 x 2.85 x 0.85）：
--- 前探不能超出船头 1.42，横移不能超出船舷 1.37，炮口不能高过船顶 0.85。
-Config.BOAT_GUN_FORWARD = 1.3      -- 沿船头方向前探（米）
-Config.BOAT_GUN_LATERAL = 0.8      -- 沿左右舷横向偏移（米）
-Config.BOAT_GUN_Y = 0.6            -- 炮口高度（相对船节点）
+-- 船上不再设固定炮位：人与站在地面一致，从枪口（枪骨下的 ShootingPos）出弹。
 -- 注意：不要复用 Config.BOAT_SPEED（那是敌人船速，见 Enemy.lua），玩家船速单独命名
 Config.PLAYER_BOAT_SPEED = 8.0       -- 米/秒，比走路快
 Config.PLAYER_BOAT_TURN = 3.0        -- 船转向速率（弧度/秒），比人物慢，做出惯性
