@@ -431,11 +431,18 @@ void ResourceBrowserTab::RenderDialogs()
     if (create_.openPending_)
         ui::OpenPopup(create_.popupTitle_.c_str());
 
+    if (prefabOverwrite_.openPending_ && !prefabOverwrite_.queue_.empty())
+    {
+        ui::OpenPopup("Prefab Overwrite Confirmation");
+        prefabOverwrite_.openPending_ = false;
+    }
+
     RenderRenameDialog();
     RenderDeleteDialog();
     RenderCreateDialog();
     RenderBoneBakeDialog();
     RenderFlipbookBakeDialog();
+    RenderPrefabOverwriteDialog();
 }
 
 void ResourceBrowserTab::RenderDirectoryTree(const FileSystemEntry& entry, const ea::string& displayedName)
@@ -981,6 +988,40 @@ void ResourceBrowserTab::RenderDeleteDialog()
 
     if (ui::Button(ICON_FA_BAN " Cancel") || ui::IsKeyPressed(KEY_ESCAPE))
         ui::CloseCurrentPopup();
+
+    ui::EndPopup();
+}
+
+void ResourceBrowserTab::RenderPrefabOverwriteDialog()
+{
+    if (prefabOverwrite_.queue_.empty())
+        return;
+
+    if (!ui::BeginPopupModal("Prefab Overwrite Confirmation", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+
+    const auto& request = prefabOverwrite_.queue_.front();
+    ui::Text("Prefab '%s' already exists.", GetFileName(request.fileName_).c_str());
+    ui::Text("Overwrite it with the dropped node?");
+
+    if (ui::Button(ICON_FA_CHECK " Overwrite") || ui::IsKeyPressed(KEY_RETURN))
+    {
+        if (Node* node = request.node_.Get())
+            WriteNodeAsPrefab(node, request.fileName_);
+        prefabOverwrite_.queue_.erase(prefabOverwrite_.queue_.begin());
+        // Ask for the next conflicting drop in the same batch.
+        prefabOverwrite_.openPending_ = !prefabOverwrite_.queue_.empty();
+        ui::CloseCurrentPopup();
+    }
+
+    ui::SameLine();
+
+    if (ui::Button(ICON_FA_BAN " Cancel") || ui::IsKeyPressed(KEY_ESCAPE))
+    {
+        // Skipping cancels the whole batch, matching the expectation that nothing is created.
+        prefabOverwrite_.queue_.clear();
+        ui::CloseCurrentPopup();
+    }
 
     ui::EndPopup();
 }
@@ -1541,36 +1582,32 @@ void ResourceBrowserTab::SaveNodeAsPrefab(Node* node, const FileSystemEntry& dir
     if (prefabName.empty())
         prefabName = "Prefab";
 
-    const auto getAvailableFileName = [&](const ea::string& prefabName) -> ea::optional<ea::string>
+    const ea::string fileName = baseDirectory + prefabName + ".prefab";
+    if (fs->DirExists(fileName))
     {
-        const ea::string fileName = baseDirectory + prefabName + ".prefab";
-        if (fs->FileExists(fileName) || fs->DirExists(fileName))
-            return ea::nullopt;
-
-        return fileName;
-    };
-
-    ea::string fileName;
-    if (const auto availableFileName = getAvailableFileName(prefabName))
-        fileName = *availableFileName;
-    else
-    {
-        const int maxAttempts = 100;
-        for (int i = 1; i < maxAttempts; ++i)
-        {
-            if (const auto availableFileName = getAvailableFileName(Format("{}_{}", prefabName, i)))
-            {
-                fileName = *availableFileName;
-                break;
-            }
-        }
-    }
-
-    if (fileName.empty())
-    {
-        URHO3D_LOGERROR("Cannot find available file name for prefab from node '{}'", node->GetName());
+        URHO3D_LOGERROR("Cannot overwrite prefab '{}', a directory with the same name exists.", fileName);
         return;
     }
+
+    // A same-named prefab already exists: ask whether to overwrite it instead of silently
+    // creating a suffixed 'Name_1.prefab' copy.
+    if (fs->FileExists(fileName))
+    {
+        PrefabOverwriteDialog::Request request;
+        request.node_ = node;
+        request.fileName_ = fileName;
+        prefabOverwrite_.queue_.push_back(request);
+        prefabOverwrite_.openPending_ = true;
+        return;
+    }
+
+    WriteNodeAsPrefab(node, fileName);
+}
+
+void ResourceBrowserTab::WriteNodeAsPrefab(Node* node, const ea::string& fileName)
+{
+    if (!node || node == node->GetScene())
+        return;
 
     NodePrefab nodePrefab = node->GeneratePrefab();
 

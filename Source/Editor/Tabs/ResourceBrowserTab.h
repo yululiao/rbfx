@@ -40,6 +40,7 @@ namespace Urho3D
 void Tabs_ResourceBrowserTab(Context* context, Project* project);
 
 class FlipbookBaker;
+class Node;
 
 class ResourceBrowserTab : public EditorTab
 {
@@ -151,6 +152,7 @@ private:
     void RenderCreateDialog();
     void RenderBoneBakeDialog();
     void RenderFlipbookBakeDialog();
+    void RenderPrefabOverwriteDialog();
 
     /// Populate the bone-bake dialog from the entry: resolve the cooked model and scan its animation clips.
     void BeginBoneBakeDialog(const FileSystemEntry& entry);
@@ -174,6 +176,8 @@ private:
     void DropPayloadToFolder(const FileSystemEntry& entry);
     void SaveDroppedNodesAsPrefabs(const NodeComponentDragDropPayload& payload, const FileSystemEntry& directory);
     void SaveNodeAsPrefab(Node* node, const FileSystemEntry& directory);
+    /// Serialize the node and write the prefab file to the given absolute path.
+    void WriteNodeAsPrefab(Node* node, const ea::string& fileName);
     /// @}
 
     /// Utility functions
@@ -282,6 +286,19 @@ private:
         SharedPtr<ResourceFactory> factory_;
         bool openPending_{};
     } create_;
+
+    // Drops that hit an existing prefab are queued here; the modal asks whether to overwrite
+    // instead of silently creating a suffixed Name_1.prefab copy.
+    struct PrefabOverwriteDialog
+    {
+        struct Request
+        {
+            WeakPtr<Node> node_;
+            ea::string fileName_;
+        };
+        ea::vector<Request> queue_;
+        bool openPending_{};
+    } prefabOverwrite_;
 
     struct BoneBakeDialog
     {
