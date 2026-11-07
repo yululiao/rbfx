@@ -177,7 +177,6 @@ Config.CLIFFS = {
     { "Environment_Cliff3", 30.0, 16.0, 15.0, 1.0 },
 }
 Config.DECOR = {
-    { "Environment_Skulls", 11.0, 6.5, -20.0 },
     { "Environment_LargeBones", -18.0, 4.5, 35.0 },
     { "Prop_Anchor", 6.0, 2.0, 110.0 },
     { "Prop_Chest_Gold", -6.5, 7.0, -25.0 },
