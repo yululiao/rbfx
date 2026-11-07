@@ -240,15 +240,39 @@ void TimelineAnimationTrack::Evaluate(TimelineTrackContext& context)
         }
 
         Animation* animation = clip.animation_;
+        const float animLength = animation->GetLength();
 
         // Source time range consumed by the clip.
         const float rangeMin = clip.clipIn_;
         float rangeMax = clip.clipIn_ + Abs(clip.duration_) * Abs(clip.timeScale_);
-        rangeMax = Min(rangeMax, animation->GetLength());
+        rangeMax = Min(rangeMax, animLength);
         if (rangeMax <= rangeMin + M_EPSILON)
             rangeMax = rangeMin + M_EPSILON;
 
-        const float desiredTime = Clamp(clip.GetSourceTime(localTime), rangeMin, rangeMax);
+        // Unity-aligned content extrapolation: when the block reaches past the end of the
+        // animation asset, the clip's extrapolation mode decides what plays there. Loop wraps
+        // the source time from clipIn, PingPong folds it back and forth, the other modes
+        // freeze on the last frame (clamped below).
+        float desiredTime = clip.GetSourceTime(localTime);
+        const float cycleLength = animLength - rangeMin;
+        if (cycleLength > M_EPSILON && (desiredTime > animLength || desiredTime < rangeMin))
+        {
+            if (clip.extrapolation_ == TimelineExtrapolation::Loop)
+            {
+                desiredTime = rangeMin + std::fmod(desiredTime - rangeMin, cycleLength);
+                if (desiredTime < rangeMin) // negative timeScale wraps below the start
+                    desiredTime += cycleLength;
+            }
+            else if (clip.extrapolation_ == TimelineExtrapolation::PingPong)
+            {
+                const float cycle = cycleLength * 2.0f;
+                float wrapped = std::fmod(desiredTime - rangeMin, cycle);
+                if (wrapped < 0.0f)
+                    wrapped += cycle;
+                desiredTime = wrapped <= cycleLength ? rangeMin + wrapped : rangeMin + cycle - wrapped;
+            }
+        }
+        desiredTime = Clamp(desiredTime, rangeMin, rangeMax);
         // While paused (or scrubbing), freeze the pose at the exact time.
         const float effectiveSpeed = context.playing_ ? clip.timeScale_ : 0.0f;
 

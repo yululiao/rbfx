@@ -188,6 +188,11 @@ private:
     // moves them all). Kept in sync with selectedTrack_/selectedClip_ for the single-selection path.
     ea::set<ea::pair<unsigned, unsigned>> multiSelectedClips_;
 
+    // Height of the bottom properties panel. Dragging the splitter between the sequencer and
+    // the panel resizes it, so several property rows can be visible at once.
+    float selectionPanelHeight_{160.0f};
+    bool draggingPanelSplitter_{false};
+
     // Clip clipboard: a detached track of the copied type holding the copied clips, so pasting
     // is independent of the source track's lifetime and only same-type tracks accept it.
     SharedPtr<TimelineTrack> clipboardTrack_;

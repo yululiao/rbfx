@@ -1502,22 +1502,38 @@ void TimelineViewTab::RenderContent()
         dpiScale = Max(renderDevice->GetDpiScale(), 1.0f);
     ApplyLayoutScale(dpiScale);
 
-    // The selection panel is taller when a property clip is selected (curve list)
-    bool propertyClipSelected = false;
-    if (selectedTrack_ < timeline_->GetNumTracks())
-    {
-        const auto* propertyTrack = AsPropertyTrack(timeline_->GetTrack(selectedTrack_));
-        propertyClipSelected = propertyTrack && selectedClip_ < propertyTrack->clips_.size();
-    }
-    const float panelHeight = propertyClipSelected ? 150.0f : 78.0f;
-
+    // The bottom properties panel keeps its user-chosen height; the splitter below the
+    // sequencer resizes it so several property rows are visible at once.
     RenderToolbar();
 
+    const float splitterHeight = 8.0f;
     const ImVec2 avail = ui::GetContentRegionAvail();
-    const float sequencerHeight = Max(avail.y - panelHeight - 4.0f, 120.0f);
+    const float maxPanelHeight = Max(avail.y - 140.0f - splitterHeight, 60.0f);
+    selectionPanelHeight_ = Clamp(selectionPanelHeight_, 60.0f, maxPanelHeight);
+    const float sequencerHeight = Max(avail.y - selectionPanelHeight_ - splitterHeight, 120.0f);
     ui::BeginChild("timeline_sequencer", ImVec2(avail.x, sequencerHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
     RenderSequencer();
     ui::EndChild();
+
+    // Drag handle between the sequencer and the properties panel.
+    ImGuiIO& io = ui::GetIO();
+    ui::InvisibleButton("timeline_panel_splitter", ImVec2(avail.x, splitterHeight));
+    if (ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+        ui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    if (ui::IsItemClicked(ImGuiMouseButton_Left))
+        draggingPanelSplitter_ = true;
+    if (draggingPanelSplitter_)
+    {
+        if (!io.MouseDown[ImGuiMouseButton_Left])
+            draggingPanelSplitter_ = false;
+        else
+            selectionPanelHeight_ = Clamp(selectionPanelHeight_ - io.MouseDelta.y, 60.0f, maxPanelHeight);
+    }
+    const ImVec2 splitMin = ui::GetItemRectMin();
+    const ImVec2 splitMax = ui::GetItemRectMax();
+    const float gripY = (splitMin.y + splitMax.y) * 0.5f;
+    ui::GetWindowDrawList()->AddLine(ImVec2(splitMin.x + 4.0f, gripY), ImVec2(splitMax.x - 4.0f, gripY),
+        draggingPanelSplitter_ ? IM_COL32(216, 130, 0, 255) : IM_COL32(120, 120, 120, 255), 2.0f);
 
     RenderSelectionPanel();
 }
@@ -1554,7 +1570,8 @@ void TimelineViewTab::RenderToolbar()
 
     {
         int durationMode = timeline_->GetDurationMode() == TimelineDurationMode::Fixed ? 0 : 1;
-        ui::SetNextItemWidth(90.0f);
+        // Wide enough for "Content" plus the dropdown arrow, also at higher font scales.
+        ui::SetNextItemWidth(120.0f);
         if (ui::Combo("##durationMode", &durationMode, "Fixed\0Content\0"))
         {
             BeginModify();
@@ -2814,6 +2831,66 @@ void TimelineViewTab::RenderClipProperties(TimelineTrack* track)
             BeginModify();
             clip->duration_ = Max(clipDuration, MinClipDuration);
         }
+    }
+
+    // Unity-aligned extrapolation selector: what plays when the block reaches past the end of
+    // the clip content (for animation clips: past the end of the .ani asset).
+    {
+        int extra = static_cast<int>(clip->extrapolation_);
+        ui::SameLine();
+        ui::SetNextItemWidth(150.0f);
+        if (ui::Combo("##clipExtrapolation", &extra, TIMELINE_EXTRAPOLATION_NAMES, 5))
+        {
+            BeginModify();
+            clip->extrapolation_ = static_cast<TimelineExtrapolation>(extra);
+        }
+    }
+
+    // Animation clips store their .ani resource reference. Show the path and let the user
+    // change it by dropping an Animation resource from the Project browser onto the text,
+    // instead of a resource dropdown.
+    if (auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(track);
+        animationTrack && selectedClip_ < animationTrack->clips_.size())
+    {
+        TimelineAnimationClip& animationClip = animationTrack->clips_[selectedClip_];
+        ea::string path = animationClip.animationRef_.name_;
+        if (path.empty() && animationClip.animation_)
+            path = animationClip.animation_->GetName();
+
+        ui::SameLine();
+        ui::Text("Animation: %s", path.empty() ? "(none)" : path.c_str());
+
+        // ui::Text registers no item ID, so the plain BeginDragDropTarget() would never arm.
+        // Use a custom rect target over the text, like the binding slot does.
+        ui::PushID(static_cast<int>(selectedClip_));
+        if (ui::BeginDragDropTargetCustom(ImRect(ui::GetItemRectMin(), ui::GetItemRectMax()),
+                ui::GetID("clip_animation_drop")))
+        {
+            const auto* payload = dynamic_cast<const ResourceDragDropPayload*>(DragDropPayload::Get());
+            if (payload && payload->resources_.size() == 1 && payload->resources_[0].HasObjectType<Animation>())
+            {
+                if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str(),
+                        ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+                {
+                    // Highlight the text while a compatible animation hovers over it.
+                    ui::GetWindowDrawList()->AddRect(ui::GetItemRectMin(), ui::GetItemRectMax(),
+                        IM_COL32(255, 200, 0, 255), 2.0f, 0, 2.0f);
+
+                    if (ui::GetDragDropPayload()->IsDelivery())
+                    {
+                        if (auto* animation = GetSubsystem<ResourceCache>()
+                                ->GetResource<Animation>(payload->resources_[0].resourceName_))
+                        {
+                            BeginModify();
+                            animationClip.animation_ = animation;
+                            animationClip.animationRef_ = GetResourceRef(animation, Animation::GetTypeStatic());
+                        }
+                    }
+                }
+            }
+            ui::EndDragDropTarget();
+        }
+        ui::PopID();
     }
 }
 
