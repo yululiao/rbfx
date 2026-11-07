@@ -130,11 +130,27 @@ unsigned GetVisibleComponentCount(Node* node, bool showTemporary)
     return showTemporary ? node->GetNumComponents() : node->GetNumPersistentComponents();
 }
 
-unsigned GetVisibleItemsCount(Node* node, bool showTemporary, bool showComponents)
+// Count the material/geometry slots shown as rows directly under a node when components
+// are not displayed as their own rows (Unity-like: node + geometry slots).
+unsigned GetVisibleGeometryCount(Node* node, bool showTemporary)
+{
+    unsigned count = 0;
+    for (Component* component : node->GetComponents())
+    {
+        if (!showTemporary && component->IsTemporary())
+            continue;
+        if (auto* staticModel = dynamic_cast<StaticModel*>(component))
+            count += staticModel->GetNumGeometries();
+    }
+    return count;
+}
+
+unsigned GetVisibleItemsCount(Node* node, bool showTemporary, bool showComponents, bool showGeometries)
 {
     const unsigned numChildren = GetVisibleChildCount(node, showTemporary);
     const unsigned numComponents = showComponents ? GetVisibleComponentCount(node, showTemporary) : 0;
-    return numChildren + numComponents;
+    const unsigned numGeometries = (!showComponents && showGeometries) ? GetVisibleGeometryCount(node, showTemporary) : 0;
+    return numChildren + numComponents + numGeometries;
 }
 
 }
@@ -198,7 +214,7 @@ void SceneHierarchyWidget::RenderNode(SceneSelection& selection, Node* node)
 
     ProcessItemIfActive(selection, node);
 
-    const unsigned numItems = GetVisibleItemsCount(node, settings_.showTemporary_, settings_.showComponents_);
+    const unsigned numItems = GetVisibleItemsCount(node, settings_.showTemporary_, settings_.showComponents_, settings_.showGeometries_);
     // Note: no OpenOnDoubleClick, double-click focuses the camera on the node (Unity-style).
     // Nodes can still be opened with single click on the arrow.
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
@@ -283,6 +299,11 @@ void SceneHierarchyWidget::RenderNode(SceneSelection& selection, Node* node)
             for (Component* component : node->GetComponents())
                 RenderComponent(selection, component);
         }
+        else if (settings_.showGeometries_)
+        {
+            // Material slots stay reachable as node children without the component noise.
+            RenderNodeGeometries(selection, node);
+        }
 
         for (Node* child : node->GetChildren())
             RenderNode(selection, child);
@@ -362,6 +383,21 @@ void SceneHierarchyWidget::RenderComponent(SceneSelection& selection, Component*
                 RenderGeometryItem(selection, staticModel, geometryIndex);
         }
         ui::TreePop();
+    }
+}
+
+void SceneHierarchyWidget::RenderNodeGeometries(SceneSelection& selection, Node* node)
+{
+    for (Component* component : node->GetComponents())
+    {
+        if (!settings_.showTemporary_ && component->IsTemporary())
+            continue;
+        auto* staticModel = dynamic_cast<StaticModel*>(component);
+        if (!staticModel)
+            continue;
+        const unsigned numGeometries = staticModel->GetNumGeometries();
+        for (unsigned geometryIndex = 0; geometryIndex < numGeometries; ++geometryIndex)
+            RenderGeometryItem(selection, staticModel, geometryIndex);
     }
 }
 

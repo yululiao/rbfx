@@ -33,7 +33,8 @@ class StaticModel;
 struct SceneHierarchySettings
 {
     bool showTemporary_{};
-    bool showComponents_{true};
+    bool showComponents_{false};
+    bool showGeometries_{true};
     ea::string filterByName_;
 };
 
@@ -60,6 +61,9 @@ public:
 private:
     void RenderNode(SceneSelection& selection, Node* node);
     void RenderComponent(SceneSelection& selection, Component* component);
+    /// Render the material/geometry slots of the node's model components directly under the node,
+    /// so editing materials stays a one-click operation without showing every component as a row.
+    void RenderNodeGeometries(SceneSelection& selection, Node* node);
     void RenderGeometryItem(SceneSelection& selection, StaticModel* staticModel, unsigned geometryIndex);
     void ApplyPendingUpdates(Scene* scene);
 

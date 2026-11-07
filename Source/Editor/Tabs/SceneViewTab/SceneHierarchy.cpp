@@ -71,6 +71,7 @@ void SceneHierarchy::WriteIniSettings(ImGuiTextBuffer& output)
 {
     const SceneHierarchySettings& settings = widget_->GetSettings();
     WriteIntToIni(output, "SceneHierarchy.ShowComponents", settings.showComponents_);
+    WriteIntToIni(output, "SceneHierarchy.ShowGeometries", settings.showGeometries_);
     WriteIntToIni(output, "SceneHierarchy.ShowTemporary", settings.showTemporary_);
     WriteStringToIni(output, "SceneHierarchy.FilterByName", settings.filterByName_);
 }
@@ -80,6 +81,8 @@ void SceneHierarchy::ReadIniSettings(const char* line)
     SceneHierarchySettings settings = widget_->GetSettings();
     if (const auto value = ReadIntFromIni(line, "SceneHierarchy.ShowComponents"))
         settings.showComponents_ = *value != 0;
+    if (const auto value = ReadIntFromIni(line, "SceneHierarchy.ShowGeometries"))
+        settings.showGeometries_ = *value != 0;
     if (const auto value = ReadIntFromIni(line, "SceneHierarchy.ShowTemporary"))
         settings.showTemporary_ = *value != 0;
     if (const auto value = ReadStringFromIni(line, "SceneHierarchy.FilterByName"))
@@ -132,6 +135,8 @@ void SceneHierarchy::RenderToolbar(SceneViewPage& page)
         settings.showTemporary_ = !settings.showTemporary_;
     if (Widgets::ToolbarButton(ICON_FA_DIAGRAM_PROJECT, "Show Components", settings.showComponents_))
         settings.showComponents_ = !settings.showComponents_;
+    if (Widgets::ToolbarButton(ICON_FA_LAYER_GROUP, "Show Model Geometries", settings.showGeometries_))
+        settings.showGeometries_ = !settings.showGeometries_;
 
     ui::BeginDisabled();
     Widgets::ToolbarButton(ICON_FA_MAGNIFYING_GLASS);
@@ -140,7 +145,9 @@ void SceneHierarchy::RenderToolbar(SceneViewPage& page)
     ui::InputText("##Rename", &settings.filterByName_);
 
     widget_->SetSettings(settings);
-    owner_->SetComponentSelection(settings.showComponents_);
+    // Component-level selection must stay enabled while material slots are reachable,
+    // because selecting a geometry slot internally selects its owning component.
+    owner_->SetComponentSelection(settings.showComponents_ || settings.showGeometries_);
 }
 
 void SceneHierarchy::RenderSelectionContextMenu(Scene* scene, SceneSelection& selection)
