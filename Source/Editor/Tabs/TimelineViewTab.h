@@ -36,6 +36,7 @@ namespace Urho3D
 
 class ModifyResourceAction;
 class Node;
+class Texture2D;
 class ProjectRequest;
 struct TimelineClip;
 class TimelineMarkerTrack;
@@ -192,6 +193,13 @@ private:
     // the panel resizes it, so several property rows can be visible at once.
     float selectionPanelHeight_{160.0f};
     bool draggingPanelSplitter_{false};
+
+    // When locked, selecting other nodes in the scene does not retarget the window: the
+    // context node and the displayed timeline stay as they are until unlocked.
+    bool bindingLocked_{false};
+    // Toolbar toggle icons (EditorData Textures/lock.png and lunock.png), loaded lazily.
+    SharedPtr<Texture2D> lockIcon_;
+    SharedPtr<Texture2D> unlockIcon_;
 
     // Clip clipboard: a detached track of the copied type holding the copied clips, so pasting
     // is independent of the source track's lifetime and only same-type tracks accept it.

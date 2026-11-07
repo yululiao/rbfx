@@ -29,6 +29,7 @@
 #include <Urho3D/Core/StringUtils.h>
 #include <Urho3D/Graphics/Animation.h>
 #include <Urho3D/Graphics/AnimationController.h>
+#include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Resource/ResourceCache.h>
@@ -39,6 +40,7 @@
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/DragDropPayload.h>
 #include <Urho3D/SystemUI/SystemUI.h>
+#include <Urho3D/SystemUI/Widgets.h>
 #include <Urho3D/Timeline/TimelineActivationTrack.h>
 #include <Urho3D/Timeline/TimelineAnimationTrack.h>
 #include <Urho3D/Timeline/TimelineAudioTrack.h>
@@ -922,6 +924,10 @@ void TimelineViewTab::OnProjectRequest(ProjectRequest* request)
 {
     // Follow the node selection of the scene so the window can bind to the selected node.
     // Only remember the selection here: the actual switch happens during the next render.
+    // While the binding is locked, selections must not retarget the window at all.
+    if (bindingLocked_)
+        return;
+
     const auto* inspectRequest = dynamic_cast<const InspectNodeComponentRequest*>(request);
     if (!inspectRequest)
         return;
@@ -1544,6 +1550,44 @@ void TimelineViewTab::RenderToolbar()
     if (!timeline_)
         return;
 
+    // Lock toggle drawn as an icon: lock.png when locked, unlock.png when following
+    // the selection. Loaded lazily from the EditorData resource root.
+    if (!lockIcon_)
+        lockIcon_ = GetSubsystem<ResourceCache>()->GetResource<Texture2D>("Textures/lock.png");
+    if (!unlockIcon_)
+        unlockIcon_ = GetSubsystem<ResourceCache>()->GetResource<Texture2D>("Textures/unlock.png");
+
+    // Push/Pop must pair by the state at draw time: clicking flips bindingLocked_ between
+    // the two checks, so remember the state that decided the Push.
+    const bool wasLocked = bindingLocked_;
+    if (wasLocked)
+        ui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.35f, 0.15f, 1.0f));
+    Texture2D* lockIcon = bindingLocked_ ? lockIcon_.Get() : unlockIcon_.Get();
+    // Widgets::ImageButton has no button frame, which would make it shorter than the
+    // other toolbar buttons: draw a regular Button and overlay the centered icon.
+    const bool clicked = lockIcon
+        ? [&]
+        {
+            const bool pressed = ui::Button(" ");
+            const ImVec2 pos = ui::GetItemRectMin();
+            const ImVec2 size = ui::GetItemRectSize();
+            const float iconSize = Min(size.y - 2.0f, size.x - 4.0f);
+            ui::GetWindowDrawList()->AddImage(ToImTextureID(lockIcon),
+                ImVec2(pos.x + (size.x - iconSize) * 0.5f, pos.y + (size.y - iconSize) * 0.5f),
+                ImVec2(pos.x + (size.x + iconSize) * 0.5f, pos.y + (size.y + iconSize) * 0.5f));
+            return pressed;
+        }()
+        : ui::Button(bindingLocked_ ? "Binding: Locked" : "Binding: Auto");
+    if (clicked)
+        bindingLocked_ = !bindingLocked_;
+    if (wasLocked)
+        ui::PopStyleColor();
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Lock the bound context node.\n"
+            "While locked, selecting other nodes in the scene will not switch\n"
+            "the timeline shown here. Click again to unlock.");
+
+    ui::SameLine();
     RenderPlaybackControls();
     ui::SameLine();
     if (ui::Button("Add Track"))
