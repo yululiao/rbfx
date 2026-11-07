@@ -1568,7 +1568,7 @@ void TimelineViewTab::RenderToolbar()
     const bool clicked = lockIcon
         ? [&]
         {
-            const bool pressed = ui::Button(" ");
+            const bool pressed = ui::Button("     ");
             const ImVec2 pos = ui::GetItemRectMin();
             const ImVec2 size = ui::GetItemRectSize();
             const float iconSize = Min(size.y - 2.0f, size.x - 4.0f);
