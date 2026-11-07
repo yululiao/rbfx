@@ -79,7 +79,16 @@ NodePrefab PrefabFromNodeFactory::CreatePrefabBase() const
 
 NodePrefab PrefabFromNodeFactory::CreatePrefabFromNode(Node* node) const
 {
-    NodePrefab result = node->GeneratePrefab();
+    // Materialize content of prefab instances: saving a prefab instance with GeneratePrefab
+    // would drop all temporary (instantiated) content and leave a bare PrefabReference behind.
+    NodePrefab result;
+    GeneratePrefabMaterialized(node, result);
+
+    // The saved node may itself be a prefab instance: drop the PrefabReference of the root node.
+    // It belongs to the scene holding the instance, not to the saved prefab, and would create
+    // a self-reference when overwriting the source file.
+    ea::erase_if(result.GetMutableComponents(), [](const SerializablePrefab& component) //
+        { return component.GetTypeNameHash() == PrefabReference::GetTypeStatic(); });
 
     // Discard enabled flag, position, rotation and name of the root node.
     // Keep the scale and the rest.
@@ -194,6 +203,14 @@ ea::string PrefabFromNodeFactory::FindBestFileName(Node* node, const ea::string&
 
 void PrefabFromNodeFactory::SaveNodeAsPrefab(Node* node, const ea::string& resourceName, const ea::string& fileName)
 {
+    // Reject the save if nested instances have uncommitted overrides: they never belong to this
+    // file and would be silently dropped.
+    if (HasUncommittedNestedOverrides(node))
+    {
+        URHO3D_LOGERROR("Prefab: nested instances have uncommitted overrides. Commit the innermost prefab first.");
+        return;
+    }
+
     NodePrefab& nodePrefab = prefab_->GetMutableNodePrefab();
     nodePrefab = CreatePrefabFromNode(node);
     prefab_->NormalizeIds();

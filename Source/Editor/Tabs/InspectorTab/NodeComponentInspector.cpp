@@ -22,7 +22,6 @@
 
 #include "../../Tabs/InspectorTab/NodeComponentInspector.h"
 
-#include "../../Tabs/SceneViewTab.h"
 #include "../CreateComponentMenu.h"
 
 #ifdef URHO3D_LUA
@@ -32,7 +31,6 @@
 
 #include <Urho3D/Container/TransformedSpan.h>
 #include <Urho3D/Resource/ResourceCache.h>
-#include <Urho3D/Scene/PrefabReference.h>
 #include <Urho3D/Scene/Scene.h>
 
 #include <IconFontCppHeaders/IconsFontAwesome6.h>
@@ -318,40 +316,6 @@ void NodeComponentInspector::RenderContent()
     if (nodeWidget_)
     {
         nodeWidget_->RenderTitle();
-
-        // Prefab editing aid: offer to apply the current edits straight back to disk.
-        // Two contexts: a prefab instance anywhere in the scene (walk up to its root's
-        // PrefabReference and commit), or the scene root when a .prefab is opened directly.
-        auto* sceneViewTab = dynamic_cast<SceneViewTab*>(inspectedTab_.Get());
-        Node* firstNode = nullptr;
-        if (!nodeWidget_->GetNodes().empty())
-            firstNode = nodeWidget_->GetNodes().front();
-
-        PrefabReference* prefabRef = nullptr;
-        for (Node* n = firstNode; n && n != n->GetScene(); n = n->GetParent())
-        {
-            if (auto* ref = n->GetComponent<PrefabReference>())
-            {
-                prefabRef = ref;
-                break;
-            }
-        }
-
-        if (prefabRef && prefabRef->GetPrefab())
-        {
-            if (ui::Button(ICON_FA_FLOPPY_DISK " Apply"))
-                prefabRef->CommitChanges();
-            if (ui::IsItemHovered())
-                ui::SetTooltip("Write the edited prefab instance back to its source prefab file.");
-        }
-        else if (sceneViewTab && firstNode && firstNode->GetScene() == firstNode
-            && sceneViewTab->GetActiveResourceName().ends_with(".prefab"))
-        {
-            if (ui::Button(ICON_FA_FLOPPY_DISK " Apply"))
-                sceneViewTab->SaveResource(sceneViewTab->GetActiveResourceName());
-            if (ui::IsItemHovered())
-                ui::SetTooltip("Save the edited prefab back to its file.");
-        }
 
         ui::Separator();
         nodeWidget_->RenderContent();

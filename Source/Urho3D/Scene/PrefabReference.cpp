@@ -391,6 +391,73 @@ void PrefabReference::Inline(PrefabInlineFlags flags)
     }
 }
 
+/// Remove materialized content that belongs to nested prefab instances.
+/// A node with a PrefabReference component is a stub whose subtree is owned by the other prefab
+/// file. Saving that subtree with SaveTemporary would flatten the nested prefab into this one.
+/// For such stubs only the PrefabReference itself is kept: user-added components and children
+/// are overrides that must be committed to the nested prefab through its own Commit button.
+/// Must be called while NodePrefab entries are still aligned with the in-memory tree (i.e.
+/// before any pruning of the root node).
+void PruneNestedInstances(Node* node, NodePrefab& nodePrefab)
+{
+    const bool isNested = node->GetComponent<PrefabReference>() != nullptr;
+    if (isNested)
+    {
+        // Keep only the PrefabReference itself: everything else belongs to the nested prefab.
+        auto& prefabComponents = nodePrefab.GetMutableComponents();
+        ea::erase_if(prefabComponents, [](const SerializablePrefab& component) //
+            { return component.GetTypeNameHash() != PrefabReference::GetTypeStatic(); });
+        nodePrefab.GetMutableChildren().clear();
+        return;
+    }
+
+    // Recurse while the entries are still aligned with the in-memory tree.
+    const auto& children = node->GetChildren();
+    auto& prefabChildren = nodePrefab.GetMutableChildren();
+    for (unsigned i = 0; i < prefabChildren.size(); ++i)
+        PruneNestedInstances(children[i], prefabChildren[i]);
+}
+
+bool HasUncommittedNestedOverrides(Node* node)
+{
+    for (Node* child : node->GetChildren())
+    {
+        if (child->GetComponent<PrefabReference>() != nullptr)
+        {
+            // Nested stub: any persistent component other than PrefabReference or any persistent
+            // child is an uncommitted override of the nested prefab.
+            for (Component* component : child->GetComponents())
+            {
+                if (!component->IsTemporary() && component->GetType() != PrefabReference::GetTypeStatic())
+                    return true;
+            }
+            for (Node* grandChild : child->GetChildren())
+            {
+                if (!grandChild->IsTemporary())
+                    return true;
+            }
+        }
+        if (HasUncommittedNestedOverrides(child))
+            return true;
+    }
+    return false;
+}
+
+void GeneratePrefabMaterialized(Node* node, NodePrefab& prefab)
+{
+    const PrefabSaveFlags flags =
+        PrefabSaveFlag::EnumsAsStrings | PrefabSaveFlag::Prefab | PrefabSaveFlag::SaveTemporary;
+    PrefabWriterToMemory writer{prefab, flags};
+    node->Save(writer);
+
+    // Keep nested prefab instances as references instead of flattening them into the file.
+    const auto& children = node->GetChildren();
+    auto& prefabChildren = prefab.GetMutableChildren();
+    for (unsigned i = 0; i < prefabChildren.size(); ++i)
+        PruneNestedInstances(children[i], prefabChildren[i]);
+}
+
+
 void PrefabReference::CommitChanges()
 {
     if (!path_.empty())
@@ -403,34 +470,38 @@ void PrefabReference::CommitChanges()
         return;
 
     const NodePrefab& originalNodePrefab = GetNodePrefab();
-    NodePrefab newNodePrefab;
+
+    // Reject the commit if nested instances have uncommitted overrides: clearing the instance
+    // below would silently destroy them. They must be committed to the nested prefab first.
+    if (HasUncommittedNestedOverrides(node_))
     {
-        const PrefabSaveFlags flags =
-            PrefabSaveFlag::EnumsAsStrings | PrefabSaveFlag::Prefab | PrefabSaveFlag::SaveTemporary;
-        PrefabWriterToMemory writer{newNodePrefab, flags};
-        node_->Save(writer);
+        URHO3D_LOGERROR("Prefab: nested instances have uncommitted overrides. Commit the innermost prefab first.");
+        return;
     }
+
+    NodePrefab newNodePrefab;
+    GeneratePrefabMaterialized(node_, newNodePrefab);
 
     // Don't change Node attributes, they are considered external
     newNodePrefab.GetMutableNode().GetMutableAttributes() = originalNodePrefab.GetNode().GetAttributes();
 
-    // Prune persistent components and children
-    const auto& components = node_->GetComponents();
-    const int numComponents = static_cast<int>(node_->GetNumComponents());
-    for (int i = numComponents - 1; i >= 0; --i)
-    {
-        Component* component = components[i];
-        if (!component->IsTemporary())
-            newNodePrefab.GetMutableComponents().erase_at(i);
-    }
+    // Drop the scene-side PrefabReference from the root: it belongs to the scene holding this
+    // instance, not to the prefab (it would create a self-reference). Everything else added by
+    // the user (persistent components and children) is an override and must be committed.
+    auto& rootComponents = newNodePrefab.GetMutableComponents();
+    ea::erase_if(rootComponents, [](const SerializablePrefab& component) //
+        { return component.GetTypeNameHash() == PrefabReference::GetTypeStatic(); });
 
-    const auto& children = node_->GetChildren();
-    const int numChildren = static_cast<int>(node_->GetNumChildren());
-    for (int i = numChildren - 1; i >= 0; --i)
+    // Skip the write entirely if nothing has changed. IDs are normalized on copies first, because
+    // in-memory IDs differ from the IDs stored in the file.
+    NodePrefab normalizedOriginal = originalNodePrefab;
+    NodePrefab normalizedNew = newNodePrefab;
+    normalizedOriginal.NormalizeIds(context_);
+    normalizedNew.NormalizeIds(context_);
+    if (normalizedOriginal == normalizedNew)
     {
-        Node* child = children[i];
-        if (!child->IsTemporary())
-            newNodePrefab.GetMutableChildren().erase_at(i);
+        URHO3D_LOGINFO("Prefab: nothing to commit, no changes detected");
+        return;
     }
 
     // Create and save resource
@@ -439,6 +510,23 @@ void PrefabReference::CommitChanges()
     newResource->GetMutableNodePrefab() = newNodePrefab;
     newResource->NormalizeIds();
     newResource->SaveFile(prefab_->GetAbsoluteFileName());
+
+    // Remove all instantiated content and overrides, keeping only the stub itself (the node and
+    // this PrefabReference component). The resource reload below rebuilds the instance from the
+    // just-committed file, resolving all overrides back into the prefab and clearing the diff.
+    const ea::vector<SharedPtr<Component>> components = node_->GetComponents();
+    for (const SharedPtr<Component>& component : components)
+    {
+        if (component != this)
+            node_->RemoveComponent(component);
+    }
+    node_->RemoveAllChildren();
+    instanceNode_ = nullptr;
+
+    // Reload the resource so that this and all other instances are rebuilt from the committed file.
+    auto* cache = GetSubsystem<ResourceCache>();
+    if (!cache || !cache->ReloadResource(prefab_))
+        CreateInstance();
 }
 
 void PrefabReference::OnSetEnabled()

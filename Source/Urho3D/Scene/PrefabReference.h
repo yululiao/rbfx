@@ -115,4 +115,13 @@ private:
     unsigned numInstanceChildren_{};
 };
 
+/// Save node hierarchy as a prefab, materializing content of prefab instances. Content of nested
+/// prefab instances is kept as references instead of being flattened into the saved prefab.
+URHO3D_API void GeneratePrefabMaterialized(Node* node, NodePrefab& prefab);
+
+/// Return true if any nested prefab instance in the subtree has uncommitted overrides: persistent
+/// components (other than PrefabReference) or persistent children added to a nested stub. Such
+/// overrides are never written to the outer file, so outer saves must be rejected while they exist.
+URHO3D_API bool HasUncommittedNestedOverrides(Node* node);
+
 } // namespace Urho3D
