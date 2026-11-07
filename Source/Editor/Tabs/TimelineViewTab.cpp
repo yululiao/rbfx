@@ -32,6 +32,7 @@
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/RenderAPI/RenderDevice.h>
 #include <Urho3D/Scene/Animatable.h>
 #include <Urho3D/Scene/Component.h>
 #include <Urho3D/Scene/Node.h>
@@ -63,22 +64,70 @@ namespace Urho3D
 namespace
 {
 
-// Layout constants
-constexpr float HeaderWidth = 200.0f;
-constexpr float RulerHeight = 26.0f;
-constexpr float FrameRulerHeight = 20.0f;
-constexpr float RowHeight = 26.0f;
-constexpr float ThinRowHeight = 20.0f;
-constexpr float RowSpacing = 2.0f;
-constexpr float ClipRounding = 3.0f;
-constexpr float EdgeGrabWidth = 8.0f;
-constexpr float KeySize = 7.0f;
+// Layout constants.
+// Base* are the design values at 100% DPI (96). The runtime copies below are refreshed every
+// frame by ApplyLayoutScale() so that track rows, the ruler, keys and paddings keep a constant
+// physical size on displays with different DPI. Row height was also raised versus the old 26/20
+// because a single track felt too cramped.
+constexpr float BaseHeaderWidth = 200.0f;
+constexpr float BaseRulerHeight = 28.0f;
+constexpr float BaseFrameRulerHeight = 20.0f;
+constexpr float BaseRowHeight = 40.0f;
+constexpr float BaseThinRowHeight = 30.0f;
+constexpr float BaseRowSpacing = 3.0f;
+constexpr float BaseClipRounding = 3.0f;
+constexpr float BaseEdgeGrabWidth = 8.0f;
+constexpr float BaseKeySize = 8.0f;
+constexpr float BaseBindingSlotWidth = 76.0f;
+
+// DPI-scaled copies actually used by layout, rendering and hit-testing. They stay consistent
+// across all of them because every row/hit rect is derived from these same values.
+float HeaderWidth = BaseHeaderWidth;
+float RulerHeight = BaseRulerHeight;
+float FrameRulerHeight = BaseFrameRulerHeight;
+float RowHeight = BaseRowHeight;
+float ThinRowHeight = BaseThinRowHeight;
+float RowSpacing = BaseRowSpacing;
+float ClipRounding = BaseClipRounding;
+float EdgeGrabWidth = BaseEdgeGrabWidth;
+float KeySize = BaseKeySize;
+float BindingSlotWidth = BaseBindingSlotWidth;
+
+// Time/zoom constants: not physical sizes, so they are not DPI-scaled.
 constexpr float MinClipDuration = 0.05f;
 constexpr float SnapStep = 0.05f;
 constexpr float MinPixelsPerSecond = 5.0f;
 constexpr float MaxPixelsPerSecond = 2000.0f;
 constexpr float MinRulerStepPx = 90.0f;
-constexpr float BindingSlotWidth = 76.0f;
+
+// Multiply the geometric layout constants by the display DPI scale so the on-screen physical
+// size stays consistent. Called once per frame before the sequencer is laid out.
+void ApplyLayoutScale(float scale)
+{
+    HeaderWidth = BaseHeaderWidth * scale;
+    RulerHeight = BaseRulerHeight * scale;
+    FrameRulerHeight = BaseFrameRulerHeight * scale;
+    RowHeight = BaseRowHeight * scale;
+    ThinRowHeight = BaseThinRowHeight * scale;
+    RowSpacing = BaseRowSpacing * scale;
+    ClipRounding = BaseClipRounding * scale;
+    EdgeGrabWidth = BaseEdgeGrabWidth * scale;
+    KeySize = BaseKeySize * scale;
+    BindingSlotWidth = BaseBindingSlotWidth * scale;
+}
+
+// Truncate text with an ellipsis so it fits within maxWidth pixels. Used for clip labels so a
+// very long animation name no longer spills past its block and overlaps the neighbouring clip.
+ea::string FitText(const char* text, float maxWidth)
+{
+    ea::string result = text;
+    if (ui::CalcTextSize(result.c_str()).x <= maxWidth)
+        return result;
+    const ea::string ellipsis = "...";
+    while (!result.empty() && ui::CalcTextSize((result + ellipsis).c_str()).x > maxWidth)
+        result.pop_back();
+    return result.empty() ? ellipsis : result + ellipsis;
+}
 
 // Colors
 const ImU32 ColorBackground = IM_COL32(36, 36, 36, 255);
@@ -1446,6 +1495,13 @@ void TimelineViewTab::RenderContent()
     ValidateSelection();
     UpdatePreviewAndRecording();
 
+    // Refresh DPI-scaled layout before anything is measured or drawn, so rendering and
+    // hit-testing agree and the widget keeps a constant physical size across displays.
+    float dpiScale = 1.0f;
+    if (auto* renderDevice = context_->GetSubsystem<RenderDevice>())
+        dpiScale = Max(renderDevice->GetDpiScale(), 1.0f);
+    ApplyLayoutScale(dpiScale);
+
     // The selection panel is taller when a property clip is selected (curve list)
     bool propertyClipSelected = false;
     if (selectedTrack_ < timeline_->GetNumTracks())
@@ -2022,11 +2078,18 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, unsigned trackInd
                 ClipRounding, 0, clipSelected ? 2.0f : 1.0f);
 
             const ea::string label = GetClipLabel(track, ci);
-            if (!label.empty() && blockMax.x - blockMin.x > 30.0f)
+            const float blockWidth = blockMax.x - blockMin.x;
+            if (!label.empty() && blockWidth > 30.0f)
             {
-                const ImVec2 textSize = ui::CalcTextSize(label.c_str());
-                const ImVec2 textPos(Max(blockMin.x + 4.0f, (blockMin.x + blockMax.x - textSize.x) * 0.5f), textY);
-                drawList->AddText(textPos, ColorClipText, label.c_str());
+                // Fit the name inside the clip block (ellipsis when too long) and clip to the block
+                // rect, so a very long animation name can no longer overlap the neighbouring clip.
+                const ea::string shown = FitText(label.c_str(), blockWidth - 8.0f);
+                const ImVec2 textSize = ui::CalcTextSize(shown.c_str());
+                const float textX = Clamp((blockMin.x + blockMax.x - textSize.x) * 0.5f,
+                    blockMin.x + 4.0f, blockMax.x - 4.0f - textSize.x);
+                drawList->PushClipRect(blockMin, blockMax, true);
+                drawList->AddText(ImVec2(textX, textY), ColorClipText, shown.c_str());
+                drawList->PopClipRect();
             }
 
             // Trim handles of the selected clip
