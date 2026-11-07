@@ -259,6 +259,14 @@ Object* TimelinePlayer::ResolveBindingPath(const ea::string& path) const
 
         if (!segment.empty())
         {
+            // Tolerate a redundant leading segment that repeats the player node's own name
+            // (bindings computed against the scene root may carry the instance prefix).
+            if (begin == 0 && node->GetName() == segment)
+            {
+                begin = end + 1;
+                continue;
+            }
+
             Node* child = node->GetChild(segment, false);
             if (!child)
                 child = node->GetChild(segment, true);

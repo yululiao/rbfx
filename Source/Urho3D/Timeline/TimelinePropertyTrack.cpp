@@ -42,6 +42,35 @@ Variant LerpVariantValues(const Variant& lhs, const Variant& rhs, float t)
     }
 }
 
+/// Sample a cubic Hermite segment. p0/p1 are the endpoint values, m0/m1 the tangents
+/// (dValue/dTime), span the segment length in time, t the normalized position in [0, 1].
+inline float HermiteScalar(float p0, float p1, float m0, float m1, float t, float span)
+{
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    const float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+    const float h10 = t3 - 2.0f * t2 + t;
+    const float h01 = -2.0f * t3 + 3.0f * t2;
+    const float h11 = t3 - t2;
+    return h00 * p0 + h10 * span * m0 + h01 * p1 + h11 * span * m1;
+}
+
+/// Hermite for a scalar key. Non-scalar types have no single well-defined dValue/dTime tangent
+/// (per-channel tangent curves are a future extension), so they fall back to linear.
+Variant HermiteVariantValue(const Variant& lhs, const Variant& rhs, float m0, float m1, float t, float span)
+{
+    switch (lhs.GetType())
+    {
+    case VAR_FLOAT:
+        return HermiteScalar(lhs.GetFloat(), rhs.GetFloat(), m0, m1, t, span);
+    case VAR_DOUBLE:
+        return static_cast<double>(
+            HermiteScalar(static_cast<float>(lhs.GetDouble()), static_cast<float>(rhs.GetDouble()), m0, m1, t, span));
+    default:
+        return LerpVariantValues(lhs, rhs, t);
+    }
+}
+
 /// Sample the curve at given source time. Keyframes are expected to be sorted by time.
 /// Return false if the curve has no keyframes.
 bool EvaluatePropertyCurve(const TimelinePropertyCurve& curve, float time, Variant& result)
@@ -62,9 +91,25 @@ bool EvaluatePropertyCurve(const TimelinePropertyCurve& curve, float time, Varia
         if (time < keys[i].time_)
         {
             const TimelinePropertyKey& to = keys[i];
-            const float rawT = (time - from.time_) / (to.time_ - from.time_);
-            const float easedT = EvaluateTimelineEase(from.ease_, rawT);
-            result = LerpVariantValues(from.value_, to.value_, easedT);
+            const float span = to.time_ - from.time_;
+            const float rawT = (time - from.time_) / span;
+            switch (from.interpolation_)
+            {
+            case TimelineInterpolation::Constant:
+                // Hold the left key value across the segment.
+                result = from.value_;
+                break;
+            case TimelineInterpolation::Linear:
+                result = LerpVariantValues(from.value_, to.value_, rawT);
+                break;
+            case TimelineInterpolation::Bezier:
+                result = HermiteVariantValue(from.value_, to.value_, from.outTangent_, to.inTangent_, rawT, span);
+                break;
+            case TimelineInterpolation::Ease:
+            default:
+                result = LerpVariantValues(from.value_, to.value_, EvaluateTimelineEase(from.ease_, rawT));
+                break;
+            }
             return true;
         }
     }
@@ -98,6 +143,13 @@ void TimelinePropertyKey::SerializeInBlock(Archive& archive, VariantType variant
     SerializeOptionalValue(archive, "ease", ease_, TimelineEase::Linear,
         [](Archive& archive, const char* name, auto& value) //
         { SerializeEnum(archive, name, value, TIMELINE_EASE_NAMES); });
+    // Interpolation + tangents are optional so files authored before this change (which only had
+    // "ease") decode to the legacy Ease behaviour with flat tangents.
+    SerializeOptionalValue(archive, "interp", interpolation_, TimelineInterpolation::Ease,
+        [](Archive& archive, const char* name, auto& value) //
+        { SerializeEnum(archive, name, value, TIMELINE_INTERPOLATION_NAMES); });
+    SerializeOptionalValue(archive, "outTangent", outTangent_, 0.0f);
+    SerializeOptionalValue(archive, "inTangent", inTangent_, 0.0f);
 }
 
 void TimelinePropertyCurve::SerializeInBlock(Archive& archive)

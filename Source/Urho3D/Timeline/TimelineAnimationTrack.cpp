@@ -30,6 +30,22 @@ unsigned FindControllerInstance(AnimationController& controller, Animation* anim
     return M_MAX_UNSIGNED;
 }
 
+/// Find an AnimationController on the node or, when the node only hosts a prefab instance
+/// (e.g. a PrefabReference container), anywhere in its subtree.
+AnimationController* FindControllerInSubtree(Node* node)
+{
+    if (!node)
+        return nullptr;
+    if (auto* controller = node->GetComponent<AnimationController>())
+        return controller;
+    for (const SharedPtr<Node>& child : node->GetChildren())
+    {
+        if (auto* controller = FindControllerInSubtree(child.Get()))
+            return controller;
+    }
+    return nullptr;
+}
+
 }
 
 void TimelineAnimationClip::SerializeInBlock(Archive& archive)
@@ -87,7 +103,7 @@ AnimationController* TimelineAnimationTrack::ResolveController(TimelineTrackCont
         if (auto* asController = dynamic_cast<AnimationController*>(bound))
             controller = asController;
         else if (auto* asNode = dynamic_cast<Node*>(bound))
-            controller = asNode->GetComponent<AnimationController>();
+            controller = FindControllerInSubtree(asNode);
         else
             controller = nullptr;
     }
@@ -160,14 +176,58 @@ void TimelineAnimationTrack::Evaluate(TimelineTrackContext& context)
 
     const float sceneTimeStep = context.player_.GetSceneTimeStep();
 
+    // Cross-blend: temporally overlapping clips on the same (non-additive) layer are weighted so
+    // their combined influence stays within the track weight, producing a smooth fade instead of a
+    // stack that saturates above 1. Additive clips and clips on distinct layers keep their own weight.
+    struct ClipEval
+    {
+        bool active_{};
+        float weight_{};
+        unsigned layer_{};
+    };
+    runtime.clips_.resize(clips_.size());
+    ea::vector<ClipEval> evals(clips_.size());
+    for (unsigned i = 0; i < clips_.size(); ++i)
+    {
+        const TimelineAnimationClip& clip = clips_[i];
+        float localTime = 0.0f;
+        const bool active = clip.animation_ && clip.EvaluateLocalTime(context.time_, localTime);
+        ClipEval& ev = evals[i];
+        ev.active_ = active;
+        ev.layer_ = clip.layer_;
+        ev.weight_ = active ? clip.EvaluateWeight(context.time_) * weight_ * context.weightScale_ : 0.0f;
+    }
+    // Normalize each layer's non-additive clips when more than one is active and their weights sum > 1.
+    for (unsigned i = 0; i < clips_.size(); ++i)
+    {
+        ClipEval& ev = evals[i];
+        if (!ev.active_ || ev.weight_ <= M_EPSILON || clips_[i].additive_)
+            continue;
+        float sum = 0.0f;
+        unsigned count = 0;
+        for (unsigned j = 0; j < clips_.size(); ++j)
+        {
+            if (evals[j].active_ && !clips_[j].additive_ && evals[j].layer_ == ev.layer_)
+            {
+                sum += evals[j].weight_;
+                ++count;
+            }
+        }
+        if (count > 1 && sum > 1.0f)
+            ev.weight_ /= sum;
+    }
+
     for (unsigned i = 0; i < clips_.size(); ++i)
     {
         const TimelineAnimationClip& clip = clips_[i];
         Runtime::ClipState& state = runtime.clips_[i];
 
+        const ClipEval& ev = evals[i];
+        const float weight = ev.weight_;
+        const bool active = ev.active_;
         float localTime = 0.0f;
-        const bool active = clip.animation_ && clip.EvaluateLocalTime(context.time_, localTime);
-        const float weight = active ? clip.EvaluateWeight(context.time_) * weight_ * context.weightScale_ : 0.0f;
+        if (active)
+            clip.EvaluateLocalTime(context.time_, localTime);
 
         if (!active || weight <= M_EPSILON)
         {

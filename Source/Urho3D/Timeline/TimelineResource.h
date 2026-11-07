@@ -40,6 +40,9 @@ public:
     /// @{
     void AddTrack(TimelineTrack* track, unsigned index = M_MAX_UNSIGNED);
     bool RemoveTrack(TimelineTrack* track);
+    /// Move the track at index «src» so that it ends up at index «dst», keeping other tracks in order.
+    /// Bumps the track list revision. No-op for out-of-range or equal indices.
+    void MoveTrack(unsigned src, unsigned dst);
     void RemoveAllTracks();
     unsigned GetNumTracks() const { return tracks_.size(); }
     TimelineTrack* GetTrack(unsigned index) const;

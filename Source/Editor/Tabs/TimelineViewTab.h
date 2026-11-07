@@ -28,6 +28,8 @@
 #include <Urho3D/Timeline/TimelineDefs.h>
 
 #include <EASTL/unordered_map.h>
+#include <EASTL/set.h>
+#include <EASTL/utility.h>
 
 namespace Urho3D
 {
@@ -35,6 +37,7 @@ namespace Urho3D
 class ModifyResourceAction;
 class Node;
 class ProjectRequest;
+struct TimelineClip;
 class TimelineMarkerTrack;
 class TimelinePlayer;
 class TimelinePropertyTrack;
@@ -84,6 +87,8 @@ private:
     void RenderPlaybackControls();
     void RenderSequencer();
     void RenderRuler(float duration, float majorStep, float minorStep, float trackX0, float trackX1);
+    /// Frame-number band above the time ruler. Shares the horizontal mapping and scrub behavior.
+    void RenderFrameRuler(float duration, float trackX0, float trackX1);
     void RenderBody(float duration, float majorStep, float minorStep);
     /// Background of the body: grid lines, duration shading and header background.
     void RenderBodyGrid(float duration, float majorStep, float minorStep, const ImVec2& canvasPos, float trackX0,
@@ -106,6 +111,12 @@ private:
     void ClearSelection();
     /// Select the track, dropping clip/key selection.
     void SelectTrack(unsigned trackIndex);
+    /// Return the clip at (track, clip) indices of the displayed timeline, or null when out of range.
+    TimelineClip* FindSelectedClip(unsigned trackIndex, unsigned clipIndex);
+    /// Copy the multi-selected clips (or the single selected clip) to the clipboard.
+    void CopySelectedClips();
+    /// Paste the clipboard clips onto the selected track and select the pasted clips.
+    void PasteClips(float pasteTime);
     /// Hit-test a single row: updates selection, drag state and context menu requests.
     void ProcessRowHitTesting(TimelineTrack* track, unsigned trackIndex, const ImVec2& rowMin, const ImVec2& rowMax,
         float trackX0);
@@ -122,6 +133,8 @@ private:
     void UpdateDrag(float trackX0);
     /// Delete the selected clip, key or marker with the Delete key.
     void ProcessDeleteKey();
+    /// Handle clipboard shortcuts (Ctrl+C copy, Ctrl+V paste) over the focused sequencer.
+    void ProcessEditKeys();
     /// Render context menus opened from the sequencer.
     void RenderTrackAreaContextMenu();
     void RenderClipContextMenu();
@@ -163,12 +176,22 @@ private:
     float viewStartTime_{};        // Time at the left edge of the canvas
     float pixelsPerSecond_{100.0f};
     float cursorTime_{};           // Scrub position
+    /// Frame rate of the frame ruler, used to convert seconds to whole frames.
+    float fps_{60.0f};
 
     // Selection. Clip/key indices are relative to the selected track.
     unsigned selectedTrack_{M_MAX_UNSIGNED};
     unsigned selectedClip_{M_MAX_UNSIGNED};
     unsigned selectedKey_{M_MAX_UNSIGNED};     // Marker of the selected Marker track
     float selectedKeyTime_{-1.0f};             // Local time of the selected Property key
+    // Set of (track, clip) pairs held by the multi-selection (Ctrl+click toggles, dragging one
+    // moves them all). Kept in sync with selectedTrack_/selectedClip_ for the single-selection path.
+    ea::set<ea::pair<unsigned, unsigned>> multiSelectedClips_;
+
+    // Clip clipboard: a detached track of the copied type holding the copied clips, so pasting
+    // is independent of the source track's lifetime and only same-type tracks accept it.
+    SharedPtr<TimelineTrack> clipboardTrack_;
+    ea::string clipboardTrackType_;
 
     // Active drag
     enum class DragKind
@@ -181,14 +204,18 @@ private:
         Key,
         Marker,
         Pan,
+        TrackReorder,
     };
     DragKind dragKind_{DragKind::None};
     unsigned dragTrack_{M_MAX_UNSIGNED};
     unsigned dragClip_{M_MAX_UNSIGNED};
     unsigned dragKey_{M_MAX_UNSIGNED};
     float dragGrabOffset_{};       // Offset between mouse time and dragged item start
+    float dragReorderGrab_{};      // Vertical offset between mouse Y and the dragged track row top
     float dragOrigStart_{};
     float dragOrigDuration_{};
+    // Batch clip move: original start of every selected clip at drag start, keyed by (track, clip).
+    ea::vector<ea::pair<ea::pair<unsigned, unsigned>, float>> dragBatchOrig_;
 
     SharedPtr<TimelineResource> timeline_;
     SharedPtr<ModifyResourceAction> pendingAction_;

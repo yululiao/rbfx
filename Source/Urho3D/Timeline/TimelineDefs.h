@@ -48,6 +48,21 @@ enum class TimelineExtrapolation
     Continue,
 };
 
+/// Interpolation used by a property-curve keyframe segment to the next key.
+/// Ease keeps the legacy per-segment TimelineEase ramp; Bezier evaluates a cubic Hermite
+/// spline from the key's outgoing and the next key's incoming tangents (Unity-style curve editor).
+enum class TimelineInterpolation
+{
+    /// Hold the left key value until the next key (step).
+    Constant = 0,
+    /// Straight linear ramp.
+    Linear,
+    /// Ease ramp selected by the key's TimelineEase (default, legacy behaviour).
+    Ease,
+    /// Cubic Hermite spline using the in/out tangents.
+    Bezier,
+};
+
 /// Easing function applied to clip ease in/out ramps.
 enum class TimelineEase
 {
@@ -115,6 +130,7 @@ inline const char* TIMELINE_TIME_UPDATE_MODE_NAMES[] = {"GameTime", "UnscaledGam
 inline const char* TIMELINE_EXTRAPOLATION_NAMES[] = {"None", "Hold", "Loop", "PingPong", "Continue", nullptr};
 inline const char* TIMELINE_EASE_NAMES[] = {"Linear", "InQuad", "OutQuad", "InOutQuad", "InCubic", "OutCubic",
     "InOutCubic", "InSine", "OutSine", "InOutSine", nullptr};
+inline const char* TIMELINE_INTERPOLATION_NAMES[] = {"Constant", "Linear", "Ease", "Bezier", nullptr};
 inline const char* TIMELINE_POST_PLAYBACK_NAMES[] = {"Destroy", "Disable", "Revert", "Keep", nullptr};
 inline const char* TIMELINE_POST_PLAYBACK_STATE_NAMES[] = {"Revert", "Active", "Inactive", "LeaveAsIs", nullptr};
 inline const char* TIMELINE_DURATION_MODE_NAMES[] = {"Fixed", "Content", nullptr};

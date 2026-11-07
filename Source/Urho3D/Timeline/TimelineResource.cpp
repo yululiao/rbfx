@@ -87,6 +87,20 @@ void TimelineResource::RemoveAllTracks()
     ++tracksRevision_;
 }
 
+void TimelineResource::MoveTrack(unsigned src, unsigned dst)
+{
+    if (src >= tracks_.size() || dst >= tracks_.size() || src == dst)
+        return;
+
+    // Rotate the moved track into place so relative order of the others is preserved.
+    // SharedPtr is moved, never re-wrapped, to avoid creating a second owner.
+    SharedPtr<TimelineTrack> moving = ea::move(tracks_[src]);
+    tracks_.erase(tracks_.begin() + static_cast<ea::vector<SharedPtr<TimelineTrack>>::difference_type>(src));
+    tracks_.insert(tracks_.begin() + static_cast<ea::vector<SharedPtr<TimelineTrack>>::difference_type>(dst),
+        ea::move(moving));
+    ++tracksRevision_;
+}
+
 TimelineTrack* TimelineResource::GetTrack(unsigned index) const
 {
     return index < tracks_.size() ? tracks_[index].Get() : nullptr;

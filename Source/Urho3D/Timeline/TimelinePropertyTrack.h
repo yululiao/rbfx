@@ -25,8 +25,16 @@ struct TimelinePropertyKey
     float time_{};
     /// Value of the attribute at the keyframe.
     Variant value_;
-    /// Easing of the segment from this keyframe to the next one.
+    /// Easing of the segment from this keyframe to the next one. Used when interpolation_ is Ease.
     TimelineEase ease_{TimelineEase::Linear};
+    /// Interpolation of the segment from this keyframe to the next one. Defaults to Ease (legacy).
+    TimelineInterpolation interpolation_{TimelineInterpolation::Ease};
+    /// Outgoing tangent (dValue / dTime) of this key, used by the segment starting here when
+    /// interpolation_ is Bezier. Zero gives a flat hold at this end.
+    float outTangent_{};
+    /// Incoming tangent (dValue / dTime) of this key, used by the segment ending here when the
+    /// previous key interpolates with Bezier. Zero gives a flat hold at this end.
+    float inTangent_{};
 };
 
 /// Inline curve animating a single attribute of the track's bound object.
