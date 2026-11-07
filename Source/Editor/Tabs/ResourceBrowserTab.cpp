@@ -1004,12 +1004,43 @@ void ResourceBrowserTab::RenderPrefabOverwriteDialog()
     ui::Text("Prefab '%s' already exists.", GetFileName(request.fileName_).c_str());
     ui::Text("Overwrite it with the dropped node?");
 
-    if (ui::Button(ICON_FA_CHECK " Overwrite") || ui::IsKeyPressed(KEY_RETURN))
+    if (ui::Button(ICON_FA_CHECK " Overwrite"))
     {
         if (Node* node = request.node_.Get())
             WriteNodeAsPrefab(node, request.fileName_);
         prefabOverwrite_.queue_.erase(prefabOverwrite_.queue_.begin());
         // Ask for the next conflicting drop in the same batch.
+        prefabOverwrite_.openPending_ = !prefabOverwrite_.queue_.empty();
+        ui::CloseCurrentPopup();
+    }
+
+    ui::SameLine();
+
+    // Keep both: write a suffixed 'Name_1.prefab' copy next to the existing one.
+    if (ui::Button(ICON_FA_COPY " Duplicate"))
+    {
+        if (Node* node = request.node_.Get())
+        {
+            auto fs = GetSubsystem<FileSystem>();
+            const ea::string stem = request.fileName_.length() >= 7
+                ? request.fileName_.substr(0, request.fileName_.length() - 7)
+                : request.fileName_;
+            ea::string target;
+            for (int i = 1; i < 100; ++i)
+            {
+                const ea::string candidate = Format("{}_{}.prefab", stem, i);
+                if (!fs->FileExists(candidate) && !fs->DirExists(candidate))
+                {
+                    target = candidate;
+                    break;
+                }
+            }
+            if (!target.empty())
+                WriteNodeAsPrefab(node, target);
+            else
+                URHO3D_LOGERROR("Cannot find available file name for prefab copy '{}'", stem);
+        }
+        prefabOverwrite_.queue_.erase(prefabOverwrite_.queue_.begin());
         prefabOverwrite_.openPending_ = !prefabOverwrite_.queue_.empty();
         ui::CloseCurrentPopup();
     }
