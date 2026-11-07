@@ -34,7 +34,7 @@
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/RenderAPI/RenderDevice.h>
-#include <Urho3D/Scene/Animatable.h>
+#include <Urho3D/Scene/Serializable.h>
 #include <Urho3D/Scene/Component.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Scene.h>
@@ -626,7 +626,7 @@ const VariantType curveTypes[] = {VAR_FLOAT, VAR_DOUBLE, VAR_INT, VAR_BOOL,
     VAR_VECTOR2, VAR_VECTOR3, VAR_VECTOR4, VAR_COLOR, VAR_QUATERNION};
 
 // Find attribute of the target by exact name, used by preview and recording.
-const AttributeInfo* FindAttributeByName(const Animatable& target, const ea::string& name)
+const AttributeInfo* FindAttributeByName(const Serializable& target, const ea::string& name)
 {
     const auto* attributes = target.GetAttributes();
     if (!attributes)
@@ -672,14 +672,15 @@ TimelinePropertyClip* FindActivePropertyClip(TimelinePropertyTrack& track, float
 }
 
 // Insert the key into the sorted key list, or update the value of the existing key.
-void SetCurveKeyValue(TimelinePropertyCurve& curve, float localTime, const Variant& value)
+// Returns whether a new key was inserted.
+bool SetCurveKeyValue(TimelinePropertyCurve& curve, float localTime, const Variant& value)
 {
     for (TimelinePropertyKey& key : curve.keys_)
     {
         if (Abs(key.time_ - localTime) < 0.001f)
         {
             key.value_ = value;
-            return;
+            return false;
         }
     }
 
@@ -691,10 +692,50 @@ void SetCurveKeyValue(TimelinePropertyCurve& curve, float localTime, const Varia
     while (insertAt < curve.keys_.size() && curve.keys_[insertAt].time_ < localTime)
         ++insertAt;
     curve.keys_.insert(curve.keys_.begin() + static_cast<long>(insertAt), newKey);
+    return true;
 }
 
-// Whether any property curve can be recorded at the given time: there is an active clip with
-// a curve that matches an attribute of the object bound to the track.
+// Property clip covering the time by its range alone. Unlike FindActivePropertyClip this also
+// matches freshly created clips that do not have any curve yet.
+TimelinePropertyClip* FindCoveringPropertyClip(TimelinePropertyTrack& track, float time)
+{
+    TimelinePropertyClip* result = nullptr;
+    for (TimelinePropertyClip& clip : track.clips_)
+    {
+        if (time >= clip.start_ && time <= clip.GetEndTime())
+            result = &clip;
+    }
+    return result;
+}
+
+// Whether values of this attribute type can be captured as property keys.
+bool IsRecordableType(VariantType type)
+{
+    switch (type)
+    {
+    case VAR_FLOAT:
+    case VAR_DOUBLE:
+    case VAR_BOOL:
+    case VAR_INT:
+    case VAR_VECTOR2:
+    case VAR_VECTOR3:
+    case VAR_VECTOR4:
+    case VAR_QUATERNION:
+    case VAR_COLOR:
+    case VAR_INTVECTOR2:
+    case VAR_INTVECTOR3:
+    case VAR_MATRIX3:
+    case VAR_MATRIX3X4:
+    case VAR_STRING:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Whether any property track can record: there is a bound Serializable target with at least
+// one recordable attribute. Recording no longer requires the cursor to be over an existing
+// clip: a clip is created at the cursor when the first change is detected.
 bool HasRecordableProperty(TimelinePlayer* player, TimelineResource* timeline, float time)
 {
     if (!player || !timeline)
@@ -706,19 +747,17 @@ bool HasRecordableProperty(TimelinePlayer* player, TimelineResource* timeline, f
         if (!track || track->IsMuted())
             continue;
 
-        float localTime = 0.0f;
-        const TimelinePropertyClip* clip = FindActivePropertyClip(*track, time, localTime);
-        if (!clip)
-            continue;
-
-        auto* target = dynamic_cast<Animatable*>(ResolveTrackTarget(player, track));
+        auto* target = dynamic_cast<Serializable*>(ResolveTrackTarget(player, track));
         if (!target)
             continue;
 
-        for (const TimelinePropertyCurve& curve : clip->curves_)
+        const auto* attributes = target->GetAttributes();
+        if (!attributes)
+            continue;
+
+        for (const AttributeInfo& info : *attributes)
         {
-            const AttributeInfo* attributeInfo = FindAttributeByName(*target, curve.name_);
-            if (attributeInfo && (curve.valueType_ == VAR_NONE || attributeInfo->type_ == curve.valueType_))
+            if (IsRecordableType(info.type_))
                 return true;
         }
     }
@@ -1171,6 +1210,9 @@ void TimelineViewTab::RenderPlaybackControls()
         {
             recording_ = false;
             recordedValues_.clear();
+            if (recordedKeyCount_)
+                URHO3D_LOGINFO("Timeline: recording finished, {} key(s) inserted.", recordedKeyCount_);
+            recordedKeyCount_ = 0;
         }
         else
         {
@@ -1179,20 +1221,35 @@ void TimelineViewTab::RenderPlaybackControls()
             StopPreview();
             recording_ = true;
             recordedValues_.clear();
+            recordedKeyCount_ = 0;
+            LogRecordingSetup(player);
         }
     }
 
     if (recording_)
     {
         ui::SameLine();
-        ui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "REC");
+        ui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "REC (%u)", recordedKeyCount_);
+        if (!recordingTargets_.empty())
+        {
+            ui::SameLine();
+            ui::TextDisabled("recording: %s", recordingTargets_.c_str());
+        }
 
-        // Warn when nothing can be recorded at the cursor: Inspector changes would be lost.
+        // Warn when nothing can be recorded: there is no property track with a valid target.
         if (!HasRecordableProperty(player, timeline_, cursorTime_))
         {
             ui::SameLine();
-            ui::TextColored(ImVec4(1.0f, 0.75f, 0.30f, 1.0f), "nothing to record at the cursor: place it over a property clip");
+            ui::TextColored(ImVec4(1.0f, 0.75f, 0.30f, 1.0f), "nothing to record: add a property track with a bound target");
         }
+    }
+
+    // Playback and recording are driven through the player of the bound node: explain why the
+    // buttons would stay inert.
+    if (!player)
+    {
+        ui::SameLine();
+        ui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "bound node has no TimelinePlayer of this timeline");
     }
 }
 
@@ -1276,6 +1333,90 @@ void TimelineViewTab::StopPreview()
     previewLastTime_ = 0.0;
 }
 
+void TimelineViewTab::LogRecordingSetup(TimelinePlayer* player)
+{
+    URHO3D_LOGINFO("Timeline: recording started at {:.3f}s (frame {:.0f}).", cursorTime_, cursorTime_ * fps_);
+
+    if (!player)
+    {
+        URHO3D_LOGWARNING("Timeline: the displayed timeline is not bound to the node with a matching "
+            "TimelinePlayer component, so nothing can be recorded. Select the node that owns the player "
+            "or add a TimelinePlayer component.");
+        return;
+    }
+    if (!timeline_)
+        return;
+
+    unsigned numPropertyTracks = 0;
+    recordingTargets_.clear();
+    for (unsigned ti = 0; ti < timeline_->GetNumTracks(); ++ti)
+    {
+        TimelinePropertyTrack* track = AsPropertyTrack(timeline_->GetTrack(ti));
+        if (!track)
+            continue;
+        ++numPropertyTracks;
+
+        Object* bound = ResolveTrackTarget(player, track);
+        auto* target = dynamic_cast<Serializable*>(bound);
+        if (!bound)
+        {
+            URHO3D_LOGWARNING("Timeline: property track {} binding '{}' does not resolve to an object; "
+                "edits of that track cannot be recorded.", ti, track->GetBindingPath().c_str());
+            AppendRecordingTargetHint(ti, "<unresolved>");
+        }
+        else if (!target)
+        {
+            URHO3D_LOGWARNING("Timeline: property track {} binds to a {} which has no attributes; "
+                "edits of that track cannot be recorded.", ti, bound->GetTypeName().c_str());
+            AppendRecordingTargetHint(ti, bound->GetTypeName());
+        }
+        else
+        {
+            ea::string description = target->GetTypeName();
+            if (auto* node = dynamic_cast<Node*>(bound))
+                description = Format("Node '{}'", node->GetName().empty() ? "(unnamed)" : node->GetName().c_str());
+            else if (auto* component = dynamic_cast<Component*>(bound))
+                description = Format("{} of '{}'", component->GetTypeName().c_str(),
+                    component->GetNode() ? component->GetNode()->GetName().c_str() : "(no node)");
+            URHO3D_LOGINFO("Timeline: property track {} records attributes of the {} bound to '{}'.",
+                ti, description.c_str(), track->GetBindingPath().c_str());
+            AppendRecordingTargetHint(ti, description);
+        }
+    }
+
+    if (!numPropertyTracks)
+        URHO3D_LOGWARNING("Timeline: the timeline has no property track, so gizmo and Inspector edits are not recorded.");
+}
+
+void TimelineViewTab::AppendRecordingTargetHint(unsigned trackIndex, const ea::string& description)
+{
+    if (!recordingTargets_.empty())
+        recordingTargets_ += ", ";
+    recordingTargets_ += Format("track {}: {}", trackIndex, description);
+}
+
+TimelinePropertyClip* TimelineViewTab::FindOrCreateClipAtCursor(TimelinePropertyTrack& track, float& localTime)
+{
+    localTime = 0.0f;
+    TimelinePropertyClip* clip = FindCoveringPropertyClip(track, cursorTime_);
+    if (!clip)
+    {
+        // No clip covers the cursor: create one when the first change is detected, so nothing
+        // the user records is silently dropped. A fresh track records from the timeline start,
+        // which puts the pre-change baseline key at frame 0 as expected. If the track already
+        // has clips elsewhere, the new one starts at the cursor to avoid overlapping them.
+        BeginModify();
+        TimelinePropertyClip newClip;
+        newClip.start_ = track.clips_.empty() ? 0.0f : Max(cursorTime_, 0.0f);
+        newClip.duration_ = Max(Max(timeline_->GetDuration(), cursorTime_ + 1.0f) - newClip.start_, 1.0f);
+        track.clips_.push_back(newClip);
+        clip = &track.clips_.back();
+    }
+
+    localTime = Max(cursorTime_ - clip->start_, 0.0f);
+    return clip;
+}
+
 void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
 {
     if (!player || !timeline_)
@@ -1288,34 +1429,35 @@ void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
         if (!track || track->IsMuted())
             continue;
 
-        auto* target = dynamic_cast<Animatable*>(ResolveTrackTarget(player, track));
+        auto* target = dynamic_cast<Serializable*>(ResolveTrackTarget(player, track));
         if (!target)
             continue;
 
-        // Keys are written only where the cursor is covered by a clip of the track.
-        float localTime = 0.0f;
-        TimelinePropertyClip* clip = FindActivePropertyClip(*track, cursorTime_, localTime);
-        if (!clip)
+        const auto* attributes = target->GetAttributes();
+        if (!attributes)
             continue;
 
-        for (TimelinePropertyCurve& curve : clip->curves_)
+        for (const AttributeInfo& info : *attributes)
         {
-            const AttributeInfo* attributeInfo = FindAttributeByName(*target, curve.name_);
-            if (!attributeInfo || (curve.valueType_ != VAR_NONE && attributeInfo->type_ != curve.valueType_))
+            if (!IsRecordableType(info.type_))
                 continue;
 
             Variant value;
-            target->OnGetAttribute(*attributeInfo, value);
+            target->OnGetAttribute(info, value);
 
-            const ea::string cacheKey = Format("{}:{}", static_cast<const void*>(target), curve.name_);
+            const ea::string cacheKey = Format("{}:{}", static_cast<const void*>(target), info.name_);
             const auto iter = recordedValues_.find(cacheKey);
-            if (iter != recordedValues_.end() && iter->second == value)
+            if (iter == recordedValues_.end())
+            {
+                // The first sample only establishes the baseline value captured when recording
+                // started; it never creates keys.
+                RecordedChannel channel;
+                channel.baseline_ = value;
+                channel.last_ = value;
+                recordedValues_[cacheKey] = channel;
                 continue;
-
-            // The first sample only establishes the baseline, it does not create keys.
-            const bool hasBaseline = iter != recordedValues_.end();
-            recordedValues_[cacheKey] = value;
-            if (!hasBaseline)
+            }
+            if (iter->second.last_ == value)
                 continue;
 
             if (!modificationStarted)
@@ -1323,7 +1465,42 @@ void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
                 BeginModify();
                 modificationStarted = true;
             }
-            SetCurveKeyValue(curve, localTime, value);
+
+            float localTime = 0.0f;
+            TimelinePropertyClip* clip = FindOrCreateClipAtCursor(*track, localTime);
+
+            TimelinePropertyCurve* curve = nullptr;
+            for (TimelinePropertyCurve& c : clip->curves_)
+            {
+                if (c.name_ == info.name_)
+                {
+                    curve = &c;
+                    break;
+                }
+            }
+            if (!curve)
+            {
+                TimelinePropertyCurve newCurve;
+                newCurve.name_ = info.name_;
+                newCurve.valueType_ = info.type_;
+                clip->curves_.push_back(newCurve);
+                curve = &clip->curves_.back();
+            }
+
+            // The Unity-style take: when nothing has been keyed on this curve yet, the
+            // baseline at recording start becomes a key at the clip start, so the movement
+            // is interpolated from where the object was. If keys already exist, the change
+            // is captured only at the cursor.
+            if (curve->keys_.empty())
+                SetCurveKeyValue(*curve, 0.0f, iter->second.baseline_);
+            if (SetCurveKeyValue(*curve, localTime, value))
+            {
+                recordedKeyCount_++;
+                URHO3D_LOGINFO("Timeline: recorded key '{}' of {} at {:.3f}s (clip starts at {:.3f}s).",
+                    info.name_, target->GetTypeName().c_str(), cursorTime_, clip->start_);
+            }
+
+            iter->second.last_ = value;
         }
     }
 }

@@ -39,6 +39,7 @@ class Node;
 class Texture2D;
 class ProjectRequest;
 struct TimelineClip;
+struct TimelinePropertyClip;
 class TimelineMarkerTrack;
 class TimelinePlayer;
 class TimelinePropertyTrack;
@@ -168,8 +169,15 @@ private:
     void UpdatePreviewAndRecording();
     /// Stop preview. Player::Stop releases instances and restores animated attributes.
     void StopPreview();
-    /// Store attributes changed in the Inspector as keys at the cursor.
+    /// Store attributes changed in the Inspector or by gizmos as keys at the cursor.
     void UpdateRecording(TimelinePlayer* player);
+    /// Property clip covering the cursor with its local time, creating one when the first
+    /// change needs a target.
+    TimelinePropertyClip* FindOrCreateClipAtCursor(TimelinePropertyTrack& track, float& localTime);
+    /// Report to the console which objects a recording take can actually capture.
+    void LogRecordingSetup(TimelinePlayer* player);
+    /// Add one resolved recording target to the toolbar hint text.
+    void AppendRecordingTargetHint(unsigned trackIndex, const ea::string& description);
 
     // View state
     /// Reset zoom, cursor and selection for the currently displayed resource.
@@ -256,10 +264,21 @@ private:
     bool cursorScrubbed_{};
     double previewLastTime_{};
 
-    // Recording: attributes changed in the Inspector become keys at the cursor.
+    // Recording: attributes changed in the Inspector or by gizmos become keys at the cursor.
     bool recording_{};
+    /// Sampled values of a recorded attribute: the baseline captured when recording started
+    /// (used for the automatic key at the clip start) and the last written value.
+    struct RecordedChannel
+    {
+        Variant baseline_;
+        Variant last_;
+    };
     /// Last sampled value of every recorded attribute, keyed by target and attribute name.
-    ea::unordered_map<ea::string, Variant> recordedValues_;
+    ea::unordered_map<ea::string, RecordedChannel> recordedValues_;
+    /// Number of keys inserted during the current take, shown next to the REC indicator.
+    unsigned recordedKeyCount_{};
+    /// Human readable list of the objects the current take captures.
+    ea::string recordingTargets_;
 
     // Context menu state
     unsigned popupTrack_{M_MAX_UNSIGNED};

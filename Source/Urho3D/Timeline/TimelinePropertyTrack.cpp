@@ -6,7 +6,7 @@
 
 #include <Urho3D/Core/ObjectCategory.h>
 #include <Urho3D/IO/ArchiveSerialization.h>
-#include <Urho3D/Scene/Animatable.h>
+#include <Urho3D/Scene/Serializable.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Timeline/TimelinePlayer.h>
 #include <Urho3D/Timeline/TimelinePropertyTrack.h>
@@ -119,7 +119,7 @@ bool EvaluatePropertyCurve(const TimelinePropertyCurve& curve, float time, Varia
 }
 
 /// Find attribute of the target by exact name. Return null if not found.
-const AttributeInfo* FindAttribute(const Animatable& target, const ea::string& name)
+const AttributeInfo* FindAttribute(const Serializable& target, const ea::string& name)
 {
     const auto* attributes = target.GetAttributes();
     if (!attributes)
@@ -158,9 +158,15 @@ void TimelinePropertyCurve::SerializeInBlock(Archive& archive)
     SerializeValue(archive, "type", valueType_);
 
     // Value of each key is serialized as the type of the curve.
+    // Every key must be wrapped into its own block: the surrounding 'keys' block is an Array
+    // whose expected element count equals the number of keys, and a key consists of several
+    // fields which would otherwise overflow that budget and trip the archive assertions.
     SerializeVectorAsObjects(archive, "keys", keys_, "key",
-        [variantType = valueType_](Archive& archive, const char*, TimelinePropertyKey& key) //
-        { key.SerializeInBlock(archive, variantType); });
+        [variantType = valueType_](Archive& archive, const char* name, TimelinePropertyKey& key) //
+        {
+            ArchiveBlock block = archive.OpenUnorderedBlock(name);
+            key.SerializeInBlock(archive, variantType);
+        });
 }
 
 void TimelinePropertyClip::SerializeInBlock(Archive& archive)
@@ -209,7 +215,9 @@ void TimelinePropertyTrack::OnTimelineStopped(TimelinePlayer& player, TimelineTr
     if (!trackRuntime.driving_)
         return;
 
-    if (auto* target = dynamic_cast<Animatable*>(trackRuntime.boundObject_.Get()))
+    // Serializable rather than Animatable: Node derives from Serializable directly, so
+    // binding a property track to a node must animate its transform attributes as well.
+    if (auto* target = dynamic_cast<Serializable*>(trackRuntime.boundObject_.Get()))
     {
         if (postPlaybackState_ == TimelinePostPlaybackState::Revert)
         {
@@ -245,7 +253,7 @@ void TimelinePropertyTrack::Evaluate(TimelineTrackContext& context)
     if (bindingDirty)
         runtime.attributeCache_.clear();
 
-    auto* target = dynamic_cast<Animatable*>(bound);
+    auto* target = dynamic_cast<Serializable*>(bound);
     if (!target)
         return;
 

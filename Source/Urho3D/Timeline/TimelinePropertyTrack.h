@@ -13,7 +13,7 @@
 namespace Urho3D
 {
 
-class Animatable;
+class Serializable;
 
 /// Keyframe of an inline property curve.
 struct TimelinePropertyKey
@@ -64,7 +64,7 @@ struct TimelinePropertyClip : public TimelineClip
 };
 
 /// Property track. Animates arbitrary reflected attributes of the bound object.
-/// Bound object can be any Animatable in the scene: a Node or a Component,
+/// Bound object can be any Serializable in the scene: a Node or a Component,
 /// referenced by the binding path of the track, e.g. "Weapon/StaticModel".
 /// Only one track should drive the same attribute of the same object at a time.
 class URHO3D_API TimelinePropertyTrack : public TimelineTrack
