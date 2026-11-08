@@ -143,6 +143,8 @@ private:
     /// The grid itself: captions, content and all mouse interaction of the sheet.
     void RenderGrid(TimelineEditorHost& host, TimelineResource& resource);
     void DrawRows(TimelineEditorHost& host);
+    /// Menu of the grid: the entries that add and remove a whole key row at the clicked frame.
+    void RenderContextMenu(TimelineEditorHost& host);
     void ProcessSelectionDrag(TimelineEditorHost& host, TimelineResource& resource);
     /// Apply the pending drag of the keys, markers or clips.
     void CommitDrag(TimelineEditorHost& host, TimelineResource& resource);
@@ -157,6 +159,10 @@ private:
     TimelineTrack* FindTrack(const TrackRef& ref) const;
     /// Address a key row from the mouse position, null when the grid is empty there.
     bool HitKey(const ImVec2& pos, DopeKey& result) const;
+    /// Append a key row to the curve row addressed by index, at the given timeline time. False when
+    /// the index is not a curve row, the time falls outside the owning clip or a row sits there
+    /// already: the same rule the curve window applies to its double-click and its menu.
+    bool AddKeyRowAt(TimelineEditorHost& host, int row, float globalTime);
     bool HitMarker(const ImVec2& pos, DopeMarker& result) const;
     bool HitClip(const ImVec2& pos, DopeClip& result) const;
     bool IsKeySelected(const TrackRef& ref, unsigned clip, float time) const;
@@ -230,6 +236,9 @@ private:
     float dragGrabTime_{};
     float panGrabX_{};
     float panOrigView_{};
+    /// Row and snapped time that the open context menu targets.
+    int popupRow_{-1};
+    float popupTime_{};
 };
 
 }

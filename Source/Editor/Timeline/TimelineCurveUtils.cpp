@@ -65,8 +65,31 @@ ea::vector<float> GetPropertyKeyTimes(const TimelinePropertyClip& clip)
     return ea::vector<float>(times.begin(), times.end());
 }
 
+// Distance in seconds below which two key times count as the same key row of a clip. The curve
+// editors of the tab, the sheet and the curve window all group keys by time, and this is the
+// window inside which a snapped click is the row that is already there.
+constexpr float KeyRowEps = 0.0001f;
+
+bool HasPropertyKeyRowAt(const TimelinePropertyClip& clip, float localTime)
+{
+    for (const auto& curve : clip.curves_)
+    {
+        for (const auto& key : curve.keys_)
+        {
+            if (Abs(key.time_ - localTime) < KeyRowEps)
+                return true;
+        }
+    }
+    return false;
+}
+
 void AddPropertyKeyAt(TimelinePropertyClip& clip, float localTime)
 {
+    // Two keys at one time leave the segment between them undefined, so an existing row is never
+    // inserted a second time.
+    if (HasPropertyKeyRowAt(clip, localTime))
+        return;
+
     for (auto& curve : clip.curves_)
     {
         // Copy the value from the nearest key, or use the default value of the curve

@@ -183,6 +183,9 @@ private:
     /// Zoom and pan so that the selected clips fill the canvas, falling back to the loop region
     /// and then to the whole timeline.
     void FitViewToSelection();
+    /// Insert a key row into the selected property clip at the play head: the keyboard shortcut of
+    /// the same name, and the fastest way to author keys because the cursor is already there.
+    void AddKeyRowAtCursor();
     /// Delete the selected clip, key or marker with the Delete key.
     void ProcessDeleteKey();
     /// Handle clipboard shortcuts (Ctrl+C copy, Ctrl+V paste) over the focused sequencer.

@@ -84,18 +84,11 @@ ImU32 ComponentColor(int component)
     return palette[Clamp(component, 0, 3)];
 }
 
-/// Whether any curve of the clip has a key at the given clip-local time.
+/// Whether any curve of the clip has a key at the given clip-local time. The comparison itself
+/// belongs to the shared curve utils, because the sequencer inserts rows through it as well.
 bool HasKeyRowAt(const TimelinePropertyClip& clip, float time)
 {
-    for (const auto& curve : clip.curves_)
-    {
-        for (const auto& key : curve.keys_)
-        {
-            if (SameRowTime(key.time_, time))
-                return true;
-        }
-    }
-    return false;
+    return HasPropertyKeyRowAt(clip, time);
 }
 
 /// Slope of the straight segment between two keys of the same curve, used by the tangent modes and

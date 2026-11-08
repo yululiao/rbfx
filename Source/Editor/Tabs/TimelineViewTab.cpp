@@ -300,6 +300,19 @@ struct EaseHandles
     float outWidth_{};
 };
 
+// Ease ramps, the clip weight and the overlap blend are all read through
+// TimelineClip::EvaluateWeight, and only the tracks that mix their content by that weight call
+// it: animation blends its asset, audio fades its gain, property clips blend over each other.
+// Activation is an on/off range, control a playable range and signal an instant, so their clips
+// carry the fields but never consult them, and the editor offers no handle, grab, slider or blend
+// mark for something that cannot take effect.
+bool TrackBlendsByWeight(const TimelineTrack* track)
+{
+    return dynamic_cast<const TimelineAnimationTrack*>(track) != nullptr
+        || dynamic_cast<const TimelineAudioTrack*>(track) != nullptr
+        || dynamic_cast<const TimelinePropertyTrack*>(track) != nullptr;
+}
+
 EaseHandles ComputeEaseHandles(const ImVec2& blockMin, const ImVec2& blockMax, const TimelineClip& clip)
 {
     EaseHandles handles;
@@ -383,6 +396,38 @@ TimelineClip* GetClip(TimelineTrack* track, unsigned index)
             clip = &clips[index];
     });
     return clip;
+}
+
+// Whether the clip shares its time range with another clip of the same track.
+bool HasClipOverlap(const TimelineTrack* track, unsigned index)
+{
+    const TimelineClip* clip = GetClipAt(track, index);
+    if (!clip)
+        return false;
+
+    const unsigned numClips = GetNumClips(track);
+    for (unsigned other = 0; other < numClips; ++other)
+    {
+        if (other == index)
+            continue;
+        const TimelineClip* next = GetClipAt(track, other);
+        if (next && next->start_ < clip->GetEndTime() && clip->start_ < next->GetEndTime())
+            return true;
+    }
+    return false;
+}
+
+// Whether the ease ramps of one clip can reach the evaluation. The track has to blend by weight,
+// and a property clip needs an overlapping neighbour: while it stands alone its value is picked
+// verbatim, so no ramp can change the result. Animation and audio fade their own content, which is
+// why they keep the ramps without an overlap.
+bool ClipShowsEase(const TimelineTrack* track, unsigned index)
+{
+    if (!TrackBlendsByWeight(track))
+        return false;
+    if (dynamic_cast<const TimelinePropertyTrack*>(track))
+        return HasClipOverlap(track, index);
+    return true;
 }
 
 ea::string GetClipLabel(TimelineTrack* track, unsigned index)
@@ -2665,7 +2710,7 @@ void TimelineViewTab::RenderToolbar()
     ui::TextDisabled("%s", FormatDisplayTime(cursorTime_).c_str());
     ui::SameLine();
     ui::TextDisabled("wheel on ruler: zoom | middle-drag: pan | Ctrl: no snap | drag lane: loop | "
-        "Home/End , . [ ] : cursor | Shift+F: fit selection");
+        "Home/End , . [ ] : cursor | S: add key | Shift+F: fit selection");
 
     if (!bindingError_.empty() && ui::GetTime() - bindingErrorTime_ < 4.0)
     {
@@ -3614,6 +3659,7 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, const TrackRef& t
     else
     {
         const unsigned numClips = GetNumClips(track);
+        const bool blendsByWeight = TrackBlendsByWeight(track);
         for (unsigned ci = 0; ci < numClips; ++ci)
         {
             const TimelineClip* clip = GetClip(track, ci);
@@ -3658,7 +3704,7 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, const TrackRef& t
 
             // Ease ramps of the clip: the top left and bottom right corners are dragged to change
             // easeIn_ / easeOut_, the line inside shows the easing function actually applied.
-            if (blockWidth > 24.0f)
+            if (ClipShowsEase(track, ci) && blockWidth > 24.0f)
                 DrawEaseHandle(drawList, ComputeEaseHandles(blockMin, blockMax, *clip), *clip);
 
             // Speed badge, only when the clip does not play its content at 1:1
@@ -3672,7 +3718,9 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, const TrackRef& t
 
             // Blend: two clips of the same track that overlap are mixed by their weights while both
             // are active. The mixed range is marked so the overlap is not mistaken for a mistake.
-            for (unsigned other = ci + 1; other < numClips; ++other)
+            // Tracks that do not blend leave the range unmarked: there the overlap simply means that
+            // both clips are active at once.
+            for (unsigned other = ci + 1; other < numClips && blendsByWeight; ++other)
             {
                 const TimelineClip* next = GetClip(track, other);
                 if (!next)
@@ -3910,7 +3958,7 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, const TrackRef
 
             // Ease ramps are grabbed at the corners of the block. They take priority over the body
             // edits but not over the modifiers that toggle selection or duplicate the clip.
-            if (!io.KeyCtrl && !io.KeyAlt && blockMax.x - blockMin.x > 24.0f)
+            if (ClipShowsEase(track, ci) && !io.KeyCtrl && !io.KeyAlt && blockMax.x - blockMin.x > 24.0f)
             {
                 const EaseHandles handles = ComputeEaseHandles(blockMin, blockMax, *clip);
                 if (ImRect(handles.inMin_, handles.inMax_).Contains(io.MousePos))
@@ -4568,6 +4616,30 @@ void TimelineViewTab::ProcessEditKeys()
         SetCursorTime(StepToNextKey(cursorTime_ + secPerFrame, true));
     else if (ui::IsKeyPressed(ImGuiKey_F) && io.KeyShift)
         FitViewToSelection();
+    else if (ui::IsKeyPressed(ImGuiKey_S))
+        AddKeyRowAtCursor();
+}
+
+// The keyboard counterpart of the two "Add Key" context menu entries. The play head is already
+// where the key belongs - it is moved with the navigation keys and stepped onto features with the
+// brackets -, so no snapping is applied here.
+void TimelineViewTab::AddKeyRowAtCursor()
+{
+    auto* propertyTrack = AsPropertyTrack(TrackAt(timeline_, selectedTrack_));
+    if (!propertyTrack || selectedClip_ >= propertyTrack->clips_.size())
+        return;
+
+    auto& clip = propertyTrack->clips_[selectedClip_];
+    if (clip.curves_.empty())
+        return;
+
+    const float localTime = Clamp(cursorTime_ - clip.start_, 0.0f, clip.duration_);
+    if (HasPropertyKeyRowAt(clip, localTime))
+        return;
+
+    BeginModify();
+    AddPropertyKeyAt(clip, localTime);
+    selectedKeyTime_ = localTime;
 }
 
 // The clips a batch edit applies to: the multi-selection when there is one, otherwise the single
@@ -4737,21 +4809,38 @@ void TimelineViewTab::RenderTrackAreaContextMenu()
         else if (IsPropertyTrack(track))
         {
             const unsigned targetClip = FindClipAtTime(track, popupTime_);
-            const ea::string label = Format("Add Keyframe at {}", FormatTime(popupTime_).c_str());
             auto* propertyTrack = AsPropertyTrack(track);
             const bool canAddKey = targetClip != M_MAX_UNSIGNED && propertyTrack
                 && targetClip < propertyTrack->clips_.size()
                 && !propertyTrack->clips_[targetClip].curves_.empty();
-            ui::BeginDisabled(!canAddKey);
-            if (ui::Selectable(label.c_str()) && canAddKey)
+            // The snapped time is what the label offers and what the insert writes, and a row that
+            // already sits there would make the entry a silent no-op, so it is greyed out instead.
+            TimelinePropertyClip* propertyClip = canAddKey ? &propertyTrack->clips_[targetClip] : nullptr;
+            const float keyTime = propertyClip ? SnapTime(popupTime_, snapEnabled) : 0.0f;
+            const float localKeyTime = propertyClip
+                ? Clamp(keyTime - propertyClip->start_, 0.0f, propertyClip->duration_) : 0.0f;
+            const bool rowExists = propertyClip && HasPropertyKeyRowAt(*propertyClip, localKeyTime);
+            // One name for one edit: the clip menu offers the same entry as "Add Key", so the two
+            // never read like two different operations.
+            const ea::string label = Format("Add Key at {}", FormatTime(keyTime).c_str());
+            ui::BeginDisabled(!canAddKey || rowExists);
+            if (ui::Selectable(label.c_str()) && canAddKey && !rowExists)
             {
                 BeginModify();
-                auto& propertyClip = propertyTrack->clips_[targetClip];
-                const float localTime = Clamp(SnapTime(popupTime_, snapEnabled) - propertyClip.start_, 0.0f, propertyClip.duration_);
-                AddPropertyKeyAt(propertyClip, localTime);
+                AddPropertyKeyAt(*propertyClip, localKeyTime);
                 SelectTrack(popupTrack_);
                 selectedClip_ = targetClip;
-                selectedKeyTime_ = localTime;
+                selectedKeyTime_ = localKeyTime;
+            }
+            // Disabled entries still have to explain themselves, otherwise the greyed out line reads
+            // like a bug rather than as a rule of the data model.
+            if (rowExists && ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ui::SetTooltip("A key row already exists at this time.");
+            else if (!canAddKey && ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ui::SetTooltip(targetClip == M_MAX_UNSIGNED
+                    ? "The time does not fall inside a clip, and every key belongs to one."
+                    : "The clip at this time has no curves yet.");
             }
             ui::EndDisabled();
             ui::Separator();
@@ -4804,6 +4893,36 @@ void TimelineViewTab::RenderClipContextMenu()
             selectedKeyTime_ = -1.0f;
             curveEditor_.Open();
         }
+        // Authoring a key is the highest frequency edit there is on a property track, and a long
+        // block covers the empty row area which alone offered the insert entry. The block menu
+        // therefore repeats it for the time of the click.
+        if (hasCurves)
+        {
+            auto& propertyClip = propertyTrack->clips_[popupClip_];
+            const float keyTime = SnapTime(popupTime_, !ui::GetIO().KeyCtrl);
+            const float localTime = Clamp(keyTime - propertyClip.start_, 0.0f, propertyClip.duration_);
+            const bool rowExists = HasPropertyKeyRowAt(propertyClip, localTime);
+            ui::BeginDisabled(rowExists);
+            const ea::string keyLabel = Format("Add Key at {}", FormatTime(keyTime).c_str());
+            if (ui::Selectable(keyLabel.c_str()) && !rowExists)
+            {
+                BeginModify();
+                SelectTrack(popupTrack_);
+                selectedClip_ = popupClip_;
+                AddPropertyKeyAt(propertyClip, localTime);
+                selectedKeyTime_ = localTime;
+            }
+            if (ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                if (rowExists)
+                    ui::SetTooltip("A key row already exists at this time.\nDrag it in the curve editor or the Dope Sheet to move it.");
+                else
+                    ui::SetTooltip("Insert a key row into every curve of the clip at the clicked time.\n"
+                        "The value is copied from the nearest key, so it does not move the object.\n"
+                        "Hold Ctrl to place it without snapping.");
+            }
+            ui::EndDisabled();
+        }
         // The sheet is not bound to a selection, it lists the whole hierarchy, so opening it from a
         // clip only brings the window up.
         if (ui::Selectable("Open Dope Sheet"))
@@ -4855,8 +4974,13 @@ void TimelineViewTab::RenderClipContextMenu()
 
             ui::Separator();
             // Easing: the shape of the two ramps is picked here, their lengths stay editable as
-            // sliders and as the corners of the block.
-            if (ui::BeginMenu("Easing"))
+            // sliders and as the corners of the block. Tracks which do not blend by weight have no
+            // use for the ramps at all, and a property clip only eases the cross-fade with an
+            // overlapping neighbour. The weight is different: zero also stops the clip from
+            // contributing anything, so it stays on every blending track.
+            const bool blendsByWeight = TrackBlendsByWeight(track);
+            const bool showsEase = ClipShowsEase(track, popupClip_);
+            if (showsEase && ui::BeginMenu("Easing"))
             {
                 for (unsigned i = 0; TIMELINE_EASE_NAMES[i]; ++i)
                 {
@@ -4878,6 +5002,7 @@ void TimelineViewTab::RenderClipContextMenu()
                 }
                 ui::EndMenu();
             }
+            if (showsEase)
             {
                 // Each ramp may take the length the other one has not used yet.
                 ui::SetNextItemWidth(170.0f);
@@ -4898,6 +5023,9 @@ void TimelineViewTab::RenderClipContextMenu()
                     BeginModify();
                     clip->easeOut_ = easeOut;
                 }
+            }
+            if (blendsByWeight)
+            {
                 ui::SetNextItemWidth(170.0f);
                 float weight = clip->weight_;
                 if (ui::SliderFloat("Weight", &weight, 0.0f, 1.0f, "%.2f") && weight != clip->weight_)
@@ -5264,9 +5392,9 @@ void TimelineViewTab::RenderClipProperties(TimelineTrack* track)
         }
     }
 
-    // Second row: how the block consumes its source and how strongly it blends with the
-    // neighbours of the same track. clipIn_ is what an Alt trimmed left edge moves, timeScale_ is
-    // what the Speed dialog writes, weight_ is the blend factor of an overlap.
+    // Second row: how the block consumes its source and, where the track mixes its clips by
+    // weight, how strongly it blends with the neighbours. clipIn_ is what an Alt trimmed left edge
+    // moves, timeScale_ is what the Speed dialog writes, weight_ is the blend factor of an overlap.
     {
         ui::SetNextItemWidth(110.0f);
         float clipIn = clip->clipIn_;
@@ -5283,17 +5411,21 @@ void TimelineViewTab::RenderClipProperties(TimelineTrack* track)
             BeginModify();
             clip->timeScale_ = Clamp(speed, 0.05f, 20.0f);
         }
-        ui::SameLine();
-        ui::SetNextItemWidth(120.0f);
-        float weight = clip->weight_;
-        if (ui::SliderFloat("Weight", &weight, 0.0f, 1.0f, "%.2f"))
+        if (TrackBlendsByWeight(track))
         {
-            BeginModify();
-            clip->weight_ = Clamp(weight, 0.0f, 1.0f);
+            ui::SameLine();
+            ui::SetNextItemWidth(120.0f);
+            float weight = clip->weight_;
+            if (ui::SliderFloat("Weight", &weight, 0.0f, 1.0f, "%.2f"))
+            {
+                BeginModify();
+                clip->weight_ = Clamp(weight, 0.0f, 1.0f);
+            }
         }
     }
     // Third row: the two ramps of the block. Both are measured in seconds from their own end, so
     // each of them may only take the length the other one has left over.
+    if (ClipShowsEase(track, selectedClip_))
     {
         ui::SetNextItemWidth(110.0f);
         float easeIn = clip->easeIn_;
@@ -5772,7 +5904,7 @@ void TimelineViewTab::RenderPropertyKeyAndCurves(TimelineTrack* track)
     if (selectedKeyTime_ >= 0.0f)
     {
         ui::Separator();
-        ui::TextDisabled("Keyframe");
+        ui::TextDisabled("Key");
         ui::SameLine();
         ui::SetNextItemWidth(110.0f);
         float keyTime = selectedKeyTime_;

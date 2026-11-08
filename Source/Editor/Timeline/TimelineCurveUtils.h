@@ -50,7 +50,12 @@ void AddPropertyCurve(TimelinePropertyClip& clip, const ea::string& name, Varian
 
 /// Sorted distinct key times of every curve of the clip.
 ea::vector<float> GetPropertyKeyTimes(const TimelinePropertyClip& clip);
+/// Whether any curve of the clip already holds a key at the given clip-local time. Two times
+/// within a tenth of a millisecond of each other are the same row, because that is the distance at
+/// which a curve with two keys at once stops being predictable.
+bool HasPropertyKeyRowAt(const TimelinePropertyClip& clip, float localTime);
 /// Insert a key at the given clip-local time in every curve, copying the value of the nearest key.
+/// Does nothing while a key row already sits at that time.
 void AddPropertyKeyAt(TimelinePropertyClip& clip, float localTime);
 /// Move the whole key row from one clip-local time to another, keeping the curves sorted.
 void MovePropertyKeysAt(TimelinePropertyClip& clip, float fromLocal, float toLocal);

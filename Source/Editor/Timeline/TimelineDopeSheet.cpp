@@ -168,7 +168,7 @@ void TimelineDopeSheet::RenderToolbar(TimelineEditorHost& host, TimelineResource
         static_cast<unsigned>(selectedMarkers_.size()), static_cast<unsigned>(selectedClips_.size()));
 
     ui::SameLine();
-    ui::TextDisabled("click ruler: select key row | drag: marquee | delete: remove | Ctrl+C/V: keys");
+    ui::TextDisabled("click ruler: select key row | drag: marquee | dbl-click/right-click: keys | delete: remove | Ctrl+C/V: keys");
 
     if (fitPending_)
     {
@@ -369,8 +369,77 @@ void TimelineDopeSheet::RenderGrid(TimelineEditorHost& host, TimelineResource& r
     }
     drawList->PopClipRect();
 
+    // Right-click over the grid, not over the caption column: the menu works on the row it was
+    // opened on, so the row and the snapped frame are remembered for as long as it is open.
+    if (canvasHovered_ && io.MousePos.x > canvasMin_.x + labelWidth_ && ui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        const int row = static_cast<int>(Floor(YToRow(io.MousePos.y)));
+        if (row >= 0 && row < static_cast<int>(rows_.size()))
+        {
+            popupRow_ = row;
+            popupTime_ = SnapToFrame(XToTime(io.MousePos.x));
+            ui::OpenPopup("DopeContextMenu");
+        }
+    }
+    RenderContextMenu(host);
+
     ProcessSelectionDrag(host, resource);
     ui::EndChild();
+}
+
+void TimelineDopeSheet::RenderContextMenu(TimelineEditorHost& host)
+{
+    if (!ui::BeginPopup("DopeContextMenu"))
+        return;
+
+    const bool validRow = popupRow_ >= 0 && popupRow_ < static_cast<int>(rows_.size());
+    const DopeRow* row = validRow ? &rows_[static_cast<unsigned>(popupRow_)] : nullptr;
+    const bool isCurveRow = row && row->kind_ == RowKind::Curve;
+
+    if (isCurveRow)
+    {
+        // A key row spans every curve of the clip, so the two entries talk about the frame and not
+        // about the single curve the caption of the row names.
+        TimelinePropertyClip* clip = nullptr;
+        auto* propertyTrack = dynamic_cast<TimelinePropertyTrack*>(row->track_);
+        if (propertyTrack && row->clip_ < propertyTrack->clips_.size())
+            clip = &propertyTrack->clips_[row->clip_];
+        const float local = clip ? Clamp(popupTime_ - clip->start_, 0.0f, clip->duration_) : 0.0f;
+        const bool rowExists = clip && HasPropertyKeyRowAt(*clip, local);
+
+        // The two verbs match the curve window: "Add Key" and "Delete Key" for one and the same
+        // thing seen from two windows.
+        ui::BeginDisabled(!rowExists);
+        if (ui::Selectable(Format("Delete Key at {}", FormatTime(popupTime_).c_str()).c_str()) && rowExists)
+        {
+            host.BeginModify();
+            RemovePropertyKeysAt(*clip, local);
+        }
+        if (!rowExists && ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ui::SetTooltip("No key row at this frame.");
+        ui::EndDisabled();
+
+        ui::Separator();
+
+        ui::BeginDisabled(rowExists);
+        if (ui::Selectable(Format("Add Key at {}", FormatTime(popupTime_).c_str()).c_str()) && !rowExists)
+            AddKeyRowAt(host, popupRow_, popupTime_);
+        ui::EndDisabled();
+        if (ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            if (rowExists)
+                ui::SetTooltip("A key row already exists at this frame.");
+            else
+                ui::SetTooltip("Add a key to every curve of the clip at this frame.\n"
+                    "The value is copied from the nearest key.");
+        }
+    }
+    else
+    {
+        ui::TextDisabled("Keys only exist on curve rows.");
+    }
+
+    ui::EndPopup();
 }
 
 void TimelineDopeSheet::DrawRows(TimelineEditorHost& host)
@@ -635,6 +704,12 @@ void TimelineDopeSheet::ProcessSelectionDrag(TimelineEditorHost& host, TimelineR
 
     if (!io.KeyCtrl)
         ClearSelection();
+
+    // A double-click on the empty grid of a curve row adds a key row at that frame, the same gesture
+    // the curve window uses. Anything else falls through to the marquee.
+    if (ui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && AddKeyRowAt(host, dragStartRow_, dragGrabTime_))
+        return;
+
     dragMode_ = DragMode::SelectRect;
     selectRectMin_ = io.MousePos;
     selectRectMax_ = io.MousePos;
@@ -1105,6 +1180,31 @@ bool TimelineDopeSheet::HitKey(const ImVec2& pos, DopeKey& result) const
         }
     }
     return false;
+}
+
+bool TimelineDopeSheet::AddKeyRowAt(TimelineEditorHost& host, int row, float globalTime)
+{
+    if (row < 0 || row >= static_cast<int>(rows_.size()))
+        return false;
+    const DopeRow& dopeRow = rows_[static_cast<unsigned>(row)];
+    if (dopeRow.kind_ != RowKind::Curve)
+        return false;
+    auto* propertyTrack = dynamic_cast<TimelinePropertyTrack*>(dopeRow.track_);
+    if (!propertyTrack || dopeRow.clip_ >= propertyTrack->clips_.size())
+        return false;
+    TimelinePropertyClip& clip = propertyTrack->clips_[dopeRow.clip_];
+    const float local = Clamp(SnapToFrame(globalTime) - clip.start_, 0.0f, clip.duration_);
+    // Two key rows at one frame would leave the segment between them undefined, and the frame the
+    // caller offered is only usable when it is not already taken.
+    if (HasPropertyKeyRowAt(clip, local))
+        return false;
+
+    host.BeginModify();
+    AddPropertyKeyAt(clip, local);
+    // The new row becomes the selection, so the next drag or delete already works on it.
+    ClearSelection();
+    selectedKeys_.push_back(DopeKey{ dopeRow.ref_, dopeRow.clip_, local });
+    return true;
 }
 
 bool TimelineDopeSheet::HitMarker(const ImVec2& pos, DopeMarker& result) const
