@@ -35,6 +35,8 @@ void TimelineResource::SerializeInBlock(Archive& archive)
         [](Archive& archive, const char* name, auto& value) //
         { SerializeEnum(archive, name, value, TIMELINE_DURATION_MODE_NAMES); });
     SerializeOptionalValue(archive, "duration", fixedDuration_, 5.0f);
+    // Optional so timelines authored before the frame rate existed load with the editor default.
+    SerializeOptionalValue(archive, "frameRate", frameRate_, 60.0f);
     SerializeVectorAsObjects(archive, "tracks", tracks_, "track");
 }
 

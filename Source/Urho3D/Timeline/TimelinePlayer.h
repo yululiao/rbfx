@@ -87,7 +87,20 @@ public:
     Object* GetTrackBinding(const TimelineTrack* track) const;
     /// Resolve and cache binding of the track. The track is bound to the override object,
     /// to the object referenced by the binding path, or to the player node.
-    Object* ResolveTrackBinding(const TimelineTrack& track, TimelineTrackRuntime& runtime);
+    /// «bindingRoot» is the bound object of the enclosing group track, or null at the top level:
+    /// the path is resolved relative to it, and an empty path inherits the root itself.
+    Object* ResolveTrackBinding(const TimelineTrack& track, TimelineTrackRuntime& runtime, Object* bindingRoot = nullptr);
+    /// @}
+
+    /// @name Track silencing
+    /// @{
+    /// Silence or unsilence a track for this player only. Used by the editor's solo buttons, so
+    /// unlike the track's own muted flag it is never stored in the shared timeline resource.
+    void SetTrackSilenced(const TimelineTrack* track, bool silenced);
+    /// Return whether the track is silenced by SetTrackSilenced.
+    bool IsTrackSilenced(const TimelineTrack* track) const;
+    /// Drop all silences, called when the displayed timeline changes.
+    void ClearTrackSilences() { trackSilenced_.clear(); }
     /// @}
 
     /// @name Runtime API for tracks
@@ -138,8 +151,8 @@ private:
     void StopPlayback(bool finished);
     /// Notify tracks about pause state change.
     void NotifyTracksPaused(bool paused);
-    /// Resolve binding path relative to the player node.
-    Object* ResolveBindingPath(const ea::string& path) const;
+    /// Resolve binding path relative to the given base node, or to the player node when it is null.
+    Object* ResolveBindingPath(const ea::string& path, Node* base) const;
     /// Resolve a resource attribute of a component, e.g. "Material/0" on a StaticModel.
     Object* ResolveResourceAttribute(Component* component, const ea::string& tail) const;
     /// Send an event with the common timeline parameters. Sender is the player node.
@@ -156,6 +169,8 @@ private:
 
     /// Explicit track bindings. Not serialized.
     ea::unordered_map<const TimelineTrack*, WeakPtr<Object>> trackBindings_;
+    /// Per track silence overrides of the editor preview. Not serialized.
+    ea::unordered_map<const TimelineTrack*, bool> trackSilenced_;
 
     /// Signals fired during current playback which should be retroactively delivered.
     ea::vector<TimelineFiredSignal> retroactiveSignals_;

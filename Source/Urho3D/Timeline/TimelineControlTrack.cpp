@@ -120,7 +120,7 @@ void TimelineControlTrack::StartClip(
     Node* host = nullptr;
     bool spawned = false;
 
-    Node* boundNode = GetBoundNode(player.ResolveTrackBinding(*this, context.runtime_));
+    Node* boundNode = GetBoundNode(player.ResolveTrackBinding(*this, context.runtime_, context.bindingRoot_));
 
     if (clip.prefab_)
     {

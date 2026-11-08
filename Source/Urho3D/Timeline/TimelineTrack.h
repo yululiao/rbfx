@@ -22,6 +22,9 @@ struct TimelineTrackRuntime
 
     /// Object bound to the track: resolved from runtime binding override or binding path.
     WeakPtr<Object> boundObject_;
+    /// Binding root the cached boundObject_ was resolved against. Tracks nested in a group are
+    /// resolved relative to the group's bound object, so the cache is only valid for that root.
+    Object* bindingRoot_{};
     /// Whether the binding should be resolved again.
     bool bindingDirty_{true};
 };
@@ -45,6 +48,9 @@ struct TimelineTrackContext
     bool playing_{};
     /// Whether this is the first evaluation after playback start.
     bool firstEvaluation_{};
+    /// Bound object of the enclosing group track, null at the top level. Child tracks resolve their
+    /// binding paths relative to it, which is how a group can drive a whole subtree of a hierarchy.
+    Object* bindingRoot_{};
 };
 
 /// Base class of timeline tracks. Track is a piece of timeline content which drives bound objects.
@@ -91,11 +97,9 @@ public:
     virtual void Evaluate(TimelineTrackContext& context) {}
 
 protected:
-    /// Return whether the track should be considered inactive: muted or has zero effective weight.
-    bool IsInactive(const TimelineTrackContext& context) const
-    {
-        return muted_ || weight_ <= M_EPSILON || context.weightScale_ <= M_EPSILON;
-    }
+    /// Return whether the track should be considered inactive: silenced by the player (editor solo),
+    /// muted, or of zero effective weight. Defined in the source file because it queries the player.
+    bool IsInactive(const TimelineTrackContext& context) const;
 
     /// Node binding path.
     ea::string bindingPath_;

@@ -63,8 +63,8 @@ public:
     };
 
 private:
-    /// Resolve the bound sound source.
-    SoundSource* ResolveSource(TimelinePlayer& player, Runtime& runtime) const;
+    /// Resolve the bound sound source. «bindingRoot» is the bound object of the enclosing group.
+    SoundSource* ResolveSource(TimelinePlayer& player, Runtime& runtime, Object* bindingRoot) const;
     /// Stop playback owned by the track.
     static void StopPlayback(Runtime& runtime);
     /// Start playback of the clip.

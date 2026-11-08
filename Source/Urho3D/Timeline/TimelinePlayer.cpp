@@ -217,9 +217,11 @@ Object* TimelinePlayer::GetTrackBinding(const TimelineTrack* track) const
     return iter != trackBindings_.end() ? iter->second.Get() : nullptr;
 }
 
-Object* TimelinePlayer::ResolveTrackBinding(const TimelineTrack& track, TimelineTrackRuntime& runtime)
+Object* TimelinePlayer::ResolveTrackBinding(const TimelineTrack& track, TimelineTrackRuntime& runtime, Object* bindingRoot)
 {
-    if (!runtime.bindingDirty_ && runtime.boundObject_)
+    // The cached object is only valid for the binding root it was resolved against: reparenting a
+    // track into another group must re-resolve it even when nothing else is dirty.
+    if (!runtime.bindingDirty_ && runtime.boundObject_ && runtime.bindingRoot_ == bindingRoot)
         return runtime.boundObject_;
 
     Object* resolved = nullptr;
@@ -230,16 +232,51 @@ Object* TimelinePlayer::ResolveTrackBinding(const TimelineTrack& track, Timeline
         resolved = iter->second.Get();
 
     if (!resolved)
-        resolved = ResolveBindingPath(track.GetBindingPath());
+    {
+        // An empty path inherits the group's object as it is, so a group bound to a component does
+        // not silently widen to its node. Otherwise the path is resolved under the group's object.
+        if (!track.GetBindingPath().empty())
+            resolved = ResolveBindingPath(track.GetBindingPath(), GetBoundNode(bindingRoot));
+        else if (bindingRoot)
+            resolved = bindingRoot;
+        else
+            resolved = ResolveBindingPath(ea::string{}, nullptr);
+    }
 
     runtime.boundObject_ = resolved;
+    runtime.bindingRoot_ = bindingRoot;
     runtime.bindingDirty_ = false;
     return resolved;
 }
 
-Object* TimelinePlayer::ResolveBindingPath(const ea::string& path) const
+void TimelinePlayer::SetTrackSilenced(const TimelineTrack* track, bool silenced)
 {
-    Node* node = GetNode();
+    if (!track)
+        return;
+
+    if (silenced)
+        trackSilenced_[track] = true;
+    else
+        trackSilenced_.erase(track);
+
+    // Silencing changes evaluation, so the tracks must be re-evaluated at the current time.
+    if (playing_)
+        Evaluate();
+}
+
+bool TimelinePlayer::IsTrackSilenced(const TimelineTrack* track) const
+{
+    // While nothing is silenced the common case must not pay for a lookup on every track of every
+    // frame, and no game code ever fills the map: only the editor preview does.
+    if (trackSilenced_.empty() || !track)
+        return false;
+    const auto iter = trackSilenced_.find(track);
+    return iter != trackSilenced_.end() && iter->second;
+}
+
+Object* TimelinePlayer::ResolveBindingPath(const ea::string& path, Node* base) const
+{
+    Node* node = base ? base : GetNode();
     if (!node)
         return nullptr;
 

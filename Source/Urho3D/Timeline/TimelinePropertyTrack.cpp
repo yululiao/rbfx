@@ -123,6 +123,64 @@ bool EvaluatePropertyCurve(const TimelinePropertyCurve& curve, float time, Varia
     return true;
 }
 
+/// Whether values of this type can be averaged. Anything else switches as a whole.
+bool IsInterpolatableValueType(VariantType type)
+{
+    switch (type)
+    {
+    case VAR_FLOAT:
+    case VAR_DOUBLE:
+    case VAR_VECTOR2:
+    case VAR_VECTOR3:
+    case VAR_VECTOR4:
+    case VAR_QUATERNION:
+    case VAR_COLOR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// Combine the samples overlapping clips contributed for one curve into a single value, weighted by
+/// the clip weights. Types without an averaging rule switch to the strongest contributor, which is
+/// what a step key does for them anyway.
+Variant BlendCurveValues(const ea::vector<ea::pair<Variant, float>>& samples)
+{
+    if (samples.size() == 1)
+        return samples.front().first;
+
+    Variant result;
+    float sum = 0.0f;
+    bool interpolatable = true;
+    for (const auto& sample : samples)
+    {
+        if (!IsInterpolatableValueType(sample.first.GetType()))
+        {
+            interpolatable = false;
+            break;
+        }
+        // Accumulate so that the running average always holds the normalized weighted mean.
+        sum += sample.second;
+        result = sum > M_EPSILON ? LerpVariantValues(result, sample.first, sample.second / sum) : sample.first;
+    }
+
+    if (interpolatable)
+        return result;
+
+    // Non-numeric values: the strongest contributor wins, ties go to the earlier clip.
+    Variant strongest;
+    float strongestWeight = -1.0f;
+    for (const auto& sample : samples)
+    {
+        if (sample.second > strongestWeight)
+        {
+            strongestWeight = sample.second;
+            strongest = sample.first;
+        }
+    }
+    return strongest;
+}
+
 /// Find attribute of the target by exact name. Return null if not found.
 const AttributeInfo* FindAttribute(const Serializable& target, const ea::string& name)
 {
@@ -154,13 +212,23 @@ bool HasPrefix(const ea::string& str, const char* prefix)
 /// the prefixed channel name ("ShaderParameters/Name", "Textures/Name"); anything else is not
 /// a material curve, because Material exposes no reflected attributes. The curve name is kept
 /// as the state key so component-qualified channels stay distinct during revert.
+void ApplyMaterialValue(Material& material, const ea::string& curveName, const ea::string& channelName,
+    const Variant& value, TimelinePropertyTrack::Runtime& runtime);
+
 void ApplyMaterialCurve(Material& material, const ea::string& curveName, const ea::string& channelName,
     const TimelinePropertyCurve& curve, float sourceTime, TimelinePropertyTrack::Runtime& runtime)
 {
     Variant value;
     if (!EvaluatePropertyCurve(curve, sourceTime, value))
         return;
+    ApplyMaterialValue(material, curveName, channelName, value, runtime);
+}
 
+/// Write an already sampled value to a material channel. Split out of ApplyMaterialCurve so that
+/// overlapping clips can blend their values before the write.
+void ApplyMaterialValue(Material& material, const ea::string& curveName, const ea::string& channelName,
+    const Variant& value, TimelinePropertyTrack::Runtime& runtime)
+{
     // Skip redundant writes to avoid reuploading shader constants every frame.
     const auto lastIter = runtime.lastValues_.find(curveName);
     if (lastIter != runtime.lastValues_.end() && lastIter->second == value)
@@ -493,7 +561,7 @@ void TimelinePropertyTrack::Evaluate(TimelineTrackContext& context)
         return;
 
     const bool bindingDirty = context.runtime_.bindingDirty_;
-    Object* bound = context.player_.ResolveTrackBinding(*this, context.runtime_);
+    Object* bound = context.player_.ResolveTrackBinding(*this, context.runtime_, context.bindingRoot_);
     if (bindingDirty)
         runtime.attributeCache_.clear();
 
@@ -501,27 +569,63 @@ void TimelinePropertyTrack::Evaluate(TimelineTrackContext& context)
     if (!target)
         return;
 
-    // The last active clip wins.
-    const TimelinePropertyClip* activeClip = nullptr;
-    float localTime = 0.0f;
+    // Collect what every active clip contributes to every curve name. Overlapping clips blend by
+    // their eased clip weight, exactly like the animation and audio tracks already do; when only
+    // one clip is active the single contribution makes the result identical to picking that clip.
+    struct Contribution
+    {
+        /// Curve providing the addressing metadata: name, value type and target attribute.
+        const TimelinePropertyCurve* curve_{};
+        /// Value sampled at the current time, paired with the weight of the clip it came from.
+        ea::vector<ea::pair<Variant, float>> samples_;
+    };
+    ea::vector<Contribution> contributions;
+
     for (const TimelinePropertyClip& clip : clips_)
     {
-        if (!clip.curves_.empty() && clip.EvaluateLocalTime(context.time_, localTime))
-            activeClip = &clip;
+        float localTime = 0.0f;
+        if (clip.curves_.empty() || !clip.EvaluateLocalTime(context.time_, localTime))
+            continue;
+        const float clipWeight = clip.EvaluateWeight(context.time_);
+        if (clipWeight <= M_EPSILON)
+            continue;
+
+        const float sourceTime = clip.GetSourceTime(localTime);
+        for (const TimelinePropertyCurve& curve : clip.curves_)
+        {
+            Variant value;
+            if (!EvaluatePropertyCurve(curve, sourceTime, value))
+                continue;
+
+            unsigned index = contributions.size();
+            for (unsigned i = 0; i < contributions.size(); ++i)
+            {
+                if (contributions[i].curve_->name_ == curve.name_)
+                {
+                    index = i;
+                    break;
+                }
+            }
+            if (index == contributions.size())
+            {
+                Contribution contribution;
+                contribution.curve_ = &curve;
+                contributions.push_back(ea::move(contribution));
+            }
+            contributions[index].samples_.emplace_back(value, clipWeight);
+        }
     }
 
-    if (!activeClip)
-        return;
-
-    const float sourceTime = activeClip->GetSourceTime(localTime);
-
-    for (const TimelinePropertyCurve& curve : activeClip->curves_)
+    for (const Contribution& contribution : contributions)
     {
+        const TimelinePropertyCurve& curve = *contribution.curve_;
+        const Variant value = BlendCurveValues(contribution.samples_);
+
         // Materials are driven through their shader parameters and texture units, addressed by
         // prefixed curve names, because they expose no reflected attributes.
         if (auto* material = dynamic_cast<Material*>(target))
         {
-            ApplyMaterialCurve(*material, curve.name_, curve.name_, curve, sourceTime, runtime);
+            ApplyMaterialValue(*material, curve.name_, curve.name_, value, runtime);
             continue;
         }
 
@@ -529,7 +633,7 @@ void TimelinePropertyTrack::Evaluate(TimelineTrackContext& context)
         // "ComponentType/AttrName[/Index]/ShaderParameters/Param".
         if (ea::string materialCurveName; Material* material = ResolveComponentMaterial(*target, curve.name_, materialCurveName))
         {
-            ApplyMaterialCurve(*material, curve.name_, materialCurveName, curve, sourceTime, runtime);
+            ApplyMaterialValue(*material, curve.name_, materialCurveName, value, runtime);
             continue;
         }
 
@@ -563,10 +667,6 @@ void TimelinePropertyTrack::Evaluate(TimelineTrackContext& context)
         }
 
         if (!attributeInfo)
-            continue;
-
-        Variant value;
-        if (!EvaluatePropertyCurve(curve, sourceTime, value))
             continue;
 
         // Skip redundant writes to avoid propagating dirty state every frame.

@@ -34,6 +34,14 @@ public:
     float GetDuration() const;
     /// Return duration of the timeline content, i.e. the end time of the last clip of any track.
     float GetContentDuration() const;
+    /// Set frame rate used to display time in frames and to snap to whole frames. Same default as
+    /// the editor used before the value existed, so files written earlier keep their look.
+    void SetFrameRate(float frameRate) { frameRate_ = Max(frameRate, 1.0f); }
+    float GetFrameRate() const { return frameRate_; }
+    /// Return whole frame number of the given time.
+    unsigned TimeToFrames(float time) const { return static_cast<unsigned>(time * frameRate_ + 0.5f); }
+    /// Return time of the given whole frame number.
+    float FramesToTime(unsigned frames) const { return static_cast<float>(frames) / frameRate_; }
     /// @}
 
     /// @name Tracks
@@ -66,6 +74,8 @@ private:
     TimelineDurationMode durationMode_{TimelineDurationMode::Content};
     /// Timeline duration for Fixed duration mode.
     float fixedDuration_{5.0f};
+    /// Frame rate used by frame based display and snapping.
+    float frameRate_{60.0f};
     /// Tracks.
     ea::vector<SharedPtr<TimelineTrack>> tracks_;
 };

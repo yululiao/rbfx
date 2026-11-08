@@ -97,13 +97,14 @@ void TimelineAudioTrack::OnTimelinePaused(TimelinePlayer& player, TimelineTrackR
         StopPlayback(static_cast<Runtime&>(runtime));
 }
 
-SoundSource* TimelineAudioTrack::ResolveSource(TimelinePlayer& player, Runtime& runtime) const
+SoundSource* TimelineAudioTrack::ResolveSource(
+    TimelinePlayer& player, Runtime& runtime, Object* bindingRoot) const
 {
     SoundSource* source = runtime.source_;
-    if (source && !runtime.bindingDirty_)
+    if (source && !runtime.bindingDirty_ && runtime.bindingRoot_ == bindingRoot)
         return source;
 
-    Object* bound = player.ResolveTrackBinding(*this, runtime);
+    Object* bound = player.ResolveTrackBinding(*this, runtime, bindingRoot);
     if (auto* asSource = dynamic_cast<SoundSource*>(bound))
         source = asSource;
     else if (auto* asNode = dynamic_cast<Node*>(bound))
@@ -176,7 +177,7 @@ void TimelineAudioTrack::Evaluate(TimelineTrackContext& context)
 {
     Runtime& runtime = static_cast<Runtime&>(context.runtime_);
 
-    SoundSource* source = IsInactive(context) ? nullptr : ResolveSource(context.player_, runtime);
+    SoundSource* source = IsInactive(context) ? nullptr : ResolveSource(context.player_, runtime, context.bindingRoot_);
 
     // Determine which clip should own the sound source. Overlapping clips of a single track are not supported,
     // the last active clip wins.

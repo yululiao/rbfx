@@ -22,11 +22,16 @@
 
 #include "TimelineViewTab.h"
 
+#include "../Timeline/TimelineCurveUtils.h"
+#include "../Timeline/TimelineEditorCommon.h"
+#include "../Timeline/TimelineTrackRows.h"
+
 #include "../Project/ModifyResourceAction.h"
 #include "../Project/Project.h"
 #include "../Project/ProjectRequest.h"
 
 #include <Urho3D/Core/StringUtils.h>
+#include <Urho3D/Audio/Sound.h>
 #include <Urho3D/Graphics/Animation.h>
 #include <Urho3D/Graphics/AnimationController.h>
 #include <Urho3D/Graphics/Material.h>
@@ -35,6 +40,7 @@
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/RenderAPI/RenderDevice.h>
+#include <Urho3D/Scene/PrefabResource.h>
 #include <Urho3D/Scene/Serializable.h>
 #include <Urho3D/Scene/Component.h>
 #include <Urho3D/Scene/Node.h>
@@ -53,6 +59,7 @@
 #include <Urho3D/Timeline/TimelineSignalTrack.h>
 #include <Urho3D/Timeline/TimelineTrack.h>
 
+#include <EASTL/algorithm.h>
 #include <EASTL/set.h>
 
 #include <nfd.h>
@@ -72,7 +79,7 @@ namespace
 // frame by ApplyLayoutScale() so that track rows, the ruler, keys and paddings keep a constant
 // physical size on displays with different DPI. Row height was also raised versus the old 26/20
 // because a single track felt too cramped.
-constexpr float BaseHeaderWidth = 200.0f;
+constexpr float BaseHeaderWidth = 260.0f;
 constexpr float BaseRulerHeight = 28.0f;
 constexpr float BaseFrameRulerHeight = 20.0f;
 constexpr float BaseRowHeight = 40.0f;
@@ -83,6 +90,12 @@ constexpr float BaseEdgeGrabWidth = 8.0f;
 constexpr float BaseKeySize = 8.0f;
 constexpr float BaseBindingSlotWidth = 76.0f;
 constexpr float BaseZoomBarHeight = 9.0f;
+constexpr float BaseRowIndent = 14.0f;
+constexpr float BaseMrbButtonSize = 18.0f;
+constexpr float BaseEaseHandleMin = 12.0f;
+constexpr float BaseLoopLaneHeight = 9.0f;
+constexpr float BaseMarkersStripHeight = 34.0f;
+constexpr float BaseMarkersPanelHeight = 120.0f;
 
 // DPI-scaled copies actually used by layout, rendering and hit-testing. They stay consistent
 // across all of them because every row/hit rect is derived from these same values.
@@ -97,13 +110,21 @@ float EdgeGrabWidth = BaseEdgeGrabWidth;
 float KeySize = BaseKeySize;
 float BindingSlotWidth = BaseBindingSlotWidth;
 float ZoomBarHeight = BaseZoomBarHeight;
+float RowIndent = BaseRowIndent;
+float MrbButtonSize = BaseMrbButtonSize;
+float EaseHandleMin = BaseEaseHandleMin;
+float LoopLaneHeight = BaseLoopLaneHeight;
+float MarkersStripHeight = BaseMarkersStripHeight;
+float MarkersPanelHeight = BaseMarkersPanelHeight;
 
 // Time/zoom constants: not physical sizes, so they are not DPI-scaled.
 constexpr float MinClipDuration = 0.05f;
-constexpr float SnapStep = 0.05f;
 constexpr float MinPixelsPerSecond = 5.0f;
 constexpr float MaxPixelsPerSecond = 2000.0f;
 constexpr float MinRulerStepPx = 90.0f;
+// Distance in screen pixels within which a clip edge or a keyframe grabs a drag. A physical
+// tolerance keeps snapping the same at every zoom level, unlike a fixed time window.
+constexpr float SnapTolerancePx = 8.0f;
 
 // Multiply the geometric layout constants by the display DPI scale so the on-screen physical
 // size stays consistent. Called once per frame before the sequencer is laid out.
@@ -120,6 +141,12 @@ void ApplyLayoutScale(float scale)
     KeySize = BaseKeySize * scale;
     BindingSlotWidth = BaseBindingSlotWidth * scale;
     ZoomBarHeight = BaseZoomBarHeight * scale;
+    RowIndent = BaseRowIndent * scale;
+    MrbButtonSize = BaseMrbButtonSize * scale;
+    EaseHandleMin = BaseEaseHandleMin * scale;
+    LoopLaneHeight = BaseLoopLaneHeight * scale;
+    MarkersStripHeight = BaseMarkersStripHeight * scale;
+    MarkersPanelHeight = BaseMarkersPanelHeight * scale;
 }
 
 // Truncate text with an ellipsis so it fits within maxWidth pixels. Used for clip labels so a
@@ -135,47 +162,12 @@ ea::string FitText(const char* text, float maxWidth)
     return result.empty() ? ellipsis : result + ellipsis;
 }
 
-// Colors
-const ImU32 ColorBackground = IM_COL32(36, 36, 36, 255);
-const ImU32 ColorRulerBg = IM_COL32(61, 56, 55, 255);
-const ImU32 ColorTick = IM_COL32(120, 120, 120, 255);
-const ImU32 ColorTickMinor = IM_COL32(80, 80, 80, 96);
-const ImU32 ColorTickLabel = IM_COL32(187, 187, 187, 255);
-const ImU32 ColorRowEven = IM_COL32(58, 54, 54, 255);
-const ImU32 ColorRowOdd = IM_COL32(65, 61, 61, 255);
-const ImU32 ColorRowSelected = IM_COL32(216, 130, 0, 56);
-const ImU32 ColorRowHover = IM_COL32(255, 255, 255, 12);
-const ImU32 ColorCursor = IM_COL32(42, 42, 255, 200);
-const ImU32 ColorKey = IM_COL32(221, 153, 153, 200);
-const ImU32 ColorKeySelected = IM_COL32(255, 255, 255, 255);
-const ImU32 ColorClipText = IM_COL32(240, 240, 240, 255);
-const ImU32 ColorHeaderText = IM_COL32(210, 210, 210, 255);
-const ImU32 ColorHeaderTypeText = IM_COL32(140, 140, 140, 255);
-const ImU32 ColorDurationShade = IM_COL32(0, 0, 0, 70);
-const ImU32 ColorBindingSlotEmpty = IM_COL32(48, 44, 44, 255);
-const ImU32 ColorBindingSlotHighlight = IM_COL32(90, 160, 90, 90);
-const ImU32 ColorBindingSlotHighlightBorder = IM_COL32(140, 220, 140, 255);
-const ImU32 ColorBindingSlotText = IM_COL32(130, 130, 130, 255);
-
-ImU32 WithAlpha(ImU32 color, unsigned alpha)
+// Number of selectable entries of a null terminated name table like TIMELINE_EASE_NAMES: the
+// trailing nullptr marks the end of the array and must not be offered as an item.
+template <unsigned N>
+constexpr unsigned NameCount(const char* const (&names)[N])
 {
-    return (color & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, alpha);
-}
-
-ea::string FormatTime(float time)
-{
-    if (time >= 100.0f - 0.001f)
-        return Format("{:.0f}s", time);
-    if (time >= 10.0f - 0.001f)
-        return Format("{:.1f}s", time);
-    return Format("{:.2f}s", time);
-}
-
-float SnapTime(float time, bool snapEnabled)
-{
-    if (!snapEnabled)
-        return time;
-    return floorf(time / SnapStep + 0.5f) * SnapStep;
+    return N - 1;
 }
 
 // Track type helpers
@@ -199,59 +191,182 @@ TimelinePropertyTrack* AsPropertyTrack(TimelineTrack* track)
     return dynamic_cast<TimelinePropertyTrack*>(track);
 }
 
+bool IsGroupTrack(const TimelineTrack* track)
+{
+    return dynamic_cast<const TimelineGroupTrack*>(track) != nullptr;
+}
+
 float GetRowHeight(const TimelineTrack* track)
 {
-    return IsMarkerTrack(track) ? ThinRowHeight : RowHeight;
+    // Marker lanes and group organizers carry no clips, so they are given the thinner row.
+    return IsMarkerTrack(track) || IsGroupTrack(track) ? ThinRowHeight : RowHeight;
+}
+
+// Left margin geometry of a row: the indentation of the nesting level, the expand/collapse
+// control of a group track and the inline mute/solo/lock controls. Both the header renderer and
+// the row hit-testing measure the same rects from these values, so clicking a control can never
+// also start a selection or a reorder drag.
+struct RowMargin
+{
+    /// Horizontal offset consumed by the nesting of the row.
+    float indent_{};
+    /// Expand/collapse control of a group row, degenerate for any other track.
+    ImVec2 toggleMin_{};
+    ImVec2 toggleMax_{};
+    /// Mute, solo and edit lock buttons of the row.
+    ImVec2 muteMin_{};
+    ImVec2 muteMax_{};
+    ImVec2 soloMin_{};
+    ImVec2 soloMax_{};
+    ImVec2 lockMin_{};
+    ImVec2 lockMax_{};
+    /// Where the type color bar of the row starts.
+    float colorBarX_{};
+    /// Where the type caption starts.
+    float captionX_{};
+    /// Right edge of the inline controls: the track name is clipped between it and the slot.
+    float controlsEnd_{};
+};
+
+RowMargin ComputeRowMargin(const ImVec2& rowMin, const ImVec2& rowMax, const TrackRow& row)
+{
+    RowMargin margin;
+    margin.indent_ = static_cast<float>(row.depth_) * RowIndent;
+    margin.colorBarX_ = rowMin.x + margin.indent_;
+    margin.captionX_ = margin.colorBarX_ + 10.0f;
+    float x = margin.colorBarX_ + 8.0f;
+
+    if (row.isGroup_)
+    {
+        const float arrowSize = 10.0f;
+        const float centerY = (rowMin.y + rowMax.y) * 0.5f;
+        margin.toggleMin_ = ImVec2(x, centerY - arrowSize * 0.5f);
+        margin.toggleMax_ = ImVec2(x + arrowSize + 6.0f, centerY + arrowSize * 0.5f);
+        x = margin.toggleMax_.x + 2.0f;
+    }
+
+    // The three controls are square, vertically centered in the row and laid out left to right.
+    const float buttonTop = (rowMin.y + rowMax.y) * 0.5f - MrbButtonSize * 0.5f;
+    const float buttonBottom = buttonTop + MrbButtonSize;
+    margin.muteMin_ = ImVec2(x, buttonTop);
+    margin.muteMax_ = ImVec2(x + MrbButtonSize, buttonBottom);
+    x += MrbButtonSize + 2.0f;
+    margin.soloMin_ = ImVec2(x, buttonTop);
+    margin.soloMax_ = ImVec2(x + MrbButtonSize, buttonBottom);
+    x += MrbButtonSize + 2.0f;
+    margin.lockMin_ = ImVec2(x, buttonTop);
+    margin.lockMax_ = ImVec2(x + MrbButtonSize, buttonBottom);
+    x += MrbButtonSize;
+
+    margin.controlsEnd_ = x;
+    margin.captionX_ = x + 6.0f;
+    return margin;
+}
+
+// Look of the inline header controls. The active state is carried by the background tint, the
+// letter stays readable either way.
+const ImU32 ColorMrbBg = IM_COL32(48, 48, 48, 255);
+const ImU32 ColorMrbBorder = IM_COL32(120, 120, 120, 200);
+const ImU32 ColorMrbText = IM_COL32(187, 187, 187, 255);
+const ImU32 ColorMrbMute = IM_COL32(216, 84, 60, 255);
+const ImU32 ColorMrbSolo = IM_COL32(224, 176, 48, 255);
+const ImU32 ColorMrbLock = IM_COL32(96, 168, 216, 255);
+
+// Look of the ease ramps drawn into the corners of a clip block.
+const ImU32 ColorEaseHandle = IM_COL32(255, 255, 255, 48);
+const ImU32 ColorEaseCurve = IM_COL32(255, 255, 255, 190);
+const ImU32 ColorBlendRegion = IM_COL32(0, 0, 0, 70);
+const ImU32 ColorBlendBorder = IM_COL32(255, 255, 255, 120);
+// Loop region of the lane above the ruler: the region reads as a bracket, its edges as handles.
+// An inactive region is drawn in the same colors at a fraction of the alpha, so that it stays
+// visible as the remembered edit without looking like the preview is looping.
+const ImU32 ColorLoopLaneBg = IM_COL32(50, 46, 46, 255);
+const ImU32 ColorLoopRegion = IM_COL32(216, 130, 0, 70);
+const ImU32 ColorLoopBorder = IM_COL32(216, 130, 0, 220);
+const ImU32 ColorLoopHandle = IM_COL32(240, 180, 90, 255);
+
+// Grab geometry of the ease ramps of a clip block. The ease-in ramp is the triangle at the top
+// left corner, the ease-out ramp the one at the bottom right; the horizontal leg of each is the
+// length of the ramp in time. Both are inset by the trim grab width so dragging a ramp never
+// collides with trimming the block. RenderTrackContent draws exactly these triangles and
+// ProcessClipHitTesting hits exactly these rects.
+struct EaseHandles
+{
+    ImVec2 inMin_{};
+    ImVec2 inMax_{};
+    ImVec2 outMin_{};
+    ImVec2 outMax_{};
+    float inWidth_{};
+    float outWidth_{};
+};
+
+EaseHandles ComputeEaseHandles(const ImVec2& blockMin, const ImVec2& blockMax, const TimelineClip& clip)
+{
+    EaseHandles handles;
+    const float width = Max(blockMax.x - blockMin.x, 1.0f);
+    const float yMid = (blockMin.y + blockMax.y) * 0.5f;
+    const float duration = Max(clip.duration_, MinClipDuration);
+    const float grabInset = Min(EdgeGrabWidth, width * 0.25f);
+
+    handles.inWidth_ = Min(Max(width * clip.easeIn_ / duration, EaseHandleMin), width);
+    handles.outWidth_ = Min(Max(width * clip.easeOut_ / duration, EaseHandleMin), width);
+    handles.inMin_ = ImVec2(blockMin.x + grabInset, blockMin.y);
+    handles.inMax_ = ImVec2(blockMin.x + grabInset + handles.inWidth_, yMid);
+    handles.outMin_ = ImVec2(blockMax.x - grabInset - handles.outWidth_, yMid);
+    handles.outMax_ = ImVec2(blockMax.x - grabInset, blockMax.y);
+    return handles;
+}
+
+void DrawEaseHandle(ImDrawList* drawList, const EaseHandles& handles, const TimelineClip& clip)
+{
+    // Ease in: right angle at the top left, the ramp rises over its own length.
+    drawList->AddTriangleFilled(handles.inMin_, ImVec2(handles.inMin_.x + handles.inWidth_, handles.inMin_.y),
+        ImVec2(handles.inMin_.x, handles.inMax_.y), ColorEaseHandle);
+    for (unsigned i = 0; i < 8; ++i)
+    {
+        const float t0 = static_cast<float>(i) / 8.0f;
+        const float t1 = static_cast<float>(i + 1) / 8.0f;
+        drawList->AddLine(
+            ImVec2(handles.inMin_.x + t0 * handles.inWidth_, handles.inMax_.y - EvaluateTimelineEase(clip.ease_, t0) * (handles.inMax_.y - handles.inMin_.y)),
+            ImVec2(handles.inMin_.x + t1 * handles.inWidth_, handles.inMax_.y - EvaluateTimelineEase(clip.ease_, t1) * (handles.inMax_.y - handles.inMin_.y)),
+            ColorEaseCurve, 1.0f);
+    }
+
+    // Ease out: mirrored at the bottom right, the ramp falls over its own length.
+    drawList->AddTriangleFilled(handles.outMax_, ImVec2(handles.outMax_.x - handles.outWidth_, handles.outMax_.y),
+        ImVec2(handles.outMax_.x, handles.outMin_.y), ColorEaseHandle);
+    for (unsigned i = 0; i < 8; ++i)
+    {
+        const float t0 = static_cast<float>(i) / 8.0f;
+        const float t1 = static_cast<float>(i + 1) / 8.0f;
+        drawList->AddLine(
+            ImVec2(handles.outMax_.x - t0 * handles.outWidth_, handles.outMin_.y + EvaluateTimelineEase(clip.ease_, t0) * (handles.outMax_.y - handles.outMin_.y)),
+            ImVec2(handles.outMax_.x - t1 * handles.outWidth_, handles.outMin_.y + EvaluateTimelineEase(clip.ease_, t1) * (handles.outMax_.y - handles.outMin_.y)),
+            ColorEaseCurve, 1.0f);
+    }
+}
+
+
+// Draw one of the inline header controls. The letter is the only affordance, the tint of the
+// button is the state; hovering shows a tooltip explaining what clicking it does.
+void DrawMrbButton(ImDrawList* drawList, const ImVec2& min, const ImVec2& max, const char* label, bool active,
+    ImU32 activeColor)
+{
+    drawList->AddRectFilled(min, max, active ? activeColor : ColorMrbBg, 3.0f);
+    drawList->AddRect(min, max, active ? activeColor : ColorMrbBorder, 3.0f, 0, 1.0f);
+    const ImVec2 size = ui::CalcTextSize(label);
+    drawList->AddText(ImVec2(min.x + (max.x - min.x - size.x) * 0.5f, min.y + (max.y - min.y - size.y) * 0.5f),
+        active ? IM_COL32(24, 24, 24, 255) : ColorMrbText, label);
 }
 
 ImU32 GetTrackColor(const TimelineTrack* track)
 {
-    if (dynamic_cast<const TimelineAnimationTrack*>(track))
-        return IM_COL32(64, 148, 148, 255);
-    if (dynamic_cast<const TimelineControlTrack*>(track))
-        return IM_COL32(190, 115, 40, 255);
-    if (dynamic_cast<const TimelineActivationTrack*>(track))
-        return IM_COL32(96, 150, 96, 255);
-    if (dynamic_cast<const TimelineAudioTrack*>(track))
-        return IM_COL32(72, 110, 158, 255);
-    if (dynamic_cast<const TimelineMarkerTrack*>(track))
-        return IM_COL32(170, 140, 30, 255);
-    if (dynamic_cast<const TimelineSignalTrack*>(track))
-        return IM_COL32(158, 72, 72, 255);
-    if (dynamic_cast<const TimelinePropertyTrack*>(track))
-        return IM_COL32(130, 100, 170, 255);
-    return IM_COL32(110, 110, 110, 255); // Group track
+    // The same tint is used by the sequencer rows, the header color bar and the dope sheet.
+    return GetTrackTypeColor(track->GetTrackTypeName());
 }
 
-// Invokes the callback on the clip vector of the track.
-// Returns whether the track type has clips. Group and Marker tracks have none.
-// All clip track types store their clips in vectors of TimelineClip-derived structs,
-// so type-specific access is centralized here.
-template <class Func>
-bool DispatchClipVector(const TimelineTrack* track, const Func& func)
-{
-    if (const auto* t = dynamic_cast<const TimelineAnimationTrack*>(track)) { func(t->clips_); return true; }
-    if (const auto* t = dynamic_cast<const TimelineControlTrack*>(track)) { func(t->clips_); return true; }
-    if (const auto* t = dynamic_cast<const TimelineActivationTrack*>(track)) { func(t->clips_); return true; }
-    if (const auto* t = dynamic_cast<const TimelineAudioTrack*>(track)) { func(t->clips_); return true; }
-    if (const auto* t = dynamic_cast<const TimelineSignalTrack*>(track)) { func(t->clips_); return true; }
-    if (const auto* t = dynamic_cast<const TimelinePropertyTrack*>(track)) { func(t->clips_); return true; }
-    return false;
-}
-
-template <class Func>
-bool DispatchClipVector(TimelineTrack* track, const Func& func)
-{
-    if (auto* t = dynamic_cast<TimelineAnimationTrack*>(track)) { func(t->clips_); return true; }
-    if (auto* t = dynamic_cast<TimelineControlTrack*>(track)) { func(t->clips_); return true; }
-    if (auto* t = dynamic_cast<TimelineActivationTrack*>(track)) { func(t->clips_); return true; }
-    if (auto* t = dynamic_cast<TimelineAudioTrack*>(track)) { func(t->clips_); return true; }
-    if (auto* t = dynamic_cast<TimelineSignalTrack*>(track)) { func(t->clips_); return true; }
-    if (auto* t = dynamic_cast<TimelinePropertyTrack*>(track)) { func(t->clips_); return true; }
-    return false;
-}
-
-// Generic clip access
+// Generic clip access. The type specific dispatch of the clip vectors lives in TimelineTrackRows,
+// which the dope sheet and the curve editor share with this tab.
 unsigned GetNumClips(const TimelineTrack* track)
 {
     unsigned numClips = 0;
@@ -394,6 +509,222 @@ bool CopyClipToTrackOfType(TimelineTrack* dst, const TimelineTrack* src, unsigne
     return copied;
 }
 
+// Clip editing primitives of the Unity style interactions: split, ripple delete, gap removal and
+// speed. They only change the data of the track, the caller owns the undo action.
+
+// Two key times closer than this are the same key. The cut position comes from the cursor, so an
+// exact comparison would duplicate a key right on the boundary.
+constexpr float KeyTimeEps = 0.0001f;
+
+// Drop the keys of a curve on one side of a split point: keepAfter retains the keys past the cut.
+void EraseKeysOutside(ea::vector<TimelinePropertyKey>& keys, float cut, bool keepAfter)
+{
+    for (auto iter = keys.begin(); iter != keys.end();)
+    {
+        const bool remove = keepAfter ? iter->time_ < cut - KeyTimeEps : iter->time_ > cut + KeyTimeEps;
+        iter = remove ? keys.erase(iter) : ea::next(iter);
+    }
+}
+
+// Append a key holding the value the curve evaluates at the given local time. Used by the split so
+// the two halves end and start on the same value the player was showing before the cut.
+void AddContinuousKey(TimelinePropertyCurve& curve, float localTime)
+{
+    for (const auto& key : curve.keys_)
+    {
+        if (Abs(key.time_ - localTime) < KeyTimeEps)
+            return;
+    }
+    if (curve.keys_.empty())
+        return;
+
+    // Sample first, the curve must still describe the uncut content.
+    TimelinePropertyKey key;
+    key.time_ = localTime;
+    const int count = GetCurveComponentCount(curve.valueType_);
+    float slope = 0.0f;
+    for (int component = 0; component < count; ++component)
+    {
+        const float value = EvaluateCurveComponent(curve, localTime, component);
+        if (component == 0)
+        {
+            // Finite difference of the first component: tangents are scalar in this data model, the
+            // runtime applies them to every component.
+            const float eps = 0.001f;
+            const float before = EvaluateCurveComponent(curve, Max(localTime - eps, 0.0f), 0);
+            const float after = EvaluateCurveComponent(curve, localTime + eps, 0);
+            slope = (after - before) / (2.0f * eps);
+        }
+        if (component < 4)
+            SetCurveComponentValue(key.value_, component, value);
+    }
+
+    // Types without a numeric representation cannot be sampled: inherit the nearest key instead.
+    if (count <= 0)
+    {
+        const TimelinePropertyKey* nearest = nullptr;
+        float bestDist = FLT_MAX;
+        for (const auto& candidate : curve.keys_)
+        {
+            const float dist = Abs(candidate.time_ - localTime);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                nearest = &candidate;
+            }
+        }
+        if (nearest)
+            key.value_ = nearest->value_;
+    }
+
+    // Follow the segment the cut falls into: the boundary key keeps the interpolation and easing of
+    // the key that precedes it, so the split does not restyle the curve.
+    const TimelinePropertyKey* previous = nullptr;
+    for (const auto& candidate : curve.keys_)
+    {
+        if (candidate.time_ <= localTime)
+            previous = &candidate;
+        else
+            break;
+    }
+    if (previous)
+    {
+        key.interpolation_ = previous->interpolation_;
+        key.ease_ = previous->ease_;
+        if (key.interpolation_ == TimelineInterpolation::Bezier)
+        {
+            // A cubic segment is reproduced exactly by the slope it has at the cut.
+            key.inTangent_ = key.outTangent_ = slope;
+        }
+    }
+    else if (!curve.keys_.empty())
+    {
+        key.interpolation_ = curve.keys_.front().interpolation_;
+        key.ease_ = curve.keys_.front().ease_;
+    }
+
+    unsigned insertAt = 0;
+    while (insertAt < curve.keys_.size() && curve.keys_[insertAt].time_ < localTime)
+        ++insertAt;
+    curve.keys_.insert(curve.keys_.begin() + static_cast<long>(insertAt), key);
+}
+
+// Split the clip into two clips of the same type at the given timeline time. Returns the index of
+// the inserted second half, or M_MAX_UNSIGNED when the cut does not fall inside the clip.
+unsigned SplitClipAt(TimelineTrack* track, unsigned index, float splitTime)
+{
+    unsigned result = M_MAX_UNSIGNED;
+    DispatchClipVector(track, [&](auto& clips)
+    {
+        if (index >= clips.size())
+            return;
+        using ClipType = typename std::remove_reference_t<decltype(clips)>::value_type;
+        ClipType& head = clips[index];
+        const float cut = splitTime - head.start_;
+        if (cut <= MinClipDuration || head.duration_ - cut <= MinClipDuration)
+            return;
+
+        ClipType tail = head;
+        tail.start_ = splitTime;
+        tail.duration_ = head.duration_ - cut;
+        // The content of the tail begins where the cut consumes the source at its own rate.
+        tail.clipIn_ = head.clipIn_ + cut * head.timeScale_;
+        // Ease ramps are measured from the ends of the clip they belong to, so whatever part of a
+        // ramp falls into the other half is dropped from this one.
+        tail.easeIn_ = Max(head.easeIn_ - cut, 0.0f);
+        head.easeOut_ = Max(head.easeOut_ - (head.duration_ - cut), 0.0f);
+        head.duration_ = cut;
+
+        if constexpr (std::is_same_v<ClipType, TimelinePropertyClip>)
+        {
+            for (auto& curve : head.curves_)
+            {
+                EraseKeysOutside(curve.keys_, cut, false);
+                AddContinuousKey(curve, cut);
+            }
+            for (auto& curve : tail.curves_)
+            {
+                EraseKeysOutside(curve.keys_, cut, true);
+                for (auto& key : curve.keys_)
+                    key.time_ -= cut;
+                AddContinuousKey(curve, 0.0f);
+            }
+        }
+
+        clips.insert(clips.begin() + static_cast<long>(index) + 1, tail);
+        result = index + 1;
+    });
+    return result;
+}
+
+// Delete the clip and pull every clip that started after it left by its duration, closing the gap
+// the deletion would otherwise leave.
+void RippleDeleteClipAt(TimelineTrack* track, unsigned index)
+{
+    DispatchClipVector(track, [index](auto& clips)
+    {
+        if (index >= clips.size())
+            return;
+        const float start = clips[index].start_;
+        const float duration = clips[index].duration_;
+        clips.erase(clips.begin() + static_cast<long>(index));
+        for (auto& clip : clips)
+        {
+            if (clip.start_ > start)
+                clip.start_ = Max(clip.start_ - duration, 0.0f);
+        }
+    });
+}
+
+// Move every clip left until it touches the clip that ends last before it. The stored order of the
+// clips is kept, only their start times change: the runtime may weight overlapping clips of the
+// same track by their position in the list.
+void EliminateGaps(TimelineTrack* track)
+{
+    DispatchClipVector(track, [](auto& clips)
+    {
+        ea::vector<unsigned> order(clips.size());
+        for (unsigned i = 0; i < clips.size(); ++i)
+            order[i] = i;
+        ea::sort(order.begin(), order.end(), [&clips](unsigned a, unsigned b)
+        {
+            return clips[a].start_ < clips[b].start_;
+        });
+
+        float cursor = 0.0f;
+        for (unsigned i : order)
+        {
+            auto& clip = clips[i];
+            if (clip.start_ > cursor)
+                clip.start_ = cursor;
+            cursor = Max(cursor, clip.GetEndTime());
+        }
+    });
+}
+
+// Change the playback speed of a clip. Either the block keeps its length in the timeline and the
+// content plays faster, or the source span it consumes is preserved and the block shrinks.
+void SetClipSpeed(TimelineTrack* track, unsigned index, float value, bool keepDuration)
+{
+    const float speed = Clamp(value, 0.05f, 20.0f);
+    DispatchClipVector(track, [index, speed, keepDuration](auto& clips)
+    {
+        if (index >= clips.size())
+            return;
+        auto& clip = clips[index];
+        if (keepDuration)
+        {
+            clip.timeScale_ = speed;
+        }
+        else
+        {
+            const float sourceSpan = clip.duration_ * clip.timeScale_;
+            clip.timeScale_ = speed;
+            clip.duration_ = Max(sourceSpan / speed, MinClipDuration);
+        }
+    });
+}
+
 SharedPtr<TimelineTrack> CreateTrackByTypeName(Context* context, const ea::string& typeName)
 {
     // Return the owning SharedPtr: a raw pointer would dangle as soon as the
@@ -415,81 +746,6 @@ SharedPtr<TimelineTrack> CreateTrackByTypeName(Context* context, const ea::strin
     if (typeName == "Group")
         return MakeShared<TimelineGroupTrack>(context);
     return nullptr;
-}
-
-// Property key helpers. Keys of all curves of a clip are expected to be aligned in time,
-// so they are displayed and edited as a single set of time points.
-ea::vector<float> GetPropertyKeyTimes(const TimelinePropertyClip& clip)
-{
-    ea::set<float> times;
-    for (const auto& curve : clip.curves_)
-    {
-        for (const auto& key : curve.keys_)
-            times.insert(key.time_);
-    }
-    return ea::vector<float>(times.begin(), times.end());
-}
-
-void AddPropertyKeyAt(TimelinePropertyClip& clip, float localTime)
-{
-    for (auto& curve : clip.curves_)
-    {
-        // Copy the value from the nearest key, or use the default value of the curve
-        const TimelinePropertyKey* nearest = nullptr;
-        float bestDist = FLT_MAX;
-        for (const auto& key : curve.keys_)
-        {
-            const float dist = Abs(key.time_ - localTime);
-            if (dist < bestDist)
-            {
-                bestDist = dist;
-                nearest = &key;
-            }
-        }
-
-        TimelinePropertyKey newKey;
-        newKey.time_ = localTime;
-        newKey.value_ = nearest ? nearest->value_ : Variant(curve.valueType_);
-
-        unsigned insertAt = curve.keys_.size();
-        for (unsigned i = 0; i < curve.keys_.size(); ++i)
-        {
-            if (curve.keys_[i].time_ > localTime)
-            {
-                insertAt = i;
-                break;
-            }
-        }
-        curve.keys_.insert(curve.keys_.begin() + static_cast<long>(insertAt), newKey);
-    }
-}
-
-void MovePropertyKeysAt(TimelinePropertyClip& clip, float fromLocal, float toLocal)
-{
-    for (auto& curve : clip.curves_)
-    {
-        bool moved = false;
-        for (auto& key : curve.keys_)
-        {
-            if (key.time_ == fromLocal)
-            {
-                key.time_ = toLocal;
-                moved = true;
-            }
-        }
-        if (moved)
-            ea::stable_sort(curve.keys_.begin(), curve.keys_.end(),
-                [](const TimelinePropertyKey& lhs, const TimelinePropertyKey& rhs) { return lhs.time_ < rhs.time_; });
-    }
-}
-
-void RemovePropertyKeysAt(TimelinePropertyClip& clip, float localTime)
-{
-    for (auto& curve : clip.curves_)
-    {
-        curve.keys_.erase(ea::remove_if(curve.keys_.begin(), curve.keys_.end(),
-            [localTime](const TimelinePropertyKey& key) { return key.time_ == localTime; }), curve.keys_.end());
-    }
 }
 
 // Returns the index of the clip that is active at the given time, or M_MAX_UNSIGNED
@@ -624,200 +880,6 @@ ea::optional<ea::string> ComputeBindingPath(Scene* scene, Object* target, const 
     return path;
 }
 
-// Variant types supported by property curves
-const char* curveTypeNames[] = {"Float", "Double", "Int", "Bool", "Vector2", "Vector3", "Vector4", "Color", "Quaternion"};
-const VariantType curveTypes[] = {VAR_FLOAT, VAR_DOUBLE, VAR_INT, VAR_BOOL,
-    VAR_VECTOR2, VAR_VECTOR3, VAR_VECTOR4, VAR_COLOR, VAR_QUATERNION};
-
-// Curve canvas helpers. Multi-component values are shown one component at a time, matching
-// how the runtime interpolates them (scalar tangents apply per component in practice).
-
-// Number of displayable components of a curve value type. Zero means the type has no
-// numeric representation and cannot be drawn as a curve.
-int GetCurveComponentCount(VariantType type)
-{
-    switch (type)
-    {
-    case VAR_FLOAT:
-    case VAR_DOUBLE:
-    case VAR_INT:
-    case VAR_BOOL:
-        return 1;
-    case VAR_VECTOR2:
-    case VAR_INTVECTOR2:
-        return 2;
-    case VAR_VECTOR3:
-    case VAR_INTVECTOR3:
-        return 3;
-    case VAR_VECTOR4:
-    case VAR_COLOR:
-    case VAR_QUATERNION:
-        return 4;
-    default:
-        return 0;
-    }
-}
-
-float GetCurveComponentValue(const Variant& value, int component)
-{
-    switch (value.GetType())
-    {
-    case VAR_FLOAT: return value.GetFloat();
-    case VAR_DOUBLE: return static_cast<float>(value.GetDouble());
-    case VAR_INT: return static_cast<float>(value.GetInt());
-    case VAR_BOOL: return value.GetBool() ? 1.0f : 0.0f;
-    case VAR_VECTOR2: return value.GetVector2().Data()[component];
-    case VAR_VECTOR3: return value.GetVector3().Data()[component];
-    case VAR_VECTOR4: return value.GetVector4().Data()[component];
-    case VAR_INTVECTOR2: return static_cast<float>(value.GetIntVector2().Data()[component]);
-    case VAR_INTVECTOR3: return static_cast<float>(value.GetIntVector3().Data()[component]);
-    case VAR_COLOR: return value.GetColor().Data()[component];
-    case VAR_QUATERNION: return value.GetQuaternion().Data()[component];
-    default: return 0.0f;
-    }
-}
-
-void SetCurveComponentValue(Variant& value, int component, float newValue)
-{
-    switch (value.GetType())
-    {
-    case VAR_FLOAT: value = newValue; break;
-    case VAR_DOUBLE: value = static_cast<double>(newValue); break;
-    case VAR_INT: value = RoundToInt(newValue); break;
-    case VAR_BOOL: value = newValue >= 0.5f; break;
-    case VAR_VECTOR2:
-    {
-        Vector2 v = value.GetVector2();
-        v.MutableData()[component] = newValue;
-        value = v;
-        break;
-    }
-    case VAR_VECTOR3:
-    {
-        Vector3 v = value.GetVector3();
-        v.MutableData()[component] = newValue;
-        value = v;
-        break;
-    }
-    case VAR_VECTOR4:
-    {
-        Vector4 v = value.GetVector4();
-        switch (component)
-        {
-        case 0: v.x_ = newValue; break;
-        case 1: v.y_ = newValue; break;
-        case 2: v.z_ = newValue; break;
-        default: v.w_ = newValue; break;
-        }
-        value = v;
-        break;
-    }
-    case VAR_INTVECTOR2:
-    {
-        IntVector2 v = value.GetIntVector2();
-        v.MutableData()[component] = RoundToInt(newValue);
-        value = v;
-        break;
-    }
-    case VAR_INTVECTOR3:
-    {
-        IntVector3 v = value.GetIntVector3();
-        v.MutableData()[component] = RoundToInt(newValue);
-        value = v;
-        break;
-    }
-    case VAR_COLOR:
-    {
-        Color v = value.GetColor();
-        switch (component)
-        {
-        case 0: v.r_ = newValue; break;
-        case 1: v.g_ = newValue; break;
-        case 2: v.b_ = newValue; break;
-        default: v.a_ = newValue; break;
-        }
-        value = v;
-        break;
-    }
-    case VAR_QUATERNION:
-    {
-        Quaternion v = value.GetQuaternion();
-        switch (component)
-        {
-        case 0: v.w_ = newValue; break;
-        case 1: v.x_ = newValue; break;
-        case 2: v.y_ = newValue; break;
-        default: v.z_ = newValue; break;
-        }
-        value = v;
-        break;
-    }
-    default: break;
-    }
-}
-
-/// Sample a cubic Hermite segment, mirroring the runtime evaluation of TimelinePropertyTrack.
-float HermiteScalarCurve(float p0, float p1, float m0, float m1, float t, float span)
-{
-    const float t2 = t * t;
-    const float t3 = t2 * t;
-    return (2.0f * t3 - 3.0f * t2 + 1.0f) * p0
-        + (t3 - 2.0f * t2 + t) * span * m0
-        + (-2.0f * t3 + 3.0f * t2) * p1
-        + (t3 - t2) * span * m1;
-}
-
-/// Sample one component of the curve at the given clip-local time, following the same
-/// interpolation rules as the runtime so the canvas matches playback.
-float EvaluateCurveComponent(const TimelinePropertyCurve& curve, float time, int component)
-{
-    const auto& keys = curve.keys_;
-    if (keys.empty())
-        return 0.0f;
-    if (time <= keys.front().time_)
-        return GetCurveComponentValue(keys.front().value_, component);
-
-    for (unsigned i = 1; i < keys.size(); ++i)
-    {
-        const TimelinePropertyKey& from = keys[i - 1];
-        if (time < keys[i].time_)
-        {
-            const TimelinePropertyKey& to = keys[i];
-            const float span = to.time_ - from.time_;
-            const float t = (time - from.time_) / span;
-            const float p0 = GetCurveComponentValue(from.value_, component);
-            const float p1 = GetCurveComponentValue(to.value_, component);
-            switch (from.interpolation_)
-            {
-            case TimelineInterpolation::Constant:
-                return p0;
-            case TimelineInterpolation::Linear:
-                return Lerp(p0, p1, t);
-            case TimelineInterpolation::Bezier:
-                return HermiteScalarCurve(p0, p1, from.outTangent_, to.inTangent_, t, span);
-            case TimelineInterpolation::Ease:
-            default:
-                return Lerp(p0, p1, EvaluateTimelineEase(from.ease_, t));
-            }
-        }
-    }
-    return GetCurveComponentValue(keys.back().value_, component);
-}
-
-// Per-curve colors of the canvas, cycled when a clip has more curves than palette entries.
-ImU32 GetCurveCanvasColor(unsigned index)
-{
-    static const ImU32 palette[] = {
-        IM_COL32(255, 200, 60, 255),
-        IM_COL32(80, 200, 255, 255),
-        IM_COL32(140, 255, 120, 255),
-        IM_COL32(255, 120, 200, 255),
-        IM_COL32(200, 140, 255, 255),
-        IM_COL32(255, 140, 80, 255),
-    };
-    return palette[index % (sizeof(palette) / sizeof(palette[0]))];
-}
-
 // Find attribute of the target by exact name, used by preview and recording.
 const AttributeInfo* FindAttributeByName(const Serializable& target, const ea::string& name)
 {
@@ -835,13 +897,39 @@ const AttributeInfo* FindAttributeByName(const Serializable& target, const ea::s
 
 // Resolve the object bound to the track using the player's binding rules (override, then path).
 // A throwaway runtime is enough: the result is used immediately.
-Object* ResolveTrackTarget(TimelinePlayer* player, TimelineTrack* track)
+Object* ResolveTrackTarget(TimelinePlayer* player, TimelineTrack* track, Object* bindingRoot = nullptr)
 {
     if (!player || !track)
         return nullptr;
 
     ea::unique_ptr<TimelineTrackRuntime> runtime = track->CreateRuntime();
-    return player->ResolveTrackBinding(*track, *runtime);
+    return player->ResolveTrackBinding(*track, *runtime, bindingRoot);
+}
+
+// Resolve the binding root a track inherits from the groups enclosing it: the object the nearest
+// group ancestor is bound to. Top level tracks inherit nothing and resolve against the player node.
+Object* ResolveInheritedBindingRoot(TimelinePlayer* player, const TimelineResource* timeline, const TrackRef& ref)
+{
+    if (!player || !timeline)
+        return nullptr;
+
+    Object* root = nullptr;
+    for (unsigned depth = 1; depth < ref.Depth(); ++depth)
+    {
+        TimelineTrack* ancestor = TrackAt(timeline, ref.Prefix(depth));
+        if (!ancestor)
+            break;
+        root = ResolveTrackTarget(player, ancestor, root);
+    }
+    return root;
+}
+
+// Resolve the object a track of the displayed timeline is bound to, including the binding it
+// inherits from its enclosing groups. Used by the preview, the recorder and the header tooltips.
+Object* ResolveBoundTarget(TimelinePlayer* player, const TimelineResource* timeline, const TrackRef& ref,
+    TimelineTrack* track)
+{
+    return ResolveTrackTarget(player, track, ResolveInheritedBindingRoot(player, timeline, ref));
 }
 
 // Property clip that is active at the given timeline time. The last active clip wins,
@@ -984,13 +1072,17 @@ bool HasRecordableProperty(TimelinePlayer* player, TimelineResource* timeline, f
     if (!player || !timeline)
         return false;
 
-    for (unsigned ti = 0; ti < timeline->GetNumTracks(); ++ti)
+    // Nested tracks are addressed by their path, so the hierarchy is walked depth-first here and
+    // everywhere else that has to see every track of the timeline.
+    ea::vector<TrackRow> rows;
+    FlattenTracks(timeline, rows);
+    for (const TrackRow& row : rows)
     {
-        TimelinePropertyTrack* track = AsPropertyTrack(timeline->GetTrack(ti));
+        TimelinePropertyTrack* track = AsPropertyTrack(row.track_);
         if (!track || track->IsMuted())
             continue;
 
-        auto* target = dynamic_cast<Serializable*>(ResolveTrackTarget(player, track));
+        auto* target = dynamic_cast<Serializable*>(ResolveBoundTarget(player, timeline, row.ref_, track));
         if (!target)
             continue;
 
@@ -1055,13 +1147,15 @@ void CommitAnimationControllers(TimelinePlayer* player, TimelineResource* timeli
     if (!player || !timeline)
         return;
 
-    for (unsigned ti = 0; ti < timeline->GetNumTracks(); ++ti)
+    ea::vector<TrackRow> rows;
+    FlattenTracks(timeline, rows);
+    for (const TrackRow& row : rows)
     {
-        auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(timeline->GetTrack(ti));
+        auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(row.track_);
         if (!animationTrack || animationTrack->IsMuted())
             continue;
 
-        Object* bound = ResolveTrackTarget(player, animationTrack);
+        Object* bound = ResolveBoundTarget(player, timeline, row.ref_, animationTrack);
         AnimationController* controller = dynamic_cast<AnimationController*>(bound);
         if (!controller)
         {
@@ -1157,6 +1251,22 @@ void TimelineViewTab::ResetViewState()
     pixelsPerSecond_ = 100.0f;
     cursorTime_ = 0.0f;
     cursorScrubbed_ = false;
+    keepCursorVisible_ = false;
+    // The frame ruler and the frame based snapping follow the frame rate stored in the resource.
+    fps_ = timeline_ ? timeline_->GetFrameRate() : 60.0f;
+    collapsedTracks_.clear();
+    rows_.clear();
+    // Solo and edit lock are session only view state of the displayed timeline.
+    ClearOverlayState();
+    // The loop region and the pinned rows are view state of the displayed timeline: the region is
+    // described in seconds and must not survive into a resource that may be shorter, while a pinned
+    // row of one project means nothing in another. The pin set itself is dropped by
+    // ClearOverlayState() above.
+    loopPreview_ = false;
+    loopStart_ = 0.0f;
+    loopEnd_ = 0.0f;
+    loopDragMode_ = LoopDragMode::None;
+    playbackSpeed_ = 1.0f;
     ClearSelection();
     dragKind_ = DragKind::None;
     pendingAction_ = nullptr;
@@ -1510,6 +1620,13 @@ void TimelineViewTab::RenderPlaybackControls()
         }
     }
 
+    // Solo is a preview only override, so the toolbar states which tracks it currently applies to.
+    if (!soloedTracks_.empty())
+    {
+        ui::SameLine();
+        ui::TextColored(ImVec4(1.0f, 0.8f, 0.25f, 1.0f), "Solo: %u", soloedTracks_.size());
+    }
+
     // Playback and recording are driven through the player of the bound node: explain why the
     // buttons would stay inert.
     if (!player)
@@ -1541,6 +1658,12 @@ void TimelineViewTab::UpdatePreviewAndRecording()
 {
     TimelinePlayer* player = GetContextPlayer();
 
+    // The solo overrides are pushed onto the player of the live session every frame: the table is
+    // small, and reapplying it makes a player that entered the scene later, or a solo toggled
+    // before the first preview started, take effect without any extra entry point.
+    if (player && previewState_ != PreviewState::Off)
+        ApplySoloOverrides();
+
     // The player or the displayed timeline can change while the preview is running.
     if (previewState_ != PreviewState::Off)
     {
@@ -1556,8 +1679,19 @@ void TimelineViewTab::UpdatePreviewAndRecording()
         if (TimelinePlayer* activePlayer = previewPlayer_.Get())
         {
             const double now = ui::GetTime();
-            const float timeStep = Clamp(static_cast<float>(now - previewLastTime_), 0.0f, 0.1f);
-            cursorTime_ = Min(cursorTime_ + timeStep, timeline_->GetDuration());
+            // The tab owns the preview clock, so the toolbar multiplier is applied to it here. The
+            // player is told about the speed as well, so that a scene update, whenever one runs,
+            // advances at the same rate instead of fighting the editor's clock.
+            const float timeStep = Clamp(static_cast<float>(now - previewLastTime_), 0.0f, 0.1f) * playbackSpeed_;
+            activePlayer->SetPlaybackSpeed(playbackSpeed_);
+            cursorTime_ = cursorTime_ + timeStep;
+            if (loopPreview_ && loopEnd_ > loopStart_ && cursorTime_ >= loopEnd_)
+            {
+                // Wrap inside the loop region. The region is editor side only: the wrap mode
+                // attribute of the player, which a runtime timeline would read from the scene, is
+                // left alone.
+                cursorTime_ = loopStart_ + Mod(cursorTime_ - loopStart_, loopEnd_ - loopStart_);
+            }
             if (cursorTime_ >= timeline_->GetDuration())
             {
                 cursorTime_ = timeline_->GetDuration();
@@ -1592,6 +1726,9 @@ void TimelineViewTab::StopPreview()
         // Stop finalizes the playback session: tracks release their instances and restore
         // the attributes they drove, so no preview state is left in the scene.
         player->Stop();
+        // Closing the preview session also drops the solo overrides: the next session starts from
+        // the mute flags stored in the resource, and the solo set of the tab is reapplied if any.
+        player->ClearTrackSilences();
     }
 
     previewPlayer_.Reset();
@@ -1615,14 +1752,16 @@ void TimelineViewTab::LogRecordingSetup(TimelinePlayer* player)
 
     unsigned numPropertyTracks = 0;
     recordingTargets_.clear();
-    for (unsigned ti = 0; ti < timeline_->GetNumTracks(); ++ti)
+    ea::vector<TrackRow> rows;
+    FlattenTracks(timeline_, rows);
+    for (unsigned ti = 0; ti < rows.size(); ++ti)
     {
-        TimelinePropertyTrack* track = AsPropertyTrack(timeline_->GetTrack(ti));
+        TimelinePropertyTrack* track = AsPropertyTrack(rows[ti].track_);
         if (!track)
             continue;
         ++numPropertyTracks;
 
-        Object* bound = ResolveTrackTarget(player, track);
+        Object* bound = ResolveBoundTarget(player, timeline_, rows[ti].ref_, track);
         auto* target = dynamic_cast<Serializable*>(bound);
         if (!bound)
         {
@@ -1844,13 +1983,17 @@ void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
         }
     };
 
-    for (unsigned ti = 0; ti < timeline_->GetNumTracks(); ++ti)
+    // Every property track of the hierarchy is sampled, including the ones nested in a group: their
+    // binding is resolved relative to the object their group is bound to.
+    ea::vector<TrackRow> rows;
+    FlattenTracks(timeline_, rows);
+    for (unsigned ti = 0; ti < rows.size(); ++ti)
     {
-        TimelinePropertyTrack* track = AsPropertyTrack(timeline_->GetTrack(ti));
+        TimelinePropertyTrack* track = AsPropertyTrack(rows[ti].track_);
         if (!track || track->IsMuted())
             continue;
 
-        auto* target = dynamic_cast<Serializable*>(ResolveTrackTarget(player, track));
+        auto* target = dynamic_cast<Serializable*>(ResolveBoundTarget(player, timeline_, rows[ti].ref_, track));
         if (!target)
             continue;
 
@@ -1934,58 +2077,182 @@ void TimelineViewTab::BeginModify()
 
 void TimelineViewTab::ClearSelection()
 {
-    selectedTrack_ = M_MAX_UNSIGNED;
+    selectedTrack_ = TrackRef{};
     selectedClip_ = M_MAX_UNSIGNED;
     selectedKey_ = M_MAX_UNSIGNED;
     selectedKeyTime_ = -1.0f;
-    multiSelectedClips_.clear();
+    multiSelectedClips_.Clear();
 }
 
-void TimelineViewTab::SelectTrack(unsigned trackIndex)
+void TimelineViewTab::SelectTrack(const TrackRef& trackRef)
 {
-    selectedTrack_ = trackIndex;
+    selectedTrack_ = trackRef;
     selectedClip_ = M_MAX_UNSIGNED;
     selectedKey_ = M_MAX_UNSIGNED;
     selectedKeyTime_ = -1.0f;
-    multiSelectedClips_.clear();
+    multiSelectedClips_.Clear();
 }
 
-TimelineClip* TimelineViewTab::FindSelectedClip(unsigned trackIndex, unsigned clipIndex)
+TimelineClip* TimelineViewTab::FindSelectedClip(const TrackRef& trackRef, unsigned clipIndex)
 {
-    if (!timeline_ || trackIndex >= timeline_->GetTracks().size())
-        return nullptr;
-    return GetClip(timeline_->GetTracks()[trackIndex].Get(), clipIndex);
+    TimelineTrack* track = TrackAt(timeline_, trackRef);
+    return track ? GetClip(track, clipIndex) : nullptr;
 }
 
 TimelinePropertyClip* TimelineViewTab::FindSelectedPropertyClip()
 {
-    if (!timeline_ || selectedTrack_ >= timeline_->GetNumTracks())
-        return nullptr;
-    auto* track = AsPropertyTrack(timeline_->GetTrack(selectedTrack_));
+    auto* track = AsPropertyTrack(TrackAt(timeline_, selectedTrack_));
     if (!track || selectedClip_ >= track->clips_.size())
         return nullptr;
     return &track->clips_[selectedClip_];
 }
 
+void TimelineViewTab::RebuildRows()
+{
+    // View state belongs to tracks that exist: undo of a track removal must not make the
+    // indices of the rebuilt lists address unrelated groups.
+    PruneStaleRefs(collapsedTracks_, timeline_);
+    PruneStaleRefs(soloedTracks_, timeline_);
+    PruneStaleRefs(lockedTracks_, timeline_);
+    PruneStaleRefs(pinnedTracks_, timeline_);
+    BuildTrackRows(timeline_, collapsedTracks_, rows_);
+}
+
+int TimelineViewTab::RowIndexOf(const TrackRef& trackRef) const
+{
+    for (unsigned i = 0; i < rows_.size(); ++i)
+    {
+        if (rows_[i].ref_ == trackRef)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+void TimelineViewTab::AddTrackOfType(const ea::string& typeName, const TrackRef& parent)
+{
+    SharedPtr<TimelineTrack> track = CreateTrackByTypeName(context_, typeName);
+    if (!track)
+        return;
+
+    BeginModify();
+    // Appending into the destination list: top level when the parent reference is invalid.
+    TrackRef ref;
+    if (!AddTrackTo(timeline_, track.Get(), parent, M_MAX_UNSIGNED, ref))
+        return;
+    RebuildRows();
+    SelectTrack(ref);
+}
+
+void TimelineViewTab::RemoveTrackAt(const TrackRef& trackRef)
+{
+    TimelineTrack* track = TrackAt(timeline_, trackRef);
+    if (!track)
+        return;
+
+    BeginModify();
+    // A group is unwrapped instead of deleted: its tracks are lifted to the position of the group,
+    // so removing the organizer of a hierarchy never removes the organized content.
+    if (!UnwrapGroup(timeline_, track))
+        RemoveTrackDeep(timeline_, track);
+    ClearSelection();
+    RebuildRows();
+}
+
+bool TimelineViewTab::IsTrackSoloed(const TrackRef& trackRef) const
+{
+    return ContainsRef(soloedTracks_, trackRef);
+}
+
+void TimelineViewTab::ToggleTrackSolo(const TrackRef& trackRef)
+{
+    if (!TrackAt(timeline_, trackRef))
+        return;
+    ToggleRef(soloedTracks_, trackRef);
+    ApplySoloOverrides();
+}
+
+bool TimelineViewTab::IsTrackLocked(const TrackRef& trackRef) const
+{
+    return ContainsRef(lockedTracks_, trackRef);
+}
+
+void TimelineViewTab::ToggleTrackLocked(const TrackRef& trackRef)
+{
+    if (!TrackAt(timeline_, trackRef))
+        return;
+    if (ToggleRef(lockedTracks_, trackRef))
+    {
+        // Locking the track the sequencer currently points at would leave the selection panel
+        // editing a track the user can no longer interact with.
+        if (selectedTrack_ == trackRef)
+            ClearSelection();
+    }
+}
+
+bool TimelineViewTab::IsTrackPinned(const TrackRef& trackRef) const
+{
+    return ContainsRef(pinnedTracks_, trackRef);
+}
+
+void TimelineViewTab::ToggleTrackPinned(const TrackRef& trackRef)
+{
+    if (!TrackAt(timeline_, trackRef))
+        return;
+    ToggleRef(pinnedTracks_, trackRef);
+}
+
+void TimelineViewTab::ApplySoloOverrides()
+{
+    TimelinePlayer* player = GetContextPlayer();
+    if (!player)
+        return;
+
+    // Solo is exclusive the way Unity does it: as soon as one track is soloed, every other track of
+    // the hierarchy is silenced. The overrides live on the player and are never serialized, so the
+    // saved timeline is unaffected.
+    if (soloedTracks_.empty())
+    {
+        player->ClearTrackSilences();
+        return;
+    }
+
+    ea::vector<TrackRow> rows;
+    FlattenTracks(timeline_, rows);
+    for (const TrackRow& row : rows)
+        player->SetTrackSilenced(row.track_, !ContainsRef(soloedTracks_, row.ref_));
+}
+
+void TimelineViewTab::ClearOverlayState()
+{
+    soloedTracks_.clear();
+    lockedTracks_.clear();
+    pinnedTracks_.clear();
+    if (TimelinePlayer* player = GetContextPlayer())
+        player->ClearTrackSilences();
+}
+
 void TimelineViewTab::CopySelectedClips()
 {
-    if (!timeline_ || selectedTrack_ >= timeline_->GetTracks().size())
+    if (!timeline_)
+        return;
+
+    TimelineTrack* src = TrackAt(timeline_, selectedTrack_);
+    if (!src)
         return;
 
     // Collect the source clip indices: all multi-selected clips on the current track, otherwise
     // just the single selected clip.
     ea::vector<unsigned> indices;
-    for (const auto& [track, clip] : multiSelectedClips_)
+    for (const ClipKey& key : multiSelectedClips_.Keys())
     {
-        if (track == selectedTrack_)
-            indices.push_back(clip);
+        if (key.track_ == selectedTrack_)
+            indices.push_back(key.clip_);
     }
     if (indices.empty() && selectedClip_ != M_MAX_UNSIGNED)
         indices.push_back(selectedClip_);
     if (indices.empty())
         return;
 
-    TimelineTrack* src = timeline_->GetTracks()[selectedTrack_].Get();
     clipboardTrackType_ = src->GetTrackTypeName();
     clipboardTrack_ = CreateTrackByTypeName(context_, clipboardTrackType_);
     if (!clipboardTrack_)
@@ -1996,10 +2263,12 @@ void TimelineViewTab::CopySelectedClips()
 
 void TimelineViewTab::PasteClips(float pasteTime)
 {
-    if (!clipboardTrack_ || !timeline_ || selectedTrack_ >= timeline_->GetTracks().size())
+    if (!clipboardTrack_ || !timeline_)
         return;
 
-    TimelineTrack* dst = timeline_->GetTracks()[selectedTrack_].Get();
+    TimelineTrack* dst = TrackAt(timeline_, selectedTrack_);
+    if (!dst)
+        return;
     if (dst->GetTrackTypeName() != clipboardTrackType_)
         return; // Paste only targets tracks of the copied type
 
@@ -2033,9 +2302,9 @@ void TimelineViewTab::PasteClips(float pasteTime)
     // Select the pasted clips.
     selectedClip_ = pasted.front();
     selectedKeyTime_ = -1.0f;
-    multiSelectedClips_.clear();
+    multiSelectedClips_.Clear();
     for (unsigned index : pasted)
-        multiSelectedClips_.insert({selectedTrack_, index});
+        multiSelectedClips_.Insert(selectedTrack_, index);
 }
 
 void TimelineViewTab::ValidateSelection()
@@ -2046,14 +2315,13 @@ void TimelineViewTab::ValidateSelection()
         return;
     }
 
-    const auto& tracks = timeline_->GetTracks();
-    if (selectedTrack_ >= tracks.size())
+    TimelineTrack* track = TrackAt(timeline_, selectedTrack_);
+    if (!track)
     {
         ClearSelection();
         return;
     }
 
-    TimelineTrack* track = tracks[selectedTrack_].Get();
     if (selectedClip_ >= GetNumClips(track))
     {
         selectedClip_ = M_MAX_UNSIGNED;
@@ -2068,14 +2336,15 @@ void TimelineViewTab::ValidateSelection()
     }
 
     // Drop multi-selected clips whose track or clip index became invalid after undo/redo.
-    for (auto it = multiSelectedClips_.begin(); it != multiSelectedClips_.end();)
+    auto& keys = multiSelectedClips_.keys_;
+    for (auto iter = keys.begin(); iter != keys.end();)
     {
-        const bool valid = it->first < tracks.size()
-            && it->second < GetNumClips(tracks[it->first].Get());
-        it = valid ? ea::next(it) : multiSelectedClips_.erase(it);
+        TimelineTrack* clipTrack = TrackAt(timeline_, iter->track_);
+        const bool valid = clipTrack && iter->clip_ < GetNumClips(clipTrack);
+        iter = valid ? ea::next(iter) : keys.erase(iter);
     }
-    if (multiSelectedClips_.size() <= 1)
-        multiSelectedClips_.clear();
+    if (keys.size() <= 1)
+        keys.clear();
 }
 
 void TimelineViewTab::RenderContent()
@@ -2090,6 +2359,8 @@ void TimelineViewTab::RenderContent()
 
     ValidateSelection();
     UpdatePreviewAndRecording();
+    // The visible rows of the track hierarchy drive both layout and hit-testing of the body.
+    RebuildRows();
 
     // Refresh DPI-scaled layout before anything is measured or drawn, so rendering and
     // hit-testing agree and the widget keeps a constant physical size across displays.
@@ -2103,10 +2374,15 @@ void TimelineViewTab::RenderContent()
     RenderToolbar();
 
     const float splitterHeight = 8.0f;
+    // The marker strip is always there, the list below it only while the panel is expanded. The
+    // sequencer and the properties panel are sized from what is left, so the strip must be
+    // subtracted from both budgets, otherwise the tab overflows its own height.
+    const float markersHeight = MarkersStripHeight + (markersPanelOpen_ ? MarkersPanelHeight : 0.0f) + 8.0f;
     const ImVec2 avail = ui::GetContentRegionAvail();
-    const float maxPanelHeight = Max(avail.y - 140.0f - splitterHeight, 60.0f);
+    const float maxPanelHeight = Max(avail.y - 140.0f - splitterHeight - markersHeight, 60.0f);
     selectionPanelHeight_ = Clamp(selectionPanelHeight_, 60.0f, maxPanelHeight);
-    const float sequencerHeight = Max(avail.y - selectionPanelHeight_ - splitterHeight - ZoomBarHeight, 120.0f);
+    const float sequencerHeight = Max(avail.y - selectionPanelHeight_ - splitterHeight - markersHeight - ZoomBarHeight,
+        120.0f);
     ui::BeginChild("timeline_sequencer", ImVec2(avail.x, sequencerHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
     RenderSequencer();
     ui::EndChild();
@@ -2134,18 +2410,30 @@ void TimelineViewTab::RenderContent()
     ui::GetWindowDrawList()->AddLine(ImVec2(splitMin.x + 4.0f, gripY), ImVec2(splitMax.x - 4.0f, gripY),
         draggingPanelSplitter_ ? IM_COL32(216, 130, 0, 255) : IM_COL32(120, 120, 120, 255), 2.0f);
 
+    // Marker list between the sequencer and the properties panel of the selection.
+    RenderMarkersPanel();
+
     RenderSelectionPanel();
+
+    // Playback speed entry of the clip context menu. It is a window rather than a popup because it
+    // is opened from a menu, whose id scope a popup would be registered under.
+    RenderClipSpeedDialog();
 
     // The curve editor is a standalone window: the properties panel is too narrow for key and
     // tangent work, and with docking the window can be stacked behind the timeline tab. It
     // follows the selected property clip and closes when that selection is gone.
-    if (curveEditorOpen_)
+    if (curveEditor_.IsOpen())
     {
         if (TimelinePropertyClip* clip = FindSelectedPropertyClip())
-            RenderCurveEditor(*clip);
+            curveEditor_.Render(*clip, *this);
         else
-            curveEditorOpen_ = false;
+            curveEditor_.Close();
     }
+
+    // The dope sheet shows the whole hierarchy, so unlike the curve editor it does not depend on a
+    // selection: it is fed the rows the sequencer is displaying right now.
+    if (dopeSheet_.IsOpen())
+        dopeSheet_.Render(*this, rows_, *timeline_);
 }
 
 void TimelineViewTab::RenderToolbar()
@@ -2203,16 +2491,112 @@ void TimelineViewTab::RenderToolbar()
         for (const char* typeName : trackTypeNames)
         {
             if (ui::Selectable(Format("Add {} Track", typeName).c_str()))
+                AddTrackOfType(typeName, TrackRef{});
+        }
+
+        // Groups offer the same list as a submenu, which creates the track inside them instead of
+        // nesting it by dragging. Nested groups list their own children as well, so a whole
+        // hierarchy can be built from the menu. The entries are snapshotted because adding a track
+        // rebuilds the row list the menu is iterating over.
+        struct GroupEntry
+        {
+            TrackRef ref_;
+            ea::string label_;
+        };
+        ea::vector<GroupEntry> groups;
+        for (const TrackRow& row : rows_)
+        {
+            if (!row.isGroup_ || !row.track_)
+                continue;
+            const ea::string name = row.track_->GetName().empty()
+                ? row.track_->GetTrackTypeName()
+                : row.track_->GetName();
+            groups.push_back(GroupEntry{row.ref_, Format("Inside '%s' (%s)", name.c_str(), row.ref_.ToString().c_str())});
+        }
+        if (!groups.empty())
+        {
+            ui::Separator();
+            for (const GroupEntry& group : groups)
             {
-                BeginModify();
-                if (SharedPtr<TimelineTrack> track = CreateTrackByTypeName(context_, typeName))
+                if (ui::BeginMenu(group.label_.c_str()))
                 {
-                    timeline_->AddTrack(track);
-                    SelectTrack(timeline_->GetNumTracks() - 1);
+                    for (const char* typeName : trackTypeNames)
+                    {
+                        if (ui::Selectable(Format("Add {} Track", typeName).c_str()))
+                            AddTrackOfType(typeName, group.ref_);
+                    }
+                    ui::EndMenu();
                 }
             }
         }
         ui::EndPopup();
+    }
+    ui::SameLine();
+
+    // Unity's sequencer has a scissors button on the toolbar: it cuts every selected clip at the
+    // cursor, wherever the cursor happens to be.
+    if (ui::Button("Split"))
+        SplitSelectedClips(cursorTime_);
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Cut the selected clips at the playhead.\n"
+            "Clips that do not span the playhead are left unchanged.\n"
+            "Ctrl+D duplicates the selection, Alt+drag copies a clip.");
+
+    ui::SameLine();
+
+    // Unity keeps the dope sheet as a dockable window of its own; the toolbar only toggles it and
+    // the window remembers its own view range and selection while it is hidden.
+    if (ui::Button("Dope Sheet"))
+    {
+        if (dopeSheet_.IsOpen())
+            dopeSheet_.Close();
+        else
+            dopeSheet_.Open();
+    }
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Time over rows overview of the whole hierarchy.\n"
+            "Keys are squares, clips are blocks.\n"
+            "Click the ruler to select a key row, F fits the view.");
+
+    ui::SameLine();
+
+    // Snapping. Unity puts a single magnet on the toolbar; the candidate sets it may grab are
+    // offered in its dropdown, so the common case stays one click. The button is highlighted while
+    // any set is on, and the style stack is paired by the state before the click, because clicking
+    // the popup open must not flip the highlight of the button that is still being drawn.
+    const bool anySnap = snapToClips_ || snapToKeys_;
+    if (anySnap)
+        ui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.42f, 0.60f, 1.0f));
+    if (ui::Button(anySnap ? "Snap  *" : "Snap  -"))
+        ui::OpenPopup("SnapPopup");
+    if (anySnap)
+        ui::PopStyleColor();
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Snap dragged clips, keys and markers to the grid and to the points listed\n"
+            "here. The grid is the ruler unit: 0.05 s in the seconds mode, one frame in the\n"
+            "frames mode. Hold Ctrl while dragging to suppress snapping entirely.");
+
+    if (ui::BeginPopup("SnapPopup"))
+    {
+        bool clips = snapToClips_;
+        if (ui::Checkbox("Clip edges", &clips))
+            snapToClips_ = clips;
+        bool keys = snapToKeys_;
+        if (ui::Checkbox("Keys and markers", &keys))
+            snapToKeys_ = keys;
+        ui::Separator();
+        ui::TextDisabled("Tolerance: 8 px");
+        ui::EndPopup();
+    }
+
+    ui::SameLine();
+
+    {
+        // Ruler unit. The mode is display only: it drives the ruler labels, the cursor readout and
+        // the grid drags snap to. In the frames mode the frame band above the ruler is dropped,
+        // because the ruler itself already counts frames.
+        ui::SetNextItemWidth(90.0f);
+        ui::Combo("##timeUnit", &timeDisplayMode_, "Seconds\0Frames\0");
     }
     ui::SameLine();
 
@@ -2245,11 +2629,43 @@ void TimelineViewTab::RenderToolbar()
         pixelsPerSecond_ = Clamp(trackAreaWidth / Max(timeline_->GetDuration(), 0.1f), MinPixelsPerSecond, MaxPixelsPerSecond);
         viewStartTime_ = 0.0f;
     }
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Show the whole timeline.\nShift+F frames the selection or the loop region.");
 
     ui::SameLine();
-    ui::TextDisabled("%s", FormatTime(cursorTime_).c_str());
+
+    // Loop preview. The region lives on the lane above the ruler and is editor side only: nothing
+    // of it is written to the resource or to the player's wrap mode attribute.
+    if (ui::Checkbox("Loop", &loopPreview_))
+    {
+        if (loopPreview_ && loopEnd_ <= loopStart_)
+        {
+            loopStart_ = 0.0f;
+            loopEnd_ = timeline_->GetDuration();
+        }
+    }
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Wrap the play head inside the loop region while playing.\n"
+            "Drag the lane above the ruler to define the region, right click it for shortcuts.");
+
     ui::SameLine();
-    ui::TextDisabled("wheel on ruler: zoom | middle-drag: pan | Ctrl: no snap");
+    {
+        ui::SetNextItemWidth(80.0f);
+        if (ui::DragFloat("Speed", &playbackSpeed_, 0.05f, 0.05f, 8.0f, "%.2fx"))
+        {
+            if (TimelinePlayer* activePlayer = previewPlayer_.Get())
+                activePlayer->SetPlaybackSpeed(playbackSpeed_);
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Preview playback speed. Editor only: the resource and a runtime\n"
+                "playback of the same timeline are not affected.");
+    }
+
+    ui::SameLine();
+    ui::TextDisabled("%s", FormatDisplayTime(cursorTime_).c_str());
+    ui::SameLine();
+    ui::TextDisabled("wheel on ruler: zoom | middle-drag: pan | Ctrl: no snap | drag lane: loop | "
+        "Home/End , . [ ] : cursor | Shift+F: fit selection");
 
     if (!bindingError_.empty() && ui::GetTime() - bindingErrorTime_ < 4.0)
     {
@@ -2371,23 +2787,23 @@ void TimelineViewTab::RenderSequencer()
 {
     const float duration = Max(timeline_->GetDuration(), 0.1f);
 
-    // Choose ruler step so that labeled ticks are reasonably spaced
-    static const float tickSteps[] = {0.01f, 0.02f, 0.05f, 0.1f, 0.2f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f, 60.0f};
-    const int numTickSteps = sizeof(tickSteps) / sizeof(tickSteps[0]);
-    int stepIndex = 0;
-    while (stepIndex + 1 < numTickSteps && tickSteps[stepIndex] * pixelsPerSecond_ < MinRulerStepPx)
-        ++stepIndex;
-    const float majorStep = tickSteps[stepIndex];
-    const float minorStep = majorStep / 5.0f;
+    // Choose ruler step so that labeled ticks are reasonably spaced. In the frames mode the steps
+    // are whole frame counts, which keeps the labels free of fractions.
+    float majorStep = SnapStep;
+    float minorStep = SnapStep;
+    ChooseRulerSteps(pixelsPerSecond_, fps_, TimeUnit(), MinRulerStepPx, 6.0f, majorStep, minorStep);
 
     const ImVec2 rulerPos = ui::GetCursorScreenPos();
     const float trackX0 = rulerPos.x + HeaderWidth;
     const float trackX1 = rulerPos.x + ui::GetContentRegionAvail().x;
 
-    // Follow the play head so that playback stays visible without manual panning.
+    // Follow the play head so that playback stays visible without manual panning. The same scroll
+    // keeps a cursor moved by a keyboard step or a marker jump in view, which is why the request is
+    // consumed here rather than where the time was set: this is where the canvas geometry is known.
     // The ruler and the body share the same view offset, so pan before drawing either.
-    if (previewState_ == PreviewState::Playing)
+    if (previewState_ == PreviewState::Playing || keepCursorVisible_)
     {
+        keepCursorVisible_ = false;
         const float rightMargin = 60.0f;
         const float cursorX = TimeToX(cursorTime_, trackX0);
         if (cursorX > trackX1 - rightMargin)
@@ -2396,14 +2812,23 @@ void TimelineViewTab::RenderSequencer()
             viewStartTime_ = Max(cursorTime_ - 10.0f / pixelsPerSecond_, 0.0f);
     }
 
-    RenderFrameRuler(duration, trackX0, trackX1);
-    // Push the layout down past the frame band so the time ruler draws beneath it, then render.
-    ui::Dummy(ImVec2(0.0f, FrameRulerHeight));
+    // Loop region lane. It owns a drag of its own, so scrubbing and region editing never collide.
+    RenderLoopLane(duration, trackX0, trackX1);
+    ui::Dummy(ImVec2(0.0f, LoopLaneHeight));
+
+    if (TimeUnit() == TimelineTimeUnit::Seconds)
+    {
+        RenderFrameRuler(duration, trackX0, trackX1);
+        // Push the layout down past the frame band so the time ruler draws beneath it, then render.
+        ui::Dummy(ImVec2(0.0f, FrameRulerHeight));
+    }
     RenderRuler(duration, majorStep, minorStep, trackX0, trackX1);
 
     ui::BeginChild("timeline_body", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, 0);
     RenderBody(duration, majorStep, minorStep);
     ui::EndChild();
+
+    RenderLoopContextMenu();
 }
 
 void TimelineViewTab::RenderRuler(float duration, float majorStep, float minorStep, float trackX0, float trackX1)
@@ -2435,7 +2860,8 @@ void TimelineViewTab::RenderRuler(float duration, float majorStep, float minorSt
         const float tickHeight = major ? 10.0f : 5.0f;
         drawList->AddLine(ImVec2(x, rulerPos.y), ImVec2(x, rulerPos.y + tickHeight), ColorTick);
         if (major)
-            drawList->AddText(ImVec2(x + 3.0f, rulerPos.y + RulerHeight * 0.5f - 6.0f), ColorTickLabel, FormatTime(time).c_str());
+            drawList->AddText(ImVec2(x + 3.0f, rulerPos.y + RulerHeight * 0.5f - 6.0f), ColorTickLabel,
+                FormatDisplayTime(time).c_str());
     }
 
     // Zoom with the mouse wheel while hovering the ruler
@@ -2450,6 +2876,13 @@ void TimelineViewTab::RenderRuler(float duration, float majorStep, float minorSt
     const ImRect rulerRect(ImVec2(trackX0, rulerPos.y), ImVec2(trackX1, rulerPos.y + RulerHeight));
     if (rulerRect.Contains(io.MousePos) && ui::IsWindowHovered() && ImGui::IsMouseClicked(0))
         dragKind_ = DragKind::Cursor;
+    // Right clicking the ruler opens the loop menu at the time under the cursor: the ruler is where
+    // a user reads and picks times, and a right click there had no meaning before the region.
+    if (rulerRect.Contains(io.MousePos) && ui::IsWindowHovered() && ui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        popupTime_ = Max(XToTime(io.MousePos.x, trackX0), 0.0f);
+        ui::OpenPopup("LoopContextMenu");
+    }
     if (dragKind_ == DragKind::Cursor)
     {
         if (!io.MouseDown[0])
@@ -2470,7 +2903,7 @@ void TimelineViewTab::RenderRuler(float duration, float majorStep, float minorSt
         drawList->AddRectFilled(ImVec2(cursorX - 5.0f, rulerPos.y + RulerHeight - 9.0f),
             ImVec2(cursorX + 5.0f, rulerPos.y + RulerHeight), ColorCursor);
         if (dragKind_ == DragKind::Cursor)
-            drawList->AddText(ImVec2(cursorX + 8.0f, rulerPos.y + 2.0f), ColorTickLabel, FormatTime(cursorTime_).c_str());
+            drawList->AddText(ImVec2(cursorX + 8.0f, rulerPos.y + 2.0f), ColorTickLabel, FormatDisplayTime(cursorTime_).c_str());
     }
 }
 
@@ -2542,11 +2975,189 @@ void TimelineViewTab::RenderFrameRuler(float duration, float trackX0, float trac
     }
 }
 
+// The loop lane is a strip of its own rather than part of the ruler: a drag over the ruler scrubs
+// the play head, and the two gestures must never compete for the same pixels. Dragging empty lane
+// creates a region, dragging a handle resizes one and dragging the region moves it whole.
+void TimelineViewTab::RenderLoopLane(float duration, float trackX0, float trackX1)
+{
+    ImGuiIO& io = ui::GetIO();
+    ImDrawList* drawList = ui::GetWindowDrawList();
+    const ImVec2 pos = ui::GetCursorScreenPos();
+    const float y0 = pos.y;
+    const float y1 = pos.y + LoopLaneHeight;
+    const ImRect laneRect(ImVec2(trackX0, y0), ImVec2(trackX1, y1));
+
+    drawList->AddRectFilled(ImVec2(pos.x, y0), ImVec2(trackX1, y1), ColorLoopLaneBg);
+    const float textY = y0 + Max((LoopLaneHeight - ui::GetTextLineHeight()) * 0.5f, 0.0f);
+    drawList->AddText(ImVec2(pos.x + 10.0f, textY), loopPreview_ ? ColorTickLabel : ColorHeaderTypeText, "Loop");
+
+    const bool hasRegion = loopEnd_ > loopStart_;
+    const float regionX0 = TimeToX(loopStart_, trackX0);
+    const float regionX1 = TimeToX(loopEnd_, trackX0);
+    if (hasRegion)
+    {
+        const ImU32 fill = loopPreview_ ? ColorLoopRegion : WithAlpha(ColorLoopRegion, 30);
+        const ImU32 border = loopPreview_ ? ColorLoopBorder : WithAlpha(ColorLoopBorder, 110);
+        drawList->AddRectFilled(ImVec2(regionX0, y0 + 1.0f), ImVec2(regionX1, y1 - 1.0f), fill);
+        drawList->AddRect(ImVec2(regionX0, y0 + 1.0f), ImVec2(regionX1, y1 - 1.0f), border);
+        drawList->AddRectFilled(ImVec2(regionX0 - 2.0f, y0), ImVec2(regionX0 + 2.0f, y1), ColorLoopHandle);
+        drawList->AddRectFilled(ImVec2(regionX1 - 2.0f, y0), ImVec2(regionX1 + 2.0f, y1), ColorLoopHandle);
+    }
+
+    const bool hovered = ui::IsWindowHovered() && laneRect.Contains(io.MousePos);
+    const float mouseTime = Max(XToTime(io.MousePos.x, trackX0), 0.0f);
+    const float grabPx = Max(4.0f, EdgeGrabWidth * 0.5f);
+    const bool overStart = hasRegion && Abs(io.MousePos.x - regionX0) <= grabPx;
+    const bool overEnd = hasRegion && Abs(io.MousePos.x - regionX1) <= grabPx;
+    const bool overRegion = hasRegion && io.MousePos.x > regionX0 && io.MousePos.x < regionX1;
+
+    if (loopDragMode_ == LoopDragMode::None)
+    {
+        if (hovered)
+        {
+            if (overStart || overEnd)
+                ui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            else if (overRegion)
+                ui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+            if (ui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                loopDragOrigStart_ = loopStart_;
+                loopDragOrigEnd_ = loopEnd_;
+                loopDragGrab_ = mouseTime;
+                if (overStart)
+                    loopDragMode_ = LoopDragMode::Start;
+                else if (overEnd)
+                    loopDragMode_ = LoopDragMode::End;
+                else if (overRegion)
+                    loopDragMode_ = LoopDragMode::Region;
+                else
+                {
+                    // A drag that starts on empty lane defines a new region from its first two
+                    // samples, so a plain click there leaves a zero length region behind.
+                    loopDragMode_ = LoopDragMode::Create;
+                    loopStart_ = mouseTime;
+                    loopEnd_ = mouseTime;
+                }
+            }
+            else if (ui::IsMouseClicked(ImGuiMouseButton_Right))
+            {
+                popupTime_ = mouseTime;
+                ui::OpenPopup("LoopContextMenu");
+            }
+        }
+
+        if (hovered && loopDragMode_ == LoopDragMode::None)
+        {
+            if (hasRegion)
+                ui::SetTooltip("Loop region %s - %s\n%s\nDrag the ends to resize, the body to move,\nempty space to define a new region.",
+                    FormatDisplayTime(loopStart_).c_str(), FormatDisplayTime(loopEnd_).c_str(),
+                    loopPreview_ ? "Preview loops here." : "Preview plays through (enable Loop on the toolbar).");
+            else
+                ui::SetTooltip("Drag here to define the loop preview region.");
+        }
+    }
+    else
+    {
+        if (!io.MouseDown[ImGuiMouseButton_Left])
+        {
+            loopDragMode_ = LoopDragMode::None;
+        }
+        else
+        {
+            const float time = SnapTime(mouseTime, !io.KeyCtrl);
+            switch (loopDragMode_)
+            {
+            case LoopDragMode::Create:
+            {
+                const float a = Max(loopStart_, 0.0f);
+                loopStart_ = Min(a, time);
+                loopEnd_ = Max(a, time);
+                break;
+            }
+            case LoopDragMode::Start:
+                loopStart_ = Clamp(time, 0.0f, loopEnd_ - MinClipDuration);
+                break;
+            case LoopDragMode::End:
+                loopEnd_ = Max(time, loopStart_ + MinClipDuration);
+                break;
+            case LoopDragMode::Region:
+            {
+                const float width = loopDragOrigEnd_ - loopDragOrigStart_;
+                const float newStart = Clamp(SnapTime(mouseTime - loopDragGrab_, !io.KeyCtrl), 0.0f, Max(duration - width, 0.0f));
+                loopStart_ = newStart;
+                loopEnd_ = newStart + width;
+                break;
+            }
+            default:
+                break;
+            }
+            if (loopEnd_ > duration)
+                loopEnd_ = duration;
+        }
+    }
+
+    // The play head crosses the lane as well, so that the region and the cursor can be compared
+    // without looking at the ruler below.
+    const float cursorX = TimeToX(cursorTime_, trackX0);
+    if (cursorX >= trackX0 && cursorX <= trackX1)
+        drawList->AddLine(ImVec2(cursorX, y0), ImVec2(cursorX, y1), ColorCursor, 2.0f);
+}
+
+// Loop region menu. Both entry points address the play head time under the cursor: the lane is the
+// widget that owns the region, the ruler is where a user looks for a time.
+void TimelineViewTab::RenderLoopContextMenu()
+{
+    if (!ui::BeginPopup("LoopContextMenu"))
+        return;
+
+    const float duration = Max(timeline_->GetDuration(), 0.1f);
+    ui::TextDisabled("%s", FormatDisplayTime(popupTime_).c_str());
+
+    // The first edge of a region that does not exist yet also establishes the other one, so a
+    // single menu click already leaves something usable instead of a zero length region.
+    if (ui::Selectable("Set Loop Start"))
+    {
+        if (loopEnd_ <= popupTime_)
+            loopEnd_ = Min(popupTime_ + Max(duration * 0.25f, SnapStep), duration);
+        loopStart_ = Clamp(popupTime_, 0.0f, Max(loopEnd_ - MinClipDuration, 0.0f));
+    }
+    if (ui::Selectable("Set Loop End"))
+    {
+        if (loopStart_ >= popupTime_)
+            loopStart_ = Max(popupTime_ - Max(duration * 0.25f, SnapStep), 0.0f);
+        loopEnd_ = Max(popupTime_, loopStart_ + MinClipDuration);
+    }
+    ui::Separator();
+    if (ui::Selectable(loopPreview_ ? "Disable Loop Preview" : "Enable Loop Preview"))
+    {
+        loopPreview_ = !loopPreview_;
+        if (loopPreview_ && loopEnd_ <= loopStart_)
+        {
+            loopStart_ = 0.0f;
+            loopEnd_ = duration;
+        }
+    }
+    if (ui::MenuItem("Fit View to Loop", nullptr, false, loopEnd_ > loopStart_))
+    {
+        const float width = Max(loopEnd_ - loopStart_, 0.1f);
+        const float trackAreaWidth = Max(ui::GetContentRegionAvail().x - HeaderWidth - 20.0f, 100.0f);
+        pixelsPerSecond_ = Clamp(trackAreaWidth / width, MinPixelsPerSecond, MaxPixelsPerSecond);
+        viewStartTime_ = loopStart_;
+    }
+    if (ui::MenuItem("Clear Loop", nullptr, false, loopEnd_ > loopStart_))
+    {
+        loopPreview_ = false;
+        loopStart_ = 0.0f;
+        loopEnd_ = 0.0f;
+    }
+    ui::EndPopup();
+}
+
 void TimelineViewTab::RenderBody(float duration, float majorStep, float minorStep)
 {
     ImGuiIO& io = ui::GetIO();
     ImDrawList* drawList = ui::GetWindowDrawList();
-    const auto& tracks = timeline_->GetTracks();
 
     const ImVec2 canvasPos = ui::GetCursorScreenPos();
     const ImVec2 windowPos = ui::GetWindowPos();
@@ -2555,83 +3166,188 @@ void TimelineViewTab::RenderBody(float duration, float majorStep, float minorSte
     const float trackX0 = canvasPos.x + HeaderWidth;
     const float trackX1 = windowPos.x + windowSize.x;
 
-    // Compute row layout
+    // Row layout of the visible hierarchy. One entry per row of rows_, which RebuildRows()
+    // refreshed for the current track lists and collapse state, so layout and hit-testing agree.
+    // Pinned rows are lifted out of the scrolling extent into a sticky band at the top of the body:
+    // the rows below them scroll past the band instead of under it, which keeps a pinned track
+    // reachable no matter how far the hierarchy has been scrolled.
     struct RowLayout
     {
-        unsigned trackIndex_{M_MAX_UNSIGNED};
+        unsigned rowIndex_{};
         float y0_{};
         float y1_{};
+        bool pinned_{};
     };
-    ea::vector<RowLayout> rows;
-    rows.reserve(tracks.size());
-    float contentHeight = 8.0f;
-    for (unsigned i = 0; i < tracks.size(); ++i)
+    ea::vector<RowLayout> layouts;
+    layouts.reserve(rows_.size());
+
+    float stickyHeight = 0.0f;
+    float scrollHeight = 8.0f;
+    for (unsigned i = 0; i < rows_.size(); ++i)
     {
-        const float height = GetRowHeight(tracks[i].Get());
-        rows.push_back(RowLayout{i, contentHeight, contentHeight + height});
-        contentHeight += height + RowSpacing;
+        const float height = GetRowHeight(rows_[i].track_);
+        if (IsTrackPinned(rows_[i].ref_))
+            stickyHeight += height + RowSpacing;
+        else
+            scrollHeight += height + RowSpacing;
     }
 
     // Reserve the scrollable extent
-    ui::Dummy(ImVec2(0.0f, contentHeight));
+    ui::Dummy(ImVec2(0.0f, scrollHeight));
     const float originY = canvasPos.y - ui::GetScrollY();
+
+    float stickyY = visibleRect.Min.y;
+    float flowY = originY;
+    for (unsigned i = 0; i < rows_.size(); ++i)
+    {
+        const float height = GetRowHeight(rows_[i].track_);
+        const bool pinned = IsTrackPinned(rows_[i].ref_);
+        if (pinned)
+        {
+            layouts.push_back(RowLayout{i, stickyY, stickyY + height, true});
+            stickyY += height + RowSpacing;
+        }
+        else
+        {
+            layouts.push_back(RowLayout{i, flowY, flowY + height, false});
+            flowY += height + RowSpacing;
+        }
+    }
 
     const auto rowRectOf = [&](const RowLayout& row)
     {
-        return ImRect(ImVec2(canvasPos.x, originY + row.y0_), ImVec2(trackX1, originY + row.y1_));
+        return ImRect(ImVec2(canvasPos.x, row.y0_), ImVec2(trackX1, row.y1_));
     };
 
     RenderBodyGrid(duration, majorStep, minorStep, canvasPos, trackX0, trackX1, visibleRect.Min, visibleRect.Max);
+
+    // Opaque backing of the sticky band. The row tints are semi-transparent, so the rows scrolling
+    // past the band would show through a pinned row without it.
+    if (stickyHeight > 0.0f)
+    {
+        const float bandBottom = visibleRect.Min.y + stickyHeight;
+        drawList->AddRectFilled(ImVec2(canvasPos.x, visibleRect.Min.y), ImVec2(trackX1, bandBottom), ColorBackground);
+        drawList->AddLine(ImVec2(canvasPos.x, bandBottom), ImVec2(trackX1, bandBottom), ColorMrbBorder, 1.0f);
+    }
 
     const bool windowHovered = ui::IsWindowHovered();
 
     // Track reorder drag: drop the dragged track onto the row under the cursor. UpdateDrag
     // clears the drag on mouse release, so only the in-drag repositioning happens here.
-    if (dragKind_ == DragKind::TrackReorder && !rows.empty())
+    int highlightRow = -1;
+    bool highlightNest = false;
+    if (dragKind_ == DragKind::TrackReorder && !layouts.empty())
     {
+        TimelineTrack* dragged = TrackAt(timeline_, dragTrack_);
         const float grabY = io.MousePos.y - dragReorderGrab_;
-        unsigned target = dragTrack_;
-        for (const RowLayout& row : rows)
+        int anchor = -1;
+        const RowLayout* anchorLayout = nullptr;
+        for (const RowLayout& row : layouts)
         {
-            const float y0 = originY + row.y0_;
-            const float y1 = originY + row.y1_;
+            const float y0 = row.y0_;
+            const float y1 = row.y1_;
             if (grabY >= y0 && grabY < y1)
             {
-                target = row.trackIndex_;
+                anchor = static_cast<int>(row.rowIndex_);
+                anchorLayout = &row;
                 break;
             }
             if (grabY >= y1)
-                target = row.trackIndex_;
+            {
+                anchor = static_cast<int>(row.rowIndex_);
+                anchorLayout = &row;
+            }
         }
-        if (target != dragTrack_ && target < tracks.size())
+
+        if (dragged)
         {
-            timeline_->MoveTrack(dragTrack_, target);
-            dragTrack_ = target;
-            selectedTrack_ = target;
+            TrackRef next;
+            TrackRef nestTarget; // group the track is dropped into, expanded when it was collapsed
+            bool moved = false;
+            const bool belowAll = anchor >= 0 && grabY >= anchorLayout->y1_;
+            if (anchor < 0)
+            {
+                // Above the first row: the track goes to the front of the top level list.
+                moved = AddTrackTo(timeline_, dragged, TrackRef{}, 0, next);
+            }
+            else
+            {
+                const TrackRow& row = rows_[anchor];
+                const ImRect rect = rowRectOf(*anchorLayout);
+                const float midY = (rect.Min.y + rect.Max.y) * 0.5f;
+                // Dropping onto the upper half of a group row nests the track into that group,
+                // the lower half inserts it after the group in the group's own list.
+                highlightNest = row.isGroup_ && row.track_ != dragged && grabY < midY
+                    && !dragTrack_.IsSelfOrAncestorOf(row.ref_);
+                if (row.track_ != dragged)
+                {
+                    if (highlightNest)
+                    {
+                        nestTarget = row.ref_;
+                        moved = AddTrackTo(timeline_, dragged, row.ref_, M_MAX_UNSIGNED, next);
+                    }
+                    else
+                    {
+                        moved = MoveTrackBeside(timeline_, dragged, row.ref_, belowAll || grabY >= midY, next);
+                    }
+                }
+                highlightRow = moved ? anchor : -1;
+            }
+
+            if (moved)
+            {
+                // Reveal the destination of a nested track, otherwise it disappears into a
+                // collapsed group without any feedback.
+                if (nestTarget.Valid() && IsCollapsed(collapsedTracks_, nestTarget))
+                    ToggleCollapsed(collapsedTracks_, nestTarget);
+                dragTrack_ = next;
+                selectedTrack_ = next;
+                RebuildRows();
+            }
         }
     }
 
-    // Rows
-    for (const RowLayout& row : rows)
+    // Rows. The sticky band is drawn in the second pass, so a pinned row always ends up on top of
+    // the rows that scrolled into its area.
+    for (int pass = 0; pass < 2; ++pass)
     {
-        const ImRect rowRect = rowRectOf(row);
-        if (rowRect.Max.y < visibleRect.Min.y || rowRect.Min.y > visibleRect.Max.y)
-            continue;
+        for (const RowLayout& row : layouts)
+        {
+            if ((pass == 0) == row.pinned_)
+                continue;
 
-        TimelineTrack* track = tracks[row.trackIndex_].Get();
-        const bool rowHovered = windowHovered && rowRect.Contains(io.MousePos);
-        const bool rowSelected = row.trackIndex_ == selectedTrack_;
+            const ImRect rowRect = rowRectOf(row);
+            if (rowRect.Max.y < visibleRect.Min.y || rowRect.Min.y > visibleRect.Max.y)
+                continue;
 
-        // Row background
-        ImU32 rowColor = (row.trackIndex_ & 1) ? ColorRowOdd : ColorRowEven;
-        if (rowSelected)
-            rowColor = ColorRowSelected;
-        else if (rowHovered)
-            rowColor = WithAlpha(rowColor, 255) == rowColor ? (rowColor + ColorRowHover) : rowColor; // additive hover tint
-        drawList->AddRectFilled(rowRect.Min, rowRect.Max, rowColor);
+            const TrackRow& trackRow = rows_[row.rowIndex_];
+            TimelineTrack* track = trackRow.track_;
+            if (!track)
+                continue;
 
-        RenderTrackHeader(track, row.trackIndex_, rowRect.Min, rowRect.Max, trackX0, rowSelected, windowHovered);
-        RenderTrackContent(track, row.trackIndex_, rowRect.Min, rowRect.Max, trackX0, trackX1, rowSelected);
+            const bool rowHovered = windowHovered && rowRect.Contains(io.MousePos);
+            const bool rowSelected = trackRow.ref_ == selectedTrack_;
+
+            // Row background
+            ImU32 rowColor = (row.rowIndex_ & 1) ? ColorRowOdd : ColorRowEven;
+            if (rowSelected)
+                rowColor = ColorRowSelected;
+            else if (rowHovered)
+                rowColor = WithAlpha(rowColor, 255) == rowColor ? (rowColor + ColorRowHover) : rowColor; // additive hover tint
+            drawList->AddRectFilled(rowRect.Min, rowRect.Max, rowColor);
+
+            RenderTrackHeader(track, trackRow, rowRect.Min, rowRect.Max, trackX0, rowSelected, windowHovered);
+            RenderTrackContent(track, trackRow.ref_, rowRect.Min, rowRect.Max, trackX0, trackX1, rowSelected);
+        }
+    }
+
+    // Feedback of the reorder drag: the row the dragged track would land on.
+    if (dragKind_ == DragKind::TrackReorder && highlightRow >= 0 && highlightRow < static_cast<int>(layouts.size()))
+    {
+        const ImRect rect = rowRectOf(layouts[static_cast<unsigned>(highlightRow)]);
+        const ImU32 tint = highlightNest ? ColorBindingSlotHighlight : ColorRowSelected;
+        drawList->AddRectFilled(rect.Min, rect.Max, tint);
+        drawList->AddRect(rect.Min, rect.Max, ColorBindingSlotHighlightBorder, 0.0f, 0, 2.0f);
     }
 
     // Cursor line across the body
@@ -2644,15 +3360,25 @@ void TimelineViewTab::RenderBody(float duration, float majorStep, float minorSte
 
     if (windowHovered && dragKind_ == DragKind::None && visibleRect.Contains(io.MousePos))
     {
-        for (const RowLayout& row : rows)
+        // The pinned band overlaps the rows that scrolled up into it, so it owns the cursor first.
+        for (int pass = 0; pass < 2; ++pass)
         {
-            const ImRect rowRect = rowRectOf(row);
-            if (!rowRect.Contains(io.MousePos))
-                continue;
+            bool handled = false;
+            for (const RowLayout& row : layouts)
+            {
+                if ((pass == 0) == row.pinned_)
+                    continue;
 
-            ProcessRowHitTesting(tracks[row.trackIndex_].Get(), row.trackIndex_,
-                rowRect.Min, rowRect.Max, trackX0);
-            break;
+                const ImRect rowRect = rowRectOf(row);
+                if (!rowRect.Contains(io.MousePos))
+                    continue;
+
+                ProcessRowHitTesting(rows_[row.rowIndex_], rowRect.Min, rowRect.Max, trackX0);
+                handled = true;
+                break;
+            }
+            if (handled)
+                break;
         }
     }
 
@@ -2690,7 +3416,7 @@ void TimelineViewTab::RenderBodyGrid(float duration, float majorStep, float mino
     drawList->AddRectFilled(ImVec2(canvasPos.x, visibleMin.y), ImVec2(trackX0, visibleMax.y), ColorBackground);
 }
 
-void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackIndex, const ImVec2& rowMin,
+void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, const TrackRow& row, const ImVec2& rowMin,
     const ImVec2& rowMax, float trackX0, bool rowSelected, bool windowHovered)
 {
     ImGuiIO& io = ui::GetIO();
@@ -2698,12 +3424,48 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     const ImRect rowRect(rowMin, rowMax);
     const float fontHeight = ui::GetTextLineHeight();
     const float textY = rowMin.y + (rowRect.GetHeight() - fontHeight) * 0.5f;
+    const RowMargin margin = ComputeRowMargin(rowMin, rowMax, row);
 
-    // Track type color bar and header text
-    drawList->AddRectFilled(rowMin, ImVec2(rowMin.x + 4.0f, rowMax.y), GetTrackColor(track));
+    // Track type color bar and header text, both offset by the indentation of the nesting level
+    drawList->AddRectFilled(ImVec2(margin.colorBarX_, rowMin.y), ImVec2(margin.colorBarX_ + 4.0f, rowMax.y),
+        GetTrackColor(track));
+    // A pinned row gets a blue top edge across the header, the same accent as its lock button. The
+    // boundary of the sticky band is not enough feedback when several rows are pinned.
+    if (IsTrackPinned(row.ref_))
+        drawList->AddLine(ImVec2(rowMin.x, rowMin.y + 1.0f), ImVec2(trackX0, rowMin.y + 1.0f), ColorMrbLock, 2.0f);
     const ea::string typeText = track->GetTrackTypeName();
-    drawList->AddText(ui::GetFont(), ui::GetFontSize(), ImVec2(rowMin.x + 10.0f, textY), ColorHeaderTypeText, typeText.c_str());
+    drawList->AddText(ui::GetFont(), ui::GetFontSize(), ImVec2(margin.captionX_, textY), ColorHeaderTypeText, typeText.c_str());
     const ImVec2 typeTextSize = ui::CalcTextSize(typeText.c_str());
+
+    // Expand/collapse arrow of a group row. Only drawn here: ProcessRowHitTesting measures the
+    // same rect returned by ComputeRowMargin(), so clicking the arrow cannot start a reorder drag.
+    if (row.isGroup_)
+    {
+        const float halfHeight = (margin.toggleMax_.y - margin.toggleMin_.y) * 0.5f;
+        const float centerY = (margin.toggleMin_.y + margin.toggleMax_.y) * 0.5f;
+        const float left = margin.toggleMin_.x;
+        const ImU32 arrowColor = rowSelected ? ColorHeaderText : WithAlpha(ColorHeaderText, 200);
+        if (row.collapsed_)
+        {
+            drawList->AddTriangleFilled(ImVec2(left, centerY - halfHeight), ImVec2(left, centerY + halfHeight),
+                ImVec2(left + halfHeight * 1.4f, centerY), arrowColor);
+        }
+        else
+        {
+            const float halfWidth = halfHeight * 0.8f;
+            drawList->AddTriangleFilled(ImVec2(left, centerY - halfWidth),
+                ImVec2(left + halfWidth * 2.0f, centerY - halfWidth), ImVec2(left + halfWidth, centerY + halfWidth),
+                arrowColor);
+        }
+    }
+
+    // Inline mute / solo / lock controls. Their rects come from the same helper the hit-testing
+    // uses, so a click on a letter never reaches the selection or the reorder drag below.
+    const bool soloed = IsTrackSoloed(row.ref_);
+    const bool locked = IsTrackLocked(row.ref_);
+    DrawMrbButton(drawList, margin.muteMin_, margin.muteMax_, "M", track->IsMuted(), ColorMrbMute);
+    DrawMrbButton(drawList, margin.soloMin_, margin.soloMax_, "S", soloed, ColorMrbSolo);
+    DrawMrbButton(drawList, margin.lockMin_, margin.lockMax_, "L", locked, ColorMrbLock);
 
     // Binding slot on the right side of the header: drop a node here to bind the track to it
     const ImRect slotRect(ImVec2(trackX0 - BindingSlotWidth - 6.0f, rowMin.y + 2.0f),
@@ -2712,7 +3474,7 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     const bool slotOccupied = !trackBinding.empty();
     bool slotHighlighted = false;
 
-    ui::PushID(static_cast<int>(trackIndex));
+    ui::PushID(track);
     if (ui::BeginDragDropTargetCustom(slotRect, ui::GetID("binding_slot")))
     {
         const auto* nodePayload = dynamic_cast<const NodeComponentDragDropPayload*>(DragDropPayload::Get());
@@ -2752,8 +3514,10 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     drawList->AddRect(slotRect.Min, slotRect.Max,
         slotHighlighted ? ColorBindingSlotHighlightBorder : WithAlpha(GetTrackColor(track), 140), 3.0f, 0, 1.0f);
 
-    // Slot label: the last segment of the binding path, or a hint when unbound
+    // Slot label: the last segment of the binding path, the inherited one for an unbound child of
+    // a bound group, or a hint when nothing resolves
     const char* slotLabel = "drop";
+    ea::string inheritedLabel;
     if (slotOccupied)
     {
         const auto lastSlash = trackBinding.find_last_of('/');
@@ -2761,24 +3525,50 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
             ? trackBinding.c_str()
             : trackBinding.c_str() + lastSlash + 1;
     }
+    else if (row.ref_.Depth() > 1)
+    {
+        // The track binds through its enclosing groups: show what it resolves to so the implicit
+        // inheritance is not invisible in the header.
+        Object* inherited = ResolveInheritedBindingRoot(GetContextPlayer(), timeline_.Get(), row.ref_);
+        if (auto* node = dynamic_cast<Node*>(inherited))
+            inheritedLabel = node->GetName().empty() ? "inherited" : Format("inherited: {}", node->GetName().c_str());
+        else if (inherited)
+            inheritedLabel = Format("inherited: {}", inherited->GetTypeName().c_str());
+        if (!inheritedLabel.empty())
+            slotLabel = inheritedLabel.c_str();
+    }
     const ImVec2 slotLabelSize = ui::CalcTextSize(slotLabel);
     if (slotLabelSize.x <= slotRect.GetWidth() - 4.0f)
         drawList->AddText(ImVec2(slotRect.Min.x + (slotRect.GetWidth() - slotLabelSize.x) * 0.5f, textY),
             slotOccupied ? ColorHeaderText : ColorBindingSlotText, slotLabel);
 
-    // Track name, clipped to the space left of the binding slot
-    const ImVec2 nameTextPos(rowMin.x + 10.0f + typeTextSize.x + 8.0f, textY);
-    drawList->PushClipRect(ImVec2(rowMin.x, rowMin.y), ImVec2(slotRect.Min.x - 6.0f, rowMax.y), true);
+    // Track name, clipped to the space between the inline controls and the binding slot
+    const ImVec2 nameTextPos(margin.captionX_ + typeTextSize.x + 8.0f, textY);
+    drawList->PushClipRect(ImVec2(margin.controlsEnd_, rowMin.y), ImVec2(slotRect.Min.x - 6.0f, rowMax.y), true);
     drawList->AddText(nameTextPos, track->IsMuted() ? ColorHeaderTypeText : ColorHeaderText, track->GetName().c_str());
     drawList->PopClipRect();
 
-    // Tooltip with full track info
+    // Tooltip of the inline controls, measured before the generic header tooltip so the two never
+    // compete for the same cursor position.
     const ImRect headerRect(rowMin, ImVec2(trackX0, rowMax.y));
     if (windowHovered && headerRect.Contains(io.MousePos))
     {
-        ui::SetTooltip("%s track\nName: %s\nBinding: %s\nWeight: %.2f%s",
-            typeText.c_str(), track->GetName().c_str(), trackBinding.empty() ? "(unbound)" : trackBinding.c_str(),
-            track->GetWeight(), track->IsMuted() ? "\n(muted)" : "");
+        if (ImRect(margin.muteMin_, margin.muteMax_).Contains(io.MousePos))
+            ui::SetTooltip("%s the track\nMuted tracks are stored in the timeline resource.",
+                track->IsMuted() ? "Unmute" : "Mute");
+        else if (ImRect(margin.soloMin_, margin.soloMax_).Contains(io.MousePos))
+            ui::SetTooltip("%s solo\nSoloing is a preview only override: while any track is soloed,\n"
+                "every other track is silenced. It is never saved.", soloed ? "Drop" : "Add to");
+        else if (ImRect(margin.lockMin_, margin.lockMax_).Contains(io.MousePos))
+            ui::SetTooltip("%s editing\nA locked track cannot be selected or dragged.\nSession only.",
+                locked ? "Unlock" : "Lock");
+        else
+        {
+            ui::SetTooltip("%s track\nName: %s\nAddress: %s\nBinding: %s\nWeight: %.2f%s%s",
+                typeText.c_str(), track->GetName().c_str(), row.ref_.ToString().c_str(),
+                trackBinding.empty() ? inheritedLabel.empty() ? "(unbound)" : inheritedLabel.c_str() : trackBinding.c_str(),
+                track->GetWeight(), track->IsMuted() ? "\n(muted)" : "", locked ? "\n(locked)" : "");
+        }
     }
     if (windowHovered && slotRect.Contains(io.MousePos))
     {
@@ -2788,7 +3578,7 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     }
 }
 
-void TimelineViewTab::RenderTrackContent(TimelineTrack* track, unsigned trackIndex, const ImVec2& rowMin,
+void TimelineViewTab::RenderTrackContent(TimelineTrack* track, const TrackRef& trackRef, const ImVec2& rowMin,
     const ImVec2& rowMax, float trackX0, float trackX1, bool rowSelected)
 {
     ImDrawList* drawList = ui::GetWindowDrawList();
@@ -2835,7 +3625,7 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, unsigned trackInd
             if (clipX1 < trackX0 || clipX0 > trackX1)
                 continue;
 
-            const bool inMulti = multiSelectedClips_.count(ea::make_pair(trackIndex, ci)) != 0;
+            const bool inMulti = multiSelectedClips_.Contains(trackRef, ci);
             const bool clipSelected = (rowSelected && ci == selectedClip_) || inMulti;
             const ImVec2 blockMin(clipX0, rowMin.y + 2.0f);
             const ImVec2 blockMax(clipX1, rowMax.y - 2.0f);
@@ -2866,6 +3656,35 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, unsigned trackInd
                 drawList->AddRectFilled(ImVec2(blockMax.x - 3.0f, blockMin.y + 4.0f), ImVec2(blockMax.x, blockMax.y - 4.0f), IM_COL32(255, 255, 255, 160));
             }
 
+            // Ease ramps of the clip: the top left and bottom right corners are dragged to change
+            // easeIn_ / easeOut_, the line inside shows the easing function actually applied.
+            if (blockWidth > 24.0f)
+                DrawEaseHandle(drawList, ComputeEaseHandles(blockMin, blockMax, *clip), *clip);
+
+            // Speed badge, only when the clip does not play its content at 1:1
+            if (Abs(clip->timeScale_ - 1.0f) > 0.001f && blockWidth > 44.0f)
+            {
+                const ea::string speed = Format("x%.2f", clip->timeScale_);
+                const ImVec2 speedSize = ui::CalcTextSize(speed.c_str());
+                drawList->AddText(ImVec2(blockMax.x - speedSize.x - 3.0f, blockMin.y + 1.0f), ColorClipText,
+                    speed.c_str());
+            }
+
+            // Blend: two clips of the same track that overlap are mixed by their weights while both
+            // are active. The mixed range is marked so the overlap is not mistaken for a mistake.
+            for (unsigned other = ci + 1; other < numClips; ++other)
+            {
+                const TimelineClip* next = GetClip(track, other);
+                if (!next)
+                    continue;
+                const float overlap0 = Max(clipX0, TimeToX(next->start_, trackX0));
+                const float overlap1 = Min(clipX1, TimeToX(next->GetEndTime(), trackX0));
+                if (overlap1 <= overlap0)
+                    continue;
+                drawList->AddRectFilled(ImVec2(overlap0, blockMin.y), ImVec2(overlap1, blockMax.y), ColorBlendRegion);
+                drawList->AddLine(ImVec2(overlap0, blockMax.y), ImVec2(overlap1, blockMin.y), ColorBlendBorder, 1.0f);
+            }
+
             // Keyframes of property clips: keys of all curves are displayed at their common times
             if (const auto* propertyTrack = dynamic_cast<const TimelinePropertyTrack*>(track))
             {
@@ -2891,10 +3710,10 @@ void TimelineViewTab::RenderTrackContent(TimelineTrack* track, unsigned trackInd
     drawList->PopClipRect();
 
     // Dropping a resource on the clip area creates a clip of the track
-    RenderTrackDropTarget(track, trackIndex, ImVec2(trackX0, rowMin.y), ImVec2(trackX1, rowMax.y), trackX0);
+    RenderTrackDropTarget(track, ImVec2(trackX0, rowMin.y), ImVec2(trackX1, rowMax.y), trackX0);
 }
 
-void TimelineViewTab::RenderTrackDropTarget(TimelineTrack* track, unsigned trackIndex, const ImVec2& contentMin,
+void TimelineViewTab::RenderTrackDropTarget(TimelineTrack* track, const ImVec2& contentMin,
     const ImVec2& contentMax, float trackX0)
 {
     auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(track);
@@ -2902,7 +3721,7 @@ void TimelineViewTab::RenderTrackDropTarget(TimelineTrack* track, unsigned track
         return;
 
     ImGuiIO& io = ui::GetIO();
-    ui::PushID(static_cast<int>(trackIndex));
+    ui::PushID(track);
     if (ui::BeginDragDropTargetCustom(ImRect(contentMin, contentMax), ui::GetID("track_clip_drop")))
     {
         const auto* payload = dynamic_cast<const ResourceDragDropPayload*>(DragDropPayload::Get());
@@ -2936,50 +3755,96 @@ void TimelineViewTab::RenderTrackDropTarget(TimelineTrack* track, unsigned track
     ui::PopID();
 }
 
-void TimelineViewTab::ProcessRowHitTesting(TimelineTrack* track, unsigned trackIndex,
-    const ImVec2& rowMin, const ImVec2& rowMax, float trackX0)
+void TimelineViewTab::ProcessRowHitTesting(const TrackRow& row, const ImVec2& rowMin, const ImVec2& rowMax,
+    float trackX0)
 {
     ImGuiIO& io = ui::GetIO();
-    const ImRect rowRect(rowMin, rowMax);
+    TimelineTrack* track = row.track_;
+    const TrackRef& trackRef = row.ref_;
     const bool leftClick = ImGui::IsMouseClicked(0);
     const bool rightClick = ImGui::IsMouseClicked(1);
+    const RowMargin margin = ComputeRowMargin(rowMin, rowMax, row);
 
     // Click on the header selects the track
     if (io.MousePos.x < trackX0)
     {
+        // The inline controls swallow the click: neither selection nor the reorder drag may start
+        // from them. Their rects are the ones RenderTrackHeader draws.
         if (leftClick)
         {
-            SelectTrack(trackIndex);
+            if (row.isGroup_ && ImRect(margin.toggleMin_, margin.toggleMax_).Contains(io.MousePos))
+            {
+                ToggleCollapsed(collapsedTracks_, trackRef);
+                RebuildRows();
+                return;
+            }
+            if (ImRect(margin.muteMin_, margin.muteMax_).Contains(io.MousePos))
+            {
+                BeginModify();
+                track->SetMuted(!track->IsMuted());
+                return;
+            }
+            if (ImRect(margin.soloMin_, margin.soloMax_).Contains(io.MousePos))
+            {
+                ToggleTrackSolo(trackRef);
+                return;
+            }
+            if (ImRect(margin.lockMin_, margin.lockMax_).Contains(io.MousePos))
+            {
+                ToggleTrackLocked(trackRef);
+                return;
+            }
+        }
+
+        // A locked track takes no selection and starts no drag; the right click still opens its
+        // menu, which then only offers to unlock it again.
+        if (IsTrackLocked(trackRef))
+        {
+            if (rightClick)
+            {
+                popupTrack_ = trackRef;
+                ui::OpenPopup("TrackHeaderContextMenu");
+            }
+            return;
+        }
+
+        if (leftClick)
+        {
+            SelectTrack(trackRef);
             // Drag the header vertically to reorder tracks. Only start when grabbing the
             // name area (left of the binding slot), so the slot keeps its drop behaviour.
-            const float slotLeft = trackX0 - 46.0f;
+            const float slotLeft = trackX0 - BindingSlotWidth - 10.0f;
             if (io.MousePos.x < slotLeft)
             {
                 BeginModify();
                 dragKind_ = DragKind::TrackReorder;
-                dragTrack_ = trackIndex;
+                dragTrack_ = trackRef;
                 dragReorderGrab_ = io.MousePos.y - rowMin.y;
             }
         }
         if (rightClick)
         {
-            popupTrack_ = trackIndex;
+            popupTrack_ = trackRef;
             ui::OpenPopup("TrackHeaderContextMenu");
         }
         return;
     }
 
+    // A locked track takes no clip, key or marker edit either.
+    if (IsTrackLocked(trackRef))
+        return;
+
     const float mouseTime = XToTime(io.MousePos.x, trackX0);
 
     if (auto* markerTrack = AsMarkerTrack(track))
     {
-        if (!ProcessMarkerHitTesting(markerTrack, trackIndex, rowMin, rowMax, trackX0, leftClick, rightClick))
+        if (!ProcessMarkerHitTesting(markerTrack, trackRef, rowMin, rowMax, trackX0, leftClick, rightClick))
         {
             if (leftClick)
-                SelectTrack(trackIndex);
+                SelectTrack(trackRef);
             if (rightClick)
             {
-                popupTrack_ = trackIndex;
+                popupTrack_ = trackRef;
                 popupClip_ = M_MAX_UNSIGNED;
                 popupTime_ = mouseTime;
                 ui::OpenPopup("TrackAreaContextMenu");
@@ -2991,26 +3856,26 @@ void TimelineViewTab::ProcessRowHitTesting(TimelineTrack* track, unsigned trackI
     if (auto* propertyTrack = AsPropertyTrack(track))
     {
         // Keys are hit-tested first, they are drawn on top of the clips
-        if (ProcessPropertyKeyHitTesting(propertyTrack, trackIndex, rowMin, rowMax, trackX0, leftClick))
+        if (ProcessPropertyKeyHitTesting(propertyTrack, trackRef, rowMin, rowMax, trackX0, leftClick))
             return;
     }
 
-    if (ProcessClipHitTesting(track, trackIndex, rowMin, rowMax, trackX0, leftClick, rightClick))
+    if (ProcessClipHitTesting(track, trackRef, rowMin, rowMax, trackX0, leftClick, rightClick))
         return;
 
     // Click on the empty track area selects the track
     if (leftClick)
-        SelectTrack(trackIndex);
+        SelectTrack(trackRef);
     if (rightClick)
     {
-        popupTrack_ = trackIndex;
+        popupTrack_ = trackRef;
         popupClip_ = M_MAX_UNSIGNED;
         popupTime_ = mouseTime;
         ui::OpenPopup("TrackAreaContextMenu");
     }
 }
 
-bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned trackIndex, const ImVec2& rowMin,
+bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, const TrackRef& trackRef, const ImVec2& rowMin,
     const ImVec2& rowMax, float trackX0, bool leftClick, bool rightClick)
 {
     ImGuiIO& io = ui::GetIO();
@@ -3030,7 +3895,7 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned track
 
         if (rightClick)
         {
-            popupTrack_ = trackIndex;
+            popupTrack_ = trackRef;
             popupClip_ = ci;
             popupTime_ = XToTime(io.MousePos.x, trackX0);
             ui::OpenPopup("ClipContextMenu");
@@ -3039,17 +3904,49 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned track
 
         if (leftClick)
         {
+            const ImVec2 blockMin(clipX0, rowMin.y + 2.0f);
+            const ImVec2 blockMax(clipX1, rowMax.y - 2.0f);
+            const float mouseTime = XToTime(io.MousePos.x, trackX0);
+
+            // Ease ramps are grabbed at the corners of the block. They take priority over the body
+            // edits but not over the modifiers that toggle selection or duplicate the clip.
+            if (!io.KeyCtrl && !io.KeyAlt && blockMax.x - blockMin.x > 24.0f)
+            {
+                const EaseHandles handles = ComputeEaseHandles(blockMin, blockMax, *clip);
+                if (ImRect(handles.inMin_, handles.inMax_).Contains(io.MousePos))
+                {
+                    SelectTrack(trackRef);
+                    selectedClip_ = ci;
+                    BeginModify();
+                    dragKind_ = DragKind::EaseIn;
+                    dragTrack_ = trackRef;
+                    dragClip_ = ci;
+                    dragGrabOffset_ = mouseTime - (clip->start_ + clip->easeIn_);
+                    return true;
+                }
+                if (ImRect(handles.outMin_, handles.outMax_).Contains(io.MousePos))
+                {
+                    SelectTrack(trackRef);
+                    selectedClip_ = ci;
+                    BeginModify();
+                    dragKind_ = DragKind::EaseOut;
+                    dragTrack_ = trackRef;
+                    dragClip_ = ci;
+                    dragGrabOffset_ = mouseTime - (clip->GetEndTime() - clip->easeOut_);
+                    return true;
+                }
+            }
+
             // Double-clicking a property clip opens the curve editor on it, like the Unity Dope Sheet.
             if (ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 auto* propertyTrack = AsPropertyTrack(track);
                 if (propertyTrack && ci < propertyTrack->clips_.size() && !propertyTrack->clips_[ci].curves_.empty())
                 {
-                    SelectTrack(trackIndex);
+                    SelectTrack(trackRef);
                     selectedClip_ = ci;
                     selectedKeyTime_ = -1.0f;
-                    curveEditorOpen_ = true;
-                    curveEditorFocusPending_ = true;
+                    curveEditor_.Open();
                     return true;
                 }
             }
@@ -3057,10 +3954,9 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned track
             // Ctrl+click toggles the clip in the multi-selection without starting a drag.
             if (io.KeyCtrl)
             {
-                const auto pair = ea::make_pair(trackIndex, ci);
-                if (!multiSelectedClips_.erase(pair))
-                    multiSelectedClips_.insert(pair);
-                selectedTrack_ = trackIndex;
+                if (!multiSelectedClips_.Erase(trackRef, ci))
+                    multiSelectedClips_.Insert(trackRef, ci);
+                selectedTrack_ = trackRef;
                 selectedClip_ = ci;
                 selectedKey_ = M_MAX_UNSIGNED;
                 selectedKeyTime_ = -1.0f;
@@ -3069,32 +3965,47 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned track
 
             // A clip inside an existing multi-selection keeps the group and drags it as a batch;
             // otherwise the selection collapses to this single clip.
-            if (multiSelectedClips_.size() > 1 && multiSelectedClips_.count(ea::make_pair(trackIndex, ci)))
+            unsigned dragged = ci;
+            if (multiSelectedClips_.Size() > 1 && multiSelectedClips_.Contains(trackRef, ci) && !io.KeyAlt)
             {
-                selectedTrack_ = trackIndex;
+                selectedTrack_ = trackRef;
                 selectedClip_ = ci;
             }
             else
             {
-                SelectTrack(trackIndex);
+                SelectTrack(trackRef);
                 selectedClip_ = ci;
-                multiSelectedClips_.clear();
-                multiSelectedClips_.insert(ea::make_pair(trackIndex, ci));
+                multiSelectedClips_.Clear();
+                multiSelectedClips_.Insert(trackRef, ci);
+            }
+
+            // Alt+drag copies the clip and drags the copy, like Unity. The copy is appended, so the
+            // index of the dragged clip changes to the last one of the track.
+            if (io.KeyAlt)
+            {
+                BeginModify();
+                DuplicateClipAt(track, ci);
+                dragged = GetNumClips(track) - 1;
+                clip = GetClip(track, dragged);
+                selectedClip_ = dragged;
+                multiSelectedClips_.Clear();
+                multiSelectedClips_.Insert(trackRef, dragged);
             }
 
             BeginModify();
-            dragTrack_ = trackIndex;
-            dragClip_ = ci;
+            dragTrack_ = trackRef;
+            dragClip_ = dragged;
             dragOrigStart_ = clip->start_;
             dragOrigDuration_ = clip->duration_;
-            dragGrabOffset_ = XToTime(io.MousePos.x, trackX0) - clip->start_;
+            dragOrigClipIn_ = clip->clipIn_;
+            dragGrabOffset_ = mouseTime - clip->start_;
 
             // Snapshot the original start of every selected clip for a batch move.
             dragBatchOrig_.clear();
-            for (const auto& sel : multiSelectedClips_)
+            for (const ClipKey& key : multiSelectedClips_.Keys())
             {
-                if (TimelineClip* selClip = FindSelectedClip(sel.first, sel.second))
-                    dragBatchOrig_.push_back({sel, selClip->start_});
+                if (TimelineClip* selClip = FindSelectedClip(key.track_, key.clip_))
+                    dragBatchOrig_.push_back({key, selClip->start_});
             }
 
             if (io.MousePos.x <= clipX0 + EdgeGrabWidth)
@@ -3109,7 +4020,7 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned track
     return false;
 }
 
-bool TimelineViewTab::ProcessMarkerHitTesting(TimelineMarkerTrack* markerTrack, unsigned trackIndex,
+bool TimelineViewTab::ProcessMarkerHitTesting(TimelineMarkerTrack* markerTrack, const TrackRef& trackRef,
     const ImVec2& rowMin, const ImVec2& rowMax, float trackX0, bool leftClick, bool rightClick)
 {
     (void)rightClick;
@@ -3123,11 +4034,11 @@ bool TimelineViewTab::ProcessMarkerHitTesting(TimelineMarkerTrack* markerTrack, 
         {
             if (leftClick)
             {
-                SelectTrack(trackIndex);
+                SelectTrack(trackRef);
                 selectedKey_ = mi;
                 BeginModify();
                 dragKind_ = DragKind::Marker;
-                dragTrack_ = trackIndex;
+                dragTrack_ = trackRef;
                 dragKey_ = mi;
                 dragOrigStart_ = markers[mi].time_;
                 dragGrabOffset_ = XToTime(io.MousePos.x, trackX0) - markers[mi].time_;
@@ -3138,7 +4049,7 @@ bool TimelineViewTab::ProcessMarkerHitTesting(TimelineMarkerTrack* markerTrack, 
     return false;
 }
 
-bool TimelineViewTab::ProcessPropertyKeyHitTesting(TimelinePropertyTrack* propertyTrack, unsigned trackIndex,
+bool TimelineViewTab::ProcessPropertyKeyHitTesting(TimelinePropertyTrack* propertyTrack, const TrackRef& trackRef,
     const ImVec2& rowMin, const ImVec2& rowMax, float trackX0, bool leftClick)
 {
     ImGuiIO& io = ui::GetIO();
@@ -3155,12 +4066,12 @@ bool TimelineViewTab::ProcessPropertyKeyHitTesting(TimelinePropertyTrack* proper
             {
                 if (leftClick)
                 {
-                    SelectTrack(trackIndex);
+                    SelectTrack(trackRef);
                     selectedClip_ = ci;
                     selectedKeyTime_ = keyTime;
                     BeginModify();
                     dragKind_ = DragKind::Key;
-                    dragTrack_ = trackIndex;
+                    dragTrack_ = trackRef;
                     dragClip_ = ci;
                     dragOrigStart_ = keyTime;
                     dragGrabOffset_ = mouseTime - (propertyClip.start_ + keyTime);
@@ -3193,10 +4104,14 @@ void TimelineViewTab::UpdateDrag(float trackX0)
         return;
     }
 
-    if (dragKind_ == DragKind::None || !timeline_ || dragTrack_ >= timeline_->GetTracks().size())
+    if (dragKind_ == DragKind::None || !timeline_)
         return;
 
-    TimelineTrack* track = timeline_->GetTracks()[dragTrack_].Get();
+    // The dragged track is addressed by its path, which the reorder drag keeps up to date while
+    // the track moves between lists. A stale reference simply stops the edit.
+    TimelineTrack* track = TrackAt(timeline_, dragTrack_);
+    if (!track)
+        return;
     const float mouseTime = XToTime(io.MousePos.x, trackX0);
     const bool snapEnabled = !io.KeyCtrl;
 
@@ -3212,9 +4127,9 @@ void TimelineViewTab::UpdateDrag(float trackX0)
         {
             // Batch move: shift every selected clip by the same delta so relative spacing holds.
             const float delta = newStart - dragOrigStart_;
-            for (auto& [pair, origStart] : dragBatchOrig_)
+            for (auto& [key, origStart] : dragBatchOrig_)
             {
-                if (TimelineClip* selClip = FindSelectedClip(pair.first, pair.second))
+                if (TimelineClip* selClip = FindSelectedClip(key.track_, key.clip_))
                     selClip->start_ = Max(origStart + delta, 0.0f);
             }
         }
@@ -3232,6 +4147,10 @@ void TimelineViewTab::UpdateDrag(float trackX0)
                 dragOrigStart_ + dragOrigDuration_ - MinClipDuration);
             clip->start_ = newStart;
             clip->duration_ = dragOrigStart_ + dragOrigDuration_ - newStart;
+            // Holding Alt while trimming the left edge keeps the visible content still: instead of
+            // sliding the block over the source, the in point of the source moves with the edge.
+            if (io.KeyAlt)
+                clip->clipIn_ = Max(dragOrigClipIn_ + (newStart - dragOrigStart_), 0.0f);
         }
         break;
     }
@@ -3241,6 +4160,26 @@ void TimelineViewTab::UpdateDrag(float trackX0)
         {
             const float newEnd = Max(SnapTime(mouseTime, snapEnabled), dragOrigStart_ + MinClipDuration);
             clip->duration_ = Max(newEnd - dragOrigStart_, MinClipDuration);
+        }
+        break;
+    }
+    // Ease ramps are dragged by their tip. The two ramps share the block, so neither may grow past
+    // the length the other one already occupies.
+    case DragKind::EaseIn:
+    {
+        if (TimelineClip* clip = GetClip(track, dragClip_))
+        {
+            const float tip = SnapTime(mouseTime - dragGrabOffset_, snapEnabled);
+            clip->easeIn_ = Clamp(tip - clip->start_, 0.0f, clip->duration_ - clip->easeOut_);
+        }
+        break;
+    }
+    case DragKind::EaseOut:
+    {
+        if (TimelineClip* clip = GetClip(track, dragClip_))
+        {
+            const float tip = SnapTime(mouseTime - dragGrabOffset_, snapEnabled);
+            clip->easeOut_ = Clamp(clip->GetEndTime() - tip, 0.0f, clip->duration_ - clip->easeIn_);
         }
         break;
     }
@@ -3273,40 +4212,288 @@ void TimelineViewTab::UpdateDrag(float trackX0)
     }
 }
 
-void TimelineViewTab::ProcessDeleteKey()
+// Move the play head the way a scrub does: the preview samples the scene from the new time and the
+// sequencer scrolls to keep the cursor inside the canvas, so a keyboard step never loses it.
+void TimelineViewTab::SetCursorTime(float time)
 {
-    if (!ui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) || !ui::IsKeyPressed(ImGuiKey_Delete)
-        || !timeline_ || selectedTrack_ >= timeline_->GetTracks().size())
+    cursorTime_ = Clamp(time, 0.0f, Max(timeline_->GetDuration(), 0.1f));
+    cursorScrubbed_ = true;
+    keepCursorVisible_ = true;
+}
+
+// Snapping of the sequencer. The member shadows the free SnapTime of the shared header, which is
+// how every drag that already calls it picks up the frame grid and the enabled candidate points.
+float TimelineViewTab::SnapTime(float time, bool snapEnabled) const
+{
+    ea::vector<float> candidates;
+    if (snapEnabled && (snapToClips_ || snapToKeys_))
+    {
+        CollectSnapCandidates(candidates, snapToClips_, snapToKeys_);
+
+        // A drag reports its own edges and keys as candidates, and those sit exactly where the item
+        // already is. Left in the list they beat every other target on distance and pin the item to
+        // the position it started from, so the owned points are dropped first.
+        const ea::vector<float> own = DraggedSnapPoints();
+        const float dropEps = 0.25f / Max(fps_, 1.0f);
+        candidates.erase(ea::remove_if(candidates.begin(), candidates.end(), [&](float candidate)
+        {
+            for (float point : own)
+            {
+                if (Abs(candidate - point) <= dropEps)
+                    return true;
+            }
+            return false;
+        }), candidates.end());
+    }
+
+    // The tolerance is a physical distance, so it is measured in pixels and converted with the
+    // current zoom.
+    const float tolerance = candidates.empty() ? 0.0f : SnapTolerancePx / Max(pixelsPerSecond_, 0.01f);
+    return SnapTimeTo(time, snapEnabled, TimeUnit(), fps_, candidates, tolerance);
+}
+
+void TimelineViewTab::CollectSnapCandidates(ea::vector<float>& candidates, bool clipEdges, bool keyPoints) const
+{
+    candidates.clear();
+    if (!timeline_)
         return;
 
-    TimelineTrack* track = timeline_->GetTracks()[selectedTrack_].Get();
-
-    // Batch delete of the multi-selected clips (takes precedence over single selection).
-    if (multiSelectedClips_.size() > 1)
+    // Only the visible rows contribute: collapsing a group is how a user gets a dense part of the
+    // hierarchy out of the way, and an edit should stop snapping to content that hid itself.
+    for (const TrackRow& row : rows_)
     {
-        BeginModify();
-        // Group clip indices per track and erase from the highest index down so earlier
-        // erasures do not invalidate the pending ones.
-        ea::set<unsigned> tracks;
-        for (const auto& sel : multiSelectedClips_)
-            tracks.insert(sel.first);
-        for (unsigned ti : tracks)
+        const TimelineTrack* track = row.track_;
+        if (!track)
+            continue;
+
+        if (clipEdges)
         {
-            ea::vector<unsigned> clips;
-            for (const auto& sel : multiSelectedClips_)
+            DispatchClipVector(track, [&](const auto& clips)
             {
-                if (sel.first == ti)
-                    clips.push_back(sel.second);
+                for (const auto& clip : clips)
+                {
+                    candidates.push_back(clip.start_);
+                    candidates.push_back(clip.GetEndTime());
+                }
+            });
+        }
+
+        if (keyPoints)
+        {
+            // Property keys are stored relative to their clip, markers are absolute. Both are
+            // features a user aims at, so they end up in the same list.
+            if (const auto* propertyTrack = dynamic_cast<const TimelinePropertyTrack*>(track))
+            {
+                for (const TimelinePropertyClip& clip : propertyTrack->clips_)
+                {
+                    for (float localTime : GetPropertyKeyTimes(clip))
+                        candidates.push_back(clip.start_ + localTime);
+                }
             }
-            // The selection set is ordered, so clips are collected ascending already.
-            if (ti < timeline_->GetTracks().size())
+            else if (const auto* markerTrack = dynamic_cast<const TimelineMarkerTrack*>(track))
             {
-                TimelineTrack* t = timeline_->GetTracks()[ti].Get();
-                for (auto it = clips.rbegin(); it != clips.rend(); ++it)
-                    RemoveClipAt(t, *it);
+                for (const TimelineMarker& marker : markerTrack->GetMarkers())
+                    candidates.push_back(marker.time_);
             }
         }
-        multiSelectedClips_.clear();
+    }
+
+    ea::sort(candidates.begin(), candidates.end());
+    candidates.erase(ea::unique(candidates.begin(), candidates.end()), candidates.end());
+}
+
+// The time points the active drag owns. SnapTime takes them out of the candidate list, because an
+// item that can snap to itself can never reach anything else.
+ea::vector<float> TimelineViewTab::DraggedSnapPoints() const
+{
+    ea::vector<float> points;
+    if (!timeline_ || dragKind_ == DragKind::None)
+        return points;
+
+    TimelineTrack* track = TrackAt(timeline_, dragTrack_);
+    if (!track)
+        return points;
+
+    // Both edges of a whole block: the end travels with the start, so neither is a target.
+    const auto pushClipEdges = [&](const TimelineClip* clip)
+    {
+        if (clip)
+        {
+            points.push_back(clip->start_);
+            points.push_back(clip->GetEndTime());
+        }
+    };
+
+    switch (dragKind_)
+    {
+    case DragKind::ClipMove:
+        pushClipEdges(GetClip(track, dragClip_));
+        // A batch move shifts every selected clip by the same delta, so none of them may hold
+        // itself back either.
+        for (const auto& [key, origStart] : dragBatchOrig_)
+            pushClipEdges(GetClip(TrackAt(timeline_, key.track_), key.clip_));
+        break;
+
+    // A trim keeps one edge in place. The fixed edge is a legitimate target and only the moving one
+    // is dropped.
+    case DragKind::ClipTrimStart:
+        if (const TimelineClip* clip = GetClip(track, dragClip_))
+            points.push_back(clip->start_);
+        break;
+
+    case DragKind::ClipTrimEnd:
+        if (const TimelineClip* clip = GetClip(track, dragClip_))
+            points.push_back(clip->GetEndTime());
+        break;
+
+    // An ease ramp is dragged by its tip, which is a point of its own inside the block.
+    case DragKind::EaseIn:
+        if (const TimelineClip* clip = GetClip(track, dragClip_))
+            points.push_back(clip->start_ + clip->easeIn_);
+        break;
+
+    case DragKind::EaseOut:
+        if (const TimelineClip* clip = GetClip(track, dragClip_))
+            points.push_back(clip->GetEndTime() - clip->easeOut_);
+        break;
+
+    case DragKind::Key:
+    {
+        TimelinePropertyTrack* propertyTrack = AsPropertyTrack(track);
+        if (propertyTrack && dragClip_ < propertyTrack->clips_.size() && selectedKeyTime_ >= 0.0f)
+            points.push_back(propertyTrack->clips_[dragClip_].start_ + selectedKeyTime_);
+        break;
+    }
+
+    case DragKind::Marker:
+    {
+        TimelineMarkerTrack* markerTrack = AsMarkerTrack(track);
+        if (markerTrack && dragKey_ < markerTrack->GetNumMarkers())
+            points.push_back(markerTrack->GetMarkers()[dragKey_].time_);
+        break;
+    }
+
+    default:
+        break;
+    }
+    return points;
+}
+
+// Next or previous keyframe of the timeline. The bracket keys step over the authored features
+// regardless of what the snapping is set to, and clip edges are deliberately left out: they would
+// turn a single step into a jump across the whole sequence.
+float TimelineViewTab::StepToNextKey(float time, bool forward) const
+{
+    ea::vector<float> times;
+    CollectSnapCandidates(times, false, true);
+    if (times.empty())
+        return time;
+
+    // Half a frame of slack, so standing exactly on a key steps to the next one instead of
+    // reporting the current position as the result.
+    const float eps = 0.5f / Max(fps_, 1.0f);
+    if (forward)
+    {
+        for (float candidate : times)
+        {
+            if (candidate > time + eps)
+                return candidate;
+        }
+    }
+    else
+    {
+        for (auto it = times.rbegin(); it != times.rend(); ++it)
+        {
+            if (*it < time - eps)
+                return *it;
+        }
+    }
+    return time;
+}
+
+// Frame the interesting part of the timeline: the selected clips when there are any, the loop
+// region otherwise, the whole resource when neither is set.
+void TimelineViewTab::FitViewToSelection()
+{
+    float from = FLT_MAX;
+    float to = -FLT_MAX;
+
+    const ea::vector<ClipKey> keys = SelectedClipKeys();
+    for (const ClipKey& key : keys)
+    {
+        const TimelineClip* clip = FindSelectedClip(key.track_, key.clip_);
+        if (!clip)
+            continue;
+        from = Min(from, clip->start_);
+        to = Max(to, clip->GetEndTime());
+    }
+
+    if (to <= from)
+    {
+        if (loopEnd_ > loopStart_)
+        {
+            from = loopStart_;
+            to = loopEnd_;
+        }
+        else
+        {
+            from = 0.0f;
+            to = timeline_->GetDuration();
+        }
+    }
+
+    to = Max(to, from + MinClipDuration);
+    const float margin = (to - from) * 0.05f;
+    from = Max(from - margin, 0.0f);
+    to += margin;
+
+    const float trackAreaWidth = Max(ui::GetContentRegionAvail().x - HeaderWidth - 20.0f, 100.0f);
+    pixelsPerSecond_ = Clamp(trackAreaWidth / Max(to - from, 0.1f), MinPixelsPerSecond, MaxPixelsPerSecond);
+    viewStartTime_ = from;
+}
+
+void TimelineViewTab::ProcessDeleteKey()
+{
+    if (!ui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) || !ui::IsKeyPressed(ImGuiKey_Delete) || !timeline_)
+        return;
+
+    TimelineTrack* track = TrackAt(timeline_, selectedTrack_);
+    if (!track)
+        return;
+
+    // Batch delete of the multi-selected clips (takes precedence over single selection).
+    if (multiSelectedClips_.Size() > 1)
+    {
+        BeginModify();
+        // Group the clips per track and erase each track's clips from the highest index down, so
+        // an erasure never invalidates the indices still pending. Tracks are collected in the
+        // selection order and the selection itself keeps the order the clips were picked in.
+        ea::vector<TrackRef> tracks;
+        for (const ClipKey& key : multiSelectedClips_.Keys())
+        {
+            bool seen = false;
+            for (const TrackRef& existing : tracks)
+                seen = seen || existing == key.track_;
+            if (!seen)
+                tracks.push_back(key.track_);
+        }
+
+        for (const TrackRef& ref : tracks)
+        {
+            TimelineTrack* clipTrack = TrackAt(timeline_, ref);
+            if (!clipTrack)
+                continue;
+            ea::vector<unsigned> clips;
+            for (const ClipKey& key : multiSelectedClips_.Keys())
+            {
+                if (key.track_ == ref)
+                    clips.push_back(key.clip_);
+            }
+            ea::sort(clips.begin(), clips.end());
+            for (auto it = clips.rbegin(); it != clips.rend(); ++it)
+                RemoveClipAt(clipTrack, *it);
+        }
+        multiSelectedClips_.Clear();
         selectedClip_ = M_MAX_UNSIGNED;
         return;
     }
@@ -3348,13 +4535,179 @@ void TimelineViewTab::ProcessEditKeys()
     if (!ui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) || !timeline_)
         return;
 
-    if (ui::GetIO().KeyCtrl)
+    ImGuiIO& io = ui::GetIO();
+    // A text field owns the keyboard while it is being edited: the navigation keys below are plain
+    // letters and punctuation, so they must not leak into it.
+    if (io.WantTextInput)
+        return;
+
+    if (io.KeyCtrl)
     {
         if (ui::IsKeyPressed(ImGuiKey_C))
             CopySelectedClips();
         else if (ui::IsKeyPressed(ImGuiKey_V))
             PasteClips(cursorTime_);
+        else if (ui::IsKeyPressed(ImGuiKey_D))
+            DuplicateSelectedClip();
+        return;
     }
+
+    // Cursor navigation. None of it touches the resource, so no undo action is started.
+    const float secPerFrame = 1.0f / Max(fps_, 1.0f);
+    if (ui::IsKeyPressed(ImGuiKey_Home))
+        SetCursorTime(0.0f);
+    else if (ui::IsKeyPressed(ImGuiKey_End))
+        SetCursorTime(timeline_->GetDuration());
+    else if (ui::IsKeyPressed(ImGuiKey_Comma))
+        SetCursorTime(Max(cursorTime_ - secPerFrame, 0.0f));
+    else if (ui::IsKeyPressed(ImGuiKey_Period))
+        SetCursorTime(cursorTime_ + secPerFrame);
+    else if (ui::IsKeyPressed(ImGuiKey_LeftBracket))
+        SetCursorTime(StepToNextKey(cursorTime_ - secPerFrame, false));
+    else if (ui::IsKeyPressed(ImGuiKey_RightBracket))
+        SetCursorTime(StepToNextKey(cursorTime_ + secPerFrame, true));
+    else if (ui::IsKeyPressed(ImGuiKey_F) && io.KeyShift)
+        FitViewToSelection();
+}
+
+// The clips a batch edit applies to: the multi-selection when there is one, otherwise the single
+// clip selected in the sequencer. Keeps every batch command working on the plain selection too.
+ea::vector<ClipKey> TimelineViewTab::SelectedClipKeys() const
+{
+    if (multiSelectedClips_.Size() > 1)
+        return multiSelectedClips_.Keys();
+    ea::vector<ClipKey> keys;
+    if (selectedClip_ != M_MAX_UNSIGNED && selectedTrack_.Valid())
+        keys.push_back(ClipKey{selectedTrack_, selectedClip_});
+    return keys;
+}
+
+// Cut every selected clip at the given timeline time. Clips that do not span the cut are left out,
+// so running the command on a whole multi-selection only splits the ones under the cursor.
+void TimelineViewTab::SplitSelectedClips(float splitTime)
+{
+    if (!timeline_)
+        return;
+    const ea::vector<ClipKey> keys = SelectedClipKeys();
+    if (keys.empty())
+        return;
+
+    // Group the clips per track and split each track from the highest index down: the second half
+    // is inserted right after the clip it was cut from, which only shifts clips already processed.
+    BeginModify();
+    ea::vector<TrackRef> tracks;
+    for (const ClipKey& key : keys)
+    {
+        if (!ContainsRef(tracks, key.track_))
+            tracks.push_back(key.track_);
+    }
+    for (const TrackRef& ref : tracks)
+    {
+        TimelineTrack* track = TrackAt(timeline_.Get(), ref);
+        if (!track)
+            continue;
+        ea::vector<unsigned> indices;
+        for (const ClipKey& key : keys)
+        {
+            if (key.track_ == ref)
+                indices.push_back(key.clip_);
+        }
+        ea::sort(indices.begin(), indices.end());
+        for (auto it = indices.rbegin(); it != indices.rend(); ++it)
+            SplitClipAt(track, *it, splitTime);
+    }
+    // The first half keeps the index of the clip it was cut from, so the selection still points at
+    // content that exists; the freshly created halves stay unselected to keep the choice deliberate.
+    multiSelectedClips_.Clear();
+}
+
+// Copy every selected clip to the block that immediately follows it, the way Unity duplicates.
+void TimelineViewTab::DuplicateSelectedClip()
+{
+    if (!timeline_)
+        return;
+    const ea::vector<ClipKey> keys = SelectedClipKeys();
+    if (keys.empty())
+        return;
+
+    BeginModify();
+    // Copies are appended to the track, so duplicating a batch never invalidates an index the loop
+    // is still going to read.
+    multiSelectedClips_.Clear();
+    for (const ClipKey& key : keys)
+    {
+        TimelineTrack* track = TrackAt(timeline_.Get(), key.track_);
+        if (!track || key.clip_ >= GetNumClips(track))
+            continue;
+        DuplicateClipAt(track, key.clip_);
+        const unsigned copy = GetNumClips(track) - 1;
+        multiSelectedClips_.Insert(key.track_, copy);
+        selectedTrack_ = key.track_;
+        selectedClip_ = copy;
+    }
+}
+
+// Small floating dialog that enters the playback speed of one clip. It is a window rather than a
+// popup because it is opened from a menu, whose id scope a popup would be registered under.
+void TimelineViewTab::RenderClipSpeedDialog()
+{
+    if (!speedEditOpen_)
+        return;
+
+    TimelineTrack* track = TrackAt(timeline_.Get(), speedEditTrack_);
+    TimelineClip* clip = track ? GetClip(track, speedEditClip_) : nullptr;
+    if (!clip)
+    {
+        speedEditOpen_ = false;
+        return;
+    }
+
+    ui::SetNextWindowSize(ImVec2(360.0f, 0.0f), ImGuiCond_FirstUseEver);
+    if (speedEditFocusPending_)
+    {
+        ui::SetNextWindowFocus();
+        speedEditFocusPending_ = false;
+    }
+
+    bool open = true;
+    if (!ui::Begin("Clip Speed", &open, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ui::End();
+        speedEditOpen_ = open;
+        return;
+    }
+
+    ui::TextDisabled("%s  (%.2f s, in %.2f s)", GetClipLabel(track, speedEditClip_).c_str(), clip->duration_,
+        clip->clipIn_);
+    const float sourceSpan = clip->duration_ * clip->timeScale_;
+    ui::TextDisabled("source span: %.2f s", sourceSpan);
+    ui::DragFloat("Speed", &speedEditValue_, 0.01f, 0.05f, 20.0f, "%.2f x");
+
+    // The two modes differ in what the block keeps: its length in the timeline, or the amount of
+    // source content it consumes.
+    int mode = speedEditKeepDuration_ ? 0 : 1;
+    ui::RadioButton("Keep clip length (play faster)", &mode, 0);
+    ui::RadioButton("Keep source span (block shrinks)", &mode, 1);
+    speedEditKeepDuration_ = mode == 0;
+
+    if (ui::Button("Apply"))
+    {
+        BeginModify();
+        SetClipSpeed(track, speedEditClip_, speedEditValue_, speedEditKeepDuration_);
+    }
+    ui::SameLine();
+    if (ui::Button("OK") || (ui::IsWindowFocused() && ui::IsKeyPressed(ImGuiKey_Enter)))
+    {
+        BeginModify();
+        SetClipSpeed(track, speedEditClip_, speedEditValue_, speedEditKeepDuration_);
+        open = false;
+    }
+    ui::SameLine();
+    if (ui::Button("Cancel"))
+        open = false;
+
+    ui::End();
+    speedEditOpen_ = open;
 }
 
 void TimelineViewTab::RenderTrackAreaContextMenu()
@@ -3363,9 +4716,7 @@ void TimelineViewTab::RenderTrackAreaContextMenu()
         return;
 
     const bool snapEnabled = !ui::GetIO().KeyCtrl;
-    TimelineTrack* track = timeline_ && popupTrack_ < timeline_->GetTracks().size()
-        ? timeline_->GetTracks()[popupTrack_].Get()
-        : nullptr;
+    TimelineTrack* track = TrackAt(timeline_.Get(), popupTrack_);
 
     if (track)
     {
@@ -3427,11 +4778,7 @@ void TimelineViewTab::RenderTrackAreaContextMenu()
 
         ui::Separator();
         if (ui::Selectable("Delete Track"))
-        {
-            BeginModify();
-            timeline_->RemoveTrack(track);
-            ClearSelection();
-        }
+            RemoveTrackAt(popupTrack_);
     }
     ui::EndPopup();
 }
@@ -3441,11 +4788,11 @@ void TimelineViewTab::RenderClipContextMenu()
     if (!ui::BeginPopup("ClipContextMenu"))
         return;
 
-    TimelineTrack* track = timeline_ && popupTrack_ < timeline_->GetTracks().size()
-        ? timeline_->GetTracks()[popupTrack_].Get()
-        : nullptr;
+    TimelineTrack* track = TrackAt(timeline_.Get(), popupTrack_);
     if (track && popupClip_ < GetNumClips(track))
     {
+        TimelineClip* clip = GetClip(track, popupClip_);
+
         // Property clips with curves offer the curve editor before the ordinary clip actions.
         auto* propertyTrack = AsPropertyTrack(track);
         const bool hasCurves = propertyTrack && popupClip_ < propertyTrack->clips_.size()
@@ -3455,9 +4802,12 @@ void TimelineViewTab::RenderClipContextMenu()
             SelectTrack(popupTrack_);
             selectedClip_ = popupClip_;
             selectedKeyTime_ = -1.0f;
-            curveEditorOpen_ = true;
-            curveEditorFocusPending_ = true;
+            curveEditor_.Open();
         }
+        // The sheet is not bound to a selection, it lists the whole hierarchy, so opening it from a
+        // clip only brings the window up.
+        if (ui::Selectable("Open Dope Sheet"))
+            dopeSheet_.Open();
         if (ui::Selectable("Delete Clip"))
         {
             BeginModify();
@@ -3472,6 +4822,113 @@ void TimelineViewTab::RenderClipContextMenu()
             SelectTrack(popupTrack_);
             selectedClip_ = GetNumClips(track) - 1;
         }
+
+        ui::Separator();
+        // A cut only makes sense strictly inside the block, otherwise it would shave off a clip of
+        // zero length. The entry stays visible with its position in the label so that the command
+        // can be found, and is merely disabled when the cursor is elsewhere.
+        if (clip)
+        {
+            const float cut = cursorTime_ - clip->start_;
+            const bool canSplit = cut > MinClipDuration && clip->duration_ - cut > MinClipDuration;
+            const ea::string label = Format("Split at Cursor (%s)", FormatTime(cursorTime_).c_str());
+            ui::BeginDisabled(!canSplit);
+            if (ui::Selectable(label.c_str()) && canSplit)
+            {
+                BeginModify();
+                SplitClipAt(track, popupClip_, cursorTime_);
+            }
+            ui::EndDisabled();
+            if (ui::Selectable("Ripple Delete"))
+            {
+                BeginModify();
+                RippleDeleteClipAt(track, popupClip_);
+                selectedClip_ = M_MAX_UNSIGNED;
+                selectedKeyTime_ = -1.0f;
+                multiSelectedClips_.Clear();
+            }
+            if (ui::Selectable("Eliminate Gaps"))
+            {
+                BeginModify();
+                EliminateGaps(track);
+            }
+
+            ui::Separator();
+            // Easing: the shape of the two ramps is picked here, their lengths stay editable as
+            // sliders and as the corners of the block.
+            if (ui::BeginMenu("Easing"))
+            {
+                for (unsigned i = 0; TIMELINE_EASE_NAMES[i]; ++i)
+                {
+                    ea::string item = TIMELINE_EASE_NAMES[i];
+                    if (static_cast<unsigned>(clip->ease_) == i)
+                        item += "  *";
+                    if (ui::Selectable(item.c_str()))
+                    {
+                        BeginModify();
+                        clip->ease_ = static_cast<TimelineEase>(i);
+                    }
+                }
+                ui::Separator();
+                if (ui::Selectable("Clear Both Ramps"))
+                {
+                    BeginModify();
+                    clip->easeIn_ = 0.0f;
+                    clip->easeOut_ = 0.0f;
+                }
+                ui::EndMenu();
+            }
+            {
+                // Each ramp may take the length the other one has not used yet.
+                ui::SetNextItemWidth(170.0f);
+                float easeIn = clip->easeIn_;
+                if (ui::SliderFloat("Ease In", &easeIn, 0.0f, Max(clip->duration_ - clip->easeOut_, 0.0f),
+                        "%.2f s")
+                    && easeIn != clip->easeIn_)
+                {
+                    BeginModify();
+                    clip->easeIn_ = easeIn;
+                }
+                ui::SetNextItemWidth(170.0f);
+                float easeOut = clip->easeOut_;
+                if (ui::SliderFloat("Ease Out", &easeOut, 0.0f, Max(clip->duration_ - clip->easeIn_, 0.0f),
+                        "%.2f s")
+                    && easeOut != clip->easeOut_)
+                {
+                    BeginModify();
+                    clip->easeOut_ = easeOut;
+                }
+                ui::SetNextItemWidth(170.0f);
+                float weight = clip->weight_;
+                if (ui::SliderFloat("Weight", &weight, 0.0f, 1.0f, "%.2f") && weight != clip->weight_)
+                {
+                    BeginModify();
+                    clip->weight_ = Clamp(weight, 0.0f, 1.0f);
+                }
+            }
+
+            ui::Separator();
+            // The two speed entries only differ in what the dialog preserves; they open it with the
+            // mode and the current value preset.
+            if (ui::Selectable("Speed (Keep Clip Length)..."))
+            {
+                speedEditOpen_ = true;
+                speedEditFocusPending_ = true;
+                speedEditTrack_ = popupTrack_;
+                speedEditClip_ = popupClip_;
+                speedEditKeepDuration_ = true;
+                speedEditValue_ = clip->timeScale_;
+            }
+            if (ui::Selectable("Speed (Keep Source Span)..."))
+            {
+                speedEditOpen_ = true;
+                speedEditFocusPending_ = true;
+                speedEditTrack_ = popupTrack_;
+                speedEditClip_ = popupClip_;
+                speedEditKeepDuration_ = false;
+                speedEditValue_ = clip->timeScale_;
+            }
+        }
     }
     ui::EndPopup();
 }
@@ -3481,22 +4938,33 @@ void TimelineViewTab::RenderTrackHeaderContextMenu()
     if (!ui::BeginPopup("TrackHeaderContextMenu"))
         return;
 
-    TimelineTrack* track = timeline_ && popupTrack_ < timeline_->GetTracks().size()
-        ? timeline_->GetTracks()[popupTrack_].Get()
-        : nullptr;
+    TimelineTrack* track = TrackAt(timeline_.Get(), popupTrack_);
     if (track)
     {
+        // A locked track only offers to be unlocked again: nothing editable may be reached from
+        // the header menu of a protected row.
+        if (IsTrackLocked(popupTrack_))
+        {
+            if (ui::Selectable("Unlock Track"))
+                ToggleTrackLocked(popupTrack_);
+            ui::EndPopup();
+            return;
+        }
+
         if (ui::Selectable(track->IsMuted() ? "Unmute Track" : "Mute Track"))
         {
             BeginModify();
             track->SetMuted(!track->IsMuted());
         }
         if (ui::Selectable("Delete Track"))
-        {
-            BeginModify();
-            timeline_->RemoveTrack(track);
-            ClearSelection();
-        }
+            RemoveTrackAt(popupTrack_);
+        // Pinning is view state, so it is offered next to the other view entries rather than with
+        // the edits that go through BeginModify.
+        if (ui::Selectable(IsTrackPinned(popupTrack_) ? "Unpin Track Header" : "Pin Track Header"))
+            ToggleTrackPinned(popupTrack_);
+        ui::Separator();
+        if (ui::Selectable("Open Dope Sheet"))
+            dopeSheet_.Open();
     }
     ui::EndPopup();
 }
@@ -3514,19 +4982,192 @@ bool TimelineViewTab::EditString(const char* label, ea::string& value)
     return false;
 }
 
+// Marker list of the whole hierarchy, between the sequencer and the properties panel. Editing a
+// marker here changes exactly the same resource the lane in the sequencer draws, only it stays
+// reachable when the timeline has more markers than the narrow marker row can show at once.
+void TimelineViewTab::RenderMarkersPanel()
+{
+    if (!timeline_)
+        return;
+
+    // Snapshot the tracks first: adding a marker track rebuilds the row list the panel walks over.
+    ea::vector<TimelineMarkerTrack*> markerTracks;
+    unsigned markerCount = 0;
+    for (const TrackRow& row : rows_)
+    {
+        TimelineMarkerTrack* markerTrack = AsMarkerTrack(row.track_);
+        if (!markerTrack)
+            continue;
+        markerTracks.push_back(markerTrack);
+        markerCount += markerTrack->GetNumMarkers();
+    }
+
+    const float panelWidth = ui::GetContentRegionAvail().x;
+    ui::Separator();
+
+    if (ui::ArrowButton("markers_panel_toggle", markersPanelOpen_ ? ImGuiDir_Down : ImGuiDir_Right))
+        markersPanelOpen_ = !markersPanelOpen_;
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Show or hide the marker list.");
+    ui::SameLine();
+    ui::Text("Markers (%u)", markerCount);
+    ui::SameLine();
+    if (ui::SmallButton("Add at cursor"))
+    {
+        TimelineMarkerTrack* target = markerTracks.empty() ? nullptr : markerTracks.front();
+        if (!target)
+        {
+            // A timeline without a marker track gets one on the first use, so the button never has
+            // to explain what a marker track is.
+            AddTrackOfType("Marker", TrackRef{});
+            for (const TrackRow& row : rows_)
+            {
+                TimelineMarkerTrack* created = AsMarkerTrack(row.track_);
+                if (created)
+                {
+                    target = created;
+                    break;
+                }
+            }
+        }
+        if (target)
+        {
+            BeginModify();
+            target->AddMarker(TimelineMarker{MakeUniqueMarkerName(*target), cursorTime_});
+        }
+    }
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Insert a marker at the play head, in the first marker track.\n"
+            "Creates a marker track when the timeline has none.");
+    ui::SameLine();
+    if (ui::SmallButton("Snap to Cursor"))
+    {
+        // Move the marker nearest to the play head onto it, which is how a beat found while
+        // scrubbing gets labelled without leaving the keyboard.
+        TimelineMarker* best = nullptr;
+        float bestDelta = FLT_MAX;
+        for (TimelineMarkerTrack* markerTrack : markerTracks)
+        {
+            for (TimelineMarker& marker : markerTrack->GetMarkers())
+            {
+                const float delta = Abs(marker.time_ - cursorTime_);
+                if (delta < bestDelta)
+                {
+                    bestDelta = delta;
+                    best = &marker;
+                }
+            }
+        }
+        if (best)
+        {
+            BeginModify();
+            best->time_ = cursorTime_;
+        }
+    }
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Move the marker closest to the play head onto it.");
+
+    if (!markersPanelOpen_)
+        return;
+
+    ui::BeginChild("timeline_markers_panel", ImVec2(panelWidth, MarkersPanelHeight), ImGuiChildFlags_None, 0);
+    if (markerTracks.empty())
+    {
+        ui::TextDisabled("No marker track yet.");
+        ui::EndChild();
+        return;
+    }
+
+    // The time column follows the ruler unit, so the list and the sequencer never disagree about
+    // where a marker is. The conversion happens on the way in and out: the resource keeps seconds.
+    const bool inFrames = TimeUnit() == TimelineTimeUnit::Frames;
+
+    if (ui::BeginTable("markers_table", 4,
+        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit))
+    {
+        ui::TableSetupColumn("Track");
+        ui::TableSetupColumn("Marker", ImGuiTableColumnFlags_WidthStretch);
+        ui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed);
+        ui::TableSetupColumn("At", ImGuiTableColumnFlags_WidthFixed);
+        for (TimelineMarkerTrack* markerTrack : markerTracks)
+        {
+            const ea::string trackName = markerTrack->GetName().empty()
+                ? markerTrack->GetTrackTypeName()
+                : markerTrack->GetName();
+            auto& markers = markerTrack->GetMarkers();
+            ui::PushID(markerTrack);
+            for (unsigned mi = 0; mi < markers.size(); ++mi)
+            {
+                TimelineMarker& marker = markers[mi];
+                ui::PushID(static_cast<int>(mi));
+                ui::TableNextRow();
+
+                ui::TableNextColumn();
+                ui::TextUnformatted(trackName.c_str());
+
+                ui::TableNextColumn();
+                {
+                    ea::string name = marker.name_;
+                    if (EditString("##markerPanelName", name))
+                        marker.name_ = name;
+                    // Double clicking the name field jumps the play head, the way clicking a
+                    // marker in the lane does.
+                    if (ui::IsItemHovered() && ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        SetCursorTime(marker.time_);
+                }
+
+                ui::TableNextColumn();
+                {
+                    float shown = inFrames ? marker.time_ * fps_ : marker.time_;
+                    if (ui::DragFloat("##markerPanelTime", &shown, inFrames ? 1.0f : 0.01f, 0.0f, FLT_MAX,
+                            inFrames ? "%.0f f" : "%.2f s"))
+                    {
+                        BeginModify();
+                        marker.time_ = Max(inFrames ? shown / Max(fps_, 1.0f) : shown, 0.0f);
+                    }
+                }
+
+                ui::TableNextColumn();
+                if (ui::SmallButton("Go"))
+                    SetCursorTime(marker.time_);
+                if (ui::IsItemHovered())
+                    ui::SetTooltip("Move the play head to this marker.");
+                ui::SameLine();
+                bool removed = false;
+                if (ui::SmallButton("X"))
+                {
+                    BeginModify();
+                    markerTrack->RemoveMarker(mi);
+                    removed = true;
+                }
+                if (ui::IsItemHovered())
+                    ui::SetTooltip("Delete this marker.");
+                ui::PopID();
+                // Erasing shifts the rest of the list up, so the same index is visited again: the
+                // marker that moved into this row must be drawn here, not skipped.
+                if (removed)
+                    --mi;
+            }
+            ui::PopID();
+        }
+        ui::EndTable();
+    }
+    ui::EndChild();
+}
+
 void TimelineViewTab::RenderSelectionPanel()
 {
     ui::Separator();
     ui::BeginChild("timeline_selection", ImVec2(ui::GetContentRegionAvail().x, 0.0f), ImGuiChildFlags_None, 0);
 
-    if (!timeline_ || selectedTrack_ >= timeline_->GetNumTracks())
+    if (!timeline_ || !TrackAt(timeline_.Get(), selectedTrack_))
     {
         ui::TextDisabled("Select a track to edit its properties");
         ui::EndChild();
         return;
     }
 
-    TimelineTrack* track = timeline_->GetTrack(selectedTrack_);
+    TimelineTrack* track = TrackAt(timeline_.Get(), selectedTrack_);
 
     RenderTrackProperties(track);
     RenderClipProperties(track);
@@ -3623,51 +5264,472 @@ void TimelineViewTab::RenderClipProperties(TimelineTrack* track)
         }
     }
 
-    // Animation clips store their .ani resource reference. Show the path and let the user
-    // change it by dropping an Animation resource from the Project browser onto the text,
-    // instead of a resource dropdown.
-    if (auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(track);
-        animationTrack && selectedClip_ < animationTrack->clips_.size())
+    // Second row: how the block consumes its source and how strongly it blends with the
+    // neighbours of the same track. clipIn_ is what an Alt trimmed left edge moves, timeScale_ is
+    // what the Speed dialog writes, weight_ is the blend factor of an overlap.
     {
-        TimelineAnimationClip& animationClip = animationTrack->clips_[selectedClip_];
-        ea::string path = animationClip.animationRef_.name_;
-        if (path.empty() && animationClip.animation_)
-            path = animationClip.animation_->GetName();
-
-        ui::SameLine();
-        ui::Text("Animation: %s", path.empty() ? "(none)" : path.c_str());
-
-        // ui::Text registers no item ID, so the plain BeginDragDropTarget() would never arm.
-        // Use a custom rect target over the text, like the binding slot does.
-        ui::PushID(static_cast<int>(selectedClip_));
-        if (ui::BeginDragDropTargetCustom(ImRect(ui::GetItemRectMin(), ui::GetItemRectMax()),
-                ui::GetID("clip_animation_drop")))
+        ui::SetNextItemWidth(110.0f);
+        float clipIn = clip->clipIn_;
+        if (ui::DragFloat("In", &clipIn, 0.01f, 0.0f, FLT_MAX, "%.2f s"))
         {
-            const auto* payload = dynamic_cast<const ResourceDragDropPayload*>(DragDropPayload::Get());
-            if (payload && payload->resources_.size() == 1 && payload->resources_[0].HasObjectType<Animation>())
-            {
-                if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str(),
-                        ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-                {
-                    // Highlight the text while a compatible animation hovers over it.
-                    ui::GetWindowDrawList()->AddRect(ui::GetItemRectMin(), ui::GetItemRectMax(),
-                        IM_COL32(255, 200, 0, 255), 2.0f, 0, 2.0f);
+            BeginModify();
+            clip->clipIn_ = Max(clipIn, 0.0f);
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(90.0f);
+        float speed = clip->timeScale_;
+        if (ui::DragFloat("Speed", &speed, 0.01f, 0.05f, 20.0f, "%.2f x"))
+        {
+            BeginModify();
+            clip->timeScale_ = Clamp(speed, 0.05f, 20.0f);
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(120.0f);
+        float weight = clip->weight_;
+        if (ui::SliderFloat("Weight", &weight, 0.0f, 1.0f, "%.2f"))
+        {
+            BeginModify();
+            clip->weight_ = Clamp(weight, 0.0f, 1.0f);
+        }
+    }
+    // Third row: the two ramps of the block. Both are measured in seconds from their own end, so
+    // each of them may only take the length the other one has left over.
+    {
+        ui::SetNextItemWidth(110.0f);
+        float easeIn = clip->easeIn_;
+        if (ui::DragFloat("Ease In", &easeIn, 0.01f, 0.0f, clip->duration_, "%.2f s"))
+        {
+            BeginModify();
+            clip->easeIn_ = Clamp(easeIn, 0.0f, Max(clip->duration_ - clip->easeOut_, 0.0f));
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(110.0f);
+        float easeOut = clip->easeOut_;
+        if (ui::DragFloat("Ease Out", &easeOut, 0.01f, 0.0f, clip->duration_, "%.2f s"))
+        {
+            BeginModify();
+            clip->easeOut_ = Clamp(easeOut, 0.0f, Max(clip->duration_ - clip->easeIn_, 0.0f));
+        }
+        ui::SameLine();
+        int ease = static_cast<int>(clip->ease_);
+        ui::SetNextItemWidth(150.0f);
+        if (ui::Combo("##clipEase", &ease, TIMELINE_EASE_NAMES, static_cast<int>(NameCount(TIMELINE_EASE_NAMES))))
+        {
+            BeginModify();
+            clip->ease_ = static_cast<TimelineEase>(Clamp(ease, 0, static_cast<int>(NameCount(TIMELINE_EASE_NAMES)) - 1));
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Easing function applied inside the in and out ramps of the clip.");
+    }
 
-                    if (ui::GetDragDropPayload()->IsDelivery())
-                    {
-                        if (auto* animation = GetSubsystem<ResourceCache>()
-                                ->GetResource<Animation>(payload->resources_[0].resourceName_))
-                        {
-                            BeginModify();
-                            animationClip.animation_ = animation;
-                            animationClip.animationRef_ = GetResourceRef(animation, Animation::GetTypeStatic());
-                        }
-                    }
+    // Everything that only exists on one track type: assigned resources, blending, payload.
+    RenderClipTypeFields(track);
+}
+
+// Resource field of a clip. The path is drawn as a selectable because ui::Text registers no item
+// id, which would leave the drag&drop target without anything to arm against.
+bool TimelineViewTab::EditResourceDrop(const char* label, const ea::string& path, StringHash objectType,
+    ea::string& result)
+{
+    bool changed = false;
+    ui::PushID(label);
+    const ea::string display = path.empty()
+        ? Format("{}: (none)", label)
+        : Format("{}: {}", label, GetFileNameAndExtension(path).c_str());
+    ui::Selectable(display.c_str(), false);
+    if (ui::IsItemHovered() && !path.empty())
+        ui::SetTooltip("%s", path.c_str());
+    if (ui::BeginDragDropTargetCustom(ImRect(ui::GetItemRectMin(), ui::GetItemRectMax()),
+            ui::GetID("resource_drop")))
+    {
+        const auto* payload = dynamic_cast<const ResourceDragDropPayload*>(DragDropPayload::Get());
+        if (payload && payload->resources_.size() == 1 && payload->resources_[0].HasObjectType(objectType))
+        {
+            if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str(), ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+            {
+                // Highlight the field while a compatible resource hovers over it.
+                ui::GetWindowDrawList()->AddRect(ui::GetItemRectMin(), ui::GetItemRectMax(),
+                    IM_COL32(255, 200, 0, 255), 2.0f, 0, 2.0f);
+                if (ui::GetDragDropPayload()->IsDelivery())
+                {
+                    result = payload->resources_[0].resourceName_;
+                    changed = true;
                 }
             }
-            ui::EndDragDropTarget();
+        }
+        ui::EndDragDropTarget();
+    }
+    ui::PopID();
+    return changed;
+}
+
+// Editable table of a VariantMap. Every row names a key, its type and its value; the type combo
+// rewrites the value of the row so a key never keeps a value of the type it was created with.
+void TimelineViewTab::RenderVariantMapRows(VariantMap& data)
+{
+    static const VariantType variantTypes[] = {VAR_STRING, VAR_FLOAT, VAR_BOOL, VAR_INT, VAR_VECTOR3};
+    static const char* const typeNames[] = {"String", "Float", "Bool", "Int", "Vector3", nullptr};
+
+    if (data.empty())
+        ui::TextDisabled("(no payload)");
+
+    // The keys are snapshotted: renaming or deleting an entry while the table is drawn would
+    // otherwise invalidate the iterator of the row below it. A hash only shows its name when the
+    // string was registered with it, which deserialization of a map always does.
+    ea::vector<StringHash> keys;
+    for (const auto& entry : data)
+        keys.push_back(entry.first);
+
+    unsigned row = 0;
+    for (const StringHash& key : keys)
+    {
+        ui::PushID(static_cast<int>(row));
+        auto found = data.find(key);
+        if (found == data.end())
+        {
+            ui::PopID();
+            ++row;
+            continue;
+        }
+        Variant& value = found->second;
+
+        const ea::string name = key.Reverse().empty() ? key.ToString() : key.Reverse();
+        char nameBuffer[128];
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s", name.c_str());
+        const bool nameEdited = ui::InputText("##key", nameBuffer, sizeof(nameBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue) && name != nameBuffer;
+        ui::SameLine();
+        int typeIndex = 0;
+        for (unsigned i = 0; i < sizeof(variantTypes) / sizeof(variantTypes[0]); ++i)
+        {
+            if (value.GetType() == variantTypes[i])
+            {
+                typeIndex = static_cast<int>(i);
+                break;
+            }
+        }
+        ui::SetNextItemWidth(90.0f);
+        if (ui::Combo("##type", &typeIndex, typeNames, static_cast<int>(NameCount(typeNames))))
+        {
+            BeginModify();
+            value = Variant(variantTypes[typeIndex]);
+        }
+        ui::SameLine();
+        switch (value.GetType())
+        {
+        case VAR_STRING:
+        {
+            ea::string text = value.ToString();
+            if (EditString("##value", text))
+                value = text;
+            break;
+        }
+        case VAR_FLOAT:
+        case VAR_DOUBLE:
+        {
+            float number = value.GetFloat();
+            if (ui::InputFloat("##value", &number))
+            {
+                BeginModify();
+                value = value.GetType() == VAR_DOUBLE ? Variant(static_cast<double>(number)) : Variant(number);
+            }
+            break;
+        }
+        case VAR_BOOL:
+        {
+            bool flag = value.GetBool();
+            if (ui::Checkbox("##value", &flag))
+            {
+                BeginModify();
+                value = flag;
+            }
+            break;
+        }
+        case VAR_INT:
+        {
+            int number = value.GetInt();
+            if (ui::InputInt("##value", &number))
+            {
+                BeginModify();
+                value = number;
+            }
+            break;
+        }
+        case VAR_VECTOR3:
+        {
+            // InputFloat3 writes through a float array, the components of a Vector3 are not
+            // exposed as one.
+            Vector3 vector = value.GetVector3();
+            float components[3] = {vector.x_, vector.y_, vector.z_};
+            if (ui::InputFloat3("##value", components))
+            {
+                BeginModify();
+                value = Vector3(components[0], components[1], components[2]);
+            }
+            break;
+        }
+        default:
+            // Types outside the table are shown but not editable: their text form is not
+            // necessarily parseable, and silently dropping the value would lose data.
+            ui::TextDisabled("%s", value.ToString().c_str());
+            break;
+        }
+
+        ui::SameLine();
+        if (ui::Button("Del"))
+        {
+            BeginModify();
+            data.erase(key);
+        }
+        // A rename is applied after the row was drawn, so the value edited above survives it. It is
+        // refused for a key whose name could not be recovered, because editing its hex display back
+        // would create a second entry instead of renaming the first one.
+        if (nameEdited && !key.Reverse().empty())
+        {
+            BeginModify();
+            const Variant renamed = value;
+            data.erase(key);
+            data[StringHash(nameBuffer)] = renamed;
         }
         ui::PopID();
+        ++row;
+    }
+
+    if (ui::Button("Add Payload Row"))
+    {
+        BeginModify();
+        unsigned index = 1;
+        ea::string name;
+        do
+            name = Format("key{}", index++);
+        while (data.find(StringHash(name)) != data.end());
+        data[StringHash(name)] = Variant(0.0f);
+    }
+}
+
+// Fields that exist only on the clip type of the selected track, one line each.
+void TimelineViewTab::RenderClipTypeFields(TimelineTrack* track)
+{
+    if (auto* animationTrack = dynamic_cast<TimelineAnimationTrack*>(track))
+    {
+        if (selectedClip_ >= animationTrack->clips_.size())
+            return;
+        TimelineAnimationClip& clip = animationTrack->clips_[selectedClip_];
+
+        ea::string path = clip.animationRef_.name_;
+        if (path.empty() && clip.animation_)
+            path = clip.animation_->GetName();
+        ea::string dropped;
+        if (EditResourceDrop("Animation", path, Animation::GetTypeStatic(), dropped))
+        {
+            BeginModify();
+            clip.animation_ = GetSubsystem<ResourceCache>()->GetResource<Animation>(dropped);
+            clip.animationRef_ = GetResourceRef(clip.animation_, Animation::GetTypeStatic());
+        }
+
+        bool additive = clip.additive_;
+        if (ui::Checkbox("Additive", &additive) && additive != clip.additive_)
+        {
+            BeginModify();
+            clip.additive_ = additive;
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(90.0f);
+        int layer = static_cast<int>(clip.layer_);
+        if (ui::DragInt("Layer", &layer, 1.0f, 0, 255) && layer != static_cast<int>(clip.layer_))
+        {
+            BeginModify();
+            clip.layer_ = static_cast<unsigned>(Clamp(layer, 0, 255));
+        }
+
+        // The bone the animation is applied from. Free text because the track may be bound to any
+        // model, but the bone tracks of the assigned animation are offered as the usual choice.
+        EditString("Start Bone", clip.startBone_);
+        ui::SameLine();
+        if (clip.animation_)
+        {
+            ui::SetNextItemWidth(170.0f);
+            if (ui::BeginCombo("##bones", clip.startBone_.empty() ? "(all)" : clip.startBone_.c_str()))
+            {
+                if (ui::Selectable("(all)", clip.startBone_.empty()))
+                {
+                    BeginModify();
+                    clip.startBone_.clear();
+                }
+                // An animation track is keyed by the name of the node or attribute it drives.
+                for (const auto& entry : clip.animation_->GetTracks())
+                {
+                    const ea::string bone = entry.first.Reverse();
+                    if (bone.empty())
+                        continue;
+                    if (ui::Selectable(bone.c_str(), clip.startBone_ == bone))
+                    {
+                        BeginModify();
+                        clip.startBone_ = bone;
+                    }
+                }
+                ui::EndCombo();
+            }
+        }
+    }
+    else if (auto* audioTrack = dynamic_cast<TimelineAudioTrack*>(track))
+    {
+        if (selectedClip_ >= audioTrack->clips_.size())
+            return;
+        TimelineAudioClip& clip = audioTrack->clips_[selectedClip_];
+
+        ea::string path = clip.soundRef_.name_;
+        if (path.empty() && clip.sound_)
+            path = clip.sound_->GetName();
+        ea::string dropped;
+        if (EditResourceDrop("Sound", path, Sound::GetTypeStatic(), dropped))
+        {
+            BeginModify();
+            clip.sound_ = GetSubsystem<ResourceCache>()->GetResource<Sound>(dropped);
+            clip.soundRef_ = GetResourceRef(clip.sound_, Sound::GetTypeStatic());
+        }
+
+        ui::SetNextItemWidth(170.0f);
+        float volume = clip.volume_;
+        if (ui::SliderFloat("Volume", &volume, 0.0f, 1.0f, "%.2f") && volume != clip.volume_)
+        {
+            BeginModify();
+            clip.volume_ = Clamp(volume, 0.0f, 1.0f);
+        }
+        ui::SameLine();
+        ui::SetNextItemWidth(170.0f);
+        float pitch = clip.pitch_;
+        if (ui::SliderFloat("Pitch", &pitch, 0.25f, 4.0f, "%.2f") && pitch != clip.pitch_)
+        {
+            BeginModify();
+            clip.pitch_ = Clamp(pitch, 0.25f, 4.0f);
+        }
+
+        // A sound of known length gives the clip its natural duration; the speed of the clip is
+        // taken into account so the block still ends where the sound ends.
+        if (ui::Button("Fit Clip To Sound"))
+        {
+            if (clip.sound_ && clip.sound_->GetLength() > 0.0f)
+            {
+                BeginModify();
+                clip.duration_ = Max(clip.sound_->GetLength() / Max(clip.timeScale_, 0.05f), MinClipDuration);
+            }
+            else
+            {
+                bindingError_ = "The clip has no sound with a known length";
+                bindingErrorTime_ = ui::GetTime();
+            }
+        }
+    }
+    else if (auto* controlTrack = dynamic_cast<TimelineControlTrack*>(track))
+    {
+        if (selectedClip_ >= controlTrack->clips_.size())
+            return;
+        TimelineControlClip& clip = controlTrack->clips_[selectedClip_];
+
+        ea::string dropped;
+        if (EditResourceDrop("Prefab", clip.prefabRef_.name_, PrefabResource::GetTypeStatic(), dropped))
+        {
+            BeginModify();
+            clip.prefab_ = GetSubsystem<ResourceCache>()->GetResource<PrefabResource>(dropped);
+            clip.prefabRef_ = GetResourceRef(clip.prefab_, PrefabResource::GetTypeStatic());
+        }
+        if (EditResourceDrop("Nested Timeline", clip.timelineRef_.name_, TimelineResource::GetTypeStatic(),
+                dropped))
+        {
+            BeginModify();
+            clip.timeline_ = GetSubsystem<ResourceCache>()->GetResource<TimelineResource>(dropped);
+            clip.timelineRef_ = GetResourceRef(clip.timeline_, TimelineResource::GetTypeStatic());
+        }
+
+        int postPlayback = static_cast<int>(clip.postPlayback_);
+        ui::SetNextItemWidth(170.0f);
+        if (ui::Combo("Post Playback", &postPlayback, TIMELINE_POST_PLAYBACK_NAMES,
+                static_cast<int>(NameCount(TIMELINE_POST_PLAYBACK_NAMES))))
+        {
+            BeginModify();
+            clip.postPlayback_ = static_cast<TimelinePostPlayback>(postPlayback);
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("What happens to the spawned object when the clip ends.");
+    }
+    else if (auto* activationTrack = dynamic_cast<TimelineActivationTrack*>(track))
+    {
+        if (selectedClip_ >= activationTrack->clips_.size())
+            return;
+        TimelineActivationClip& clip = activationTrack->clips_[selectedClip_];
+        bool active = clip.active_;
+        if (ui::Checkbox("Active", &active) && active != clip.active_)
+        {
+            BeginModify();
+            clip.active_ = active;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Enabled state the bound node gets while this clip is active.");
+    }
+    else if (auto* signalTrack = dynamic_cast<TimelineSignalTrack*>(track))
+    {
+        if (selectedClip_ >= signalTrack->clips_.size())
+            return;
+        TimelineSignalClip& clip = signalTrack->clips_[selectedClip_];
+
+        // The names already used anywhere in the timeline are the usual choice for a new signal:
+        // receivers are matched by name, so a typo creates a signal nobody listens for.
+        ea::vector<ea::string> names;
+        ea::vector<TrackRow> allRows;
+        FlattenTracks(timeline_.Get(), allRows);
+        for (const TrackRow& trackRow : allRows)
+        {
+            auto* other = dynamic_cast<TimelineSignalTrack*>(trackRow.track_);
+            if (!other)
+                continue;
+            for (const auto& otherClip : other->clips_)
+            {
+                if (otherClip.signal_.empty()
+                    || ea::find(names.begin(), names.end(), otherClip.signal_) != names.end())
+                    continue;
+                names.push_back(otherClip.signal_);
+            }
+        }
+        EditString("Signal", clip.signal_);
+        if (!names.empty())
+        {
+            ui::SameLine();
+            ui::SetNextItemWidth(170.0f);
+            if (ui::BeginCombo("##signalNames", "Known signals..."))
+            {
+                for (const ea::string& name : names)
+                {
+                    if (ui::Selectable(name.c_str(), clip.signal_ == name))
+                    {
+                        BeginModify();
+                        clip.signal_ = name;
+                    }
+                }
+                ui::EndCombo();
+            }
+        }
+
+        bool emitOnce = clip.emitOnce_;
+        if (ui::Checkbox("Emit Once", &emitOnce) && emitOnce != clip.emitOnce_)
+        {
+            BeginModify();
+            clip.emitOnce_ = emitOnce;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Fire the signal only the first time playback crosses the clip.");
+        ui::SameLine();
+        bool retroactive = clip.retroactive_;
+        if (ui::Checkbox("Retroactive", &retroactive) && retroactive != clip.retroactive_)
+        {
+            BeginModify();
+            clip.retroactive_ = retroactive;
+        }
+        if (ui::IsItemHovered())
+            ui::SetTooltip("Also fire the signal when playback starts past its time.");
+
+        ui::TextDisabled("Payload");
+        RenderVariantMapRows(clip.data_);
     }
 }
 
@@ -3813,533 +5875,28 @@ void TimelineViewTab::RenderPropertyKeyAndCurves(TimelineTrack* track)
     ui::InputText("##newCurveName", newCurveName_, sizeof(newCurveName_));
     ui::SameLine();
     ui::SetNextItemWidth(100.0f);
-    ui::Combo("##newCurveType", &newCurveType_, curveTypeNames, sizeof(curveTypeNames) / sizeof(curveTypeNames[0]));
+    ui::Combo("##newCurveType", &newCurveType_, curveTypeNames, static_cast<int>(kNumCurveTypes));
     ui::SameLine();
     if (ui::Button("Add Curve"))
     {
         const ea::string curveName = newCurveName_;
-        if (!curveName.empty() && newCurveType_ >= 0
-            && newCurveType_ < static_cast<int>(sizeof(curveTypes) / sizeof(curveTypes[0])))
+        if (!curveName.empty() && newCurveType_ >= 0 && newCurveType_ < static_cast<int>(kNumCurveTypes))
         {
             BeginModify();
-            TimelinePropertyCurve curve;
-            curve.name_ = curveName;
-            curve.valueType_ = curveTypes[newCurveType_];
-            // A single key at the clip start with the default value of the type
-            TimelinePropertyKey key;
-            key.time_ = 0.0f;
-            key.value_ = Variant(curve.valueType_);
-            curve.keys_.push_back(key);
-            propertyClip.curves_.push_back(curve);
+            AddPropertyCurve(propertyClip, curveName, curveTypes[newCurveType_]);
             newCurveName_[0] = '\0';
         }
     }
 
     // The canvas itself lives in the standalone "Timeline Curve Editor" window; this only
     // toggles it for the selected clip.
-    if (ui::Button(curveEditorOpen_ ? "Close Curve Editor" : "Open Curve Editor"))
+    if (ui::Button(curveEditor_.IsOpen() ? "Close Curve Editor" : "Open Curve Editor"))
     {
-        curveEditorOpen_ = !curveEditorOpen_;
-        curveEditorFocusPending_ = curveEditorOpen_;
-    }
-}
-
-void TimelineViewTab::RenderCurveEditor(TimelinePropertyClip& propertyClip)
-{
-    if (propertyClip.curves_.empty())
-    {
-        curveEditorOpen_ = false;
-        return;
-    }
-    ImGuiIO& io = ui::GetIO();
-
-    ui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
-    // Opening the window or retargeting it to another clip fits both axes to the new clip.
-    if (curveEditorFocusPending_)
-    {
-        ui::SetNextWindowFocus();
-        curveEditorFocusPending_ = false;
-        curveAutoFit_ = true;
-        curveTimeAutoFit_ = true;
-        curveComponentIndex_ = 0;
-    }
-    bool open = curveEditorOpen_;
-    if (!ui::Begin("Timeline Curve Editor", &open))
-    {
-        // Collapsed or fully clipped: keep the window alive but skip the content.
-        ui::End();
-        curveEditorOpen_ = open;
-        return;
-    }
-
-    // Legend: buttons tinted with the canvas color of the curve pick the curve to edit.
-    if (selectedCurveIndex_ >= propertyClip.curves_.size())
-        selectedCurveIndex_ = 0u;
-    for (unsigned ci = 0; ci < propertyClip.curves_.size(); ++ci)
-    {
-        const auto& curve = propertyClip.curves_[ci];
-        ui::PushID(static_cast<int>(ci));
-        ui::PushStyleColor(ImGuiCol_Button,
-            selectedCurveIndex_ == ci ? GetCurveCanvasColor(ci) : WithAlpha(GetCurveCanvasColor(ci), 70));
-        if (ui::Button(curve.name_.c_str()))
-            selectedCurveIndex_ = ci;
-        ui::PopStyleColor();
-        if (ui::IsItemHovered())
-            ui::SetTooltip("%s (%s)", curve.name_.c_str(), Variant::GetTypeName(curve.valueType_).c_str());
-        ui::PopID();
-        ui::SameLine();
-    }
-    ui::NewLine();
-
-    auto& selectedCurve = propertyClip.curves_[selectedCurveIndex_];
-    const int numComponents = GetCurveComponentCount(selectedCurve.valueType_);
-    if (curveComponentIndex_ >= Max(numComponents, 1))
-        curveComponentIndex_ = 0;
-
-    if (numComponents > 1)
-    {
-        static const char* componentNames[] = {"X", "Y", "Z", "W"};
-        ui::SetNextItemWidth(110.0f);
-        ui::Combo("Component", &curveComponentIndex_, componentNames, numComponents);
-        ui::SameLine();
-    }
-    if (ui::Button("Fit V"))
-        curveAutoFit_ = true;
-    ui::SameLine();
-    if (ui::Button("Fit H"))
-        curveTimeAutoFit_ = true;
-    ui::SameLine();
-    ui::TextDisabled("T %.2f .. %.2f s, Y %.2f .. %.2f", curveTimeMin_, curveTimeMax_, curveViewMin_, curveViewMax_);
-
-    // Canvas: fills the rest of the window. The child does not consume the mouse wheel, so
-    // the wheel zooms the vertical range instead of scrolling the window.
-    ui::BeginChild("##curveCanvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    ImDrawList* drawList = ui::GetWindowDrawList();
-    const ImVec2 canvasMin = ui::GetCursorScreenPos();
-    const ImVec2 canvasSize = ui::GetContentRegionAvail();
-    const ImVec2 canvasMax(canvasMin.x + canvasSize.x, canvasMin.y + canvasSize.y);
-    const bool canvasHovered = ui::IsWindowHovered();
-
-    // The canvas has its own horizontal range in clip-local time. Inheriting the sequencer zoom
-    // would squash a long clip into a few pixels and turn ramps into vertical lines.
-    if (curveTimeAutoFit_)
-    {
-        curveTimeMin_ = 0.0f;
-        curveTimeMax_ = Max(propertyClip.duration_, 0.05f);
-    }
-
-    const auto timeToX = [&](float localTime)
-    {
-        const float range = Max(curveTimeMax_ - curveTimeMin_, 0.0001f);
-        return canvasMin.x + (localTime - curveTimeMin_) / range * canvasSize.x;
-    };
-    const auto xToTime = [&](float x)
-    {
-        const float range = Max(curveTimeMax_ - curveTimeMin_, 0.0001f);
-        return curveTimeMin_ + (x - canvasMin.x) / canvasSize.x * range;
-    };
-    const float pxPerSecond = Max(canvasSize.x / Max(curveTimeMax_ - curveTimeMin_, 0.0001f), 0.0001f);
-
-    // Auto-fit: the vertical range follows the keys of the selected curve component.
-    if (curveAutoFit_ && numComponents > 0)
-    {
-        float lo = FLT_MAX;
-        float hi = -FLT_MAX;
-        for (const TimelinePropertyKey& key : selectedCurve.keys_)
-        {
-            const float value = GetCurveComponentValue(key.value_, curveComponentIndex_);
-            lo = Min(lo, value);
-            hi = Max(hi, value);
-        }
-        if (lo > hi)
-        {
-            lo = -1.0f;
-            hi = 1.0f;
-        }
-        const float pad = Max((hi - lo) * 0.1f, 0.001f);
-        curveViewMin_ = lo - pad;
-        curveViewMax_ = hi + pad;
-    }
-
-    const auto valueToY = [&](float value)
-    {
-        const float range = Max(curveViewMax_ - curveViewMin_, 0.0001f);
-        return canvasMax.y - (value - curveViewMin_) / range * canvasSize.y;
-    };
-    const auto yToValue = [&](float y)
-    {
-        const float range = Max(curveViewMax_ - curveViewMin_, 0.0001f);
-        return curveViewMin_ + (canvasMax.y - y) / canvasSize.y * range;
-    };
-
-    if (canvasHovered && io.MouseWheel != 0.0f)
-    {
-        const float factor = io.MouseWheel > 0.0f ? 1.25f : 0.8f;
-        if (io.KeyCtrl)
-        {
-            // Ctrl + wheel zooms the horizontal range around the mouse position.
-            const float timeUnderMouse = xToTime(io.MousePos.x);
-            curveTimeAutoFit_ = false;
-            curveTimeMin_ = timeUnderMouse - (timeUnderMouse - curveTimeMin_) / factor;
-            curveTimeMax_ = timeUnderMouse + (curveTimeMax_ - timeUnderMouse) / factor;
-        }
+        if (curveEditor_.IsOpen())
+            curveEditor_.Close();
         else
-        {
-            const float valueUnderMouse = yToValue(io.MousePos.y);
-            curveAutoFit_ = false;
-            curveViewMin_ = valueUnderMouse - (valueUnderMouse - curveViewMin_) / factor;
-            curveViewMax_ = valueUnderMouse + (curveViewMax_ - valueUnderMouse) / factor;
-        }
+            curveEditor_.Open();
     }
-
-    // Middle mouse button pans the horizontal range.
-    if (canvasHovered && ui::IsMouseClicked(ImGuiMouseButton_Middle))
-        curveTimePanning_ = true;
-    if (curveTimePanning_)
-    {
-        if (!io.MouseDown[ImGuiMouseButton_Middle])
-            curveTimePanning_ = false;
-        else
-        {
-            const float delta = -io.MouseDelta.x / pxPerSecond;
-            curveTimeAutoFit_ = false;
-            curveTimeMin_ += delta;
-            curveTimeMax_ += delta;
-        }
-    }
-
-    // Background and grid. Time is clip-local, so the clip always starts at 0.
-    drawList->AddRectFilled(canvasMin, canvasMax, IM_COL32(40, 40, 40, 255));
-
-    const float minStepPx = 70.0f;
-    static const float timeSteps[] = {0.1f, 0.2f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f, 60.0f, 120.0f, 300.0f};
-    float timeStep = timeSteps[sizeof(timeSteps) / sizeof(timeSteps[0]) - 1];
-    for (float step : timeSteps)
-    {
-        if (step * pxPerSecond >= minStepPx)
-        {
-            timeStep = step;
-            break;
-        }
-    }
-    for (float time = floorf(curveTimeMin_ / timeStep) * timeStep;; time += timeStep)
-    {
-        const float x = timeToX(time);
-        if (x > canvasMax.x)
-            break;
-        if (x < canvasMin.x)
-            continue;
-        drawList->AddLine(ImVec2(x, canvasMin.y), ImVec2(x, canvasMax.y), ColorTickMinor);
-        drawList->AddText(ImVec2(x + 2.0f, canvasMin.y + 2.0f), ColorTickLabel, FormatTime(time).c_str());
-    }
-
-    for (int i = 0; i <= 4; ++i)
-    {
-        const float value = Lerp(curveViewMin_, curveViewMax_, static_cast<float>(i) / 4.0f);
-        const float y = valueToY(value);
-        drawList->AddLine(ImVec2(canvasMin.x, y), ImVec2(canvasMax.x, y), i == 2 ? ColorTick : ColorTickMinor);
-        const ea::string label = Format("{:.2f}", value);
-        const float labelY = i == 4 ? y + 2.0f : y - ui::GetTextLineHeight();
-        drawList->AddText(ImVec2(canvasMin.x + 2.0f, labelY), ColorTickLabel, label.c_str());
-    }
-
-    // Cursor line when the scrub position is inside the clip.
-    const float cursorLocalTime = cursorTime_ - propertyClip.start_;
-    if (cursorLocalTime >= 0.0f && cursorLocalTime <= propertyClip.duration_)
-    {
-        const float x = timeToX(cursorLocalTime);
-        drawList->AddLine(ImVec2(x, canvasMin.y), ImVec2(x, canvasMax.y), ColorCursor, 1.5f);
-    }
-
-    if (numComponents > 0)
-    {
-        // Key of the selected curve at the selected time, and its Bezier tangent handles.
-        int selectedKeyIndex = -1;
-        for (unsigned i = 0; i < selectedCurve.keys_.size(); ++i)
-        {
-            if (selectedCurve.keys_[i].time_ == selectedKeyTime_)
-            {
-                selectedKeyIndex = static_cast<int>(i);
-                break;
-            }
-        }
-        TimelinePropertyKey* selectedKey = selectedKeyIndex >= 0
-            ? &selectedCurve.keys_[static_cast<unsigned>(selectedKeyIndex)]
-            : nullptr;
-
-        // The out handle reaches right into the next segment, the in handle left into the
-        // previous one. Tangents are dValue/dTime, so both use the same screen mapping.
-        const float handleDx = 50.0f;
-        const float handleDt = handleDx / pxPerSecond;
-        const bool hasOutHandle = selectedKey && selectedKey->interpolation_ == TimelineInterpolation::Bezier
-            && selectedKeyIndex + 1 < static_cast<int>(selectedCurve.keys_.size());
-        const bool hasInHandle = selectedKey && selectedKeyIndex > 0
-            && selectedCurve.keys_[static_cast<unsigned>(selectedKeyIndex - 1)].interpolation_ == TimelineInterpolation::Bezier;
-        ImVec2 outHandlePos{};
-        ImVec2 inHandlePos{};
-        if (hasOutHandle)
-        {
-            const float keyValue = GetCurveComponentValue(selectedKey->value_, curveComponentIndex_);
-            outHandlePos = ImVec2(timeToX(selectedKey->time_ + handleDt),
-                valueToY(keyValue + selectedKey->outTangent_ * handleDt));
-        }
-        if (hasInHandle)
-        {
-            const float keyValue = GetCurveComponentValue(selectedKey->value_, curveComponentIndex_);
-            inHandlePos = ImVec2(timeToX(selectedKey->time_ - handleDt),
-                valueToY(keyValue + selectedKey->inTangent_ * -handleDt));
-        }
-
-        const auto nearPos = [&](const ImVec2& pos)
-        {
-            return Abs(io.MousePos.x - pos.x) <= 6.0f && Abs(io.MousePos.y - pos.y) <= 6.0f;
-        };
-        const auto keyScreenPos = [&](const TimelinePropertyKey& key)
-        {
-            return ImVec2(timeToX(key.time_),
-                valueToY(GetCurveComponentValue(key.value_, curveComponentIndex_)));
-        };
-        const float mouseLocalTime = xToTime(io.MousePos.x);
-
-        // Right-click: a hit key is selected first, otherwise the menu targets the empty time.
-        if (canvasHovered && ui::IsMouseClicked(ImGuiMouseButton_Right))
-        {
-            curvePopupTime_ = Clamp(mouseLocalTime, 0.0f, propertyClip.duration_);
-            curvePopupOnKey_ = false;
-            for (const TimelinePropertyKey& key : selectedCurve.keys_)
-            {
-                if (nearPos(keyScreenPos(key)))
-                {
-                    selectedKeyTime_ = key.time_;
-                    curvePopupTime_ = key.time_;
-                    curvePopupOnKey_ = true;
-                    break;
-                }
-            }
-            ui::OpenPopup("CurveEditorContextMenu");
-        }
-
-        if (canvasHovered && ui::IsMouseClicked(ImGuiMouseButton_Left))
-        {
-            if (ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-            {
-                // Double-click adds a whole key row, unless a key already exists at this time.
-                const float addTime = Clamp(SnapTime(mouseLocalTime, !io.KeyCtrl), 0.0f, propertyClip.duration_);
-                bool exists = false;
-                for (float keyTime : GetPropertyKeyTimes(propertyClip))
-                    exists = exists || Abs(keyTime - addTime) < 0.001f;
-                if (!exists)
-                {
-                    BeginModify();
-                    AddPropertyKeyAt(propertyClip, addTime);
-                    selectedKeyTime_ = addTime;
-                }
-            }
-            else if (hasOutHandle && nearPos(outHandlePos))
-            {
-                BeginModify();
-                curveAutoFit_ = false;
-                curveDragMode_ = CurveDragMode::TangentOut;
-                curveDragCurve_ = selectedCurveIndex_;
-                curveDragKeyTime_ = selectedKeyTime_;
-            }
-            else if (hasInHandle && nearPos(inHandlePos))
-            {
-                BeginModify();
-                curveAutoFit_ = false;
-                curveDragMode_ = CurveDragMode::TangentIn;
-                curveDragCurve_ = selectedCurveIndex_;
-                curveDragKeyTime_ = selectedKeyTime_;
-            }
-            else
-            {
-                // A key starts a drag; empty space drops the key selection.
-                TimelinePropertyKey* hitKey = nullptr;
-                for (TimelinePropertyKey& key : selectedCurve.keys_)
-                {
-                    if (nearPos(keyScreenPos(key)))
-                    {
-                        hitKey = &key;
-                        break;
-                    }
-                }
-                if (hitKey)
-                {
-                    selectedKeyTime_ = hitKey->time_;
-                    BeginModify();
-                    curveAutoFit_ = false;
-                    curveDragMode_ = CurveDragMode::KeyMove;
-                    curveDragCurve_ = selectedCurveIndex_;
-                    curveDragKeyTime_ = hitKey->time_;
-                }
-                else
-                    selectedKeyTime_ = -1.0f;
-            }
-        }
-
-        // Update the active drag. Horizontal key movement shifts the whole row, the vertical
-        // movement changes only the component of the dragged curve.
-        if (curveDragMode_ != CurveDragMode::None)
-        {
-            if (!io.MouseDown[ImGuiMouseButton_Left])
-                curveDragMode_ = CurveDragMode::None;
-            else if (curveDragCurve_ < propertyClip.curves_.size())
-            {
-                auto& dragCurve = propertyClip.curves_[curveDragCurve_];
-                if (curveDragMode_ == CurveDragMode::KeyMove)
-                {
-                    const float localTime = Clamp(SnapTime(mouseLocalTime, !io.KeyCtrl), 0.0f, propertyClip.duration_);
-                    MovePropertyKeysAt(propertyClip, curveDragKeyTime_, localTime);
-                    curveDragKeyTime_ = localTime;
-                    selectedKeyTime_ = localTime;
-                    for (TimelinePropertyKey& key : dragCurve.keys_)
-                    {
-                        if (key.time_ == localTime)
-                        {
-                            Variant value = key.value_;
-                            SetCurveComponentValue(value, curveComponentIndex_, yToValue(io.MousePos.y));
-                            key.value_ = value;
-                            break;
-                        }
-                    }
-                }
-                else if (curveDragMode_ == CurveDragMode::TangentOut || curveDragMode_ == CurveDragMode::TangentIn)
-                {
-                    for (TimelinePropertyKey& key : dragCurve.keys_)
-                    {
-                        if (key.time_ != curveDragKeyTime_)
-                            continue;
-                        const float keyX = timeToX(key.time_);
-                        const float dTime = (io.MousePos.x - keyX) / pxPerSecond;
-                        const float safeDTime = Abs(dTime) < 0.01f ? (dTime < 0.0f ? -0.01f : 0.01f) : dTime;
-                        const float keyValue = GetCurveComponentValue(key.value_, curveComponentIndex_);
-                        const float tangent = (yToValue(io.MousePos.y) - keyValue) / safeDTime;
-                        if (curveDragMode_ == CurveDragMode::TangentOut)
-                            key.outTangent_ = tangent;
-                        else
-                            key.inTangent_ = tangent;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Curves: non-selected ones as thin context lines (component 0), the selected one on
-        // top in full color with its chosen component.
-        drawList->PushClipRect(canvasMin, canvasMax, true);
-        const auto drawCurvePolyline = [&](const TimelinePropertyCurve& curve, int component, ImU32 color, float thickness)
-        {
-            // Sample the whole canvas width; outside the key range the curve holds its last value.
-            ea::vector<ImVec2> points;
-            for (float x = canvasMin.x; x <= canvasMax.x; x += 2.0f)
-            {
-                const float localTime = Clamp(xToTime(x), 0.0f, propertyClip.duration_);
-                points.push_back(ImVec2(x, valueToY(EvaluateCurveComponent(curve, localTime, component))));
-            }
-            drawList->AddPolyline(points.data(), static_cast<int>(points.size()), color, 0, thickness);
-        };
-
-        for (unsigned ci = 0; ci < propertyClip.curves_.size(); ++ci)
-        {
-            if (ci == selectedCurveIndex_)
-                continue;
-            const auto& curve = propertyClip.curves_[ci];
-            if (!curve.keys_.empty() && GetCurveComponentCount(curve.valueType_) > 0)
-                drawCurvePolyline(curve, 0, WithAlpha(GetCurveCanvasColor(ci), 130), 1.5f);
-        }
-        drawCurvePolyline(selectedCurve, curveComponentIndex_, GetCurveCanvasColor(selectedCurveIndex_), 2.5f);
-
-        // Keys of the selected curve; the selected row is highlighted in white.
-        for (const TimelinePropertyKey& key : selectedCurve.keys_)
-        {
-            const ImVec2 pos = keyScreenPos(key);
-            if (pos.x < canvasMin.x || pos.x > canvasMax.x)
-                continue;
-            const bool keySelected = key.time_ == selectedKeyTime_;
-            drawList->AddCircleFilled(pos, 4.0f, keySelected ? ColorKeySelected : GetCurveCanvasColor(selectedCurveIndex_));
-            drawList->AddCircle(pos, 4.0f, IM_COL32(0, 0, 0, 200), 0, 1.5f);
-        }
-
-        // Tangent handles of the selected key.
-        if (selectedKey)
-        {
-            const ImVec2 keyPos = keyScreenPos(*selectedKey);
-            if (hasOutHandle)
-            {
-                drawList->AddLine(keyPos, outHandlePos, IM_COL32(255, 255, 255, 160), 1.5f);
-                drawList->AddCircleFilled(outHandlePos, 3.5f, ColorKeySelected);
-            }
-            if (hasInHandle)
-            {
-                drawList->AddLine(keyPos, inHandlePos, IM_COL32(255, 255, 255, 160), 1.5f);
-                drawList->AddCircleFilled(inHandlePos, 3.5f, ColorKeySelected);
-            }
-        }
-        drawList->PopClipRect();
-    }
-
-    ui::EndChild();
-
-    if (ui::BeginPopup("CurveEditorContextMenu"))
-    {
-        if (curvePopupOnKey_)
-        {
-            if (ui::Selectable("Delete Key"))
-            {
-                BeginModify();
-                RemovePropertyKeysAt(propertyClip, curvePopupTime_);
-                if (selectedKeyTime_ == curvePopupTime_)
-                    selectedKeyTime_ = -1.0f;
-            }
-            ui::Separator();
-            // Interpolation applies to the whole key row, like the properties panel does.
-            TimelinePropertyKey* popupKey = nullptr;
-            for (auto& curve : propertyClip.curves_)
-            {
-                for (auto& key : curve.keys_)
-                {
-                    if (key.time_ == curvePopupTime_)
-                    {
-                        popupKey = &key;
-                        break;
-                    }
-                }
-                if (popupKey)
-                    break;
-            }
-            if (popupKey)
-            {
-                constexpr int interpCount = static_cast<int>(sizeof(TIMELINE_INTERPOLATION_NAMES) / sizeof(const char*)) - 1;
-                for (int i = 0; i < interpCount; ++i)
-                {
-                    const auto interp = static_cast<TimelineInterpolation>(i);
-                    if (ui::Selectable(TIMELINE_INTERPOLATION_NAMES[i], popupKey->interpolation_ == interp))
-                    {
-                        BeginModify();
-                        for (auto& curve : propertyClip.curves_)
-                            for (auto& key : curve.keys_)
-                                if (key.time_ == curvePopupTime_)
-                                    key.interpolation_ = interp;
-                    }
-                }
-            }
-        }
-        else
-        {
-            const ea::string label = Format("Add Key at {}", FormatTime(curvePopupTime_).c_str());
-            if (ui::Selectable(label.c_str()))
-            {
-                BeginModify();
-                AddPropertyKeyAt(propertyClip, curvePopupTime_);
-                selectedKeyTime_ = curvePopupTime_;
-            }
-        }
-        ui::EndPopup();
-    }
-
-    ui::End();
-    curveEditorOpen_ = open;
 }
 
 }

@@ -90,7 +90,7 @@ void TimelineActivationTrack::Evaluate(TimelineTrackContext& context)
     if (IsInactive(context))
         return;
 
-    Node* node = GetBoundNode(context.player_.ResolveTrackBinding(*this, context.runtime_));
+    Node* node = GetBoundNode(context.player_.ResolveTrackBinding(*this, context.runtime_, context.bindingRoot_));
     if (!node)
         return;
 

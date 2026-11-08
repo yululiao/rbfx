@@ -6,6 +6,7 @@
 
 #include <Urho3D/Core/ObjectCategory.h>
 #include <Urho3D/IO/ArchiveSerialization.h>
+#include <Urho3D/Timeline/TimelinePlayer.h>
 #include <Urho3D/Timeline/TimelineTrack.h>
 
 namespace Urho3D
@@ -29,6 +30,14 @@ void TimelineTrack::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "binding", bindingPath_);
     SerializeOptionalValue(archive, "weight", weight_, 1.0f);
     SerializeOptionalValue(archive, "muted", muted_, false);
+}
+
+bool TimelineTrack::IsInactive(const TimelineTrackContext& context) const
+{
+    // The player keeps a per track silence override used by the editor's solo buttons: it must not
+    // be stored on the track because the resource is shared between the editor and the game.
+    return context.player_.IsTrackSilenced(this) || muted_ || weight_ <= M_EPSILON
+        || context.weightScale_ <= M_EPSILON;
 }
 
 ea::unique_ptr<TimelineTrackRuntime> TimelineTrack::CreateRuntime() const
@@ -109,10 +118,16 @@ void TimelineGroupTrack::Evaluate(TimelineTrackContext& context)
 
     const float childWeightScale = IsInactive(context) ? 0.0f : context.weightScale_ * weight_;
 
+    // Resolve the group's own binding with the enclosing group as the root, so nested groups chain
+    // up, and hand the result to the children as their binding root. Child tracks resolve their
+    // paths relative to it, and an empty child path inherits the group's object outright.
+    Object* bindingRoot = context.player_.ResolveTrackBinding(*this, runtime, context.bindingRoot_);
+
     for (unsigned i = 0; i < tracks_.size(); ++i)
     {
-        TimelineTrackContext childContext{context.player_, *runtime.children_[i], context.time_, context.prevTime_,
-            context.deltaTime_, childWeightScale, context.playing_, context.firstEvaluation_};
+        TimelineTrackContext childContext{context.player_, *runtime.children_[i], context.time_,
+            context.prevTime_, context.deltaTime_, childWeightScale, context.playing_,
+            context.firstEvaluation_, bindingRoot};
         tracks_[i]->Evaluate(childContext);
     }
 }

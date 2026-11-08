@@ -99,7 +99,7 @@ AnimationController* TimelineAnimationTrack::ResolveController(TimelineTrackCont
     AnimationController* controller = runtime.controller_;
     if (!controller || context.runtime_.bindingDirty_)
     {
-        Object* bound = context.player_.ResolveTrackBinding(*this, context.runtime_);
+        Object* bound = context.player_.ResolveTrackBinding(*this, context.runtime_, context.bindingRoot_);
         if (auto* asController = dynamic_cast<AnimationController*>(bound))
             controller = asController;
         else if (auto* asNode = dynamic_cast<Node*>(bound))
