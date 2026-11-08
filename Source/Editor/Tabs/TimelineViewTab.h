@@ -88,6 +88,8 @@ private:
     /// Play/Pause/Stop and Record buttons followed by the recording state.
     void RenderPlaybackControls();
     void RenderSequencer();
+    /// Unity-style zoom bar at the bottom-left: drag the middle to pan, drag the ends to zoom.
+    void RenderZoomSlider();
     void RenderRuler(float duration, float majorStep, float minorStep, float trackX0, float trackX1);
     /// Frame-number band above the time ruler. Shares the horizontal mapping and scrub behavior.
     void RenderFrameRuler(float duration, float trackX0, float trackX1);
@@ -187,6 +189,16 @@ private:
     float cursorTime_{};           // Scrub position
     /// Frame rate of the frame ruler, used to convert seconds to whole frames.
     float fps_{60.0f};
+
+    // Zoom bar interaction state.
+    enum class ZoomDragMode
+    {
+        None,
+        Pan,
+        LeftEdge,
+        RightEdge
+    };
+    ZoomDragMode zoomDragMode_{ZoomDragMode::None};
 
     // Selection. Clip/key indices are relative to the selected track.
     unsigned selectedTrack_{M_MAX_UNSIGNED};

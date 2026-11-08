@@ -81,6 +81,7 @@ constexpr float BaseClipRounding = 3.0f;
 constexpr float BaseEdgeGrabWidth = 8.0f;
 constexpr float BaseKeySize = 8.0f;
 constexpr float BaseBindingSlotWidth = 76.0f;
+constexpr float BaseZoomBarHeight = 9.0f;
 
 // DPI-scaled copies actually used by layout, rendering and hit-testing. They stay consistent
 // across all of them because every row/hit rect is derived from these same values.
@@ -94,6 +95,7 @@ float ClipRounding = BaseClipRounding;
 float EdgeGrabWidth = BaseEdgeGrabWidth;
 float KeySize = BaseKeySize;
 float BindingSlotWidth = BaseBindingSlotWidth;
+float ZoomBarHeight = BaseZoomBarHeight;
 
 // Time/zoom constants: not physical sizes, so they are not DPI-scaled.
 constexpr float MinClipDuration = 0.05f;
@@ -116,6 +118,7 @@ void ApplyLayoutScale(float scale)
     EdgeGrabWidth = BaseEdgeGrabWidth * scale;
     KeySize = BaseKeySize * scale;
     BindingSlotWidth = BaseBindingSlotWidth * scale;
+    ZoomBarHeight = BaseZoomBarHeight * scale;
 }
 
 // Truncate text with an ellipsis so it fits within maxWidth pixels. Used for clip labels so a
@@ -1693,10 +1696,13 @@ void TimelineViewTab::RenderContent()
     const ImVec2 avail = ui::GetContentRegionAvail();
     const float maxPanelHeight = Max(avail.y - 140.0f - splitterHeight, 60.0f);
     selectionPanelHeight_ = Clamp(selectionPanelHeight_, 60.0f, maxPanelHeight);
-    const float sequencerHeight = Max(avail.y - selectionPanelHeight_ - splitterHeight, 120.0f);
+    const float sequencerHeight = Max(avail.y - selectionPanelHeight_ - splitterHeight - ZoomBarHeight, 120.0f);
     ui::BeginChild("timeline_sequencer", ImVec2(avail.x, sequencerHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
     RenderSequencer();
     ui::EndChild();
+
+    // Unity-style zoom bar between the sequencer and the splitter.
+    RenderZoomSlider();
 
     // Drag handle between the sequencer and the properties panel.
     ImGuiIO& io = ui::GetIO();
@@ -1812,12 +1818,6 @@ void TimelineViewTab::RenderToolbar()
     }
 
     ui::SameLine();
-    if (ui::Button("+"))
-        pixelsPerSecond_ = Min(pixelsPerSecond_ * 1.5f, MaxPixelsPerSecond);
-    ui::SameLine();
-    if (ui::Button("-"))
-        pixelsPerSecond_ = Max(pixelsPerSecond_ / 1.5f, MinPixelsPerSecond);
-    ui::SameLine();
     if (ui::Button("Fit"))
     {
         const float trackAreaWidth = Max(ui::GetContentRegionAvail().x - HeaderWidth - 20.0f, 100.0f);
@@ -1835,6 +1835,115 @@ void TimelineViewTab::RenderToolbar()
         ui::SameLine();
         ui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", bindingError_.c_str());
     }
+}
+
+void TimelineViewTab::RenderZoomSlider()
+{
+    const float duration = Max(timeline_->GetDuration(), 0.1f);
+
+    // The zoom bar maps the whole timeline across the full window width. The visible range is
+    // computed from the canvas width exactly like the sequencer maps time to pixels. The bar is
+    // full when the view covers twice the duration (half the Fit zoom), so zooming out from Fit
+    // still leaves room to see all clips with margins around them.
+    const float trackWidth = Max(ui::GetContentRegionAvail().x - HeaderWidth, 100.0f);
+    const float maxVisibleDuration = duration * 2.0f;
+    const float visibleDuration = Clamp(trackWidth / pixelsPerSecond_, 0.0f, maxVisibleDuration);
+    const float maxViewStart = Max(duration - visibleDuration, 0.0f);
+    viewStartTime_ = Clamp(viewStartTime_, 0.0f, maxViewStart);
+
+    const ImVec2 barPos = ui::GetCursorScreenPos();
+    const float barWidth = Max(ui::GetContentRegionAvail().x, 100.0f);
+    const ImRect barRect{barPos, ImVec2(barPos.x + barWidth, barPos.y + ZoomBarHeight)};
+    const float cornerRadius = ZoomBarHeight * 0.5f;
+
+    // Current view window inside the bar. The window position is mapped on the content range
+    // (the whole bar is the timeline duration), while its width is mapped so that a full bar
+    // means twice the duration (half the Fit zoom): zooming out from Fit still leaves room.
+    const float winX0 = barPos.x + viewStartTime_ / duration * barWidth;
+    const float winX1 = Min(winX0 + visibleDuration / maxVisibleDuration * barWidth, barRect.Max.x);
+
+    ImGuiIO& io = ui::GetIO();
+    ui::InvisibleButton("timeline_zoom_slider", ImVec2(barWidth, ZoomBarHeight));
+    const bool hovered = ui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    const float mouseX = io.MousePos.x;
+
+    constexpr float kHandleWidth = 8.0f;
+    const bool overLeftHandle = hovered && mouseX >= winX0 && mouseX <= winX0 + kHandleWidth;
+    const bool overRightHandle = hovered && mouseX >= winX1 - kHandleWidth && mouseX <= winX1;
+    const bool overWindow = hovered && mouseX > winX0 + kHandleWidth && mouseX < winX1 - kHandleWidth;
+
+    if (zoomDragMode_ == ZoomDragMode::None)
+    {
+        if (overLeftHandle || overRightHandle)
+            ui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        else if (overWindow)
+            ui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+        if (ui::IsItemClicked(ImGuiMouseButton_Left))
+        {
+            if (overLeftHandle)
+                zoomDragMode_ = ZoomDragMode::LeftEdge;
+            else if (overRightHandle)
+                zoomDragMode_ = ZoomDragMode::RightEdge;
+            else if (overWindow)
+                zoomDragMode_ = ZoomDragMode::Pan;
+            else
+            {
+                // Clicking outside the window jumps the view there.
+                const float clickTime = (mouseX - barPos.x) / barWidth * duration;
+                viewStartTime_ = Clamp(clickTime - visibleDuration * 0.5f, 0.0f, maxViewStart);
+            }
+        }
+    }
+    else
+    {
+        if (!io.MouseDown[ImGuiMouseButton_Left])
+        {
+            zoomDragMode_ = ZoomDragMode::None;
+        }
+        else
+        {
+            const float viewEndTime = viewStartTime_ + visibleDuration;
+            if (zoomDragMode_ == ZoomDragMode::Pan)
+            {
+                viewStartTime_ = Clamp(viewStartTime_ + io.MouseDelta.x / barWidth * duration, 0.0f, maxViewStart);
+            }
+            else if (zoomDragMode_ == ZoomDragMode::LeftEdge)
+            {
+                // Keep the right edge where it is, so the view is anchored to it while zooming.
+                const float newStart = Clamp((mouseX - barPos.x) / barWidth * duration, 0.0f, viewEndTime - SnapStep);
+                const float newVisible = Max(viewEndTime - newStart, SnapStep);
+                pixelsPerSecond_ = Clamp(trackWidth / newVisible, MinPixelsPerSecond, MaxPixelsPerSecond);
+                viewStartTime_ = newStart;
+            }
+            else if (zoomDragMode_ == ZoomDragMode::RightEdge)
+            {
+                // Keep the left edge where it is, so the view is anchored to it while zooming.
+                const float newEnd = viewStartTime_ + (mouseX - winX0) / barWidth * maxVisibleDuration;
+                const float clampedEnd = Clamp(newEnd, viewStartTime_ + SnapStep, maxVisibleDuration);
+                const float newVisible = Max(clampedEnd - viewStartTime_, SnapStep);
+                pixelsPerSecond_ = Clamp(trackWidth / newVisible, MinPixelsPerSecond, MaxPixelsPerSecond);
+            }
+        }
+    }
+
+    // Draw the track, the view window and its edge handles.
+    ImDrawList* drawList = ui::GetWindowDrawList();
+    drawList->AddRectFilled(barRect.Min, barRect.Max, IM_COL32(45, 45, 52, 255), cornerRadius);
+    const ImRect winRect{ImVec2(winX0, barPos.y + 2.0f), ImVec2(winX1, barPos.y + ZoomBarHeight - 2.0f)};
+    const ImU32 winColor = zoomDragMode_ != ZoomDragMode::None || hovered
+        ? IM_COL32(110, 130, 165, 200)
+        : IM_COL32(90, 105, 135, 160);
+    const float winCornerRadius = Max(ZoomBarHeight * 0.5f - 2.0f, 0.5f);
+    drawList->AddRectFilled(winRect.Min, winRect.Max, winColor, winCornerRadius);
+    drawList->AddRect(winRect.Min, winRect.Max, IM_COL32(170, 185, 210, 255), winCornerRadius);
+    drawList->AddLine(ImVec2(winX0 + 1.0f, barPos.y + 3.0f), ImVec2(winX0 + 1.0f, barPos.y + ZoomBarHeight - 3.0f),
+        IM_COL32(255, 255, 255, 230), 1.5f);
+    drawList->AddLine(ImVec2(winX1 - 1.0f, barPos.y + 3.0f), ImVec2(winX1 - 1.0f, barPos.y + ZoomBarHeight - 3.0f),
+        IM_COL32(255, 255, 255, 230), 1.5f);
+
+    if (ui::IsItemHovered())
+        ui::SetTooltip("Drag the middle to pan, drag the ends to zoom, click to jump");
 }
 
 void TimelineViewTab::RenderSequencer()
