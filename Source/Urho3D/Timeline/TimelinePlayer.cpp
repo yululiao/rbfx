@@ -9,6 +9,7 @@
 #include <Urho3D/Graphics/AnimationController.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Node.h>
+#include <Urho3D/Scene/Serializable.h>
 #include <Urho3D/Timeline/TimelineAnimationTrack.h>
 #include <Urho3D/Timeline/TimelineEvents.h>
 #include <Urho3D/Timeline/TimelinePlayer.h>
@@ -280,13 +281,55 @@ Object* TimelinePlayer::ResolveBindingPath(const ea::string& path) const
                 return component;
             }
             else
-                return nullptr;
+            {
+                // Resource attribute tail of a component, e.g. "Weapon/StaticModel/Material/0".
+                Component* component = node->GetComponent(StringHash(segment));
+                return component ? ResolveResourceAttribute(component, path.substr(end + 1)) : nullptr;
+            }
         }
 
         begin = end + 1;
     }
 
     return node;
+}
+
+Object* TimelinePlayer::ResolveResourceAttribute(Component* component, const ea::string& tail) const
+{
+    // Tail form: "AttributeName" or "AttributeName/index".
+    const auto slash = tail.find('/');
+    const ea::string attrName = tail.substr(0, slash);
+    const ea::string indexStr = slash != ea::string::npos ? tail.substr(slash + 1) : ea::string{};
+
+    const auto* attributes = component->GetAttributes();
+    if (!attributes)
+        return nullptr;
+
+    for (const AttributeInfo& info : *attributes)
+    {
+        if (info.name_ != attrName)
+            continue;
+
+        Variant value;
+        component->OnGetAttribute(info, value);
+        auto* cache = GetSubsystem<ResourceCache>();
+
+        if (info.type_ == VAR_RESOURCEREF && indexStr.empty())
+        {
+            if (value.IsEmpty())
+                return nullptr;
+            return cache->GetResource(value.GetResourceRef().type_, value.GetResourceRef().name_);
+        }
+        if (info.type_ == VAR_RESOURCEREFLIST)
+        {
+            const ResourceRefList& list = value.GetResourceRefList();
+            const unsigned index = ToUInt(indexStr, M_MAX_UNSIGNED);
+            if (index < list.names_.size())
+                return cache->GetResource(list.type_, list.names_[index]);
+        }
+        return nullptr;
+    }
+    return nullptr;
 }
 
 void TimelinePlayer::RemoveAnimationInstance(AnimationController& controller, unsigned index)

@@ -29,6 +29,7 @@
 #include <Urho3D/Core/StringUtils.h>
 #include <Urho3D/Graphics/Animation.h>
 #include <Urho3D/Graphics/AnimationController.h>
+#include <Urho3D/Graphics/Material.h>
 #include <Urho3D/Graphics/Texture2D.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
@@ -736,6 +737,56 @@ bool IsRecordableType(VariantType type)
     }
 }
 
+// Whether the component references at least one material resource through its attributes.
+bool HasComponentMaterial(Component& component)
+{
+    const auto* attributes = component.GetAttributes();
+    if (!attributes)
+        return false;
+    for (const AttributeInfo& info : *attributes)
+    {
+        Variant value;
+        if (info.type_ == VAR_RESOURCEREF)
+        {
+            component.OnGetAttribute(info, value);
+            if (!value.IsEmpty())
+            {
+                const ResourceRef& ref = value.GetResourceRef();
+                if (ref.type_ == Material::GetTypeStatic() && !ref.name_.empty())
+                    return true;
+            }
+        }
+        else if (info.type_ == VAR_RESOURCEREFLIST)
+        {
+            component.OnGetAttribute(info, value);
+            const ResourceRefList& list = value.GetResourceRefList();
+            if (list.type_ == Material::GetTypeStatic())
+            {
+                for (const ea::string& name : list.names_)
+                {
+                    if (!name.empty())
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Whether the object has at least one attribute of a recordable type.
+bool HasRecordableAttribute(Serializable& object)
+{
+    const auto* attributes = object.GetAttributes();
+    if (!attributes)
+        return false;
+    for (const AttributeInfo& info : *attributes)
+    {
+        if (IsRecordableType(info.type_))
+            return true;
+    }
+    return false;
+}
+
 // Whether any property track can record: there is a bound Serializable target with at least
 // one recordable attribute. Recording no longer requires the cursor to be over an existing
 // clip: a clip is created at the cursor when the first change is detected.
@@ -753,6 +804,29 @@ bool HasRecordableProperty(TimelinePlayer* player, TimelineResource* timeline, f
         auto* target = dynamic_cast<Serializable*>(ResolveTrackTarget(player, track));
         if (!target)
             continue;
+
+        // A bound Material records its shader parameters and texture units.
+        if (auto* material = dynamic_cast<Material*>(target))
+        {
+            if (!material->GetShaderParameters().empty() || !material->GetTextures().empty())
+                return true;
+            continue;
+        }
+
+        // A bound node or component also records the materials of its components.
+        if (auto* node = dynamic_cast<Node*>(target))
+        {
+            for (const SharedPtr<Component>& component : node->GetComponents())
+            {
+                if (component && (HasComponentMaterial(*component) || HasRecordableAttribute(*component)))
+                    return true;
+            }
+        }
+        else if (auto* component = dynamic_cast<Component*>(target))
+        {
+            if (HasComponentMaterial(*component) || HasRecordableAttribute(*component))
+                return true;
+        }
 
         const auto* attributes = target->GetAttributes();
         if (!attributes)
@@ -1381,6 +1455,11 @@ void TimelineViewTab::LogRecordingSetup(TimelinePlayer* player)
             else if (auto* component = dynamic_cast<Component*>(bound))
                 description = Format("{} of '{}'", component->GetTypeName().c_str(),
                     component->GetNode() ? component->GetNode()->GetName().c_str() : "(no node)");
+            else if (auto* material = dynamic_cast<Material*>(bound))
+            {
+                const ea::string materialName = GetResourceName(material);
+                description = Format("Material '{}'", materialName.empty() ? "(unnamed)" : materialName.c_str());
+            }
             URHO3D_LOGINFO("Timeline: property track {} records attributes of the {} bound to '{}'.",
                 ti, description.c_str(), track->GetBindingPath().c_str());
             AppendRecordingTargetHint(ti, description);
@@ -1426,6 +1505,156 @@ void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
         return;
 
     bool modificationStarted = false;
+
+    // Shared capture-and-key logic for one channel of one track: sample the current value,
+    // compare it to the last one, and write a key at the cursor when it changed.
+    const auto captureChannel = [&](TimelinePropertyTrack& track, Object& target, const ea::string& channelName,
+        VariantType valueType, const Variant& value)
+    {
+        const ea::string cacheKey = Format("{}:{}", static_cast<const void*>(&target), channelName);
+        const auto iter = recordedValues_.find(cacheKey);
+        if (iter == recordedValues_.end())
+        {
+            // The first sample only establishes the baseline value captured when recording
+            // started; it never creates keys.
+            RecordedChannel channel;
+            channel.baseline_ = value;
+            channel.last_ = value;
+            recordedValues_[cacheKey] = channel;
+            return;
+        }
+        if (iter->second.last_ == value)
+            return;
+
+        if (!modificationStarted)
+        {
+            BeginModify();
+            modificationStarted = true;
+        }
+
+        float localTime = 0.0f;
+        TimelinePropertyClip* clip = FindOrCreateClipAtCursor(track, localTime);
+
+        TimelinePropertyCurve* curve = nullptr;
+        for (TimelinePropertyCurve& c : clip->curves_)
+        {
+            if (c.name_ == channelName)
+            {
+                curve = &c;
+                break;
+            }
+        }
+        if (!curve)
+        {
+            TimelinePropertyCurve newCurve;
+            newCurve.name_ = channelName;
+            newCurve.valueType_ = valueType;
+            clip->curves_.push_back(newCurve);
+            curve = &clip->curves_.back();
+        }
+
+        // The Unity-style take: when nothing has been keyed on this curve yet, the
+        // baseline at recording start becomes a key at the clip start, so the movement
+        // is interpolated from where the object was. If keys already exist, the change
+        // is captured only at the cursor.
+        if (curve->keys_.empty())
+            SetCurveKeyValue(*curve, 0.0f, iter->second.baseline_);
+        if (SetCurveKeyValue(*curve, localTime, value))
+        {
+            recordedKeyCount_++;
+            URHO3D_LOGINFO("Timeline: recorded key '{}' of {} at {:.3f}s (clip starts at {:.3f}s).",
+                channelName, target.GetTypeName().c_str(), cursorTime_, clip->start_);
+        }
+
+        iter->second.last_ = value;
+    };
+
+    // Capture the shader parameters and texture units of one material, prefixed so that
+    // curves of the same material under different components stay distinct.
+    const auto captureMaterial = [&](Material& material, TimelinePropertyTrack& track, const ea::string& channelPrefix)
+    {
+        for (const auto& [hash, param] : material.GetShaderParameters())
+        {
+            (void)hash;
+            if (IsRecordableType(param.value_.GetType()))
+                captureChannel(track, material, Format("{}ShaderParameters/{}", channelPrefix, param.name_),
+                    param.value_.GetType(), param.value_);
+        }
+        for (const auto& [hash, texture] : material.GetTextures())
+        {
+            (void)hash;
+            if (!texture.value_)
+                continue;
+            const ea::string textureName = GetResourceName(texture.value_);
+            if (textureName.empty())
+                continue;
+            captureChannel(track, material, Format("{}Textures/{}", channelPrefix, texture.name_),
+                VAR_RESOURCEREF, Variant(ResourceRef(texture.value_->GetType(), textureName)));
+        }
+    };
+
+    // Capture all materials referenced by resource attributes of a component (e.g. the
+    // "Material" list of a StaticModel), addressed as "Type/Attr[/Index]/...".
+    const auto captureComponentMaterials = [&](Component& component, TimelinePropertyTrack& track)
+    {
+        const auto* componentAttributes = component.GetAttributes();
+        if (!componentAttributes)
+            return;
+        auto* cache = component.GetSubsystem<ResourceCache>();
+        for (const AttributeInfo& info : *componentAttributes)
+        {
+            if (info.type_ == VAR_RESOURCEREF)
+            {
+                Variant refValue;
+                component.OnGetAttribute(info, refValue);
+                if (refValue.IsEmpty())
+                    continue;
+                const ResourceRef& ref = refValue.GetResourceRef();
+                if (ref.type_ != Material::GetTypeStatic() || ref.name_.empty())
+                    continue;
+                if (auto* material = cache->GetResource<Material>(ref.name_))
+                    captureMaterial(*material, track, Format("{}/{}/", component.GetTypeName(), info.name_));
+            }
+            else if (info.type_ == VAR_RESOURCEREFLIST)
+            {
+                Variant refValue;
+                component.OnGetAttribute(info, refValue);
+                const ResourceRefList& list = refValue.GetResourceRefList();
+                if (list.type_ != Material::GetTypeStatic())
+                    continue;
+                for (unsigned i = 0; i < list.names_.size(); ++i)
+                {
+                    if (list.names_[i].empty())
+                        continue;
+                    if (auto* material = cache->GetResource<Material>(list.names_[i]))
+                        captureMaterial(*material, track, Format("{}/{}/{}/", component.GetTypeName(), info.name_, i));
+                }
+            }
+        }
+    };
+
+    // Capture the recordable attributes of one component. Node-bound tracks prefix the channel
+    // with the component type (and an index when several components share the type) so curves
+    // resolve back to the right component; component-bound tracks use the bare attribute name
+    // because the component itself is the binding target.
+    const auto captureComponentAttributes = [&](Component& component, TimelinePropertyTrack& track,
+        const ea::string& channelPrefix)
+    {
+        const auto* componentAttributes = component.GetAttributes();
+        if (!componentAttributes)
+            return;
+        for (const AttributeInfo& info : *componentAttributes)
+        {
+            if (!IsRecordableType(info.type_))
+                continue;
+            Variant value;
+            component.OnGetAttribute(info, value);
+            if (value.IsEmpty())
+                continue;
+            captureChannel(track, component, Format("{}{}", channelPrefix, info.name_), info.type_, value);
+        }
+    };
+
     for (unsigned ti = 0; ti < timeline_->GetNumTracks(); ++ti)
     {
         TimelinePropertyTrack* track = AsPropertyTrack(timeline_->GetTrack(ti));
@@ -1435,6 +1664,44 @@ void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
         auto* target = dynamic_cast<Serializable*>(ResolveTrackTarget(player, track));
         if (!target)
             continue;
+
+        if (auto* material = dynamic_cast<Material*>(target))
+        {
+            // Materials have no reflected attributes: capture their shader parameters and
+            // texture units, addressed by prefixed channel names.
+            captureMaterial(*material, *track, ea::string{});
+            continue;
+        }
+
+        // A bound node or component also captures the materials of its components, so editing
+        // a material in the Inspector records keys without binding the material itself.
+        if (auto* node = dynamic_cast<Node*>(target))
+        {
+            // Count same-type components to index their channels only when ambiguous.
+            ea::unordered_map<StringHash, unsigned> typeCounts;
+            for (const SharedPtr<Component>& component : node->GetComponents())
+            {
+                if (component)
+                    ++typeCounts[component->GetType()];
+            }
+            ea::unordered_map<StringHash, unsigned> typeIndices;
+            for (const SharedPtr<Component>& component : node->GetComponents())
+            {
+                if (!component)
+                    continue;
+                captureComponentMaterials(*component, *track);
+                const unsigned count = typeCounts[component->GetType()];
+                const unsigned index = typeIndices[component->GetType()]++;
+                captureComponentAttributes(*component, *track,
+                    count > 1 ? Format("{}/{}/", component->GetTypeName(), index)
+                              : Format("{}/", component->GetTypeName()));
+            }
+        }
+        else if (auto* component = dynamic_cast<Component*>(target))
+        {
+            captureComponentMaterials(*component, *track);
+            captureComponentAttributes(*component, *track, ea::string{});
+        }
 
         const auto* attributes = target->GetAttributes();
         if (!attributes)
@@ -1447,63 +1714,7 @@ void TimelineViewTab::UpdateRecording(TimelinePlayer* player)
 
             Variant value;
             target->OnGetAttribute(info, value);
-
-            const ea::string cacheKey = Format("{}:{}", static_cast<const void*>(target), info.name_);
-            const auto iter = recordedValues_.find(cacheKey);
-            if (iter == recordedValues_.end())
-            {
-                // The first sample only establishes the baseline value captured when recording
-                // started; it never creates keys.
-                RecordedChannel channel;
-                channel.baseline_ = value;
-                channel.last_ = value;
-                recordedValues_[cacheKey] = channel;
-                continue;
-            }
-            if (iter->second.last_ == value)
-                continue;
-
-            if (!modificationStarted)
-            {
-                BeginModify();
-                modificationStarted = true;
-            }
-
-            float localTime = 0.0f;
-            TimelinePropertyClip* clip = FindOrCreateClipAtCursor(*track, localTime);
-
-            TimelinePropertyCurve* curve = nullptr;
-            for (TimelinePropertyCurve& c : clip->curves_)
-            {
-                if (c.name_ == info.name_)
-                {
-                    curve = &c;
-                    break;
-                }
-            }
-            if (!curve)
-            {
-                TimelinePropertyCurve newCurve;
-                newCurve.name_ = info.name_;
-                newCurve.valueType_ = info.type_;
-                clip->curves_.push_back(newCurve);
-                curve = &clip->curves_.back();
-            }
-
-            // The Unity-style take: when nothing has been keyed on this curve yet, the
-            // baseline at recording start becomes a key at the clip start, so the movement
-            // is interpolated from where the object was. If keys already exist, the change
-            // is captured only at the cursor.
-            if (curve->keys_.empty())
-                SetCurveKeyValue(*curve, 0.0f, iter->second.baseline_);
-            if (SetCurveKeyValue(*curve, localTime, value))
-            {
-                recordedKeyCount_++;
-                URHO3D_LOGINFO("Timeline: recorded key '{}' of {} at {:.3f}s (clip starts at {:.3f}s).",
-                    info.name_, target->GetTypeName().c_str(), cursorTime_, clip->start_);
-            }
-
-            iter->second.last_ = value;
+            captureChannel(*track, *target, info.name_, info.type_, value);
         }
     }
 }
@@ -2284,7 +2495,7 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     drawList->AddText(ui::GetFont(), ui::GetFontSize(), ImVec2(rowMin.x + 10.0f, textY), ColorHeaderTypeText, typeText.c_str());
     const ImVec2 typeTextSize = ui::CalcTextSize(typeText.c_str());
 
-    // Binding slot on the right side of the header: drop a node or a component here to bind the track to it
+    // Binding slot on the right side of the header: drop a node here to bind the track to it
     const ImRect slotRect(ImVec2(trackX0 - BindingSlotWidth - 6.0f, rowMin.y + 2.0f),
         ImVec2(trackX0 - 6.0f, rowMax.y - 2.0f));
     const ea::string& trackBinding = track->GetBindingPath();
@@ -2295,7 +2506,7 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     if (ui::BeginDragDropTargetCustom(slotRect, ui::GetID("binding_slot")))
     {
         const auto* nodePayload = dynamic_cast<const NodeComponentDragDropPayload*>(DragDropPayload::Get());
-        if (nodePayload && (!nodePayload->nodes_.empty() || !nodePayload->components_.empty()))
+        if (nodePayload && !nodePayload->nodes_.empty())
         {
             if (ui::AcceptDragDropPayload(DragDropPayloadType.c_str(),
                     ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
@@ -2303,9 +2514,7 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
                 slotHighlighted = true;
                 if (ui::GetDragDropPayload()->IsDelivery())
                 {
-                    Object* dropTarget = !nodePayload->components_.empty()
-                        ? static_cast<Object*>(nodePayload->components_[0].Get())
-                        : static_cast<Object*>(nodePayload->nodes_[0].Get());
+                    Object* dropTarget = static_cast<Object*>(nodePayload->nodes_[0].Get());
                     const auto path = ComputeBindingPath(nodePayload->scene_.Get(), dropTarget, timeline_.Get());
                     if (path)
                     {
@@ -2363,7 +2572,8 @@ void TimelineViewTab::RenderTrackHeader(TimelineTrack* track, unsigned trackInde
     }
     if (windowHovered && slotRect.Contains(io.MousePos))
     {
-        ui::SetTooltip("Binding: %s\nDrag a node or a component from the Scene hierarchy\nand drop it here to bind the track to it.",
+        ui::SetTooltip("Binding: %s\nDrag a node from the Scene hierarchy\nand drop it here to bind the track to it.\n"
+            "To bind a material, append its attribute and index,\ne.g. \"Model/StaticModel/Material/0\".",
             trackBinding.empty() ? "(unbound)" : trackBinding.c_str());
     }
 }

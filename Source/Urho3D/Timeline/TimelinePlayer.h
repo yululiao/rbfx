@@ -140,6 +140,8 @@ private:
     void NotifyTracksPaused(bool paused);
     /// Resolve binding path relative to the player node.
     Object* ResolveBindingPath(const ea::string& path) const;
+    /// Resolve a resource attribute of a component, e.g. "Material/0" on a StaticModel.
+    Object* ResolveResourceAttribute(Component* component, const ea::string& tail) const;
     /// Send an event with the common timeline parameters. Sender is the player node.
     void SendTimelineEvent(StringHash eventType, VariantMap parameters);
 
