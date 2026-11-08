@@ -65,10 +65,7 @@ ea::vector<float> GetPropertyKeyTimes(const TimelinePropertyClip& clip)
     return ea::vector<float>(times.begin(), times.end());
 }
 
-// Distance in seconds below which two key times count as the same key row of a clip. The curve
-// editors of the tab, the sheet and the curve window all group keys by time, and this is the
-// window inside which a snapped click is the row that is already there.
-constexpr float KeyRowEps = 0.0001f;
+// KeyRowEps, the tolerance the row tests below share with the widgets, is declared in the header.
 
 bool HasPropertyKeyRowAt(const TimelinePropertyClip& clip, float localTime)
 {

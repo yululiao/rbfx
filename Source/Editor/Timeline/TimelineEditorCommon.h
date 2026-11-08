@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include "TimelineCurveUtils.h"
+#include "TimelineEditorHost.h"
+
 #include <Urho3D/Core/StringUtils.h>
 #include <Urho3D/Math/MathDefs.h>
 #include <Urho3D/SystemUI/SystemUI.h>
@@ -212,6 +215,49 @@ inline float SnapTimeTo(float time, bool snapEnabled, TimelineTimeUnit unit, flo
         }
     }
     return snapped;
+}
+
+/// Value fields of the key row at the given clip-local time: one line per curve that owns a key at
+/// that time, one drag field per numeric component of the curve type. The properties panel of the
+/// sequencer and the curve window both call it, so an exact number is entered the same way in
+/// either. A change opens an undo action through «host».
+inline void EditKeyRowValues(TimelinePropertyClip& clip, float localTime, TimelineEditorHost& host)
+{
+    for (unsigned curveIndex = 0; curveIndex < clip.curves_.size(); ++curveIndex)
+    {
+        auto& curve = clip.curves_[curveIndex];
+        TimelinePropertyKey* rowKey = nullptr;
+        for (auto& key : curve.keys_)
+        {
+            if (Abs(key.time_ - localTime) < KeyRowEps)
+            {
+                rowKey = &key;
+                break;
+            }
+        }
+        const int components = rowKey ? GetCurveComponentCount(curve.valueType_) : 0;
+        if (components <= 0)
+            continue;
+
+        ui::PushID(static_cast<int>(curveIndex));
+        ui::AlignTextToFramePadding();
+        ui::TextUnformatted(curve.name_.c_str());
+        ui::SameLine();
+        for (int component = 0; component < components && component < 4; ++component)
+        {
+            float value = GetCurveComponentValue(rowKey->value_, component);
+            ui::SetNextItemWidth(80.0f);
+            const ea::string field = Format("##value{}", component);
+            if (ui::DragFloat(field.c_str(), &value, 0.01f, 0.0f, 0.0f, "%.4g"))
+            {
+                host.BeginModify();
+                SetCurveComponentValue(rowKey->value_, component, value);
+            }
+            if (component + 1 < components)
+                ui::SameLine();
+        }
+        ui::PopID();
+    }
 }
 
 }

@@ -48,6 +48,10 @@ void AddPropertyCurve(TimelinePropertyClip& clip, const ea::string& name, Varian
 // Keys of all curves of a clip are expected to be aligned in time, so they are displayed and
 // edited as a single set of time points.
 
+/// Distance in seconds below which two key times count as the same key row of a clip. Every widget
+/// that groups keys by time uses it, so a snapped click and a stored time agree everywhere.
+inline constexpr float KeyRowEps = 0.0001f;
+
 /// Sorted distinct key times of every curve of the clip.
 ea::vector<float> GetPropertyKeyTimes(const TimelinePropertyClip& clip);
 /// Whether any curve of the clip already holds a key at the given clip-local time. Two times

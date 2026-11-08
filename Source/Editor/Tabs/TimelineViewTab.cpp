@@ -5982,6 +5982,15 @@ void TimelineViewTab::RenderPropertyKeyAndCurves(TimelineTrack* track)
                 ui::TextDisabled("In");
             }
         }
+
+        // Values of the key row, one line per curve. Without them the only way to set an exact
+        // number would be the vertical drag of the curve canvas, which is what the value fields of
+        // the Unity key inspector exist to avoid.
+        if (rep)
+        {
+            ui::SeparatorText("Values");
+            EditKeyRowValues(propertyClip, selectedKeyTime_, *this);
+        }
     }
 
     ui::SeparatorText("Curves");

@@ -87,6 +87,9 @@ private:
 
     void RenderLegend(TimelinePropertyClip& propertyClip);
     void RenderControls(const TimelinePropertyCurve& selectedCurve);
+    /// Value fields of the anchor key row: the same widget the properties panel of the sequencer
+    /// shows, so a number can be typed in either window.
+    void RenderKeyValues(TimelinePropertyClip& propertyClip, TimelineEditorHost& host);
     /// Lay out the canvas, refresh the visible ranges and handle wheel zoom / middle button pan.
     void BeginCanvas(TimelinePropertyClip& propertyClip);
     void EndCanvas();

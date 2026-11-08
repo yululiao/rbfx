@@ -254,6 +254,7 @@ void TimelineCurveEditor::Render(TimelinePropertyClip& propertyClip, TimelineEdi
 
     RenderLegend(propertyClip);
     RenderControls(propertyClip.curves_[selectedCurveIndex_]);
+    RenderKeyValues(propertyClip, host);
 
     BeginCanvas(propertyClip);
     RenderCanvas(propertyClip, host);
@@ -325,6 +326,23 @@ void TimelineCurveEditor::RenderControls(const TimelinePropertyCurve& selectedCu
         ui::SetTooltip("Drag on empty space selects key rows.\n"
             "Ctrl+click toggles a row, Ctrl+drag moves without snapping.\n"
             "F fits, +/- zooms, Delete removes the selection, Ctrl+C/V copies rows.");
+}
+
+void TimelineCurveEditor::RenderKeyValues(TimelinePropertyClip& propertyClip, TimelineEditorHost& host)
+{
+    if (selectedRows_.empty())
+        return;
+
+    // The fields describe a single row. Several selected rows cannot be edited as one set of
+    // numbers, so the anchor of the selection is what is shown and what is named above the lines.
+    const float anchor = host.GetSelectedKeyTime();
+    const float row = anchor >= 0.0f && IsRowSelected(anchor) ? anchor : selectedRows_.front();
+    if (selectedRows_.size() > 1)
+        ui::TextDisabled("Values at %s (the anchor of the selection)", FormatTime(row).c_str());
+    else
+        ui::TextDisabled("Values at %s", FormatTime(row).c_str());
+
+    EditKeyRowValues(propertyClip, row, host);
 }
 
 void TimelineCurveEditor::BeginCanvas(TimelinePropertyClip& propertyClip)
