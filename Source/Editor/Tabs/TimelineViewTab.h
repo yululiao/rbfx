@@ -109,6 +109,8 @@ private:
     void RenderClipProperties(TimelineTrack* track);
     void RenderMarkerProperties(TimelineTrack* track);
     void RenderPropertyKeyAndCurves(TimelineTrack* track);
+    /// Standalone value-over-time window of the selected property clip, rendered by RenderContent.
+    void RenderCurveEditor(TimelinePropertyClip& propertyClip);
 
     // Interaction
     /// Drop all selection.
@@ -117,6 +119,8 @@ private:
     void SelectTrack(unsigned trackIndex);
     /// Return the clip at (track, clip) indices of the displayed timeline, or null when out of range.
     TimelineClip* FindSelectedClip(unsigned trackIndex, unsigned clipIndex);
+    /// Property clip currently selected in the sequencer, target of the curve editor window.
+    TimelinePropertyClip* FindSelectedPropertyClip();
     /// Copy the multi-selected clips (or the single selected clip) to the clipboard.
     void CopySelectedClips();
     /// Paste the clipboard clips onto the selected track and select the pasted clips.
@@ -208,6 +212,32 @@ private:
     // Set of (track, clip) pairs held by the multi-selection (Ctrl+click toggles, dragging one
     // moves them all). Kept in sync with selectedTrack_/selectedClip_ for the single-selection path.
     ea::set<ea::pair<unsigned, unsigned>> multiSelectedClips_;
+
+    // Curve editor state of the selected property clip.
+    bool curveEditorOpen_{};                      // Standalone curve editor window is visible
+    bool curveEditorFocusPending_{};              // Open the window and focus it on the next render
+    unsigned selectedCurveIndex_{M_MAX_UNSIGNED}; // Curve highlighted in the curve canvas
+    int curveComponentIndex_{};                   // Displayed component of a multi-component curve
+    bool curveAutoFit_{true};                     // Vertical range follows the selected curve keys
+    float curveViewMin_{};                        // Vertical range of the canvas
+    float curveViewMax_{1.0f};
+    bool curveTimeAutoFit_{true};                 // Horizontal range follows the clip duration
+    float curveTimeMin_{};                        // Horizontal range, clip-local time
+    float curveTimeMax_{1.0f};
+    bool curveTimePanning_{};                     // Middle mouse button drags the horizontal range
+    enum class CurveDragMode
+    {
+        None,
+        KeyMove,
+        TangentOut,
+        TangentIn,
+    };
+    CurveDragMode curveDragMode_{CurveDragMode::None};
+    unsigned curveDragCurve_{M_MAX_UNSIGNED};
+    float curveDragKeyTime_{};
+    // Right-click context of the canvas: time at the cursor and whether a key was hit.
+    float curvePopupTime_{};
+    bool curvePopupOnKey_{};
 
     // Height of the bottom properties panel. Dragging the splitter between the sequencer and
     // the panel resizes it, so several property rows can be visible at once.

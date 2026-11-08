@@ -629,6 +629,195 @@ const char* curveTypeNames[] = {"Float", "Double", "Int", "Bool", "Vector2", "Ve
 const VariantType curveTypes[] = {VAR_FLOAT, VAR_DOUBLE, VAR_INT, VAR_BOOL,
     VAR_VECTOR2, VAR_VECTOR3, VAR_VECTOR4, VAR_COLOR, VAR_QUATERNION};
 
+// Curve canvas helpers. Multi-component values are shown one component at a time, matching
+// how the runtime interpolates them (scalar tangents apply per component in practice).
+
+// Number of displayable components of a curve value type. Zero means the type has no
+// numeric representation and cannot be drawn as a curve.
+int GetCurveComponentCount(VariantType type)
+{
+    switch (type)
+    {
+    case VAR_FLOAT:
+    case VAR_DOUBLE:
+    case VAR_INT:
+    case VAR_BOOL:
+        return 1;
+    case VAR_VECTOR2:
+    case VAR_INTVECTOR2:
+        return 2;
+    case VAR_VECTOR3:
+    case VAR_INTVECTOR3:
+        return 3;
+    case VAR_VECTOR4:
+    case VAR_COLOR:
+    case VAR_QUATERNION:
+        return 4;
+    default:
+        return 0;
+    }
+}
+
+float GetCurveComponentValue(const Variant& value, int component)
+{
+    switch (value.GetType())
+    {
+    case VAR_FLOAT: return value.GetFloat();
+    case VAR_DOUBLE: return static_cast<float>(value.GetDouble());
+    case VAR_INT: return static_cast<float>(value.GetInt());
+    case VAR_BOOL: return value.GetBool() ? 1.0f : 0.0f;
+    case VAR_VECTOR2: return value.GetVector2().Data()[component];
+    case VAR_VECTOR3: return value.GetVector3().Data()[component];
+    case VAR_VECTOR4: return value.GetVector4().Data()[component];
+    case VAR_INTVECTOR2: return static_cast<float>(value.GetIntVector2().Data()[component]);
+    case VAR_INTVECTOR3: return static_cast<float>(value.GetIntVector3().Data()[component]);
+    case VAR_COLOR: return value.GetColor().Data()[component];
+    case VAR_QUATERNION: return value.GetQuaternion().Data()[component];
+    default: return 0.0f;
+    }
+}
+
+void SetCurveComponentValue(Variant& value, int component, float newValue)
+{
+    switch (value.GetType())
+    {
+    case VAR_FLOAT: value = newValue; break;
+    case VAR_DOUBLE: value = static_cast<double>(newValue); break;
+    case VAR_INT: value = RoundToInt(newValue); break;
+    case VAR_BOOL: value = newValue >= 0.5f; break;
+    case VAR_VECTOR2:
+    {
+        Vector2 v = value.GetVector2();
+        v.MutableData()[component] = newValue;
+        value = v;
+        break;
+    }
+    case VAR_VECTOR3:
+    {
+        Vector3 v = value.GetVector3();
+        v.MutableData()[component] = newValue;
+        value = v;
+        break;
+    }
+    case VAR_VECTOR4:
+    {
+        Vector4 v = value.GetVector4();
+        switch (component)
+        {
+        case 0: v.x_ = newValue; break;
+        case 1: v.y_ = newValue; break;
+        case 2: v.z_ = newValue; break;
+        default: v.w_ = newValue; break;
+        }
+        value = v;
+        break;
+    }
+    case VAR_INTVECTOR2:
+    {
+        IntVector2 v = value.GetIntVector2();
+        v.MutableData()[component] = RoundToInt(newValue);
+        value = v;
+        break;
+    }
+    case VAR_INTVECTOR3:
+    {
+        IntVector3 v = value.GetIntVector3();
+        v.MutableData()[component] = RoundToInt(newValue);
+        value = v;
+        break;
+    }
+    case VAR_COLOR:
+    {
+        Color v = value.GetColor();
+        switch (component)
+        {
+        case 0: v.r_ = newValue; break;
+        case 1: v.g_ = newValue; break;
+        case 2: v.b_ = newValue; break;
+        default: v.a_ = newValue; break;
+        }
+        value = v;
+        break;
+    }
+    case VAR_QUATERNION:
+    {
+        Quaternion v = value.GetQuaternion();
+        switch (component)
+        {
+        case 0: v.w_ = newValue; break;
+        case 1: v.x_ = newValue; break;
+        case 2: v.y_ = newValue; break;
+        default: v.z_ = newValue; break;
+        }
+        value = v;
+        break;
+    }
+    default: break;
+    }
+}
+
+/// Sample a cubic Hermite segment, mirroring the runtime evaluation of TimelinePropertyTrack.
+float HermiteScalarCurve(float p0, float p1, float m0, float m1, float t, float span)
+{
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    return (2.0f * t3 - 3.0f * t2 + 1.0f) * p0
+        + (t3 - 2.0f * t2 + t) * span * m0
+        + (-2.0f * t3 + 3.0f * t2) * p1
+        + (t3 - t2) * span * m1;
+}
+
+/// Sample one component of the curve at the given clip-local time, following the same
+/// interpolation rules as the runtime so the canvas matches playback.
+float EvaluateCurveComponent(const TimelinePropertyCurve& curve, float time, int component)
+{
+    const auto& keys = curve.keys_;
+    if (keys.empty())
+        return 0.0f;
+    if (time <= keys.front().time_)
+        return GetCurveComponentValue(keys.front().value_, component);
+
+    for (unsigned i = 1; i < keys.size(); ++i)
+    {
+        const TimelinePropertyKey& from = keys[i - 1];
+        if (time < keys[i].time_)
+        {
+            const TimelinePropertyKey& to = keys[i];
+            const float span = to.time_ - from.time_;
+            const float t = (time - from.time_) / span;
+            const float p0 = GetCurveComponentValue(from.value_, component);
+            const float p1 = GetCurveComponentValue(to.value_, component);
+            switch (from.interpolation_)
+            {
+            case TimelineInterpolation::Constant:
+                return p0;
+            case TimelineInterpolation::Linear:
+                return Lerp(p0, p1, t);
+            case TimelineInterpolation::Bezier:
+                return HermiteScalarCurve(p0, p1, from.outTangent_, to.inTangent_, t, span);
+            case TimelineInterpolation::Ease:
+            default:
+                return Lerp(p0, p1, EvaluateTimelineEase(from.ease_, t));
+            }
+        }
+    }
+    return GetCurveComponentValue(keys.back().value_, component);
+}
+
+// Per-curve colors of the canvas, cycled when a clip has more curves than palette entries.
+ImU32 GetCurveCanvasColor(unsigned index)
+{
+    static const ImU32 palette[] = {
+        IM_COL32(255, 200, 60, 255),
+        IM_COL32(80, 200, 255, 255),
+        IM_COL32(140, 255, 120, 255),
+        IM_COL32(255, 120, 200, 255),
+        IM_COL32(200, 140, 255, 255),
+        IM_COL32(255, 140, 80, 255),
+    };
+    return palette[index % (sizeof(palette) / sizeof(palette[0]))];
+}
+
 // Find attribute of the target by exact name, used by preview and recording.
 const AttributeInfo* FindAttributeByName(const Serializable& target, const ea::string& name)
 {
@@ -1768,6 +1957,16 @@ TimelineClip* TimelineViewTab::FindSelectedClip(unsigned trackIndex, unsigned cl
     return GetClip(timeline_->GetTracks()[trackIndex].Get(), clipIndex);
 }
 
+TimelinePropertyClip* TimelineViewTab::FindSelectedPropertyClip()
+{
+    if (!timeline_ || selectedTrack_ >= timeline_->GetNumTracks())
+        return nullptr;
+    auto* track = AsPropertyTrack(timeline_->GetTrack(selectedTrack_));
+    if (!track || selectedClip_ >= track->clips_.size())
+        return nullptr;
+    return &track->clips_[selectedClip_];
+}
+
 void TimelineViewTab::CopySelectedClips()
 {
     if (!timeline_ || selectedTrack_ >= timeline_->GetTracks().size())
@@ -1936,6 +2135,17 @@ void TimelineViewTab::RenderContent()
         draggingPanelSplitter_ ? IM_COL32(216, 130, 0, 255) : IM_COL32(120, 120, 120, 255), 2.0f);
 
     RenderSelectionPanel();
+
+    // The curve editor is a standalone window: the properties panel is too narrow for key and
+    // tangent work, and with docking the window can be stacked behind the timeline tab. It
+    // follows the selected property clip and closes when that selection is gone.
+    if (curveEditorOpen_)
+    {
+        if (TimelinePropertyClip* clip = FindSelectedPropertyClip())
+            RenderCurveEditor(*clip);
+        else
+            curveEditorOpen_ = false;
+    }
 }
 
 void TimelineViewTab::RenderToolbar()
@@ -2829,6 +3039,21 @@ bool TimelineViewTab::ProcessClipHitTesting(TimelineTrack* track, unsigned track
 
         if (leftClick)
         {
+            // Double-clicking a property clip opens the curve editor on it, like the Unity Dope Sheet.
+            if (ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                auto* propertyTrack = AsPropertyTrack(track);
+                if (propertyTrack && ci < propertyTrack->clips_.size() && !propertyTrack->clips_[ci].curves_.empty())
+                {
+                    SelectTrack(trackIndex);
+                    selectedClip_ = ci;
+                    selectedKeyTime_ = -1.0f;
+                    curveEditorOpen_ = true;
+                    curveEditorFocusPending_ = true;
+                    return true;
+                }
+            }
+
             // Ctrl+click toggles the clip in the multi-selection without starting a drag.
             if (io.KeyCtrl)
             {
@@ -3221,6 +3446,18 @@ void TimelineViewTab::RenderClipContextMenu()
         : nullptr;
     if (track && popupClip_ < GetNumClips(track))
     {
+        // Property clips with curves offer the curve editor before the ordinary clip actions.
+        auto* propertyTrack = AsPropertyTrack(track);
+        const bool hasCurves = propertyTrack && popupClip_ < propertyTrack->clips_.size()
+            && !propertyTrack->clips_[popupClip_].curves_.empty();
+        if (hasCurves && ui::Selectable("Open Curve Editor"))
+        {
+            SelectTrack(popupTrack_);
+            selectedClip_ = popupClip_;
+            selectedKeyTime_ = -1.0f;
+            curveEditorOpen_ = true;
+            curveEditorFocusPending_ = true;
+        }
         if (ui::Selectable("Delete Clip"))
         {
             BeginModify();
@@ -3597,6 +3834,512 @@ void TimelineViewTab::RenderPropertyKeyAndCurves(TimelineTrack* track)
             newCurveName_[0] = '\0';
         }
     }
+
+    // The canvas itself lives in the standalone "Timeline Curve Editor" window; this only
+    // toggles it for the selected clip.
+    if (ui::Button(curveEditorOpen_ ? "Close Curve Editor" : "Open Curve Editor"))
+    {
+        curveEditorOpen_ = !curveEditorOpen_;
+        curveEditorFocusPending_ = curveEditorOpen_;
+    }
+}
+
+void TimelineViewTab::RenderCurveEditor(TimelinePropertyClip& propertyClip)
+{
+    if (propertyClip.curves_.empty())
+    {
+        curveEditorOpen_ = false;
+        return;
+    }
+    ImGuiIO& io = ui::GetIO();
+
+    ui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
+    // Opening the window or retargeting it to another clip fits both axes to the new clip.
+    if (curveEditorFocusPending_)
+    {
+        ui::SetNextWindowFocus();
+        curveEditorFocusPending_ = false;
+        curveAutoFit_ = true;
+        curveTimeAutoFit_ = true;
+        curveComponentIndex_ = 0;
+    }
+    bool open = curveEditorOpen_;
+    if (!ui::Begin("Timeline Curve Editor", &open))
+    {
+        // Collapsed or fully clipped: keep the window alive but skip the content.
+        ui::End();
+        curveEditorOpen_ = open;
+        return;
+    }
+
+    // Legend: buttons tinted with the canvas color of the curve pick the curve to edit.
+    if (selectedCurveIndex_ >= propertyClip.curves_.size())
+        selectedCurveIndex_ = 0u;
+    for (unsigned ci = 0; ci < propertyClip.curves_.size(); ++ci)
+    {
+        const auto& curve = propertyClip.curves_[ci];
+        ui::PushID(static_cast<int>(ci));
+        ui::PushStyleColor(ImGuiCol_Button,
+            selectedCurveIndex_ == ci ? GetCurveCanvasColor(ci) : WithAlpha(GetCurveCanvasColor(ci), 70));
+        if (ui::Button(curve.name_.c_str()))
+            selectedCurveIndex_ = ci;
+        ui::PopStyleColor();
+        if (ui::IsItemHovered())
+            ui::SetTooltip("%s (%s)", curve.name_.c_str(), Variant::GetTypeName(curve.valueType_).c_str());
+        ui::PopID();
+        ui::SameLine();
+    }
+    ui::NewLine();
+
+    auto& selectedCurve = propertyClip.curves_[selectedCurveIndex_];
+    const int numComponents = GetCurveComponentCount(selectedCurve.valueType_);
+    if (curveComponentIndex_ >= Max(numComponents, 1))
+        curveComponentIndex_ = 0;
+
+    if (numComponents > 1)
+    {
+        static const char* componentNames[] = {"X", "Y", "Z", "W"};
+        ui::SetNextItemWidth(110.0f);
+        ui::Combo("Component", &curveComponentIndex_, componentNames, numComponents);
+        ui::SameLine();
+    }
+    if (ui::Button("Fit V"))
+        curveAutoFit_ = true;
+    ui::SameLine();
+    if (ui::Button("Fit H"))
+        curveTimeAutoFit_ = true;
+    ui::SameLine();
+    ui::TextDisabled("T %.2f .. %.2f s, Y %.2f .. %.2f", curveTimeMin_, curveTimeMax_, curveViewMin_, curveViewMax_);
+
+    // Canvas: fills the rest of the window. The child does not consume the mouse wheel, so
+    // the wheel zooms the vertical range instead of scrolling the window.
+    ui::BeginChild("##curveCanvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* drawList = ui::GetWindowDrawList();
+    const ImVec2 canvasMin = ui::GetCursorScreenPos();
+    const ImVec2 canvasSize = ui::GetContentRegionAvail();
+    const ImVec2 canvasMax(canvasMin.x + canvasSize.x, canvasMin.y + canvasSize.y);
+    const bool canvasHovered = ui::IsWindowHovered();
+
+    // The canvas has its own horizontal range in clip-local time. Inheriting the sequencer zoom
+    // would squash a long clip into a few pixels and turn ramps into vertical lines.
+    if (curveTimeAutoFit_)
+    {
+        curveTimeMin_ = 0.0f;
+        curveTimeMax_ = Max(propertyClip.duration_, 0.05f);
+    }
+
+    const auto timeToX = [&](float localTime)
+    {
+        const float range = Max(curveTimeMax_ - curveTimeMin_, 0.0001f);
+        return canvasMin.x + (localTime - curveTimeMin_) / range * canvasSize.x;
+    };
+    const auto xToTime = [&](float x)
+    {
+        const float range = Max(curveTimeMax_ - curveTimeMin_, 0.0001f);
+        return curveTimeMin_ + (x - canvasMin.x) / canvasSize.x * range;
+    };
+    const float pxPerSecond = Max(canvasSize.x / Max(curveTimeMax_ - curveTimeMin_, 0.0001f), 0.0001f);
+
+    // Auto-fit: the vertical range follows the keys of the selected curve component.
+    if (curveAutoFit_ && numComponents > 0)
+    {
+        float lo = FLT_MAX;
+        float hi = -FLT_MAX;
+        for (const TimelinePropertyKey& key : selectedCurve.keys_)
+        {
+            const float value = GetCurveComponentValue(key.value_, curveComponentIndex_);
+            lo = Min(lo, value);
+            hi = Max(hi, value);
+        }
+        if (lo > hi)
+        {
+            lo = -1.0f;
+            hi = 1.0f;
+        }
+        const float pad = Max((hi - lo) * 0.1f, 0.001f);
+        curveViewMin_ = lo - pad;
+        curveViewMax_ = hi + pad;
+    }
+
+    const auto valueToY = [&](float value)
+    {
+        const float range = Max(curveViewMax_ - curveViewMin_, 0.0001f);
+        return canvasMax.y - (value - curveViewMin_) / range * canvasSize.y;
+    };
+    const auto yToValue = [&](float y)
+    {
+        const float range = Max(curveViewMax_ - curveViewMin_, 0.0001f);
+        return curveViewMin_ + (canvasMax.y - y) / canvasSize.y * range;
+    };
+
+    if (canvasHovered && io.MouseWheel != 0.0f)
+    {
+        const float factor = io.MouseWheel > 0.0f ? 1.25f : 0.8f;
+        if (io.KeyCtrl)
+        {
+            // Ctrl + wheel zooms the horizontal range around the mouse position.
+            const float timeUnderMouse = xToTime(io.MousePos.x);
+            curveTimeAutoFit_ = false;
+            curveTimeMin_ = timeUnderMouse - (timeUnderMouse - curveTimeMin_) / factor;
+            curveTimeMax_ = timeUnderMouse + (curveTimeMax_ - timeUnderMouse) / factor;
+        }
+        else
+        {
+            const float valueUnderMouse = yToValue(io.MousePos.y);
+            curveAutoFit_ = false;
+            curveViewMin_ = valueUnderMouse - (valueUnderMouse - curveViewMin_) / factor;
+            curveViewMax_ = valueUnderMouse + (curveViewMax_ - valueUnderMouse) / factor;
+        }
+    }
+
+    // Middle mouse button pans the horizontal range.
+    if (canvasHovered && ui::IsMouseClicked(ImGuiMouseButton_Middle))
+        curveTimePanning_ = true;
+    if (curveTimePanning_)
+    {
+        if (!io.MouseDown[ImGuiMouseButton_Middle])
+            curveTimePanning_ = false;
+        else
+        {
+            const float delta = -io.MouseDelta.x / pxPerSecond;
+            curveTimeAutoFit_ = false;
+            curveTimeMin_ += delta;
+            curveTimeMax_ += delta;
+        }
+    }
+
+    // Background and grid. Time is clip-local, so the clip always starts at 0.
+    drawList->AddRectFilled(canvasMin, canvasMax, IM_COL32(40, 40, 40, 255));
+
+    const float minStepPx = 70.0f;
+    static const float timeSteps[] = {0.1f, 0.2f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f, 60.0f, 120.0f, 300.0f};
+    float timeStep = timeSteps[sizeof(timeSteps) / sizeof(timeSteps[0]) - 1];
+    for (float step : timeSteps)
+    {
+        if (step * pxPerSecond >= minStepPx)
+        {
+            timeStep = step;
+            break;
+        }
+    }
+    for (float time = floorf(curveTimeMin_ / timeStep) * timeStep;; time += timeStep)
+    {
+        const float x = timeToX(time);
+        if (x > canvasMax.x)
+            break;
+        if (x < canvasMin.x)
+            continue;
+        drawList->AddLine(ImVec2(x, canvasMin.y), ImVec2(x, canvasMax.y), ColorTickMinor);
+        drawList->AddText(ImVec2(x + 2.0f, canvasMin.y + 2.0f), ColorTickLabel, FormatTime(time).c_str());
+    }
+
+    for (int i = 0; i <= 4; ++i)
+    {
+        const float value = Lerp(curveViewMin_, curveViewMax_, static_cast<float>(i) / 4.0f);
+        const float y = valueToY(value);
+        drawList->AddLine(ImVec2(canvasMin.x, y), ImVec2(canvasMax.x, y), i == 2 ? ColorTick : ColorTickMinor);
+        const ea::string label = Format("{:.2f}", value);
+        const float labelY = i == 4 ? y + 2.0f : y - ui::GetTextLineHeight();
+        drawList->AddText(ImVec2(canvasMin.x + 2.0f, labelY), ColorTickLabel, label.c_str());
+    }
+
+    // Cursor line when the scrub position is inside the clip.
+    const float cursorLocalTime = cursorTime_ - propertyClip.start_;
+    if (cursorLocalTime >= 0.0f && cursorLocalTime <= propertyClip.duration_)
+    {
+        const float x = timeToX(cursorLocalTime);
+        drawList->AddLine(ImVec2(x, canvasMin.y), ImVec2(x, canvasMax.y), ColorCursor, 1.5f);
+    }
+
+    if (numComponents > 0)
+    {
+        // Key of the selected curve at the selected time, and its Bezier tangent handles.
+        int selectedKeyIndex = -1;
+        for (unsigned i = 0; i < selectedCurve.keys_.size(); ++i)
+        {
+            if (selectedCurve.keys_[i].time_ == selectedKeyTime_)
+            {
+                selectedKeyIndex = static_cast<int>(i);
+                break;
+            }
+        }
+        TimelinePropertyKey* selectedKey = selectedKeyIndex >= 0
+            ? &selectedCurve.keys_[static_cast<unsigned>(selectedKeyIndex)]
+            : nullptr;
+
+        // The out handle reaches right into the next segment, the in handle left into the
+        // previous one. Tangents are dValue/dTime, so both use the same screen mapping.
+        const float handleDx = 50.0f;
+        const float handleDt = handleDx / pxPerSecond;
+        const bool hasOutHandle = selectedKey && selectedKey->interpolation_ == TimelineInterpolation::Bezier
+            && selectedKeyIndex + 1 < static_cast<int>(selectedCurve.keys_.size());
+        const bool hasInHandle = selectedKey && selectedKeyIndex > 0
+            && selectedCurve.keys_[static_cast<unsigned>(selectedKeyIndex - 1)].interpolation_ == TimelineInterpolation::Bezier;
+        ImVec2 outHandlePos{};
+        ImVec2 inHandlePos{};
+        if (hasOutHandle)
+        {
+            const float keyValue = GetCurveComponentValue(selectedKey->value_, curveComponentIndex_);
+            outHandlePos = ImVec2(timeToX(selectedKey->time_ + handleDt),
+                valueToY(keyValue + selectedKey->outTangent_ * handleDt));
+        }
+        if (hasInHandle)
+        {
+            const float keyValue = GetCurveComponentValue(selectedKey->value_, curveComponentIndex_);
+            inHandlePos = ImVec2(timeToX(selectedKey->time_ - handleDt),
+                valueToY(keyValue + selectedKey->inTangent_ * -handleDt));
+        }
+
+        const auto nearPos = [&](const ImVec2& pos)
+        {
+            return Abs(io.MousePos.x - pos.x) <= 6.0f && Abs(io.MousePos.y - pos.y) <= 6.0f;
+        };
+        const auto keyScreenPos = [&](const TimelinePropertyKey& key)
+        {
+            return ImVec2(timeToX(key.time_),
+                valueToY(GetCurveComponentValue(key.value_, curveComponentIndex_)));
+        };
+        const float mouseLocalTime = xToTime(io.MousePos.x);
+
+        // Right-click: a hit key is selected first, otherwise the menu targets the empty time.
+        if (canvasHovered && ui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            curvePopupTime_ = Clamp(mouseLocalTime, 0.0f, propertyClip.duration_);
+            curvePopupOnKey_ = false;
+            for (const TimelinePropertyKey& key : selectedCurve.keys_)
+            {
+                if (nearPos(keyScreenPos(key)))
+                {
+                    selectedKeyTime_ = key.time_;
+                    curvePopupTime_ = key.time_;
+                    curvePopupOnKey_ = true;
+                    break;
+                }
+            }
+            ui::OpenPopup("CurveEditorContextMenu");
+        }
+
+        if (canvasHovered && ui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            if (ui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                // Double-click adds a whole key row, unless a key already exists at this time.
+                const float addTime = Clamp(SnapTime(mouseLocalTime, !io.KeyCtrl), 0.0f, propertyClip.duration_);
+                bool exists = false;
+                for (float keyTime : GetPropertyKeyTimes(propertyClip))
+                    exists = exists || Abs(keyTime - addTime) < 0.001f;
+                if (!exists)
+                {
+                    BeginModify();
+                    AddPropertyKeyAt(propertyClip, addTime);
+                    selectedKeyTime_ = addTime;
+                }
+            }
+            else if (hasOutHandle && nearPos(outHandlePos))
+            {
+                BeginModify();
+                curveAutoFit_ = false;
+                curveDragMode_ = CurveDragMode::TangentOut;
+                curveDragCurve_ = selectedCurveIndex_;
+                curveDragKeyTime_ = selectedKeyTime_;
+            }
+            else if (hasInHandle && nearPos(inHandlePos))
+            {
+                BeginModify();
+                curveAutoFit_ = false;
+                curveDragMode_ = CurveDragMode::TangentIn;
+                curveDragCurve_ = selectedCurveIndex_;
+                curveDragKeyTime_ = selectedKeyTime_;
+            }
+            else
+            {
+                // A key starts a drag; empty space drops the key selection.
+                TimelinePropertyKey* hitKey = nullptr;
+                for (TimelinePropertyKey& key : selectedCurve.keys_)
+                {
+                    if (nearPos(keyScreenPos(key)))
+                    {
+                        hitKey = &key;
+                        break;
+                    }
+                }
+                if (hitKey)
+                {
+                    selectedKeyTime_ = hitKey->time_;
+                    BeginModify();
+                    curveAutoFit_ = false;
+                    curveDragMode_ = CurveDragMode::KeyMove;
+                    curveDragCurve_ = selectedCurveIndex_;
+                    curveDragKeyTime_ = hitKey->time_;
+                }
+                else
+                    selectedKeyTime_ = -1.0f;
+            }
+        }
+
+        // Update the active drag. Horizontal key movement shifts the whole row, the vertical
+        // movement changes only the component of the dragged curve.
+        if (curveDragMode_ != CurveDragMode::None)
+        {
+            if (!io.MouseDown[ImGuiMouseButton_Left])
+                curveDragMode_ = CurveDragMode::None;
+            else if (curveDragCurve_ < propertyClip.curves_.size())
+            {
+                auto& dragCurve = propertyClip.curves_[curveDragCurve_];
+                if (curveDragMode_ == CurveDragMode::KeyMove)
+                {
+                    const float localTime = Clamp(SnapTime(mouseLocalTime, !io.KeyCtrl), 0.0f, propertyClip.duration_);
+                    MovePropertyKeysAt(propertyClip, curveDragKeyTime_, localTime);
+                    curveDragKeyTime_ = localTime;
+                    selectedKeyTime_ = localTime;
+                    for (TimelinePropertyKey& key : dragCurve.keys_)
+                    {
+                        if (key.time_ == localTime)
+                        {
+                            Variant value = key.value_;
+                            SetCurveComponentValue(value, curveComponentIndex_, yToValue(io.MousePos.y));
+                            key.value_ = value;
+                            break;
+                        }
+                    }
+                }
+                else if (curveDragMode_ == CurveDragMode::TangentOut || curveDragMode_ == CurveDragMode::TangentIn)
+                {
+                    for (TimelinePropertyKey& key : dragCurve.keys_)
+                    {
+                        if (key.time_ != curveDragKeyTime_)
+                            continue;
+                        const float keyX = timeToX(key.time_);
+                        const float dTime = (io.MousePos.x - keyX) / pxPerSecond;
+                        const float safeDTime = Abs(dTime) < 0.01f ? (dTime < 0.0f ? -0.01f : 0.01f) : dTime;
+                        const float keyValue = GetCurveComponentValue(key.value_, curveComponentIndex_);
+                        const float tangent = (yToValue(io.MousePos.y) - keyValue) / safeDTime;
+                        if (curveDragMode_ == CurveDragMode::TangentOut)
+                            key.outTangent_ = tangent;
+                        else
+                            key.inTangent_ = tangent;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Curves: non-selected ones as thin context lines (component 0), the selected one on
+        // top in full color with its chosen component.
+        drawList->PushClipRect(canvasMin, canvasMax, true);
+        const auto drawCurvePolyline = [&](const TimelinePropertyCurve& curve, int component, ImU32 color, float thickness)
+        {
+            // Sample the whole canvas width; outside the key range the curve holds its last value.
+            ea::vector<ImVec2> points;
+            for (float x = canvasMin.x; x <= canvasMax.x; x += 2.0f)
+            {
+                const float localTime = Clamp(xToTime(x), 0.0f, propertyClip.duration_);
+                points.push_back(ImVec2(x, valueToY(EvaluateCurveComponent(curve, localTime, component))));
+            }
+            drawList->AddPolyline(points.data(), static_cast<int>(points.size()), color, 0, thickness);
+        };
+
+        for (unsigned ci = 0; ci < propertyClip.curves_.size(); ++ci)
+        {
+            if (ci == selectedCurveIndex_)
+                continue;
+            const auto& curve = propertyClip.curves_[ci];
+            if (!curve.keys_.empty() && GetCurveComponentCount(curve.valueType_) > 0)
+                drawCurvePolyline(curve, 0, WithAlpha(GetCurveCanvasColor(ci), 130), 1.5f);
+        }
+        drawCurvePolyline(selectedCurve, curveComponentIndex_, GetCurveCanvasColor(selectedCurveIndex_), 2.5f);
+
+        // Keys of the selected curve; the selected row is highlighted in white.
+        for (const TimelinePropertyKey& key : selectedCurve.keys_)
+        {
+            const ImVec2 pos = keyScreenPos(key);
+            if (pos.x < canvasMin.x || pos.x > canvasMax.x)
+                continue;
+            const bool keySelected = key.time_ == selectedKeyTime_;
+            drawList->AddCircleFilled(pos, 4.0f, keySelected ? ColorKeySelected : GetCurveCanvasColor(selectedCurveIndex_));
+            drawList->AddCircle(pos, 4.0f, IM_COL32(0, 0, 0, 200), 0, 1.5f);
+        }
+
+        // Tangent handles of the selected key.
+        if (selectedKey)
+        {
+            const ImVec2 keyPos = keyScreenPos(*selectedKey);
+            if (hasOutHandle)
+            {
+                drawList->AddLine(keyPos, outHandlePos, IM_COL32(255, 255, 255, 160), 1.5f);
+                drawList->AddCircleFilled(outHandlePos, 3.5f, ColorKeySelected);
+            }
+            if (hasInHandle)
+            {
+                drawList->AddLine(keyPos, inHandlePos, IM_COL32(255, 255, 255, 160), 1.5f);
+                drawList->AddCircleFilled(inHandlePos, 3.5f, ColorKeySelected);
+            }
+        }
+        drawList->PopClipRect();
+    }
+
+    ui::EndChild();
+
+    if (ui::BeginPopup("CurveEditorContextMenu"))
+    {
+        if (curvePopupOnKey_)
+        {
+            if (ui::Selectable("Delete Key"))
+            {
+                BeginModify();
+                RemovePropertyKeysAt(propertyClip, curvePopupTime_);
+                if (selectedKeyTime_ == curvePopupTime_)
+                    selectedKeyTime_ = -1.0f;
+            }
+            ui::Separator();
+            // Interpolation applies to the whole key row, like the properties panel does.
+            TimelinePropertyKey* popupKey = nullptr;
+            for (auto& curve : propertyClip.curves_)
+            {
+                for (auto& key : curve.keys_)
+                {
+                    if (key.time_ == curvePopupTime_)
+                    {
+                        popupKey = &key;
+                        break;
+                    }
+                }
+                if (popupKey)
+                    break;
+            }
+            if (popupKey)
+            {
+                constexpr int interpCount = static_cast<int>(sizeof(TIMELINE_INTERPOLATION_NAMES) / sizeof(const char*)) - 1;
+                for (int i = 0; i < interpCount; ++i)
+                {
+                    const auto interp = static_cast<TimelineInterpolation>(i);
+                    if (ui::Selectable(TIMELINE_INTERPOLATION_NAMES[i], popupKey->interpolation_ == interp))
+                    {
+                        BeginModify();
+                        for (auto& curve : propertyClip.curves_)
+                            for (auto& key : curve.keys_)
+                                if (key.time_ == curvePopupTime_)
+                                    key.interpolation_ = interp;
+                    }
+                }
+            }
+        }
+        else
+        {
+            const ea::string label = Format("Add Key at {}", FormatTime(curvePopupTime_).c_str());
+            if (ui::Selectable(label.c_str()))
+            {
+                BeginModify();
+                AddPropertyKeyAt(propertyClip, curvePopupTime_);
+                selectedKeyTime_ = curvePopupTime_;
+            }
+        }
+        ui::EndPopup();
+    }
+
+    ui::End();
+    curveEditorOpen_ = open;
 }
 
 }
