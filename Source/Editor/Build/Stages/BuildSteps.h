@@ -290,6 +290,8 @@ private:
     bool PrepareWeChatJavaScript(ea::string& message);
     /// Byte sizes of the main package and every subpackage, checked against the vendor budgets.
     void ReportPackageSizes() const;
+    /// Captured before vendor layout conversion; manifests must not depend on directory shells.
+    bool hasGameData_{};
 };
 
 } // namespace Urho3D

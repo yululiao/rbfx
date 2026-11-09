@@ -44,10 +44,13 @@ async function main() {
         assert(fs.existsSync(path.join(root, subpackage.root, "game.js")));
     }
     let fileReads = 0;
-    // The host file system rejects engine-private suffixes even when the file exists on disk.
-    // Keep this mock stricter than Node's fs, which otherwise hides packaging permission bugs.
-    const wechatReadable = new Set([".json", ".js", ".bin", ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".ttf", ".mp3", ".aac", ".m4a", ".wav", ".ogg", ".wasm", ".br"]);
+    // One packaging policy shared with C++. These observed host failures remain independent
+    // regression anchors, so accidentally broadening the policy cannot make the mock accept them.
+    const filePolicy = require("../bin/EditorData/Build/wechat_file_policy.json");
+    const wechatReadable = new Set(filePolicy.readableExtensions);
+    assert(wechatReadable.has(".bin"), "Binary fallback must be readable");
+    for (const rejected of [".lua", ".mdl", ".glsl", ".renderpath", ".otf"])
+        assert(!wechatReadable.has(rejected), `Known host rejection must remain mapped: ${rejected}`);
     const api = {
         env: {USER_DATA_PATH: "user://test"},
         getDeviceInfo: () => ({platform: "devtools", system: "Windows 11"}),
@@ -129,6 +132,8 @@ async function main() {
         for (const entry of fs.readdirSync(directory, {withFileTypes: true})) {
             const file = path.join(directory, entry.name);
             if (entry.isDirectory()) {
+                if (vendor === "WeChat")
+                    assert(fs.readdirSync(file).length > 0, `Unexpected empty package directory: ${file}`);
                 inspect(file);
                 continue;
             }

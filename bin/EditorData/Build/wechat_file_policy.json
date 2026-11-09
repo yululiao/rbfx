@@ -1,0 +1,6 @@
+{
+  "readableExtensions": [
+    ".json", ".js", ".bin", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ttf",
+    ".mp3", ".aac", ".m4a", ".wav", ".ogg", ".wasm", ".br"
+  ]
+}
