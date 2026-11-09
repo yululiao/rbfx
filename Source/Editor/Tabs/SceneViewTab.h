@@ -277,6 +277,7 @@ protected:
     void OnResourceUnloaded(const ea::string& resourceName) override;
     void OnActiveResourceChanged(const ea::string& oldResourceName, const ea::string& newResourceName) override;
     void OnResourceSaved(const ea::string& resourceName) override;
+    bool CanSaveResource(const ea::string& resourceName) override;
     void OnResourceShallowSaved(const ea::string& resourceName) override;
     /// @}
 

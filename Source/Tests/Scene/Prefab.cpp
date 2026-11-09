@@ -26,6 +26,7 @@
 
 #include <Urho3D/IO/BinaryArchive.h>
 #include <Urho3D/IO/MemoryBuffer.h>
+#include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Resource/BinaryFile.h>
 #include <Urho3D/Resource/JSONArchive.h>
 #include <Urho3D/Resource/ResourceCache.h>
@@ -37,6 +38,7 @@
 #include <Urho3D/Scene/PrefabReader.h>
 #include <Urho3D/Scene/PrefabResource.h>
 #include <Urho3D/Scene/PrefabWriter.h>
+#include <Urho3D/Scene/SceneResource.h>
 
 namespace
 {
@@ -932,4 +934,232 @@ TEST_CASE("Prefab reference is reloaded")
     REQUIRE(node->GetChild(1u)->GetNumChildren() == 0);
     REQUIRE(node->GetChild(2u)->GetNumComponents() == 0);
     REQUIRE(node->GetChild(2u)->GetNumChildren() == 1);
+}
+
+namespace
+{
+
+class PrefabTestBuffer : public RefCounted, public VectorBuffer
+{
+};
+
+/// A writable virtual file, allowing save/reload and truncation checks without touching assets.
+class PrefabTestMount : public MountPoint
+{
+public:
+    explicit PrefabTestMount(Context* context) : MountPoint(context), buffer_(MakeShared<PrefabTestBuffer>()) {}
+    bool AcceptsScheme(const ea::string& scheme) const override { return scheme == scheme_; }
+    bool Exists(const FileIdentifier& name) const override { return AcceptsScheme(name.scheme_) && buffer_->GetSize(); }
+    AbstractFilePtr OpenFile(const FileIdentifier& name, FileMode mode) override
+    {
+        if (!AcceptsScheme(name.scheme_))
+            return nullptr;
+        if (mode == FILE_WRITE)
+        {
+            ++writes_;
+            buffer_->Clear();
+        }
+        buffer_->Seek(0);
+        buffer_->SetName(name.ToUri());
+        return buffer_;
+    }
+    const ea::string& GetName() const override { return scheme_; }
+    void Scan(ea::vector<ea::string>&, const ea::string&, const ea::string&, ScanFlags) const override {}
+
+    const ea::string scheme_{"prefab-regression"};
+    SharedPtr<PrefabTestBuffer> buffer_;
+    unsigned writes_{};
+};
+
+}
+
+TEST_CASE("Nested prefab edits are detected before saving", "[Prefab][NestedPrefab]")
+{
+    auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
+    auto guard = Tests::MakeScopedReflection<Tests::RegisterObject<TestComponent>>(context);
+    auto prefab = MakeShared<PrefabResource>(context);
+    prefab->GetMutableNodePrefab() = MakeTestPrefab();
+    auto resource = MakeShared<SceneResource>(context);
+    Node* node = resource->GetScene()->CreateChild();
+    auto* reference = node->CreateComponent<PrefabReference>();
+    reference->SetPrefab(prefab);
+    REQUIRE_FALSE(HasUncommittedNestedOverrides(resource->GetScene()));
+
+    SECTION("Component attribute") { node->GetComponent<TestComponent>()->enum_ = TestEnum::Red; }
+    SECTION("Child attribute") { node->GetChild(0u)->SetPosition(Vector3{9, 8, 7}); }
+    SECTION("Component deletion") { node->GetComponent<TestComponent>()->Remove(); }
+    SECTION("Child deletion") { node->GetChild(0u)->Remove(); }
+    SECTION("Deep addition") { node->GetChild(3u)->GetChild(0u)->CreateChild("Added"); }
+    SECTION("Deep component addition") { node->GetChild(3u)->GetChild(0u)->CreateComponent<TestComponent>(); }
+    SECTION("Deep attribute") { node->GetChild(3u)->GetChild(0u)->SetName("Changed"); }
+    SECTION("Deep deletion") { node->GetChild(3u)->GetChild(0u)->GetChild(0u)->Remove(); }
+    SECTION("Root component addition") { node->CreateComponent<TestComponent>(); }
+    SECTION("Root child addition") { node->CreateChild("Added"); }
+
+    REQUIRE(reference->HasUncommittedChanges());
+    REQUIRE(HasUncommittedNestedOverrides(resource->GetScene()));
+    for (bool asPrefab : {false, true})
+    {
+        VectorBuffer buffer;
+        CHECK_FALSE(resource->Save(buffer, InternalResourceFormat::Json, asPrefab));
+        CHECK(buffer.GetSize() == 0);
+    }
+
+    auto mount = MakeShared<PrefabTestMount>(context);
+    const MountPointGuard mountGuard{mount};
+    mount->buffer_->WriteString("Existing file must survive");
+    const unsigned originalSize = mount->buffer_->GetSize();
+    CHECK_FALSE(resource->SaveFile(FileIdentifier{"prefab-regression", "outer.prefab"}, InternalResourceFormat::Json, true));
+    CHECK(mount->writes_ == 0);
+    CHECK(mount->buffer_->GetSize() == originalSize);
+}
+
+TEST_CASE("Prefab root placement and reverted edits are not overrides", "[Prefab][NestedPrefab]")
+{
+    auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
+    auto guard = Tests::MakeScopedReflection<Tests::RegisterObject<TestComponent>>(context);
+    auto prefab = MakeShared<PrefabResource>(context);
+    prefab->GetMutableNodePrefab() = MakeTestPrefab();
+    auto resource = MakeShared<SceneResource>(context);
+    Node* node = resource->GetScene()->CreateChild();
+    auto* reference = node->CreateComponent<PrefabReference>();
+    reference->SetPrefab(prefab);
+    node->SetPosition(Vector3{9, 8, 7});
+    node->SetName("Scene-side name");
+    CHECK_FALSE(reference->HasUncommittedChanges());
+    auto* component = node->GetComponent<TestComponent>();
+    component->enum_ = TestEnum::Red;
+    REQUIRE(reference->HasUncommittedChanges());
+    component->enum_ = TestEnum::Blue;
+    CHECK_FALSE(reference->HasUncommittedChanges());
+    VectorBuffer buffer;
+    CHECK(resource->Save(buffer, InternalResourceFormat::Json, true));
+}
+
+TEST_CASE("Existing additions do not become a clean prefab baseline", "[Prefab][NestedPrefab]")
+{
+    auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
+    auto guard = Tests::MakeScopedReflection<Tests::RegisterObject<TestComponent>>(context);
+    auto prefab = MakeShared<PrefabResource>(context);
+    prefab->GetMutableNodePrefab() = MakeTestPrefab();
+    auto scene = MakeShared<Scene>(context);
+    Node* node = scene->CreateChild();
+    SECTION("Existing child") { node->CreateChild("Existing addition"); }
+    SECTION("Existing component") { node->CreateComponent<TestComponent>(); }
+    auto* reference = node->CreateComponent<PrefabReference>();
+    reference->SetPrefab(prefab);
+    CHECK(reference->HasUncommittedChanges());
+    CHECK(HasUncommittedNestedOverrides(scene));
+    const auto components = node->GetComponents();
+    for (Component* component : components)
+    {
+        if (component != reference && !component->IsTemporary())
+            component->Remove();
+    }
+    const auto children = node->GetChildren();
+    for (Node* child : children)
+    {
+        if (!child->IsTemporary())
+            child->Remove();
+    }
+    CHECK_FALSE(reference->HasUncommittedChanges());
+}
+
+TEST_CASE("Failed prefab commit retains edited objects", "[Prefab][NestedPrefab]")
+{
+    auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
+    auto guard = Tests::MakeScopedReflection<Tests::RegisterObject<TestComponent>>(context);
+    auto prefab = MakeShared<PrefabResource>(context);
+    prefab->GetMutableNodePrefab() = MakeTestPrefab();
+    prefab->SetAbsoluteFileName("unmounted-prefab-test://cannot-write.prefab");
+    auto scene = MakeShared<Scene>(context);
+    Node* node = scene->CreateChild();
+    auto* reference = node->CreateComponent<PrefabReference>();
+    reference->SetPrefab(prefab);
+    WeakPtr<Node> child{node->CreateChild("Unsaved addition")};
+    WeakPtr<TestComponent> component{node->GetComponent<TestComponent>()};
+    component->enum_ = TestEnum::Red;
+    reference->CommitChanges();
+    REQUIRE(child);
+    REQUIRE(component);
+    CHECK(component->enum_ == TestEnum::Red);
+    CHECK(reference->HasUncommittedChanges());
+    CHECK(node->GetChild("Unsaved addition") == child);
+}
+
+TEST_CASE("Outer commit cannot discard nested edits", "[Prefab][NestedPrefab]")
+{
+    auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
+    auto guard = Tests::MakeScopedReflection<Tests::RegisterObject<TestComponent>>(context);
+    auto* cache = context->GetSubsystem<ResourceCache>();
+    auto inner = MakeShared<PrefabResource>(context);
+    inner->SetName("NestedPrefabRegression-inner.prefab");
+    inner->GetMutableNodePrefab() = MakeTestPrefab();
+    REQUIRE(cache->AddManualResource(inner));
+    auto source = MakeShared<Node>(context);
+    source->CreateChild()->CreateComponent<PrefabReference>()->SetPrefab(inner);
+    auto outer = MakeShared<PrefabResource>(context);
+    GeneratePrefabMaterialized(source, outer->GetMutableNodePrefab());
+    auto scene = MakeShared<Scene>(context);
+    Node* node = scene->CreateChild();
+    auto* reference = node->CreateComponent<PrefabReference>();
+    reference->SetPrefab(outer);
+    REQUIRE_FALSE(HasUncommittedNestedOverrides(node));
+    Node* nested = node->GetChild(0u);
+    WeakPtr<TestComponent> component{nested->GetComponent<TestComponent>()};
+    REQUIRE(component);
+    component->enum_ = TestEnum::Red;
+    REQUIRE(HasUncommittedNestedOverrides(node));
+    reference->CommitChanges();
+    REQUIRE(component);
+    CHECK(component->enum_ == TestEnum::Red);
+
+    // A nested root transform belongs to the outer prefab and must remain saveable.
+    component->enum_ = TestEnum::Blue;
+    nested->SetPosition(Vector3{9, 8, 7});
+    CHECK_FALSE(HasUncommittedNestedOverrides(node));
+    NodePrefab saved;
+    GeneratePrefabMaterialized(node, saved);
+    REQUIRE(saved.GetChildren().size() == 1);
+    CHECK(saved.GetChildren()[0].GetChildren().empty());
+    REQUIRE(saved.GetChildren()[0].GetComponents().size() == 1);
+    CHECK(saved.GetChildren()[0].GetComponents()[0].GetTypeNameHash() == PrefabReference::GetTypeStatic());
+    cache->ReleaseResource<PrefabResource>(inner->GetName(), true);
+}
+
+TEST_CASE("Successful prefab commit saves and rebuilds edited content", "[Prefab][NestedPrefab]")
+{
+    auto context = Tests::GetOrCreateContext(Tests::CreateCompleteContext);
+    auto guard = Tests::MakeScopedReflection<Tests::RegisterObject<TestComponent>>(context);
+    auto mount = MakeShared<PrefabTestMount>(context);
+    const MountPointGuard mountGuard{mount};
+    auto prefab = MakeShared<PrefabResource>(context);
+    prefab->SetName("prefab-regression://saved.prefab");
+    prefab->SetAbsoluteFileName(prefab->GetName());
+    prefab->GetMutableNodePrefab() = MakeTestPrefab();
+    REQUIRE(prefab->SaveFile(prefab->GetAbsoluteFileName()));
+    auto scene = MakeShared<Scene>(context);
+    Node* node = scene->CreateChild();
+    auto* reference = node->CreateComponent<PrefabReference>();
+    reference->SetPrefab(prefab);
+    node->GetComponent<TestComponent>()->enum_ = TestEnum::Red;
+    node->GetChild(3u)->GetChild(0u)->CreateChild("Deep addition");
+    node->GetChild(0u)->Remove();
+    REQUIRE(reference->HasUncommittedChanges());
+    reference->CommitChanges();
+    CHECK(mount->writes_ == 2);
+    CHECK_FALSE(reference->HasUncommittedChanges());
+    REQUIRE(node->GetComponent<TestComponent>());
+    CHECK(node->GetComponent<TestComponent>()->enum_ == TestEnum::Red);
+    CHECK(node->GetNumChildren() == 3);
+    REQUIRE(node->GetChild(2u)->GetChild(0u));
+    CHECK(node->GetChild(2u)->GetChild(0u)->GetChild("Deep addition") != nullptr);
+    auto loaded = MakeShared<PrefabResource>(context);
+    mount->buffer_->Seek(0);
+    REQUIRE(loaded->Load(*mount->buffer_));
+    Node* fresh = scene->InstantiatePrefab(loaded);
+    REQUIRE(fresh);
+    REQUIRE(fresh->GetComponent<TestComponent>());
+    CHECK(fresh->GetComponent<TestComponent>()->enum_ == TestEnum::Red);
+    CHECK(fresh->GetNumChildren() == 3);
 }

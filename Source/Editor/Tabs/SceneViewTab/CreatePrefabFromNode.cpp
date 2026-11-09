@@ -214,7 +214,11 @@ void PrefabFromNodeFactory::SaveNodeAsPrefab(Node* node, const ea::string& resou
     NodePrefab& nodePrefab = prefab_->GetMutableNodePrefab();
     nodePrefab = CreatePrefabFromNode(node);
     prefab_->NormalizeIds();
-    prefab_->SaveFile(fileName);
+    if (!prefab_->SaveFile(fileName))
+    {
+        URHO3D_LOGERROR("Cannot save prefab '{}'; the original node was retained", fileName);
+        return;
+    }
 
     if (replaceWithReference_ && tab_ && node != node->GetScene())
     {

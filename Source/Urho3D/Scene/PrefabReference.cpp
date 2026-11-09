@@ -278,11 +278,15 @@ void PrefabReference::CreateInstance(bool tryInplace, PrefabInstanceFlags instan
 
     // Try to create inplace first
     if (tryInplace && TryCreateInplace())
+    {
+        instancePrefab_ = GenerateInstancePrefab();
         return;
+    }
 
     RemoveTemporaryComponents(node_);
     RemoveTemporaryChildren(node_);
     InstantiatePrefab(nodePrefab, instanceFlags);
+    instancePrefab_ = GenerateInstancePrefab();
 }
 
 void PrefabReference::SetPrefab(PrefabResource* prefab, ea::string_view path, bool createInstance, PrefabInstanceFlags instanceFlags)
@@ -420,27 +424,66 @@ void PruneNestedInstances(Node* node, NodePrefab& nodePrefab)
 
 bool HasUncommittedNestedOverrides(Node* node)
 {
+    if (!node)
+        return false;
+
     for (Node* child : node->GetChildren())
     {
-        if (child->GetComponent<PrefabReference>() != nullptr)
+        if (auto* reference = child->GetComponent<PrefabReference>())
         {
-            // Nested stub: any persistent component other than PrefabReference or any persistent
-            // child is an uncommitted override of the nested prefab.
-            for (Component* component : child->GetComponents())
-            {
-                if (!component->IsTemporary() && component->GetType() != PrefabReference::GetTypeStatic())
-                    return true;
-            }
-            for (Node* grandChild : child->GetChildren())
-            {
-                if (!grandChild->IsTemporary())
-                    return true;
-            }
+            if (reference->HasUncommittedChanges())
+                return true;
         }
         if (HasUncommittedNestedOverrides(child))
             return true;
     }
     return false;
+}
+
+NodePrefab PrefabReference::GenerateInstancePrefab() const
+{
+    NodePrefab result;
+    GeneratePrefabMaterialized(node_, result);
+    // Root-level persistent additions are checked separately. Exclude them from the baseline
+    // as well, so removing an old scene-side addition returns the instance to a clean state.
+    auto& components = result.GetMutableComponents();
+    for (unsigned i = components.size(); i-- > 0;)
+    {
+        if (!node_->GetComponents()[i]->IsTemporary())
+            components.erase_at(i);
+    }
+    auto& children = result.GetMutableChildren();
+    for (unsigned i = children.size(); i-- > 0;)
+    {
+        if (!node_->GetChildren()[i]->IsTemporary())
+            children.erase_at(i);
+    }
+    result.GetMutableNode().GetMutableAttributes().clear();
+    ea::erase_if(result.GetMutableComponents(), [](const SerializablePrefab& component)
+        { return component.GetTypeNameHash() == PrefabReference::GetTypeStatic(); });
+    result.NormalizeIds(context_);
+    return result;
+}
+
+bool PrefabReference::HasUncommittedChanges() const
+{
+    if (!node_)
+        return false;
+
+    // Existing scene-side additions may already be present when the instance is created
+    // (e.g. after loading an older file). They must not become part of the clean baseline:
+    // materializing an outer prefab would discard them just like newly added overrides.
+    for (Component* component : node_->GetComponents())
+    {
+        if (component != this && !component->IsTemporary())
+            return true;
+    }
+    for (Node* child : node_->GetChildren())
+    {
+        if (!child->IsTemporary())
+            return true;
+    }
+    return instanceNode_ && node_ == instanceNode_ && GenerateInstancePrefab() != instancePrefab_;
 }
 
 void GeneratePrefabMaterialized(Node* node, NodePrefab& prefab)
@@ -509,7 +552,11 @@ void PrefabReference::CommitChanges()
     newResource->GetMutableScenePrefab() = prefab_->GetScenePrefab();
     newResource->GetMutableNodePrefab() = newNodePrefab;
     newResource->NormalizeIds();
-    newResource->SaveFile(prefab_->GetAbsoluteFileName());
+    if (!newResource->SaveFile(prefab_->GetAbsoluteFileName()))
+    {
+        URHO3D_LOGERROR("Cannot save prefab '{}'; instance changes were retained", prefab_->GetName());
+        return;
+    }
 
     // Remove all instantiated content and overrides, keeping only the stub itself (the node and
     // this PrefabReference component). The resource reload below rebuilds the instance from the

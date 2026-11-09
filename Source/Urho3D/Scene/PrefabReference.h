@@ -70,6 +70,10 @@ public:
     /// Commit prefab changes to the resource.
     void CommitChanges();
 
+    /// Whether owned content differs from the last instantiated state. Root node attributes
+    /// belong to the containing scene/prefab and are intentionally excluded.
+    bool HasUncommittedChanges() const;
+
     /// Handle enabled/disabled state change.
     void OnSetEnabled() override;
 
@@ -102,6 +106,9 @@ private:
     /// Removes all existing children and components except this PrefabReference.
     void CreateInstance(bool tryInplace = false, PrefabInstanceFlags instanceFlags = PrefabInstanceFlag::None);
 
+    NodePrefab GenerateInstancePrefab() const;
+    NodePrefab instancePrefab_;
+
     SharedPtr<PrefabResource> prefab_;
     ResourceRef prefabRef_;
     ea::string path_;
@@ -119,9 +126,8 @@ private:
 /// prefab instances is kept as references instead of being flattened into the saved prefab.
 URHO3D_API void GeneratePrefabMaterialized(Node* node, NodePrefab& prefab);
 
-/// Return true if any nested prefab instance in the subtree has uncommitted overrides: persistent
-/// components (other than PrefabReference) or persistent children added to a nested stub. Such
-/// overrides are never written to the outer file, so outer saves must be rejected while they exist.
+/// Return true if any nested prefab instance has uncommitted content changes, including attribute
+/// edits, additions and deletions at any depth. Does not check the reference on node itself.
 URHO3D_API bool HasUncommittedNestedOverrides(Node* node);
 
 } // namespace Urho3D

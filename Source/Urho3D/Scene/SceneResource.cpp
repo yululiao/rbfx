@@ -27,6 +27,7 @@
 #include <Urho3D/IO/MemoryBuffer.h>
 #include <Urho3D/IO/VirtualFileSystem.h>
 #include <Urho3D/Scene/PrefabResource.h>
+#include <Urho3D/Scene/PrefabReference.h>
 #include <Urho3D/Scene/SceneResource.h>
 #include <Urho3D/Resource/BinaryFile.h>
 #include <Urho3D/Resource/JSONArchive.h>
@@ -59,6 +60,11 @@ void SceneResource::SetSaveFormatHint(InternalResourceFormat format)
 
 bool SceneResource::Save(Serializer& dest, InternalResourceFormat format, bool asPrefab) const
 {
+    if (HasUncommittedNestedOverrides(scene_))
+    {
+        URHO3D_LOGERROR("Prefab: nested instances have uncommitted overrides. Commit the innermost prefab first.");
+        return false;
+    }
     if (asPrefab)
     {
         // Save as prefab is rare, we can afford to be suboptimal here.
@@ -119,6 +125,12 @@ bool SceneResource::Save(Serializer& dest, InternalResourceFormat format, bool a
 
 bool SceneResource::SaveFile(const FileIdentifier& fileName, InternalResourceFormat format, bool asPrefab) const
 {
+    // Check before opening with FILE_WRITE, which may truncate the existing file.
+    if (HasUncommittedNestedOverrides(scene_))
+    {
+        URHO3D_LOGERROR("Prefab: nested instances have uncommitted overrides. Commit the innermost prefab first.");
+        return false;
+    }
     auto vfs = GetSubsystem<VirtualFileSystem>();
     auto file = vfs->OpenFile(fileName, FILE_WRITE);
     return file && Save(*file, format, asPrefab);

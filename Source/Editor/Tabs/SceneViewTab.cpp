@@ -42,6 +42,7 @@
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Resource/ResourceEvents.h>
 #include <Urho3D/Scene/PrefabResource.h>
+#include <Urho3D/Scene/PrefabReference.h>
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/SystemUI/NodeInspectorWidget.h>
 #include <Urho3D/SystemUI/Widgets.h>
@@ -1042,6 +1043,17 @@ void SceneViewTab::OnActiveResourceChanged(const ea::string& oldResourceName, co
 
     if (SceneViewPage* newActivePage = GetPage(newResourceName))
         InspectSelection(*newActivePage);
+}
+
+bool SceneViewTab::CanSaveResource(const ea::string& resourceName)
+{
+    SceneViewPage* page = GetPage(resourceName);
+    if (page && HasUncommittedNestedOverrides(page->scene_))
+    {
+        URHO3D_LOGERROR("Prefab: nested instances have uncommitted overrides. Commit the innermost prefab first.");
+        return false;
+    }
+    return true;
 }
 
 void SceneViewTab::OnResourceSaved(const ea::string& resourceName)
