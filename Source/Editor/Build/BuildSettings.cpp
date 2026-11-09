@@ -29,6 +29,7 @@ const ea::string DefaultWindowsName = "Windows";
 const ea::string DefaultAndroidName = "Android";
 const ea::string DefaultWebName = "Web";
 const ea::string DefaultDouyinName = "Douyin";
+const ea::string DefaultWeChatName = "WeChat";
 const ea::string DefaultExecutableName = "Game";
 
 /// Environment variable the runtime already consults for a content key override, so a platform that
@@ -168,7 +169,7 @@ void AndroidBuildSettings::SerializeInBlock(Archive& archive)
     SerializeOptionalValue(archive, "KeystoreAliasEnvVar", keystoreAliasEnvVar_, ea::string());
 }
 
-void DouyinBuildSettings::SerializeInBlock(Archive& archive)
+void MinigameBuildSettings::SerializeInBlock(Archive& archive)
 {
     SerializeOptionalValue(archive, "AppId", appId_, ea::string());
     SerializeOptionalValue(archive, "Orientation", orientation_, ea::string("portrait"));
@@ -219,6 +220,7 @@ void BuildPlatformData::SerializeInBlock(Archive& archive)
     // tell "section absent" apart from "section present and complete".
     SerializeOptionalValue(archive, "Android", android_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "Douyin", douyin_, AlwaysSerialize{});
+    SerializeOptionalValue(archive, "WeChat", wechat_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "TextureCompression", textureCompression_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "AssetFilter", assetFilter_, AlwaysSerialize{});
     SerializeOptionalValue(archive, "CoreDataExclude", coreDataExclude_, ea::vector<ea::string>{});
@@ -308,6 +310,7 @@ bool BuildSettings::LoadProject(const ea::string& projectPath, const ea::string&
     // project without it would silently lack the option. By design this also re-adds a Douyin
     // platform removed by hand: it is the one platform the list never loses.
     changed |= EnsurePlatform(DefaultDouyinName, projectPath, engineData);
+    changed |= EnsurePlatform(DefaultWeChatName, projectPath, engineData);
 
     if (!changed)
         return true;
@@ -350,6 +353,24 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
 
     auto* fs = GetSubsystem<FileSystem>();
     BuildPlatformData platform;
+    // Both vendors run the same engine module. Reuse a project's configured toolchain,
+    // module selection and asset filters, but never its vendor identity or output directory.
+    if (name == DefaultWeChatName)
+    {
+        if (const auto* douyin = FindPlatform(DefaultDouyinName))
+        {
+            platform = *douyin;
+            platform.name_ = name;
+            platform.platform_ = "WeChat";
+            platform.outputDir_ = "Build/WeChat";
+            platform.wechat_ = {};
+            platform.wechat_.orientation_ = platform.douyin_.orientation_;
+            platform.packData_ = false;
+            platform.autoRunAfterBuild_ = false;
+            platforms_.push_back(platform);
+            return true;
+        }
+    }
     platform.name_ = name;
     if (name == DefaultAndroidName)
         platform.platform_ = "Android";
@@ -357,6 +378,8 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
         platform.platform_ = "Web";
     else if (name == DefaultDouyinName)
         platform.platform_ = "Douyin";
+    else if (name == DefaultWeChatName)
+        platform.platform_ = "WeChat";
     else
         platform.platform_ = "WindowsDesktop";
     // An emscripten-built platform points at a build tree made by its own toolchain, so a
@@ -368,7 +391,7 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
     platform.executableName_ = DefaultExecutableName;
     // The minigame file layer serves loose files only (its single synchronous primitive is a
     // plain file read), so a Douyin package can never be a .pak archive.
-    platform.packData_ = !platform.IsDouyin();
+    platform.packData_ = !platform.IsMinigame();
     platform.compressPackages_ = true;
     platform.encryptScripts_ = false;
     platform.autoRunAfterBuild_ = false;
@@ -383,7 +406,7 @@ bool BuildSettings::EnsurePlatform(const ea::string& name, const ea::string& pro
     // A fresh minigame platform starts from the size-cut selection: the modules a typical minigame
     // does not use are left out of the box, so the first build already produces the small package
     // without anyone having to find and uncheck them.
-    if (platform.IsDouyin())
+    if (platform.IsMinigame())
     {
         for (const EngineModuleInfo& module : GetEngineModules())
         {
@@ -425,10 +448,10 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
 
     if (platform.name_.empty())
         errors.push_back("Platform has no name.");
-    if (!platform.IsAndroid() && !platform.IsWindowsDesktop() && !platform.IsWeb() && !platform.IsDouyin())
+    if (!platform.IsAndroid() && !platform.IsWindowsDesktop() && !platform.IsWeb() && !platform.IsMinigame())
     {
         errors.push_back(ToString("Platform '%s': unknown platform '%s', expected 'WindowsDesktop', "
-            "'Android', 'Web' or 'Douyin'.",
+            "'Android', 'Web', 'Douyin' or 'WeChat'.",
             platform.name_.c_str(), platform.platform_.c_str()));
     }
 
@@ -512,8 +535,8 @@ bool BuildSettings::Validate(const BuildPlatformData& platform, ea::vector<ea::s
 
     // The runtime's only synchronous package access is a plain file read, so an archive would be
     // invisible to the game. The flag can still be set while editing; it just cannot ship.
-    if (platform.IsDouyin() && platform.packData_)
-        errors.push_back("Douyin packages serve loose files only: the runtime file layer cannot read "
+    if (platform.IsMinigame() && platform.packData_)
+        errors.push_back("Minigame packages serve loose files only: the runtime file layer cannot read "
             "inside a .pak archive. Turn off 'Pack resources into .pak files' for this platform.");
 
     if (platform.textureCompression_.enabled_ && FindTool(platform, "PVRTexToolCLI").empty())

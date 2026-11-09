@@ -545,6 +545,8 @@ ea::unique_ptr<BuildPlatform> CreateBuildPlatform(Context* context, const ea::st
         return ea::make_unique<WebBuildPlatform>(context);
     if (platformKind == "Douyin")
         return ea::make_unique<DouyinBuildPlatform>(context);
+    if (platformKind == "WeChat")
+        return ea::make_unique<WeChatBuildPlatform>(context);
     return ea::make_unique<DesktopBuildPlatform>(context);
 }
 

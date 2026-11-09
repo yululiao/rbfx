@@ -2,7 +2,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 
-// The terminal packaging step of the Douyin platform: the vendor package assembled around the
+// The shared terminal packaging step of the WeChat and Douyin platforms: the package assembled around the
 // minigame build tree. The engine module and the game data each ship as a subpackage - the vendor
 // caps the subpackages, so the module goes brotli-compressed for the loader that decompresses it -
 // and every manifest (the vendor's game.json and project.config.json, and the engine file layer's
@@ -18,6 +18,7 @@
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
+#include <Urho3D/Resource/ResourceCache.h>
 
 #include <EASTL/algorithm.h>
 #include <EASTL/sort.h>
@@ -149,9 +150,25 @@ constexpr const char* const VendorSafeExtensions[] = {
 /// the engine-visible name.
 constexpr const char* VendorRenameSuffix[] = {".dat"};
 
-bool HasVendorSafeExtension(const ea::string& fileName)
+// WeChat's package file system has a different allowlist from Douyin. In particular OTF,
+// Lua, model and shader suffixes can exist on disk yet fail readFileSync with permission denied.
+// Preserve native media suffixes and serve everything else as binary data via the manifest.
+constexpr const char* const WeChatSafeExtensions[] = {
+    ".json", ".js", ".bin", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ttf",
+    ".mp3", ".aac", ".m4a", ".wav", ".ogg", ".wasm", ".br"};
+
+bool HasVendorSafeExtension(const ea::string& fileName, bool wechat)
 {
     const ea::string extension = GetExtension(fileName);
+    if (wechat)
+    {
+        for (const char* extensionSafe : WeChatSafeExtensions)
+        {
+            if (extension == extensionSafe)
+                return true;
+        }
+        return false;
+    }
     for (const char* const extensionSafe : VendorSafeExtensions)
     {
         if (extension == extensionSafe)
@@ -162,7 +179,7 @@ bool HasVendorSafeExtension(const ea::string& fileName)
 
 } // namespace
 
-bool DouyinRuntimeStep::Run(ea::string& message)
+bool MinigameRuntimeStep::Run(ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     const BuildPlatformData* platform = owner_.platform();
@@ -216,14 +233,42 @@ bool DouyinRuntimeStep::Run(ea::string& message)
         return false;
     if (!WriteProjectConfig(message))
         return false;
+    if (platform->IsWeChat() && !PrepareWeChatJavaScript(message))
+        return false;
 
     ReportPackageSizes();
-    URHO3D_LOGINFO("[Build] Douyin package is ready in '{}'; open the directory with the Douyin "
-        "developer tool", owner_.outputDir());
+    URHO3D_LOGINFO("[Build] {} package is ready in '{}'; open the directory with the vendor developer tool",
+        platform->platform_, owner_.outputDir());
     return true;
 }
 
-bool DouyinRuntimeStep::StageBootstrap(const ea::string& bin, ea::string& message)
+bool MinigameRuntimeStep::PrepareWeChatJavaScript(ea::string& message)
+{
+    auto* fs = owner_.context()->GetSubsystem<FileSystem>();
+    auto* cache = owner_.context()->GetSubsystem<ResourceCache>();
+    const auto script = cache->GetFile("Build/prepare_wechat_js.cjs");
+    if (!script || !fs->FileExists(script->GetAbsoluteName()))
+    {
+        message = "Missing EditorData/Build/prepare_wechat_js.cjs; update the editor data alongside the editor.";
+        return false;
+    }
+    auto& platform = static_cast<EmscriptenBuildPlatform&>(owner_);
+    const ea::string toolchain = platform.ResolveEmscriptenRoot(message);
+    if (toolchain.empty())
+        return false;
+    ea::string output;
+    const int exitCode = fs->SystemRun(owner_.ResolveEmsdkNode(),
+        {script->GetAbsoluteName(), RemoveTrailingSlash(owner_.outputDir()), toolchain}, output);
+    if (exitCode != 0)
+    {
+        message = Format("WeChat JavaScript compatibility conversion failed: {}", output);
+        return false;
+    }
+    URHO3D_LOGINFO("[Build] {}", output.trimmed());
+    return true;
+}
+
+bool MinigameRuntimeStep::StageBootstrap(const ea::string& bin, ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     const ea::string& outputDir = owner_.outputDir();
@@ -267,7 +312,7 @@ bool DouyinRuntimeStep::StageBootstrap(const ea::string& bin, ea::string& messag
     return true;
 }
 
-bool DouyinRuntimeStep::StageWasmSubpackage(const ea::string& bin, const ea::string& name,
+bool MinigameRuntimeStep::StageWasmSubpackage(const ea::string& bin, const ea::string& name,
     ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
@@ -317,7 +362,7 @@ bool DouyinRuntimeStep::StageWasmSubpackage(const ea::string& bin, const ea::str
     return CompressWasmModule(bin, destination, message);
 }
 
-bool DouyinRuntimeStep::CompressWasmModule(const ea::string& bin, const ea::string& destination,
+bool MinigameRuntimeStep::CompressWasmModule(const ea::string& bin, const ea::string& destination,
     ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
@@ -372,12 +417,12 @@ bool DouyinRuntimeStep::CompressWasmModule(const ea::string& bin, const ea::stri
     File wasmHandle(owner_.context(), source, FILE_READ);
     File moduleHandle(owner_.context(), artifact, FILE_READ);
     URHO3D_LOGINFO("[Build] Compressed the engine module for the vendor loader: {} KB -> {} KB; "
-        "the package needs Douyin base library 3.7.0.0 or newer",
+        "use a vendor base library supporting Brotli-compressed WebAssembly",
         (wasmHandle.GetSize() + 1023) / 1024, (moduleHandle.GetSize() + 1023) / 1024);
     return true;
 }
 
-bool DouyinRuntimeStep::WriteGameConfig(const ea::vector<ea::string>& wasmSubpackages,
+bool MinigameRuntimeStep::WriteGameConfig(const ea::vector<ea::string>& wasmSubpackages,
     ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
@@ -431,7 +476,7 @@ bool DouyinRuntimeStep::WriteGameConfig(const ea::vector<ea::string>& wasmSubpac
     text += "    // Canvas sizing: true sizes the canvas to the physical resolution (logical size times\n";
     text += "    // the pixel ratio); false keeps the logical resolution and lets the vendor scale it.\n";
     text += "    screen: {native_resolution: true},\n\n";
-    text += "    // The WeChat debug overlay switch; Douyin has no equivalent, so it is always off.\n";
+    text += "    // WeChat debug overlay (off by default); ignored on Douyin.\n";
     text += "    enable_debug: false,\n\n";
     text += "    // Ask the vendor update manager to check for a new package version on every launch.\n";
     text += "    enable_check_update: true\n";
@@ -440,7 +485,7 @@ bool DouyinRuntimeStep::WriteGameConfig(const ea::vector<ea::string>& wasmSubpac
     return WriteTextFile(owner_.context(), owner_.outputDir() + "rbfx_game_config.js", text, message);
 }
 
-bool DouyinRuntimeStep::TranscodeStagedAudio(ea::string& message)
+bool MinigameRuntimeStep::TranscodeStagedAudio(ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     const ea::string& resourceDir = owner_.resourceDir();
@@ -467,7 +512,7 @@ bool DouyinRuntimeStep::TranscodeStagedAudio(ea::string& message)
         const ea::string resolved = output.trimmed();
         if (exitCode != 0 || resolved.empty() || !fs->FileExists(resolved))
         {
-            message = Format("The Douyin package transcodes .ogg to .m4a for the host audio "
+            message = Format("The minigame package transcodes .ogg to .m4a for the host audio "
                 "player, which needs ffmpeg, and locating it failed: {}. Install it once with "
                 "'<emsdk-python> -m pip install imageio-ffmpeg'.", output);
             return false;
@@ -522,10 +567,42 @@ bool DouyinRuntimeStep::TranscodeStagedAudio(ea::string& message)
     return true;
 }
 
-bool DouyinRuntimeStep::RenameForVendorCompatibility(
+bool MinigameRuntimeStep::RenameForVendorCompatibility(
     ea::unordered_map<ea::string, ea::string>& vendorRenames, ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
+    const bool wechat = owner_.platform()->IsWeChat();
+    if (wechat)
+    {
+        // Cooked names such as island.fbx.d/Models/island.mdl are engine resource names,
+        // not portable host package paths. Give every resource a short, flat physical path;
+        // the manifest preserves all logical names, including relative shader/prefab references.
+        const ea::string& resourceDir = owner_.resourceDir();
+        ea::vector<ea::string> files;
+        fs->ScanDir(files, resourceDir, "*", SCAN_FILES | SCAN_RECURSIVE);
+        ea::sort(files.begin(), files.end());
+        if (!fs->CreateDirsRecursive(resourceDir + "files"))
+        {
+            message = "Cannot create the WeChat resource storage directory.";
+            return false;
+        }
+        const ea::string root = MinigameDataSubpackageName + "/";
+        for (unsigned i = 0; i < files.size(); ++i)
+        {
+            const ea::string extension = HasVendorSafeExtension(files[i], true) ? GetExtension(files[i]) : ".bin";
+            const ea::string physical = Format("files/{:06}{}", i, extension);
+            if (fs->FileExists(resourceDir + physical)
+                || !fs->Rename(resourceDir + files[i], resourceDir + physical))
+            {
+                message = Format("Cannot stage WeChat resource '{}' as '{}'.", files[i], physical);
+                return false;
+            }
+            vendorRenames[root + physical] = root + files[i];
+        }
+        URHO3D_LOGINFO("[Build] Mapped {} WeChat resources to flat package paths", files.size());
+        return true;
+    }
+    const ea::string suffix = wechat ? ".bin" : VendorRenameSuffix[0];
 
     // The whole assembled package is subject to the vendor filter, not only the data subpackage:
     // an unrecognized extension would be dropped wherever it sits. The bootstrap scripts and the
@@ -539,27 +616,32 @@ bool DouyinRuntimeStep::RenameForVendorCompatibility(
     unsigned renamed = 0;
     for (const ea::string& file : files)
     {
-        if (HasVendorSafeExtension(file))
+        if (HasVendorSafeExtension(file, wechat))
             continue;
 
         const ea::string from = owner_.outputDir() + file;
-        const ea::string to = from + VendorRenameSuffix[0];
+        const ea::string to = from + suffix;
+        if (fs->FileExists(to))
+        {
+            message = Format("Cannot map '{}' to '{}': the destination already exists.", from, to);
+            return false;
+        }
         if (!fs->Rename(from, to))
         {
             message = Format("Could not rename '{}': the vendor file filter would drop it as is.", from);
             return false;
         }
-        vendorRenames[file + VendorRenameSuffix[0]] = file;
+        vendorRenames[file + suffix] = file;
         ++renamed;
     }
 
     if (renamed)
         URHO3D_LOGINFO("[Build] Renamed {} file(s) with the '{}' suffix: the vendor tool stages "
-            "only the extensions it recognizes", renamed, VendorRenameSuffix[0]);
+            "only the extensions it recognizes", renamed, suffix);
     return true;
 }
 
-bool DouyinRuntimeStep::WriteFileManifest(
+bool MinigameRuntimeStep::WriteFileManifest(
     const ea::unordered_map<ea::string, ea::string>& vendorRenames, ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
@@ -587,7 +669,7 @@ bool DouyinRuntimeStep::WriteFileManifest(
         const ea::string packageRelative = MinigameDataSubpackageName + "/" + files[i];
         const bool renamed = vendorRenames.contains(packageRelative);
         const ea::string logical = renamed
-            ? files[i].substr(0, files[i].length() - strlen(VendorRenameSuffix[0]))
+            ? vendorRenames.at(packageRelative).substr(MinigameDataSubpackageName.length() + 1)
             : files[i];
         const ea::string path = resourceDir + files[i];
         File handle(owner_.context(), path, FILE_READ);
@@ -613,7 +695,7 @@ bool DouyinRuntimeStep::WriteFileManifest(
     return WriteTextFile(owner_.context(), owner_.outputDir() + "rbfx_files.json", text, message);
 }
 
-bool DouyinRuntimeStep::EnsureDataSubpackageEntry(ea::string& message)
+bool MinigameRuntimeStep::EnsureDataSubpackageEntry(ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     const ea::string& resourceDir = owner_.resourceDir();
@@ -633,7 +715,7 @@ bool DouyinRuntimeStep::EnsureDataSubpackageEntry(ea::string& message)
     return WriteTextFile(owner_.context(), resourceDir + "game.js", text, message);
 }
 
-bool DouyinRuntimeStep::WriteGameManifest(const ea::vector<ea::string>& wasmSubpackages,
+bool MinigameRuntimeStep::WriteGameManifest(const ea::vector<ea::string>& wasmSubpackages,
     ea::string& message)
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
@@ -648,7 +730,7 @@ bool DouyinRuntimeStep::WriteGameManifest(const ea::vector<ea::string>& wasmSubp
         subpackages.push_back(MinigameDataSubpackageName);
 
     const ea::string orientation =
-        platform->douyin_.orientation_ == "landscape" ? "landscape" : "portrait";
+        platform->GetMinigameSettings().orientation_ == "landscape" ? "landscape" : "portrait";
 
     ea::string text;
     text += "{\n";
@@ -665,7 +747,7 @@ bool DouyinRuntimeStep::WriteGameManifest(const ea::vector<ea::string>& wasmSubp
     return WriteTextFile(owner_.context(), owner_.outputDir() + "game.json", text, message);
 }
 
-bool DouyinRuntimeStep::WriteProjectConfig(ea::string& message)
+bool MinigameRuntimeStep::WriteProjectConfig(ea::string& message)
 {
     // The developer tool reads this when the output directory is opened as a project; the runtime
     // never looks at it. The appid is the one piece the editor cannot derive, so it is whatever the
@@ -685,7 +767,13 @@ bool DouyinRuntimeStep::WriteProjectConfig(ea::string& message)
 
     ea::string text;
     text += "{\n";
-    text += "  \"appid\": \"" + platform->douyin_.appId_ + "\",\n";
+    text += "  \"appid\": \"" + platform->GetMinigameSettings().appId_ + "\",\n";
+    if (platform->IsWeChat())
+    {
+        text += "  \"compileType\": \"game\",\n";
+        text += "  \"miniprogramRoot\": \"./\",\n";
+        text += "  \"simulatorType\": \"wechat\",\n";
+    }
     text += "  \"projectname\": \"" + platform->executableName_ + "\",\n";
     text += "  \"setting\": {\n";
     text += "    \"urlCheck\": false,\n";
@@ -698,10 +786,11 @@ bool DouyinRuntimeStep::WriteProjectConfig(ea::string& message)
     return WriteTextFile(owner_.context(), owner_.outputDir() + "project.config.json", text, message);
 }
 
-void DouyinRuntimeStep::ReportPackageSizes() const
+void MinigameRuntimeStep::ReportPackageSizes() const
 {
     auto* fs = owner_.context()->GetSubsystem<FileSystem>();
     const ea::string& outputDir = owner_.outputDir();
+    const unsigned long long totalBudget = owner_.platform()->IsWeChat() ? 30ull * 1024 * 1024 : TotalPackageBudget;
 
     // The main package is what the vendor runtime downloads before anything runs, so it is the one
     // with a budget worth watching; the subpackages stream on demand. Sizes are read back from the
@@ -731,11 +820,11 @@ void DouyinRuntimeStep::ReportPackageSizes() const
 
     URHO3D_LOGINFO("[Build] Package sizes: main {} KB of {} KB budget, total {} KB of {} KB budget",
         (mainPackage + 1023) / 1024, MainPackageBudget / 1024,
-        (total + 1023) / 1024, TotalPackageBudget / 1024);
+        (total + 1023) / 1024, totalBudget / 1024);
     if (mainPackage > MainPackageBudget)
         URHO3D_LOGWARNING("[Build] The main package is over the vendor budget; move content into a "
             "subpackage or the upload will be rejected.");
-    if (total > TotalPackageBudget)
+    if (total > totalBudget)
         URHO3D_LOGWARNING("[Build] The whole package is over the vendor budget; the upload will be "
             "rejected until it shrinks.");
 }

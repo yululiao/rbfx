@@ -121,6 +121,80 @@
 				"Container": "ktx",
 				"NormalFormat": "ETC2_RGBA"
 			}
+		},
+		{
+			"Android": {},
+			"AssetFilter": {
+				"Exclude": [
+					"Models/Quaternius_pirate-kit/**/Characters_*.mdl",
+					"Models/Quaternius_pirate-kit/**/Characters_*.ani",
+					"Models/Quaternius_pirate-kit/**/*.bonetex",
+					"Models/Quaternius_pirate-kit/**/Environment_Skulls.*",
+					"Models/Characters-001/**/*Duck.ani",
+					"Models/Characters-001/**/*Jump*.ani",
+					"Models/Characters-001/**/*No.ani",
+					"Models/Characters-001/**/*Punch.ani",
+					"Models/Characters-001/**/*Slash.ani",
+					"Models/Characters-001/**/*Stab.ani",
+					"Models/Characters-001/**/*Wave.ani",
+					"Models/Characters-001/**/*Yes.ani",
+					"Models/Characters-001/**/*CharacterArmatureWalk.ani",
+					"Models/Characters-001/**/*CharacterArmatureWalk_Gun.ani",
+					"Models/Characters-001/**/*AnimalArmatureDeath.ani",
+					"Models/Characters-001/**/*AnimalArmatureEating.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_2.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_2_HeadLow.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_HitReact_Left.ani",
+					"Models/Characters-001/**/*AnimalArmatureIdle_HitReact_Right.ani"
+				],
+				"Include": [
+					"Models/Quaternius_pirate-kit",
+					"Models/Characters-001",
+					"Models/Island",
+					"Materials",
+					"Particle",
+					"Textures",
+					"Fonts",
+					"Sound/back_ground",
+					"Sound/gun_shot",
+					"Sound/kenney_voiceover-pack-fighter",
+					"Sound/kenney_impact-sounds"
+				]
+			},
+			"CoreDataExclude": [
+				"Models/TeaPot.mdl",
+				"Models/Torus.mdl",
+				"Models/PlaneTess.mdl",
+				"Models/Dome.mdl",
+				"Models/Sphere.mdl"
+			],
+			"DisabledEngineModules": [
+				"URHO3D_PHYSICS",
+				"URHO3D_PHYSICS2D",
+				"URHO3D_NAVIGATION",
+				"URHO3D_IK",
+				"URHO3D_UI",
+				"URHO3D_SYSTEMUI",
+				"URHO3D_TIMELINE"
+			],
+			"Douyin": {},
+			"EmsdkRoot": "D:/openSrc/emsdk",
+			"EngineBin": "D:/openSrc/rbfx/cmake-build/minigame-douyin/bin/Release",
+			"EngineBuild": "Incremental",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "WeChat",
+			"OutputDir": "Build/WeChat",
+			"PackData": false,
+			"Platform": "WeChat",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			},
+			"WeChat": {
+				"AppId": "wx84060798d3825e67"
+			}
 		}
 	]
 }

@@ -58,9 +58,8 @@ struct AndroidBuildSettings
     void SerializeInBlock(Archive& archive);
 };
 
-/// Douyin specific part of a build platform. Ignored by every other platform; it describes
-/// the vendor project the assembled package declares itself as.
-struct DouyinBuildSettings
+/// Vendor identity and orientation. WeChat and Douyin persist independent settings blocks.
+struct MinigameBuildSettings
 {
     /// Vendor app id written into project.config.json. Empty is legal: the devtools lets the
     /// developer pick the app when the id is missing, and a value pasted here ends up in the
@@ -155,7 +154,7 @@ struct BuildPlatformData
     /// Display name, unique inside the file. Doubles as the argument to `--build`. Deliberately
     /// without a fallback: a platform nobody can name is an error, not something to guess at.
     ea::string name_;
-    /// "WindowsDesktop", "Android", "Web" or "Douyin". Kept as a string on purpose: an unknown
+    /// "WindowsDesktop", "Android", "Web", "Douyin" or "WeChat". Kept as a string on purpose: an unknown
     /// value has to be reported as an error rather than quietly resolved to one of the known
     /// platforms, and a missing one is reported the same way instead of defaulting an Android
     /// platform to desktop.
@@ -198,7 +197,8 @@ struct BuildPlatformData
     /// and their build tree is the one the editor reconfigures itself.
     ea::vector<ea::string> disabledEngineModules_;
     AndroidBuildSettings android_;
-    DouyinBuildSettings douyin_;
+    MinigameBuildSettings douyin_;
+    MinigameBuildSettings wechat_;
     TextureCompressionSettings textureCompression_;
     /// Directory allowlist for the packaged Data/ and Cache outputs. Empty (default) ships everything.
     AssetFilterSettings assetFilter_;
@@ -214,10 +214,14 @@ struct BuildPlatformData
     bool IsWindowsDesktop() const { return platform_ == "WindowsDesktop"; }
     bool IsWeb() const { return platform_ == "Web"; }
     bool IsDouyin() const { return platform_ == "Douyin"; }
+    bool IsWeChat() const { return platform_ == "WeChat"; }
+    bool IsMinigame() const { return IsDouyin() || IsWeChat(); }
+    const MinigameBuildSettings& GetMinigameSettings() const { return IsWeChat() ? wechat_ : douyin_; }
+    MinigameBuildSettings& GetMinigameSettings() { return IsWeChat() ? wechat_ : douyin_; }
     /// Whether the platform's host is built by the emscripten toolchain into a wasm module:
     /// the web page and the minigame host share the toolchain probing and the texture
     /// format defaults of a WebGL-only target.
-    bool IsWebBased() const { return IsWeb() || IsDouyin(); }
+    bool IsWebBased() const { return IsWeb() || IsMinigame(); }
 
     /// Texture compression settings with every empty field resolved to this platform's platform default.
     TextureCompressionSettings GetEffectiveTextureCompression() const;

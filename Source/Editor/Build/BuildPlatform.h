@@ -344,14 +344,14 @@ public:
     void LaunchAfterBuild(const ea::string& outputDir) const override;
 };
 
-/// Douyin minigame: the same emsdk toolchain as web, but the compile target and the payload are the
+/// Minigames: the same emsdk toolchain as web, but the compile target and the payload are the
 /// vendor's - the engine module rides in its own subpackage next to a data subpackage, and the
-/// vendor manifests are generated around both (see DouyinRuntimeStep). Nothing on this machine can
+/// vendor manifests are generated around both (see MinigameRuntimeStep). Nothing on this machine can
 /// launch the result; the vendor devtool does.
-class DouyinBuildPlatform : public EmscriptenBuildPlatform
+class MinigameBuildPlatform : public EmscriptenBuildPlatform
 {
 public:
-    explicit DouyinBuildPlatform(Context* context)
+    explicit MinigameBuildPlatform(Context* context)
         : EmscriptenBuildPlatform(context)
     {
     }
@@ -373,6 +373,18 @@ public:
     ea::unique_ptr<BuildStep> MakeRuntimeStep() override;
     bool SupportsAutoRun() const override { return false; }
     void LaunchAfterBuild(const ea::string& /*outputDir*/) const override { }
+};
+
+class DouyinBuildPlatform : public MinigameBuildPlatform
+{
+public:
+    using MinigameBuildPlatform::MinigameBuildPlatform;
+};
+
+class WeChatBuildPlatform : public MinigameBuildPlatform
+{
+public:
+    using MinigameBuildPlatform::MinigameBuildPlatform;
 };
 
 /// Resolve the platform of the build platform named 'platformName' to its backend, or null when no such

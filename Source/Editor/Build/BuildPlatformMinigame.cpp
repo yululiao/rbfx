@@ -2,7 +2,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT> or the accompanying LICENSE file.
 
-// Douyin backend. The compile side is the shared emsdk machinery; what is specific here is the
+// Shared minigame backend. The compile side is the shared emsdk machinery; what is specific here is the
 // payload: the compile target is the vendor module rather than a complete host application, the
 // game files are staged into a subpackage because the vendor caps the main package well below the
 // size of the game data, and nothing on this machine can launch the result - the vendor devtool
@@ -64,15 +64,15 @@ ea::string FindRepositoryRoot(FileSystem* fs, const ea::string& startDir)
 
 } // namespace
 
-ea::string DouyinBuildPlatform::ResolveResourceDir(const ea::string& outputDir) const
+ea::string MinigameBuildPlatform::ResolveResourceDir(const ea::string& outputDir) const
 {
     // The staged resources are exported straight into the root of the data subpackage: the runtime
     // downloads that subpackage on demand, and the assembler maps the engine-visible file names
-    // back onto it (see DouyinRuntimeStep).
+    // back onto it (see MinigameRuntimeStep).
     return outputDir + MinigameDataSubpackageName + "/";
 }
 
-bool DouyinBuildPlatform::VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const
+bool MinigameBuildPlatform::VerifyEngineArtifacts(const ea::string& bin, ea::string& message) const
 {
     auto* fs = context()->GetSubsystem<FileSystem>();
     for (const char* extension : {".js", ".wasm"})
@@ -87,7 +87,7 @@ bool DouyinBuildPlatform::VerifyEngineArtifacts(const ea::string& bin, ea::strin
     return true;
 }
 
-bool DouyinBuildPlatform::ConfigureEngineBuildTreeFromScratch(ea::string& tree, ea::string& cmakeCommand,
+bool MinigameBuildPlatform::ConfigureEngineBuildTreeFromScratch(ea::string& tree, ea::string& cmakeCommand,
     ea::vector<ea::string>& arguments, const ea::vector<ea::string>& featureDefines,
     ea::string& message) const
 {
@@ -112,7 +112,7 @@ bool DouyinBuildPlatform::ConfigureEngineBuildTreeFromScratch(ea::string& tree, 
     {
         message = "Cannot configure a build tree from scratch: the engine sources were not found "
             "above the editor directory. Configure the tree manually first, for example "
-            "'cmake --preset minigame-douyin', and try again.";
+            "'cmake --preset minigame-wechat' or 'minigame-douyin', and try again.";
         return false;
     }
 
@@ -191,9 +191,9 @@ bool DouyinBuildPlatform::ConfigureEngineBuildTreeFromScratch(ea::string& tree, 
     return true;
 }
 
-ea::unique_ptr<BuildStep> DouyinBuildPlatform::MakeRuntimeStep()
+ea::unique_ptr<BuildStep> MinigameBuildPlatform::MakeRuntimeStep()
 {
-    return ea::make_unique<DouyinRuntimeStep>(*this);
+    return ea::make_unique<MinigameRuntimeStep>(*this);
 }
 
 } // namespace Urho3D

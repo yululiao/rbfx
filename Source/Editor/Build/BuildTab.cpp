@@ -199,7 +199,7 @@ void BuildTab::RenderContent()
             fs->SystemOpen(outputDir);
         ui::EndDisabled();
 
-        if (!platform->IsAndroid() && !platform->IsDouyin())
+        if (!platform->IsAndroid() && !platform->IsMinigame())
         {
             ui::SameLine();
             if (platform->IsWeb())
@@ -236,8 +236,8 @@ void BuildTab::RenderContent()
         RenderAndroidOptions(*platform);
     if (platform->IsWeb())
         RenderWebOptions(*platform);
-    if (platform->IsDouyin())
-        RenderDouyinOptions(*platform);
+    if (platform->IsMinigame())
+        RenderMinigameOptions(*platform);
     if (platform->IsWebBased())
         RenderEngineModuleOptions(*platform);
     ui::EndDisabled();
@@ -284,11 +284,11 @@ void BuildTab::RenderPackageOptions(BuildPlatformData& platform)
         "Absolute, or relative to the project folder. It is emptied at the start of "
             "every build, so point it at a directory the build owns"));
 
-    ui::BeginDisabled(platform.IsDouyin());
+    ui::BeginDisabled(platform.IsMinigame());
     Touch(ui::Checkbox("Pack resources into .pak files", &platform.packData_));
     ui::EndDisabled();
-    if (platform.IsDouyin() && ui::IsItemHovered())
-        ui::SetTooltip("Douyin packages serve loose files only: the runtime's single synchronous "
+    if (platform.IsMinigame() && ui::IsItemHovered())
+        ui::SetTooltip("Minigame packages serve loose files only: the runtime's single synchronous "
             "file API reads the package directory directly, which a .pak archive cannot satisfy");
     ui::Indent();
     ui::BeginDisabled(!platform.packData_);
@@ -307,11 +307,11 @@ void BuildTab::RenderPackageOptions(BuildPlatformData& platform)
     ui::EndDisabled();
     ui::Unindent();
 
-    ui::BeginDisabled(platform.IsDouyin());
+    ui::BeginDisabled(platform.IsMinigame());
     Touch(ui::Checkbox("Run the game when the build finishes", &platform.autoRunAfterBuild_));
     ui::EndDisabled();
-    if (platform.IsDouyin() && ui::IsItemHovered())
-        ui::SetTooltip("The output is a vendor package; open the output directory with the Douyin "
+    if (platform.IsMinigame() && ui::IsItemHovered())
+        ui::SetTooltip("The output is a vendor package; open the output directory with the vendor's "
             "developer tool to play it");
 
     ui::Separator();
@@ -399,11 +399,12 @@ void BuildTab::RenderWebOptions(BuildPlatformData& platform)
     RenderEmsdkRootField(platform);
 }
 
-void BuildTab::RenderDouyinOptions(BuildPlatformData& platform)
+void BuildTab::RenderMinigameOptions(BuildPlatformData& platform)
 {
-    DouyinBuildSettings& douyin = platform.douyin_;
+    MinigameBuildSettings& douyin = platform.GetMinigameSettings();
 
-    if (!ui::CollapsingHeader(ICON_FA_GAMEPAD " Douyin", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!ui::CollapsingHeader(platform.IsWeChat() ? ICON_FA_GAMEPAD " WeChat" : ICON_FA_GAMEPAD " Douyin",
+        ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
     // A closed list on purpose: the vendor runtime takes these two values and nothing else, and a
@@ -428,14 +429,14 @@ void BuildTab::RenderDouyinOptions(BuildPlatformData& platform)
 
     Touch(ui::InputText("Application id", &douyin.appId_));
     if (ui::IsItemHovered())
-        ui::SetTooltip("The appid from the Douyin developer console, written into "
+        ui::SetTooltip("The appid from this platform's developer console, written into "
             "project.config.json; may stay empty until the game is registered");
 
     ui::Separator();
     RenderEmsdkRootField(platform);
 
-    ui::TextWrapped("The output is the vendor package itself: open its directory with the Douyin "
-        "developer tool to preview and upload it.");
+    ui::TextWrapped("Open the output directory with the %s developer tool to preview and upload it.",
+        platform.IsWeChat() ? "WeChat" : "Douyin");
 }
 
 void BuildTab::RenderEngineModuleOptions(BuildPlatformData& platform)

@@ -265,6 +265,17 @@
       "name": "minigame-douyin",
       "inherits": "minigame-base"
     },
+      {
+        "name": "minigame-wechat",
+        "inherits": "minigame-base"
+      },
+      {
+        "name": "minigame-wechat-compatible",
+        "inherits": "minigame-base",
+        "cacheVariables": {
+          "URHO3D_MINIGAME_LEGACY": "ON"
+        }
+      },
     {
       "name": "minigame-douyin-compatible",
       "inherits": "minigame-base",
@@ -578,6 +589,16 @@
       "configurePreset": "minigame-douyin",
       "displayName": "release"
     },
+      {
+        "name": "minigame-wechat-release",
+        "configurePreset": "minigame-wechat",
+        "displayName": "release"
+      },
+      {
+        "name": "minigame-wechat-compatible-release",
+        "configurePreset": "minigame-wechat-compatible",
+        "displayName": "release"
+      },
     {
       "name": "minigame-douyin-compatible-release",
       "configurePreset": "minigame-douyin-compatible",

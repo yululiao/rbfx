@@ -238,17 +238,17 @@ private:
     class WebBuildPlatform& web_;
 };
 
-/// Douyin minigame: assemble the vendor package from the minigame build tree. The bootstrap scripts
+/// WeChat/Douyin minigames: assemble the vendor package from the shared minigame build tree. The bootstrap scripts
 /// move to the package root, each wasm subpackage gets its entry script and the brotli-compressed
 /// module beside it, and the manifests the vendor runtime and the engine file layer read (game.json,
 /// project.config.json, rbfx_files.json) are regenerated around the subpackages this build actually
 /// produced. The staged game files are already in place: the platform exported them into the data
 /// subpackage root.
-class DouyinRuntimeStep : public BuildStep
+class MinigameRuntimeStep : public BuildStep
 {
 public:
     using BuildStep::BuildStep;
-    const char* Name() const override { return "Assemble Douyin package"; }
+    const char* Name() const override { return "Assemble minigame package"; }
     bool Run(ea::string& message) override;
 
 private:
@@ -286,6 +286,8 @@ private:
     bool WriteGameManifest(const ea::vector<ea::string>& wasmSubpackages, ea::string& message);
     /// The developer-tool project descriptor (appid, project name); runtime ignores it.
     bool WriteProjectConfig(ea::string& message);
+    /// Downlevel executable scripts for WeChat's device-debug parser and verify ES2017 syntax.
+    bool PrepareWeChatJavaScript(ea::string& message);
     /// Byte sizes of the main package and every subpackage, checked against the vendor budgets.
     void ReportPackageSizes() const;
 };

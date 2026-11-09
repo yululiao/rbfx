@@ -49,7 +49,7 @@ private:
     /// The part of a platform only the web package assembler reads.
     void RenderWebOptions(BuildPlatformData& platform);
     /// The part of a platform only the minigame package assembler reads.
-    void RenderDouyinOptions(BuildPlatformData& platform);
+    void RenderMinigameOptions(BuildPlatformData& platform);
     /// The engine subsystems a web-based build can leave out: the wasm module shrinks by whatever
     /// is unchecked, at the price of reconfiguring and recompiling the build tree.
     void RenderEngineModuleOptions(BuildPlatformData& platform);
