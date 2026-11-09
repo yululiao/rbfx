@@ -6,8 +6,9 @@
 -- 链路分工（与 Voice 同一模式）：
 --   * 引擎侧（MinigameSDK）只发请求收事件——GetLaunchInfo / NavigateToSidebar，
 --     结果经 "MinigameSdkResult" 事件回来（data.Kind 对照 MINIGAME_REQUEST_KIND 表）。
---   * 宿主 JS 侧（minigame_sdk.js）管 scene 判定（抖音侧边栏 scene=021236）与
---     guideDone 持久化（宿主 storage），payload 形如 {"sidebar":true,"guideDone":false}，
+--   * 宿主 JS 侧（minigame_sdk.js）管 scene 判定（抖音侧边栏 scene=021236）、
+--     sidebarSupported 能力位与 guideDone 持久化（宿主 storage），payload 形如
+--     {"sidebar":true,"guideDone":false,"sidebarSupported":true}，
 --     JSON 布尔用 string.find 认领（同 Voice 的做法，不引 JSON 库）。
 --
 -- 行为：
@@ -20,7 +21,8 @@
 --   * 宿主 onShow（引擎 "MinigameShow" 事件）后重查一次：玩家从侧边栏面板点回
 --     游戏（进程保活、不冷启动）也走 onShow options.scene，这条路也能领到奖励。
 --   * 编辑器/桌面宿主没有 SDK → 整个模块静默（增益恒 1.0、引导不弹）；
---     要在编辑器里验证两条路径用 Config.DEBUG_SIDEBAR。
+--     微信宿主没有侧边栏（回包 sidebarSupported:false）→ 同样整个模块静默，
+--     不弹抖音专属引导、不发增益。要在编辑器里验证两条路径用 Config.DEBUG_SIDEBAR。
 --
 local Config = require("game.Config")
 local Tracker = require("game.Tracker")
@@ -102,6 +104,11 @@ function Sidebar:OnSdkResult(data)
         return
     end
     local payload = tostring(data.Payload or "")
+    -- 宿主没有侧边栏（微信等）：整条链路静默——不弹抖音专属引导，增益也永不生效。
+    -- 旧版宿主 JS 的回包没有这个字段，缺省按「支持」处理，抖音侧行为不变。
+    if string.find(payload, '"sidebarSupported":false', 1, true) then
+        return
+    end
     local fromSidebar = string.find(payload, '"sidebar":true', 1, true) ~= nil
     local guideDone = string.find(payload, '"guideDone":true', 1, true) ~= nil
     if fromSidebar then

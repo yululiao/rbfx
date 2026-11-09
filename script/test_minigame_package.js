@@ -69,6 +69,11 @@ async function main() {
             }
         })
     };
+    api.getStorageSync = () => "";
+    api.setStorageSync = () => {};
+    // Douyin's home sidebar is the only vendor surface the SDK shim detects by API presence.
+    if (vendor === "Douyin")
+        api.navigateToScene = () => {};
     let loadedWasm;
     const loader = {instantiate: (file, imports) => {
         loadedWasm = file;
@@ -119,6 +124,19 @@ async function main() {
     assert(gameEntry, "Missing game entry configuration");
     assert.equal(sandbox.rbfx.files.readBytes(gameEntry.path, gameEntry.size).byteLength, gameEntry.size);
     assert(fileReads >= 2, "File layer must read actual package files");
+    // Sidebar capability: Douyin detects its home sidebar through navigateToScene, which WeChat
+    // does not have. The shim reports that bit so the game keeps the Douyin-only guide silent on
+    // hosts without a sidebar; without it WeChat shows a guide whose button is a dead end.
+    sandbox.rbfx.native = {
+        completions: [],
+        sdk_complete(id, success, payload) { this.completions.push({id, success, payload}); }
+    };
+    run("minigame_sdk.js");
+    sandbox.rbfx.sdk.invoke(sandbox.rbfx.sdk.kind.get_launch_info, 1, "{}");
+    const launchInfo = JSON.parse(sandbox.rbfx.native.completions.pop().payload);
+    assert.equal(launchInfo.sidebar, false, "This test launches outside the sidebar scene");
+    assert.equal(launchInfo.sidebarSupported, vendor === "Douyin",
+        `Sidebar capability must be ${vendor === "Douyin"} on ${vendor}`);
     const preJs = path.join(__dirname, "../Source/MinigamePlayer/pre-js/rbfx_pre.js");
     vm.runInContext(fs.readFileSync(preJs, "utf8"), context);
     let instantiated = false;

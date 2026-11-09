@@ -974,6 +974,12 @@
     var SIDEBAR_GUIDE_KEY = "rbfx_sidebar_guide_done";
     var launch_scene = "";
 
+    // Whether the host has the sidebar surface at all. WeChat does not: its launch scene is a
+    // plain numeric code that can never equal the Douyin sidebar code above, so without this
+    // bit the game would read "not from the sidebar, guide not done" and show the Douyin-only
+    // guide on a host where the guide's navigateToScene button is a dead end.
+    var sidebar_supported = !!(wx_tt && typeof wx_tt.navigateToScene === "function");
+
     function read_launch_scene(options) {
         if (options && options.scene !== undefined && options.scene !== null)
             launch_scene = String(options.scene);
@@ -990,6 +996,8 @@
     // Launch info doubles as the "guide done" persist call: markGuideDone=true writes the
     // host-side flag so the guide never comes back after a reinstall-free restart. The
     // answer always carries the full state; a host without storage degrades to "not done".
+    // sidebarSupported is the capability bit the game gates on: a host that lacks the sidebar
+    // surface reports false, and the game stays silent instead of guessing from the scene.
     handlers[KIND.get_launch_info] = function (request_id, payload) {
         var args = parse_payload(payload);
         var marked = false;
@@ -997,8 +1005,9 @@
             try { wx_tt.setStorageSync(SIDEBAR_GUIDE_KEY, true); marked = true; } catch (e) { /* best effort */ }
         }
         complete(request_id, true, JSON.stringify({
-            sidebar: launch_scene === SIDEBAR_SCENE,
-            guideDone: sidebar_guide_done() || marked
+            sidebar: sidebar_supported && launch_scene === SIDEBAR_SCENE,
+            guideDone: sidebar_guide_done() || marked,
+            sidebarSupported: sidebar_supported
         }));
     };
 
