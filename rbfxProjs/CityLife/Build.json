@@ -1,0 +1,106 @@
+{
+	"Platforms": [
+		{
+			"Android": {},
+			"AssetFilter": {},
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Windows",
+			"OutputDir": "Build/Windows",
+			"Platform": "WindowsDesktop",
+			"TextureCompression": {
+				"ColorFormatAlpha": "BC3",
+				"ColorFormatNoAlpha": "BC1",
+				"Container": "dds",
+				"NormalFormat": "BC5"
+			},
+			"WeChat": {}
+		},
+		{
+			"Android": {
+				"ApplicationId": "com.example.citylife"
+			},
+			"AssetFilter": {},
+			"Douyin": {},
+			"EngineBin": "D:/openSrc/rbfx/msvc/bin/Release",
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Android",
+			"OutputDir": "Build/Android",
+			"Platform": "Android",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			},
+			"WeChat": {}
+		},
+		{
+			"Android": {},
+			"AssetFilter": {},
+			"Douyin": {},
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Web",
+			"OutputDir": "Build/Web",
+			"Platform": "Web",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			},
+			"WeChat": {}
+		},
+		{
+			"Android": {},
+			"AssetFilter": {},
+			"DisabledEngineModules": [
+				"URHO3D_PHYSICS",
+				"URHO3D_PHYSICS2D",
+				"URHO3D_NAVIGATION",
+				"URHO3D_IK",
+				"URHO3D_UI",
+				"URHO3D_SYSTEMUI"
+			],
+			"Douyin": {},
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "Douyin",
+			"OutputDir": "Build/Douyin",
+			"PackData": false,
+			"Platform": "Douyin",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			},
+			"WeChat": {}
+		},
+		{
+			"Android": {},
+			"AssetFilter": {},
+			"DisabledEngineModules": [
+				"URHO3D_PHYSICS",
+				"URHO3D_PHYSICS2D",
+				"URHO3D_NAVIGATION",
+				"URHO3D_IK",
+				"URHO3D_UI",
+				"URHO3D_SYSTEMUI"
+			],
+			"Douyin": {},
+			"EngineData": "D:/openSrc/rbfx/msvc/bin",
+			"Name": "WeChat",
+			"OutputDir": "Build/WeChat",
+			"PackData": false,
+			"Platform": "WeChat",
+			"TextureCompression": {
+				"ColorFormatAlpha": "ETC2_RGBA",
+				"ColorFormatNoAlpha": "ETC2_RGB",
+				"Container": "ktx",
+				"NormalFormat": "ETC2_RGBA"
+			},
+			"WeChat": {}
+		}
+	]
+}

@@ -1,0 +1,35 @@
+{
+	"nodes": [
+		{
+			"attributes": [
+				{
+					"name": "Scale",
+					"type": "Vector3",
+					"value": "1 1 1"
+				}
+			],
+			"components": [
+				{
+					"_typeName": "StaticModel",
+					"attributes": [
+						{
+							"name": "Model",
+							"type": "ResourceRef",
+							"value": "Model;Models/kenney_city/Models/Fbx/building-type-s.fbx.d/Models/building-type-s.mdl"
+						},
+						{
+							"name": "Material",
+							"type": "ResourceRefList",
+							"value": "Material;Models/kenney_city/Models/materials/city-variation-c.material"
+						},
+						{
+							"name": "Cast Shadows",
+							"type": "Bool",
+							"value": true
+						}
+					]
+				}
+			]
+		}
+	]
+}
