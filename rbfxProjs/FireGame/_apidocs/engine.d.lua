@@ -23,6 +23,7 @@ function GetRandomSeed(...) end
 ---@overload fun(typeName: "Technique", resourceName: string): Technique
 ---@overload fun(typeName: "Texture", resourceName: string): Texture
 ---@overload fun(typeName: "Texture2D", resourceName: string): Texture2D
+---@overload fun(typeName: "TimelineResource", resourceName: string): TimelineResource
 ---@overload fun(typeName: "TmxFile2D", resourceName: string): TmxFile2D
 ---@overload fun(typeName: "XMLFile", resourceName: string): XMLFile
 ---@param typeName string
@@ -126,10 +127,12 @@ function BehaviorNetworkObject.SetOwner(...) end
 
 ---@class Billboard
 Billboard = {}
+Billboard.color = nil
 Billboard.enabled = nil
 Billboard.position = nil
 Billboard.rotation = nil
 Billboard.size = nil
+Billboard.uv = nil
 
 ---@class BillboardSet : Drawable, Component, Serializable, Object
 BillboardSet = {}
@@ -146,6 +149,17 @@ Bone.animated = nil
 Bone.name = nil
 ---@type Node
 Bone.node = nil
+
+---@class BoneMatrixBaker : Object
+BoneMatrixBaker = {}
+function BoneMatrixBaker.GetFrames(...) end
+function BoneMatrixBaker.GetLastError(...) end
+function BoneMatrixBaker.GetNumBones(...) end
+function BoneMatrixBaker.GetTexture(...) end
+function BoneMatrixBaker.GetWidth(...) end
+function BoneMatrixBaker.Load(...) end
+function BoneMatrixBaker.Reset(...) end
+function BoneMatrixBaker.Save(...) end
 
 ---@class BorderImage : UIElement, Serializable, Object
 BorderImage = {}
@@ -535,7 +549,6 @@ Engine = {}
 function Engine.DumpResources(...) end
 function Engine.Exit(...) end
 function Engine.IsHeadless(...) end
---- Target frame rate: wasm caps the main loop to it; desktop caps via maxFps sleep limiter.
 function Engine.SetWebFrameRate(...) end
 
 ---@class EventData
@@ -571,6 +584,22 @@ function FileSystem.FileExists(...) end
 function FileSystem.GetProgramDir(...) end
 ---@return string
 function FileSystem.GetUserDocumentsDir(...) end
+
+---@class FlipbookBaker : Object
+FlipbookBaker = {}
+function FlipbookBaker.GetAtlasHeight(...) end
+function FlipbookBaker.GetAtlasWidth(...) end
+function FlipbookBaker.GetClipCellUV(...) end
+function FlipbookBaker.GetClipDuration(...) end
+function FlipbookBaker.GetClipFrameCount(...) end
+function FlipbookBaker.GetClipName(...) end
+function FlipbookBaker.GetFps(...) end
+function FlipbookBaker.GetLastError(...) end
+function FlipbookBaker.GetNumClips(...) end
+function FlipbookBaker.GetRotations(...) end
+function FlipbookBaker.GetTexture(...) end
+function FlipbookBaker.Load(...) end
+function FlipbookBaker.Reset(...) end
 
 ---@class Font : Resource, Object
 Font = {}
@@ -672,6 +701,44 @@ function Input.SetToggleFullscreen(...) end
 InputMap = {}
 ---@return number
 function InputMap.Evaluate(...) end
+
+---@class InstancedBoneModel : Drawable, Component, Serializable, Object
+InstancedBoneModel = {}
+function InstancedBoneModel.AddInstanceTRS(...) end
+function InstancedBoneModel.ClearInstances(...) end
+function InstancedBoneModel.GetBoneAtlas(...) end
+function InstancedBoneModel.GetGeometry(...) end
+function InstancedBoneModel.GetInstancePhase(...) end
+function InstancedBoneModel.GetMaterial(...) end
+function InstancedBoneModel.GetNumInstances(...) end
+function InstancedBoneModel.RemoveInstance(...) end
+function InstancedBoneModel.SetBoneAtlas(...) end
+function InstancedBoneModel.SetGeometry(...) end
+function InstancedBoneModel.SetInstanceAnimIndex(...) end
+function InstancedBoneModel.SetInstancePhase(...) end
+function InstancedBoneModel.SetInstancePlaySpeed(...) end
+function InstancedBoneModel.SetInstanceTransform(...) end
+function InstancedBoneModel.SetLocalBoundingBox(...) end
+function InstancedBoneModel.SetMaterial(...) end
+
+---@class InstancedVATModel : Drawable, Component, Serializable, Object
+InstancedVATModel = {}
+function InstancedVATModel.AddInstance(...) end
+function InstancedVATModel.AddInstanceTRS(...) end
+function InstancedVATModel.ClearInstances(...) end
+function InstancedVATModel.GetAnimationDuration(...) end
+function InstancedVATModel.GetGeometry(...) end
+function InstancedVATModel.GetInstanceAnimTime(...) end
+function InstancedVATModel.GetMaterial(...) end
+function InstancedVATModel.GetNumInstances(...) end
+function InstancedVATModel.RemoveInstance(...) end
+function InstancedVATModel.SetAnimationDuration(...) end
+function InstancedVATModel.SetGeometry(...) end
+function InstancedVATModel.SetInstanceAnimTime(...) end
+function InstancedVATModel.SetInstancePlaySpeed(...) end
+function InstancedVATModel.SetInstanceTransform(...) end
+function InstancedVATModel.SetLocalBoundingBox(...) end
+function InstancedVATModel.SetMaterial(...) end
 
 ---@class IntRect
 IntRect = {}
@@ -849,11 +916,21 @@ function LuaRmlUIComponent.SetVariantVector(...) end
 
 ---@class MINIGAME_REQUEST_KIND
 MINIGAME_REQUEST_KIND = {}
+MINIGAME_REQUEST_KIND.CLEAR_USER_AUDIO = 0
+MINIGAME_REQUEST_KIND.GET_LAUNCH_INFO = 0
 MINIGAME_REQUEST_KIND.LOGIN = 0
+MINIGAME_REQUEST_KIND.NAVIGATE_TO_SIDEBAR = 0
 MINIGAME_REQUEST_KIND.PAYMENT = 0
+MINIGAME_REQUEST_KIND.PLAY_GAME_AUDIO = 0
+MINIGAME_REQUEST_KIND.PLAY_USER_AUDIO = 0
 MINIGAME_REQUEST_KIND.PRIVACY_AUTHORIZATION = 0
+MINIGAME_REQUEST_KIND.RECORD_VOICE = 0
+MINIGAME_REQUEST_KIND.REPORT_ANALYTICS = 0
 MINIGAME_REQUEST_KIND.REWARDED_AD = 0
+MINIGAME_REQUEST_KIND.SET_DEVICE_ORIENTATION = 0
 MINIGAME_REQUEST_KIND.SHARE = 0
+MINIGAME_REQUEST_KIND.STOP_GAME_AUDIO = 0
+MINIGAME_REQUEST_KIND.STOP_USER_AUDIO = 0
 
 ---@class MM
 MM = {}
@@ -922,20 +999,40 @@ function MinigamePlatform.PrefetchFiles(...) end
 
 ---@class MinigameSDK : Object
 MinigameSDK = {}
+---@return integer
+function MinigameSDK.ClearUserAudio(...) end
+---@return integer
+function MinigameSDK.GetLaunchInfo(...) end
 ---@return boolean
 function MinigameSDK.IsAvailable(...) end
 function MinigameSDK.Login(...) end
+function MinigameSDK.NavigateToSidebar(...) end
 function MinigameSDK.Pay(...) end
+---@return integer
+function MinigameSDK.PlayGameAudio(...) end
+---@return integer
+function MinigameSDK.PlayUserAudio(...) end
+---@return integer
+function MinigameSDK.RecordVoice(...) end
+---@return integer
+function MinigameSDK.ReportAnalytics(...) end
 function MinigameSDK.RequestPrivacyAuthorization(...) end
+---@return integer
+function MinigameSDK.SetDeviceOrientation(...) end
 ---@return integer
 function MinigameSDK.Share(...) end
 function MinigameSDK.ShowRewardedAd(...) end
+---@return integer
+function MinigameSDK.StopGameAudio(...) end
+function MinigameSDK.StopUserAudio(...) end
 
 ---@class Model : Resource, Object
 Model = {}
 ---@return Model
 function Model.Clone(...) end
+function Model.GetBoundingBox(...) end
 function Model.GetGeometry(...) end
+function Model.GetGeometryName(...) end
 function Model.GetNumGeometries(...) end
 function Model.SetBoundingBox(...) end
 function Model.SetGeometry(...) end
@@ -1058,6 +1155,8 @@ function Node.CreateChild(...) end
 ---@overload fun(self: Node, typeName: "Drawable"): Drawable
 ---@overload fun(self: Node, typeName: "Drawable2D"): Drawable2D
 ---@overload fun(self: Node, typeName: "DynamicNavigationMesh"): DynamicNavigationMesh
+---@overload fun(self: Node, typeName: "InstancedBoneModel"): InstancedBoneModel
+---@overload fun(self: Node, typeName: "InstancedVATModel"): InstancedVATModel
 ---@overload fun(self: Node, typeName: "Light"): Light
 ---@overload fun(self: Node, typeName: "LuaRmlUIComponent"): LuaRmlUIComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitComponent"): MoveAndOrbitComponent
@@ -1081,6 +1180,7 @@ function Node.CreateChild(...) end
 ---@overload fun(self: Node, typeName: "RigidBody2D"): RigidBody2D
 ---@overload fun(self: Node, typeName: "RmlCanvasComponent"): RmlCanvasComponent
 ---@overload fun(self: Node, typeName: "RmlUIComponent"): RmlUIComponent
+---@overload fun(self: Node, typeName: "SignalReceiver"): SignalReceiver
 ---@overload fun(self: Node, typeName: "Skybox"): Skybox
 ---@overload fun(self: Node, typeName: "SoundListener"): SoundListener
 ---@overload fun(self: Node, typeName: "SoundSource"): SoundSource
@@ -1093,6 +1193,7 @@ function Node.CreateChild(...) end
 ---@overload fun(self: Node, typeName: "Text3D"): Text3D
 ---@overload fun(self: Node, typeName: "TileMap2D"): TileMap2D
 ---@overload fun(self: Node, typeName: "TileMapLayer2D"): TileMapLayer2D
+---@overload fun(self: Node, typeName: "TimelinePlayer"): TimelinePlayer
 ---@overload fun(self: Node, typeName: "UIComponent"): UIComponent
 ---@overload fun(self: Node, typeName: "Zone"): Zone
 ---@param typeName string
@@ -1140,6 +1241,8 @@ function Node.GetChildrenWithTag(...) end
 ---@overload fun(self: Node, typeName: "Drawable"): Drawable
 ---@overload fun(self: Node, typeName: "Drawable2D"): Drawable2D
 ---@overload fun(self: Node, typeName: "DynamicNavigationMesh"): DynamicNavigationMesh
+---@overload fun(self: Node, typeName: "InstancedBoneModel"): InstancedBoneModel
+---@overload fun(self: Node, typeName: "InstancedVATModel"): InstancedVATModel
 ---@overload fun(self: Node, typeName: "Light"): Light
 ---@overload fun(self: Node, typeName: "LuaRmlUIComponent"): LuaRmlUIComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitComponent"): MoveAndOrbitComponent
@@ -1163,6 +1266,7 @@ function Node.GetChildrenWithTag(...) end
 ---@overload fun(self: Node, typeName: "RigidBody2D"): RigidBody2D
 ---@overload fun(self: Node, typeName: "RmlCanvasComponent"): RmlCanvasComponent
 ---@overload fun(self: Node, typeName: "RmlUIComponent"): RmlUIComponent
+---@overload fun(self: Node, typeName: "SignalReceiver"): SignalReceiver
 ---@overload fun(self: Node, typeName: "Skybox"): Skybox
 ---@overload fun(self: Node, typeName: "SoundListener"): SoundListener
 ---@overload fun(self: Node, typeName: "SoundSource"): SoundSource
@@ -1175,6 +1279,7 @@ function Node.GetChildrenWithTag(...) end
 ---@overload fun(self: Node, typeName: "Text3D"): Text3D
 ---@overload fun(self: Node, typeName: "TileMap2D"): TileMap2D
 ---@overload fun(self: Node, typeName: "TileMapLayer2D"): TileMapLayer2D
+---@overload fun(self: Node, typeName: "TimelinePlayer"): TimelinePlayer
 ---@overload fun(self: Node, typeName: "UIComponent"): UIComponent
 ---@overload fun(self: Node, typeName: "Zone"): Zone
 ---@param typeName string
@@ -1225,6 +1330,8 @@ function Node.GetNumComponents(...) end
 ---@overload fun(self: Node, typeName: "Drawable"): Drawable
 ---@overload fun(self: Node, typeName: "Drawable2D"): Drawable2D
 ---@overload fun(self: Node, typeName: "DynamicNavigationMesh"): DynamicNavigationMesh
+---@overload fun(self: Node, typeName: "InstancedBoneModel"): InstancedBoneModel
+---@overload fun(self: Node, typeName: "InstancedVATModel"): InstancedVATModel
 ---@overload fun(self: Node, typeName: "Light"): Light
 ---@overload fun(self: Node, typeName: "LuaRmlUIComponent"): LuaRmlUIComponent
 ---@overload fun(self: Node, typeName: "MoveAndOrbitComponent"): MoveAndOrbitComponent
@@ -1248,6 +1355,7 @@ function Node.GetNumComponents(...) end
 ---@overload fun(self: Node, typeName: "RigidBody2D"): RigidBody2D
 ---@overload fun(self: Node, typeName: "RmlCanvasComponent"): RmlCanvasComponent
 ---@overload fun(self: Node, typeName: "RmlUIComponent"): RmlUIComponent
+---@overload fun(self: Node, typeName: "SignalReceiver"): SignalReceiver
 ---@overload fun(self: Node, typeName: "Skybox"): Skybox
 ---@overload fun(self: Node, typeName: "SoundListener"): SoundListener
 ---@overload fun(self: Node, typeName: "SoundSource"): SoundSource
@@ -1260,6 +1368,7 @@ function Node.GetNumComponents(...) end
 ---@overload fun(self: Node, typeName: "Text3D"): Text3D
 ---@overload fun(self: Node, typeName: "TileMap2D"): TileMap2D
 ---@overload fun(self: Node, typeName: "TileMapLayer2D"): TileMapLayer2D
+---@overload fun(self: Node, typeName: "TimelinePlayer"): TimelinePlayer
 ---@overload fun(self: Node, typeName: "UIComponent"): UIComponent
 ---@overload fun(self: Node, typeName: "Zone"): Zone
 ---@param typeName string
@@ -1615,6 +1724,7 @@ function ResourceCache.Exists(...) end
 ---@overload fun(self: ResourceCache, typeName: "Technique", resourceName: string): Technique
 ---@overload fun(self: ResourceCache, typeName: "Texture", resourceName: string): Texture
 ---@overload fun(self: ResourceCache, typeName: "Texture2D", resourceName: string): Texture2D
+---@overload fun(self: ResourceCache, typeName: "TimelineResource", resourceName: string): TimelineResource
 ---@overload fun(self: ResourceCache, typeName: "TmxFile2D", resourceName: string): TmxFile2D
 ---@overload fun(self: ResourceCache, typeName: "XMLFile", resourceName: string): XMLFile
 ---@param typeName string
@@ -1713,6 +1823,7 @@ function RmlCanvasComponent.SetUISize(...) end
 
 ---@class RmlUI : Object
 RmlUI = {}
+function RmlUI.GetCanvasSize(...) end
 function RmlUI.GetScale(...) end
 function RmlUI.IsDebuggerVisible(...) end
 function RmlUI.IsHovered(...) end
@@ -1772,6 +1883,17 @@ function Serializable.GetAttribute(...) end
 function Serializable.GetAttributes(...) end
 function Serializable.LoadXML(...) end
 function Serializable.SetAttribute(...) end
+
+---@class SignalReceiver : Component, Serializable, Object
+SignalReceiver = {}
+function SignalReceiver.AddSignal(...) end
+---@return integer
+function SignalReceiver.GetNumSignals(...) end
+---@return boolean
+function SignalReceiver.IsSubscribed(...) end
+function SignalReceiver.RemoveAllSignals(...) end
+---@return boolean
+function SignalReceiver.RemoveSignal(...) end
 
 ---@class Skeleton
 Skeleton = {}
@@ -2025,6 +2147,103 @@ function Time.GetSystemTime(...) end
 function Time.GetTimeSinceEpoch(...) end
 function Time.GetTimeStep(...) end
 
+---@class TimelineActivationTrack : TimelineTrack, Object
+TimelineActivationTrack = {}
+
+---@class TimelineAnimationTrack : TimelineTrack, Object
+TimelineAnimationTrack = {}
+
+---@class TimelineAudioTrack : TimelineTrack, Object
+TimelineAudioTrack = {}
+
+---@class TimelineControlTrack : TimelineTrack, Object
+TimelineControlTrack = {}
+
+---@class TimelineGroupTrack : TimelineTrack, Object
+TimelineGroupTrack = {}
+---@return integer
+function TimelineGroupTrack.GetNumTracks(...) end
+---@return TimelineTrack
+function TimelineGroupTrack.GetTrack(...) end
+
+---@class TimelineMarkerTrack : TimelineTrack, Object
+TimelineMarkerTrack = {}
+
+---@class TimelinePlayer : Component, Serializable, Object
+TimelinePlayer = {}
+function TimelinePlayer.Evaluate(...) end
+---@return number
+function TimelinePlayer.GetDuration(...) end
+---@return number
+function TimelinePlayer.GetPlaybackSpeed(...) end
+---@return number
+function TimelinePlayer.GetTime(...) end
+---@return TimelineResource
+function TimelinePlayer.GetTimeline(...) end
+function TimelinePlayer.GetTrackBinding(...) end
+---@return boolean
+function TimelinePlayer.IsPaused(...) end
+---@return boolean
+function TimelinePlayer.IsPlaying(...) end
+function TimelinePlayer.Play(...) end
+function TimelinePlayer.SetPaused(...) end
+function TimelinePlayer.SetPlaybackSpeed(...) end
+function TimelinePlayer.SetTime(...) end
+function TimelinePlayer.SetTimeline(...) end
+function TimelinePlayer.SetTrackBinding(...) end
+function TimelinePlayer.Stop(...) end
+
+---@class TimelinePropertyTrack : TimelineTrack, Object
+TimelinePropertyTrack = {}
+
+---@class TimelineResource : Resource, Object
+TimelineResource = {}
+---@return number
+function TimelineResource.GetContentDuration(...) end
+---@return number
+function TimelineResource.GetDuration(...) end
+---@return number
+function TimelineResource.GetFixedDuration(...) end
+---@return integer
+function TimelineResource.GetNumTracks(...) end
+---@return TimelineTrack
+function TimelineResource.GetTrack(...) end
+function TimelineResource.SetFixedDuration(...) end
+
+---@class TimelineSignalTrack : TimelineTrack, Object
+TimelineSignalTrack = {}
+
+---@class TimelineTimeUpdateMode
+TimelineTimeUpdateMode = {}
+TimelineTimeUpdateMode.GameTime = 0
+TimelineTimeUpdateMode.Manual = 0
+TimelineTimeUpdateMode.UnscaledGameTime = 0
+
+---@class TimelineTrack : Object
+TimelineTrack = {}
+---@return string
+function TimelineTrack.GetBindingPath(...) end
+---@return number
+function TimelineTrack.GetContentDuration(...) end
+---@return string
+function TimelineTrack.GetName(...) end
+---@return string
+function TimelineTrack.GetTrackTypeName(...) end
+---@return number
+function TimelineTrack.GetWeight(...) end
+---@return boolean
+function TimelineTrack.IsMuted(...) end
+function TimelineTrack.SetBindingPath(...) end
+function TimelineTrack.SetMuted(...) end
+function TimelineTrack.SetName(...) end
+function TimelineTrack.SetWeight(...) end
+
+---@class TimelineWrapMode
+TimelineWrapMode = {}
+TimelineWrapMode.Hold = 0
+TimelineWrapMode.Loop = 0
+TimelineWrapMode.None = 0
+
 ---@class TmxFile2D : Resource, Object
 TmxFile2D = {}
 
@@ -2137,6 +2356,22 @@ VA = {}
 VA.BOTTOM = 0
 VA.CENTER = 0
 VA.TOP = 0
+
+---@class VATBaker : Object
+VATBaker = {}
+function VATBaker.Bake(...) end
+function VATBaker.GetDuration(...) end
+function VATBaker.GetFrames(...) end
+function VATBaker.GetGeometry(...) end
+function VATBaker.GetLastError(...) end
+function VATBaker.GetLocalBoundingBox(...) end
+function VATBaker.GetMaterial(...) end
+function VATBaker.GetNormalTexture(...) end
+function VATBaker.GetNumSlots(...) end
+function VATBaker.GetPositionTexture(...) end
+function VATBaker.LoadVAT(...) end
+function VATBaker.Reset(...) end
+function VATBaker.SaveVAT(...) end
 
 ---@class VET
 VET = {}
