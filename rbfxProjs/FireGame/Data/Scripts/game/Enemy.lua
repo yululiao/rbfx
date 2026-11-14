@@ -475,9 +475,9 @@ function Enemy:SpawnPirate(spawnPos, skin)
                     p.z = p.z + dz / dist * step
                     p.y = wadeY(p.x, p.z)
                     self.node:SetPosition(p)
-                    -- 面向主角（角色模型原生朝 -z，与 Player 同一 yaw 约定）
+                    -- 面向主角（角色模型前向 +z，与 Player 同一 yaw 约定，见 Config.MODEL_FORWARD_YAW）
                     local yaw = math.atan(dx, -dz)
-                    self.node:SetRotation(Quaternion(-math.deg(yaw), Vector3.UP))
+                    self.node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW - math.deg(yaw), Vector3.UP))
                 end
             else
                 -- 冲滩型（或主角已上船/阵亡）：直线 +z 朝滩头，抵近防线带后转打最近那座炮塔。

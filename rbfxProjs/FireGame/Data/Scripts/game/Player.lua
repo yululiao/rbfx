@@ -13,7 +13,8 @@
 --   动画状态机 animState_ —— idle / idle_shoot / run / run_shoot 四态，见文件顶部 STATE_ANIM。
 --
 -- 朝向约定：
---   Soldier 模型原生朝 -z。nodeYaw=0 时主角面朝海面。相机永远在 +z 侧上方看回主角。
+--   模型前向是 +z（见 Config.MODEL_FORWARD_YAW），所以“世界 yaw -> 节点旋转”的换算要整体
+--   偏置 MODEL_FORWARD_YAW，nodeYaw=0 时才面朝海面。相机永远在 +z 侧上方看回主角。
 
 local Config = require("game.Config")
 
@@ -85,7 +86,7 @@ function Player.Build(scene, spot, playerBoat, aspect)
         node = scene:CreateChild("Player")
     end
     node:SetPosition(spot)
-    node:SetRotation(Quaternion(0.0, Vector3.UP))
+    node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP))
     -- 主角模型整体放大（Config.PLAYER_MODEL_SCALE）：骨骼子节点都挂在本节点下，脚底原点为锚
     -- 往上长，不动 spot/走位/相机关注高；只把画面里的角变高。
     node:SetScale(Config.PLAYER_MODEL_SCALE)
@@ -267,9 +268,9 @@ function Player:Move(stickX, stickY, dt)
             local d = angDiff(self.boatYaw, math.atan(dirX, -dirZ))
             self.boatYaw = self.boatYaw + clamp(d, -step, step)
         end
-        -- 船体（kenney ship-row-large）沿 z 建模，Coast 以 Config.BOAT_YAW=180 落位把船头拧向内陆；
-        -- boatYaw=0 时旋转回落到 Config.BOAT_YAW，与出生姿态连续（不突跳）。若发现船是“倒着开”
-        -- （船尾朝行驶方向），翻转本式的符号即可。
+        -- 船体底模船头朝 +z，与航行方向一致，Config.BOAT_YAW 现在就是 0（旧值 180 是 z 镜像
+        -- 时代的补偿，见 Config 文件头）。boatYaw=0 时旋转回落到 Config.BOAT_YAW，与出生姿态
+        -- 连续（不突跳）。
         self.boatNode:SetRotation(Quaternion(Config.BOAT_YAW - math.deg(self.boatYaw), Vector3.UP))
         return
     end
@@ -438,7 +439,7 @@ function Player:BoardBoat()
     self.inBoat = true
     self.node:SetParent(self.boatNode)
     self.node:SetPosition(Vector3(0.0, Config.BOAT_SEAT_Y, 0.0))   -- 坐在甲板高度（纯 Y 偏移，不受船 yaw 影响）
-    self.node:SetRotation(Quaternion(0.0, Vector3.UP))
+    self.node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP))
     self.nodeYaw = 0.0             -- 局部航向归零（世界朝向由船带动；后续开火转身在此基础上叠加）
     self.aimValid_ = false
     self.aimTwist_ = 0.0
@@ -460,7 +461,7 @@ function Player:LeaveBoat()
     self.spot = Vector3(x, self.groundY, z)
     self.node:SetPosition(self.spot)
     self.nodeYaw = 0.0
-    self.node:SetRotation(Quaternion(0.0, Vector3.UP))
+    self.node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP))
 end
 
 --- 角色与船的水平距离是否小于交互阈值（可登船）。
@@ -474,14 +475,15 @@ function Player:IsNearBoat()
 end
 
 --- 人物当前世界朝向（弧度，atan(dx,-dz) 系）：开火转身/扭转对目标时的基准。
---- 步行 = nodeYaw；船上 = 船航向 + 人物局部航向 - 船体基线。
---- 必须折算 BOAT_YAW：船节点旋转 = BOAT_YAW - deg(boatYaw)，人物局部再叠加 -deg(nodeYaw)，
---- 世界旋转合计 BOAT_YAW - deg(boatYaw+nodeYaw)；而步行系约定“yaw w ↔ 旋转 -deg(w)”，
---- 两边相差常数 BOAT_YAW——目标方向 aimYaw_ 是不带此常数的纯世界角，差分不消去，
---- 漏折算时人物恒差 180°（BOAT_YAW=180），枪口背对目标。
+--- 步行 = nodeYaw；船上 = 船航向 + 人物局部航向 - 节点旋转里的常数偏置。
+--- 必须折算这些偏置：船节点旋转 = BOAT_YAW - deg(boatYaw)，人物局部再叠加
+--- MODEL_FORWARD_YAW - deg(nodeYaw)，世界旋转合计 BOAT_YAW + MODEL_FORWARD_YAW
+--- - deg(boatYaw+nodeYaw)；而步行系约定“yaw w ↔ 旋转 -deg(w)”，两边相差的就是这两个
+--- 常数——目标方向 aimYaw_ 是不带常数的纯世界角，差分不消去，漏折算时人物恒差那个角度，
+--- 枪口背对目标。
 function Player:GetWorldYaw()
     if self.inBoat then
-        return self.boatYaw + self.nodeYaw - math.rad(Config.BOAT_YAW)
+        return self.boatYaw + self.nodeYaw - math.rad(Config.BOAT_YAW + Config.MODEL_FORWARD_YAW)
     end
     return self.nodeYaw
 end
@@ -585,7 +587,9 @@ function Player:UpdateCamera()
     -- 开火窗口内 Update 会把组合朝向往目标修，见 GetWorldYaw）。
     -- Quaternion(angle, axis) 的 angle 是“度”，而 nodeYaw 全程是弧度——必须 math.deg
     --（旧版直接塞弧度，视觉旋转被缩小 57 倍，人物几乎从不转身，等于一直朝前）。
-    self.node:SetRotation(Quaternion(-math.deg(self.nodeYaw), Vector3.UP))
+    -- 减号是“模型前向 -z 时代”的 atan(dx,-dz) 换算；模型前向回到 +z 后，整族公式
+    -- 都要偏置 MODEL_FORWARD_YAW（见 Config 文件头）。
+    self.node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW - math.deg(self.nodeYaw), Vector3.UP))
     -- facing 保持朝海（给旧接口 GetFacing 兼容）
     self.facing = Vector3(0.0, 0.0, -1.0)
 end
@@ -646,7 +650,7 @@ end
 function Player:Die()
     self.dying = true
     self.moving_ = false
-    self.node:SetRotation(Quaternion(0.0, Vector3.UP))
+    self.node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP))
     self.anim:PlayExclusive(Config.PlayerAnim("Death"), 0, false, 0.1)
     self.animState_ = "dead"
 end

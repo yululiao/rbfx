@@ -18,7 +18,7 @@
 --   House2 3.78x9.38x3.74 y[0,9.38]、Dock/Dock_Pole y[-2.00,1.01]（桥面 1.01、桩到 -2）、
 --   PalmTree_1 高 3.58 y[0.01,3.59]、Rock_* 高 0.6 上下、Cliff2 8.0x6.9x7.1 y[-0.78,6.13]、
 --   Skulls 高 3.81、Prop_Barrel 0.72x0.66x0.72 y[0,0.66]、Prop_Cannon 1.04x1.12x1.48
---   y[0.0009,1.12]、z[-0.87,0.61]（炮管往 -z 伸更长，即原生炮口朝海）。
+--   y[0.001,1.122]、z[-0.604,0.867]（炮管往 +z 伸更长，即底模炮口朝内陆，落位要转 180 才朝海）。
 --   船族：ship-row-large 2.75x0.85x2.85 y[0,0.85]、ship-pirate-large 4.80x9.96x13.10 y[0,9.96]
 --   （旧 Ship_Small 5.14x1.99x3.60 / Ship_Large 已连资产删除，不再由本模块的 Place 落位）。
 -- 模型大多自带"底部略低于 y=0"的埋地量，所以按 y=0 摆就是站在地上，不要再手动抬。
@@ -237,8 +237,9 @@ local function BuildTurrets(root)
         end
         
         -- 炮身：架在塔顶平台上（炮座比尖顶塔顶低 0.2 免得悬空；Prop_Cannon 原点在炮架底面），
-        -- yaw=0 即炮口朝海。Turrets 失能时把它歪下来。
-        local gun = PlacePirate(tower, "Prop_Cannon", Vector3(0.0, Config.TURRET_CANNON_SEAT_Y, 0.0), 0.0)
+        -- 底模炮口朝 +z，转 MODEL_FORWARD_YAW 才朝海。Turrets 失能时把它歪下来。
+        local gun = PlacePirate(tower, "Prop_Cannon", Vector3(0.0, Config.TURRET_CANNON_SEAT_Y, 0.0),
+            Config.MODEL_FORWARD_YAW)
         gun:SetVar("noShoot", true)
 
         handles[#handles + 1] = { node = tower, gun = gun, x = x }

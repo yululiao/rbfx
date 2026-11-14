@@ -12,6 +12,22 @@
 local Config = {}
 
 ----------------------------------------------------------------------
+-- 模型前向基准
+--
+-- 所有 FBX 源数据（kenney 船族、Quaternius 角色、Prop_Cannon、瞭望塔）都沿 +z 建模，
+-- 正前方是 +z，左右关于 x=0 对称。旧的 rbfx FBX 导入器无条件对所有 FBX 施加 Z 镜像
+-- (x,y,z)->(x,y,-z)，模型进引擎后因此全部朝 -z；Player / Turrets / Dog 里那族
+-- "世界 yaw -> 节点旋转"的换算公式（Quaternion(-deg(worldYaw), UP)）也是按"模型朝 -z"
+-- 推出来的，Config.BOAT_YAW / PIRATE_YAW 里的 180 同样是在补偿这个镜像。
+--
+-- 镜像移除后导入结果与源数据逐位一致，模型前向回到 +z。要让同一套世界 yaw 语义继续
+-- 成立，那些换算公式必须整体偏置 180 度：Quaternion(MODEL_FORWARD_YAW - deg(worldYaw), UP)。
+-- 而直接以角度落位的地方（BOAT_YAW / PIRATE_YAW / 炮座）把原来补偿镜像的 180 撤掉即可。
+-- 两者是同一件事的两种写法，改一边要同步另一边。
+----------------------------------------------------------------------
+Config.MODEL_FORWARD_YAW = 180.0
+
+----------------------------------------------------------------------
 -- 关卡几何
 ----------------------------------------------------------------------
 Config.SEA_Y = -0.20                 -- 海平面高度
@@ -221,8 +237,9 @@ Config.TURRET_STAND_OFF = 1.6        -- 海盗砍塔时与塔中心的水平距�
 -- 炮台 = pirate-kit 瞭望塔 prefab（tower-complete-small）缩小一档坐地，塔顶再架一门 Prop_Cannon 当炮
 -- （失能时 Turrets 把那根炮管歪下来）。塔身实测高 6.78m（解析 Cache 里 .mdl 顶点缓冲，同 Coast 头部
 -- 那套方法），原尺寸会横切相机 35°俯视朝海的视线，所以按 Config.TURRET_TOWER_SCALE 缩到约 4.4m。
--- Prop_Cannon 实测盒 x[-0.52,0.52] y[0.0009,1.1217] z[-0.8665,0.6138]：炮管往 -z 伸得更长，即原生
--- 炮口就朝海，落位 yaw=0 不用转；原点在炮架底面，所以直接放塔顶高度即可。
+-- Prop_Cannon 实测盒 x[-0.52,0.52] y[0.001,1.122] z[-0.604,0.867]（解析 Cache 里 .mdl 顶点缓冲）：
+-- 炮管往 +z 伸得更长，即底模炮口朝 +z（内陆），落位要靠 MODEL_FORWARD_YAW 转 180 才朝海。
+-- 原点在炮架底面，所以直接放塔顶高度即可。
 Config.TURRET_TOWER_PREFAB = "tower-complete-small"
 Config.TURRET_TOWER_SCALE = 0.65                            -- 6.78m 的塔缩一档 ≈4.4m，别挡视线
 Config.TURRET_TOP_Y = 6.78 * Config.TURRET_TOWER_SCALE      -- 塔顶最高点（失能烟/爆闪、血条悬浮的基准）
@@ -329,10 +346,11 @@ end
 ----------------------------------------------------------------------
 Config.LANES = { -13.0, -4.5, 4.5, 13.0 }
 -- 船族现在全是 kenney prefab：小船/玩家船 ship-row-large、大船 ship-pirate-large
--- （旧的 Quaternius Ship_Small/Ship_Large 已连资产一起删除）。这批沿 z 建模，静置时船头
--- 朝海（= 退着开），故统一用 180 把船头拧向内陆（航行方向 +z）。玩家船驾船公式也以此为
--- 基准偏置（Player.lua），所以改这一处两侧同步生效；若某艘反而了，再按 kind 拆档。
-Config.BOAT_YAW = 180.0
+-- （旧的 Quaternius Ship_Small/Ship_Large 已连资产一起删除）。这批 FBX 沿 +z 建模，船头朝 +z，
+-- 而游戏里船就是往 +z（内陆）开——底模前向与航行方向一致，落位不需要额外偏航，故为 0。
+-- 旧值 180 是 z 镜像时代用来把被翻转的船头拧回内陆的补偿（见文件头 MODEL_FORWARD_YAW）。
+-- 玩家船驾船公式（Player.lua）以本值为基准偏置，所以改这一处两侧同步生效。
+Config.BOAT_YAW = 0.0
 -- 船体视觉缩放，只作用于实例化出来的船体子节点（见 Enemy:SpawnBoat / Coast:BuildPlayerBoat），
 -- 不缩逻辑节点：吃水、瞄点、坐船高度、沉船翻滚都是相对逻辑节点定义的。
 Config.BOAT_SMALL_SCALE = 1.0        -- ship-row-large（小船 + 玩家船，实测 2.75宽 x 0.85高 x 2.85长；旧船是 3.60 长，要更像旧体型可往上加）
@@ -373,9 +391,9 @@ Config.CANNON_SPLASH_RADIUS = 3.2        -- 落点杀伤半径（米）
 Config.CANNON_PLAYER_DAMAGE = 2          -- 炸到主角掉几格血（3 格口径：一发掉 2 格，与旧 100 血/30 伤同比例）
 
 Config.PIRATE_SPAWN_Z = -4.5         -- 下水点（浅水里，看着像涉水冲滩）
--- Quaternius 角色模型原生朝 -z（Soldier 的散落道具在 z 负侧就是"正前方"），
--- 海盗要朝 +z（防线/塔）行进，所以偏航 180 度。若进游戏发现海盗倒着走，改成 0。
-Config.PIRATE_YAW = 180.0
+-- Quaternius 角色源数据朝 +z。旧值 180 同样是 z 镜像时代的补偿（镜像把模型翻成朝 -z，
+-- 而海盗要朝 +z 行进）。镜像移除后模型前向与行进方向一致，归零。
+Config.PIRATE_YAW = 0.0
 Config.PIRATE_SPEED = 2.0            -- 调慢：海盗滩头滞留更久，给玩家更多“割”的时间与参与感
 Config.PIRATE_SPEED_SPREAD = 0.5     -- 每个海盗速度随机 ±，避免排队齐步走
 Config.PIRATE_HP = 1                 -- 一发死：保住割草爽感的根。压迫靠数量/来速，不靠肉。

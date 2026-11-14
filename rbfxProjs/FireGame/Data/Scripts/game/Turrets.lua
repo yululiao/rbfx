@@ -34,8 +34,8 @@ local function distXZ(ax, az, bx, bz)
     return math.sqrt(dx * dx + dz * dz)
 end
 
---- 塔心指向 pos 的 yaw（弧度）。炮管与角色模型同一约定（原生朝 -z）：
---- yaw = atan(dx, -dz) 配 Quaternion(-deg(yaw), UP)，Enemy/Player 已验证的同款公式。
+--- 塔心指向 pos 的 yaw（弧度）。炮管与角色模型同一约定（前向 +z，见 Config.MODEL_FORWARD_YAW）：
+--- yaw = atan(dx, -dz) 配 Quaternion(MODEL_FORWARD_YAW - deg(yaw), UP)。
 ---@param tw table
 ---@param pos Vector3
 ---@return number
@@ -244,12 +244,15 @@ function Turrets:SyncTowerState()
                 self.fx:Spawn("smoke", Vector3(tw.x, Config.TURRET_TOP_Y + 0.8, tw.z))
                 self.fx:Flash(top, Color(1.0, 0.5, 0.2), 12.0, 0.14)
                 self.audio:Play("breakWood")
-                tw.gun:SetRotation(Quaternion(Config.TURRET_GUN_PITCH_DEAD, Vector3(1.0, 0.0, 0.0)))
+                -- 先按模型前向偏置把炮身立向海侧，再绕自身 X 压低炮口。
+                -- Urho3D 的 A*B 表示 B 先作用，所以俯仰在右、偏置在左。
+                tw.gun:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP)
+                    * Quaternion(Config.TURRET_GUN_PITCH_DEAD, Vector3(1.0, 0.0, 0.0)))
                 if self.onTowerDown then
                     self.onTowerDown(i, tw.x)
                 end
             else
-                tw.gun:SetRotation(Quaternion.IDENTITY)
+                tw.gun:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP))
             end
         end
     end
@@ -274,7 +277,7 @@ function Turrets:UpdateAim(dt)
             -- 指数趋近（每帧走剩余角差的一小口）：快而不僵，跨 ±180 走短弧。
             local diff = yawDiff(targetYaw, tw.aimYaw)
             tw.aimYaw = tw.aimYaw + diff * math.min(1.0, dt * Config.TURRET_AIM_TURN_RATE)
-            tw.gun:SetRotation(Quaternion(-math.deg(tw.aimYaw), Vector3.UP))
+            tw.gun:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW - math.deg(tw.aimYaw), Vector3.UP))
         end
     end
 end
@@ -353,7 +356,7 @@ function Turrets:Reset()
         tw.aimYaw = 0.0
         tw.recoilT = nil
         tw.gun:SetPosition(tw.gunRest)
-        tw.gun:SetRotation(Quaternion.IDENTITY)
+        tw.gun:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW, Vector3.UP))
         tw.dead = false
     end
 end

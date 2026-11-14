@@ -106,27 +106,24 @@ static const unsigned MAX_CHANNELS = 4;
 // ---------------------------------------------------------------------------
 
 // Coordinate frame conversion into the Urho3D left-handed frame (Y-up, Z-forward).
-// This FBX was exported with the node hierarchy already carrying the Z-up -> Y-up
-// rotation (a -90 degree X rotation placed by the DCC exporter), so node matrices and
-// animation data are already Y-up. The remaining step - matching what assimp's
-// ConvertToLeftHanded (MakeLeftHanded) does - is a Z mirror Mz: (x, y, z) -> (x, y, -z),
-// det(Mz) = -1. Triangle winding is flipped once in FbxProcessMeshPart to compensate.
 //
-// The conversion is applied uniformly:
-//   - points/vectors (positions, normals, translations): Mz * v
-//   - rotations (quaternions): Mz * q * Mz (negate the x and y components, keep z and w)
-//   - transform matrices: Mz * M * Mz (negate the third row and third column, except m22)
-//   - scale factors: unchanged (Mz * diag(s) * Mz = diag(s))
-// Conjugation preserves det(M), so no negative scale ever appears in bone data, and the
-// whole skinning chain (bone initial transforms, offset matrices, animation keyframes,
-// baked vertices) stays mathematically self-consistent in the converted frame.
-// Note: raw mesh geometry is still Z-up; FbxProcessMeshPart bakes it through the node
-// matrix (which supplies the missing rotation) before this mirror applies to it.
+// There is none: the source data is used verbatim.
+//
+// Unity's ModelImporter (bakeAxisConversion off) keeps the mesh vertices and node
+// transforms exactly as the FBX stores them and only accounts for the handedness when it
+// interprets triangle winding, so a scene round-trips between the two engines with its
+// positions untouched. Handedness is a global property of the frame, not something that
+// mirrors individual meshes: treating it as a per-asset Z mirror Mz, (x, y, z) ->
+// (x, y, -z), flips the shape of every mesh and pushes each node to the opposite side of
+// the Z plane, which is what made imported scenes disagree with the source.
+//
+// Up-axis normalization (a Z-up file becoming Y-up) is a separate thing and comes from
+// the DCC exporter's compensation node, which ufbx bakes into the vertices through
+// UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY below.
 
 static Vector3 ToVector3(const ufbx_vec3& v)
 {
-    // Mz * v: negate z
-    return Vector3((float)v.x, (float)v.y, (float)-v.z);
+    return Vector3((float)v.x, (float)v.y, (float)v.z);
 }
 
 // Unit scale applied to every position converted from the FBX: the file's own unit declaration
@@ -149,29 +146,22 @@ static Vector2 ToVector2(const ufbx_vec2& v)
 
 static Quaternion ToQuaternion(const ufbx_quat& q)
 {
-    // Mz * q * Mz: negate the x and y components, keep z and w.
-    // (Under a Z mirror a rotation about X or Y reverses direction, one about Z does not;
-    // verified element-wise against the quaternion-to-matrix formula.)
-    return Quaternion((float)q.w, (float)-q.x, (float)-q.y, (float)q.z);
+    return Quaternion((float)q.w, (float)q.x, (float)q.y, (float)q.z);
 }
 
 static Matrix3x4 ToMatrix3x4(const ufbx_matrix& m)
 {
-    // Mz * M * Mz: negate the third row and third column (except the m22 diagonal);
-    // the translation column holds a point, so its z is negated as well and the whole
-    // column is scaled by g_positionScale (see the comment on ToPosition3).
-    // Element (i,j) becomes Mz[i][i] * m_ij * Mz[j][j].
+    // The translation column holds a point, so it is scaled by g_positionScale (see the
+    // comment on ToPosition3); the rotation part is used as authored.
     return Matrix3x4(
-        (float)m.m00, (float)m.m01, (float)-m.m02, (float)m.m03 * g_positionScale,
-        (float)m.m10, (float)m.m11, (float)-m.m12, (float)m.m13 * g_positionScale,
-        (float)-m.m20, (float)-m.m21, (float)m.m22, (float)-m.m23 * g_positionScale
+        (float)m.m00, (float)m.m01, (float)m.m02, (float)m.m03 * g_positionScale,
+        (float)m.m10, (float)m.m11, (float)m.m12, (float)m.m13 * g_positionScale,
+        (float)m.m20, (float)m.m21, (float)m.m22, (float)m.m23 * g_positionScale
     );
 }
 
 static Vector3 ToScale(const ufbx_vec3& v)
 {
-    // Scale factors are unaffected by the Mz mirror: Mz * diag(s) * Mz = diag(s).
-    // Mirroring them would inject a negative z scale into bones and animation tracks.
     return Vector3((float)v.x, (float)v.y, (float)v.z);
 }
 
@@ -253,10 +243,8 @@ bool ImportFbx(const ea::string& inFile, const ea::string& outFile, const ea::st
     ufbx_load_opts opts = {};
     // No target_axes / space_conversion: ufbx's ADJUST_TRANSFORMS only compensates via node
     // matrices while leaving mesh vertices in the source coordinate system (e.g. 3ds Max
-    // Z-up), which produced upside-down geometry. Instead we load everything in the
-    // original frame and apply the handedness/axis conversion ourselves (matching what
-    // assimp's ConvertToLeftHanded does): see the S conjugation in ToVector3/ToQuaternion/
-    // ToMatrix3x4 below and the triangle winding flip in FbxProcessMeshPart.
+    // Z-up), which produced upside-down geometry. The source frame is used as-is instead
+    // (see the comment above ToVector3); only the DCC compensation node is baked in.
     opts.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY;
     opts.generate_missing_normals = true;
     opts.clean_skin_weights = true;
@@ -931,20 +919,12 @@ static void FbxProcessMeshPart(
     }
     unsigned numTriIndices = triOffset;
 
-    // Flip triangle winding: the coordinate conversion S (see ToVector3) is a mirror,
-    // det(S) = -1, so face orientation must be reversed to keep surfaces facing outward.
-    // ufbx did not flip anything because no target axes were requested.
-    for (unsigned i = 0; i + 2 < numTriIndices; i += 3)
-    {
-        const uint32_t tmp = triIndices[i + 1];
-        triIndices[i + 1] = triIndices[i + 2];
-        triIndices[i + 2] = tmp;
-    }
+    // No winding flip: the source is not mirrored (see the comment above ToVector3), so
+    // the authored face orientation is preserved as-is, exactly like Unity does.
 
-    // Bake vertices from the mesh geometry space into the model root node space, in the
-    // converted (S-conjugated) frame. Chains of S-conjugated matrices stay conjugated:
-    // (S*A*S) * (S*B*S) = S*(A*B)*S, and applying the result to S-converted points
-    // yields exactly S * (original transform chain) * (original point).
+    // Bake vertices from the mesh geometry space into the model root node space. Both
+    // matrices are expressed in the same (source) frame, so the composition is a plain
+    // transform chain: rootNode^-1 * meshNode applied to the raw vertex.
     const Matrix3x4 vertexTransform =
         ToMatrix3x4(model.rootNode_->node_to_world).Inverse() * ToMatrix3x4(meshNode->node_to_world);
     const Matrix3 normalTransform = vertexTransform.RotationMatrix();
@@ -1419,8 +1399,7 @@ static void FbxBuildAndSaveModel(FbxModel& model, ufbx_scene* scene)
                 // Same vertex baking transform as used in FbxProcessMeshPart. Vertices are
                 // baked into the model root node space, so the skin cluster matrix must be
                 // adjusted accordingly: offset = geometry_to_bone * inverse(baking transform).
-                // Both matrices are S-conjugated, so the chain stays consistent:
-                // (S*G2B*S) * (S*T^-1*S) = S*(G2B * T^-1)*S
+                // Both matrices share the source frame, so the chain stays consistent.
                 const Matrix3x4 vertexTransform =
                     ToMatrix3x4(model.rootNode_->node_to_world).Inverse() * ToMatrix3x4(model.meshNodes_[mi]->node_to_world);
                 ufbx_skin_deformer* skin = mesh->skin_deformers.data[0];

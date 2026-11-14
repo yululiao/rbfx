@@ -11,7 +11,8 @@
 -- 海盗不会主动攻击狗（突袭型 AI 只追 player.spot，逻辑未动）。
 --
 -- 抖音包无物理/导航，移动是 Lua 直线推进 + 矩形钳制；炸飞靠 Lua 抛物线积分 + 多轴翻滚。
--- 面向约定与海盗一致：角色模型原生朝 -z，朝目标 (dx,dz) 的 yaw = atan(dx,-dz)，取负角度绕 UP。
+-- 面向约定与海盗一致：角色模型前向 +z（见 Config.MODEL_FORWARD_YAW），朝目标 (dx,dz) 的
+-- yaw = atan(dx,-dz)，节点旋转 = MODEL_FORWARD_YAW - yaw。
 
 local Config = require("game.Config")
 local Materials = require("game.Materials")
@@ -76,7 +77,7 @@ function Dog:PlaceAtSpawn()
     self.x = p.x + self.cfg.spawnOffset.x
     self.z = p.z + self.cfg.spawnOffset.z
     self:ClampXZ()
-    self.yaw = Config.PIRATE_YAW   -- 默认朝海（与主角出生朝向一致）
+    self.yaw = Config.PIRATE_YAW   -- 默认朝陆地 +z（旧值 180 是镜像补偿，见 Config）；之后由 FaceDir 接管
     self.node:SetPosition(Vector3(self.x, Config.SAND_Y, self.z))
     self.node:SetRotation(Quaternion(self.yaw, Vector3.UP))
 end
@@ -116,7 +117,7 @@ end
 function Dog:FaceDir(dx, dz)
     if dx == 0.0 and dz == 0.0 then return end
     if dx * dx + dz * dz < self.cfg.faceMinDist * self.cfg.faceMinDist then return end
-    local desired = -math.deg(math.atan(dx, -dz))
+    local desired = Config.MODEL_FORWARD_YAW - math.deg(math.atan(dx, -dz))
     -- 最短弧：把 desired 相对当前 yaw 折到 [-180,180)，避免绕远路
     local delta = ((desired - self.yaw + 180) % 360) - 180
     if math.abs(delta) < self.cfg.faceTurnEps then return end
