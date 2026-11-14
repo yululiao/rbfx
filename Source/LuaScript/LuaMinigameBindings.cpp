@@ -88,6 +88,13 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
                 return sdk ? sdk->GetLaunchInfo(markGuideDone.value_or(false)) : 0;
             })
             LUA_MEMBER_FUNC(NavigateToSidebar)
+            // Screen orientation: landscape is optional and defaults to true (the only reason a
+            // game asks is to give the player more horizontal room). The answer arrives when
+            // the host finished rotating and the engine canvas carries the new size.
+            LUA_MEMBER_FUNC_RAW(SetDeviceOrientation, [](MinigameSDK* sdk,
+                sol::optional<bool> landscape) -> int {
+                return sdk ? sdk->SetDeviceOrientation(landscape.value_or(true)) : 0;
+            })
             LUA_MEMBER_FUNC_RET(IsAvailable, bool)
         );
     }
@@ -138,7 +145,8 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
         "STOP_GAME_AUDIO", static_cast<int>(MinigameSDKRequestKind::StopGameAudio),
         "REPORT_ANALYTICS", static_cast<int>(MinigameSDKRequestKind::ReportAnalytics),
         "GET_LAUNCH_INFO", static_cast<int>(MinigameSDKRequestKind::GetLaunchInfo),
-        "NAVIGATE_TO_SIDEBAR", static_cast<int>(MinigameSDKRequestKind::NavigateToSidebar));
+        "NAVIGATE_TO_SIDEBAR", static_cast<int>(MinigameSDKRequestKind::NavigateToSidebar),
+        "SET_DEVICE_ORIENTATION", static_cast<int>(MinigameSDKRequestKind::SetDeviceOrientation));
 }
 
 } // namespace Urho3D

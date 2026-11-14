@@ -54,6 +54,10 @@ enum class MinigameSDKRequestKind
     /// Open the host's sidebar panel (Douyin's mandatory sidebar revisit surface: the game
     /// guides the player to pin it there and come back for a reward).
     NavigateToSidebar = 13,
+    /// Rotate the host screen between portrait and landscape. The answer arrives once the
+    /// host finished rotating, which is also when the canvas has its new size: the shim
+    /// pushes that size into the engine before completing the request.
+    SetDeviceOrientation = 14,
 };
 
 /// Bridge to the host SDK capabilities (login, share, rewarded ads, payment, privacy).
@@ -141,6 +145,12 @@ public:
     /// Open the host's sidebar panel (Douyin sidebar revisit compliance). The answer tells
     /// whether the panel opened; a host without the API answers with a failure.
     int NavigateToSidebar();
+
+    /// Rotate the host screen to landscape (true) or portrait (false). The answer arrives when
+    /// the host finished rotating and the engine canvas was resized to the new window, so a
+    /// listener can re-lay out on the next frame instead of reading a stale resolution. A host
+    /// without the vendor API answers with a failure and nothing changes.
+    int SetDeviceOrientation(bool landscape);
 
     /// Return whether the JavaScript SDK shim is attached.
     /// @property

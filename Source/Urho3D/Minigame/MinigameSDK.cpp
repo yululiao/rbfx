@@ -332,6 +332,14 @@ int MinigameSDK::NavigateToSidebar()
     return Invoke(MinigameSDKRequestKind::NavigateToSidebar, "{}");
 }
 
+int MinigameSDK::SetDeviceOrientation(bool landscape)
+{
+    // The vendor API takes the two literals and nothing else; sending the flag as a value
+    // keeps the JS side from having to interpret a boolean argument.
+    return Invoke(MinigameSDKRequestKind::SetDeviceOrientation,
+        landscape ? "{\"value\":\"landscape\"}" : "{\"value\":\"portrait\"}");
+}
+
 int MinigameSDK::Invoke(MinigameSDKRequestKind kind, const ea::string& payloadJson)
 {
     const int requestId = nextRequestId_++;

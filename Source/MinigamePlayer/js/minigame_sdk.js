@@ -31,7 +31,8 @@
         clear_user_audio: 10,
         report_analytics: 11,
         get_launch_info: 12,
-        navigate_to_sidebar: 13
+        navigate_to_sidebar: 13,
+        set_device_orientation: 14
     };
 
     function complete(request_id, success, payload) {
@@ -1024,6 +1025,105 @@
             });
         } catch (error) {
             complete(request_id, false, fail_text(error, "navigateToScene failed"));
+        }
+    };
+
+    // ---------- screen orientation ----------
+    // Rotating the host changes the window size, and the vendor runtime gives the engine no
+    // notice of it: the web resize path is compiled out on these platforms
+    // (Graphics::OnWindowResized returns early for Web), so the SDL resize event is dropped and
+    // the engine would keep rendering into the portrait-sized backing store. The browser shell
+    // covers the same gap by calling Module.JSCanvasSize from its own resize handler; the
+    // rotation path does it here, after the host reports the new window size.
+
+    // Resize the canvas and push the new size into the engine. Retried for a few turns because
+    // the success callback can fire before the host refreshed getSystemInfoSync, which would
+    // hand the engine the old orientation's size.
+    function resize_engine_canvas(expected) {
+        var module = rbfx.module;
+        if (!module || typeof module.JSCanvasSize !== "function")
+            return false;
+
+        var attempts = 0;
+        var MAX_ATTEMPTS = 20;     // 20 turns at 50ms covers the slowest devices seen
+        var RETRY_MS = 50;
+
+        function attempt() {
+            var info = rbfx.env.get_screen_info();
+            var landscape = info.width > info.height;
+            var wanted = expected === "landscape";
+            // A host still reporting the old shape means the rotation has not landed yet.
+            if (landscape !== wanted && attempts < MAX_ATTEMPTS) {
+                ++attempts;
+                setTimeout(attempt, RETRY_MS);
+                return;
+            }
+
+            // Canvas density must match what the boot canvas already runs at, not the device
+            // pixel ratio. RenderDevice only asks SDL for SDL_WINDOW_ALLOW_HIGHDPI off the Web,
+            // so the emscripten backend creates the window with pixel_ratio = 1 and sizes the
+            // canvas to its CSS box: one canvas pixel per CSS pixel. Pushing
+            // window x pixel_ratio here changed that space behind the engine's back: the UI
+            // scale is derived from the canvas short side, so it fell to 1.0 (everything on
+            // screen shrank by the ratio), and every touch landed at 1/ratio of its real
+            // position (the buttons stopped responding at all).
+            var canvas = module["canvas"] || globalThis.canvas;
+            var density = 1.0;
+            if (canvas && canvas.width > 0 && globalThis.innerWidth > 0)
+                density = canvas.width / globalThis.innerWidth;
+            if (!(density > 0.0))
+                density = 1.0;
+            var width = Math.max(1, Math.floor(info.width * density));
+            var height = Math.max(1, Math.floor(info.height * density));
+
+            // The adapter's mock window keeps a boot-time snapshot of innerWidth/innerHeight and
+            // SDL normalizes every touch by the canvas CSS box, so the rotation has to reach the
+            // input mapping too: otherwise the joystick and the buttons land in the old
+            // orientation's half of the screen (the canvas redraw alone would look correct while
+            // nothing is clickable where it is drawn).
+            if (typeof globalThis.rbfx_set_viewport_size === "function")
+                globalThis.rbfx_set_viewport_size(info.width, info.height);
+
+            if (canvas && (canvas.width !== width || canvas.height !== height)) {
+                canvas.width = width;
+                canvas.height = height;
+            }
+            console.log("[rbfx] canvas resized to " + width + "x" + height +
+                " after the orientation change to " + expected);
+            try {
+                module.JSCanvasSize(width, height, false, density);
+            } catch (error) {
+                console.error("[rbfx] pushing the new canvas size into the engine failed", error);
+            }
+        }
+
+        attempt();
+        return true;
+    }
+
+    // The payload carries { value: "landscape"|"portrait" }. The answer is sent as soon as the
+    // host accepted the rotation; the canvas resize runs on its own so a slow device cannot
+    // stall the request (the game re-lays out when the size actually changes, see main.lua).
+    handlers[KIND.set_device_orientation] = function (request_id, payload) {
+        var args = parse_payload(payload);
+        var value = args.value === "landscape" ? "landscape" : "portrait";
+        if (!wx_tt || typeof wx_tt.setDeviceOrientation !== "function")
+            return complete(request_id, false, "setDeviceOrientation is not supported by the host");
+        try {
+            wx_tt.setDeviceOrientation({
+                value: value,
+                success: function () {
+                    resize_engine_canvas(value);
+                    complete(request_id, true, JSON.stringify({ value: value }));
+                },
+                fail: function (error) {
+                    if (error && error.errMsg)
+                        console.warn("[rbfx] setDeviceOrientation failed: " + error.errMsg);
+                    complete(request_id, false, fail_text(error, "setDeviceOrientation failed"));
+                }
+            });
+        } catch (error) {
+            complete(request_id, false, fail_text(error, "setDeviceOrientation failed"));
         }
     };
 

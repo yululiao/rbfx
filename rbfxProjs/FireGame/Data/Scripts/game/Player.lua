@@ -189,8 +189,10 @@ function Player.Build(scene, spot, playerBoat, aspect)
     self.aimTwist_ = 0.0         -- 上半身当前扭转量（弧度，平滑值）
 
     self.aim = 0.0                              -- 度，正=右转（俯视角下固定 0，不再动态变化）
-    self.aspect_ = aspect                       -- 画布宽高比，Build 时定下不再变（真机恒定）；
-                                                -- 调试面板改 Config 后靠它重跑 CameraForAspect
+    self.aspect_ = aspect                       -- 画布宽高比：Build 时由画布算得，之后随转屏
+                                                -- 经 SetAspect 更新（早期注释写的“真机恒定”
+                                                -- 已被横竖屏切换打破）；调试面板也靠它重跑
+                                                -- CameraForAspect
     self.pitch = camFit.pitch                   -- 度，相机俯角（竖屏端更陡，见 CameraForAspect）
     self.camDistance_ = camFit.distance         -- 相机离关注点的距离（竖屏端更远/更高）
     self.camLookAhead_ = camFit.lookAhead       -- 视线中心朝海前推量（竖屏端更大）
@@ -225,6 +227,21 @@ end
 --- 开火后座：给相机一个瞬时上抬，随后 Update 里指数回落。
 function Player:AddKick()
     self.kick = self.kick + Config.CAMERA_KICK
+end
+
+--- 更新画布宽高比并重摆相机（画布尺寸变化时由 main.lua 调：转屏、或编辑器拖 GameView）。
+--- 横屏不另写一套参数：CameraForAspect 在 aspect >= CAMERA_LANDSCAPE_ASPECT 时 t=0，
+--- 直接取桌面那组值——即“横屏相机参数用 PC 的”。
+---@param aspect number 画布宽/高
+function Player:SetAspect(aspect)
+    if not (aspect and aspect > 0.0) then
+        return
+    end
+    if self.aspect_ and math.abs(aspect - self.aspect_) < 1e-4 then
+        return
+    end
+    self.aspect_ = aspect
+    self:ApplyCameraFit()
 end
 
 --- 把当前 Config 相机常量重新落到相机与本帧缓存上（调试面板每拖一下滑条调它）。

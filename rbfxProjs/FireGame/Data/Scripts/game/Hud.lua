@@ -29,7 +29,8 @@ end
 ---@param scene Scene
 ---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil,
 ---                   onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil,
----                   onVoiceFilter: fun()|nil, onSidebarGo: fun()|nil, onSidebarClose: fun()|nil }|nil
+---                   onVoiceFilter: fun()|nil, onSidebarGo: fun()|nil, onSidebarClose: fun()|nil,
+---                   onOrientation: fun(landscape:boolean)|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -80,6 +81,20 @@ function Hud.Build(scene, handlers)
     self.voiceRecording = false
     self.voiceStatus = ""
     self.voiceFilterName = ""
+    -- 设置面板：语音与屏幕方向两个入口的统一出口（原独立语音按钮已并入）。
+    -- 能力位分开给：宿主可能有录音却没切屏 API（或反之），面板里每一行各自显隐；
+    -- 两者都不可用时设置按钮本身也不渲染（settingsAvailable），不给假入口。
+    -- settingsOpen 是模态：main.lua 据此把世界 dt 压成 0（与开始画面同一手法）。
+    self.settingsAvailable = false
+    self.settingsOpen = false
+    self.orientationAvailable = false
+    -- 当前是否横屏 + 面板里那颗按钮的文案：一个按钮做反向切换（竖屏时写“切换横屏”），
+    -- 玩家不用再自己对照状态行选哪一个。方向由画布宽高比判定（SetOrientationLandscape），
+    -- 不信宿主的回答：转屏完成与否，尺寸才是唯一硬证据。
+    self.landscape = false
+    self.orientationToggleLabel = "切换横屏"
+    -- 状态行文案：当前方向（“当前：横屏”）或失败提示（“本机不支持切换屏幕方向”）。
+    self.orientationStatus = ""
     -- 侧边栏复访引导（game/Sidebar.lua 推）：非侧边栏首次进入、开始画面收起后弹一次。
     -- 模态：开着的期间 main.lua 把世界 dt 压成 0（与开始画面/语音面板同一手法）。
     self.sidebarGuide = false
@@ -124,6 +139,12 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("voiceStatus", function() return self.voiceStatus end)
             w:BindReadonlyProperty("voiceFilterName", function() return self.voiceFilterName end)
             w:BindReadonlyProperty("sidebarGuide", function() return self.sidebarGuide end)
+            -- 设置面板：按钮显隐 / 面板显隐 / 方向行显隐、状态文字与切换按钮文案
+            w:BindReadonlyProperty("settingsAvailable", function() return self.settingsAvailable end)
+            w:BindReadonlyProperty("settingsOpen", function() return self.settingsOpen end)
+            w:BindReadonlyProperty("orientationAvailable", function() return self.orientationAvailable end)
+            w:BindReadonlyProperty("orientationStatus", function() return self.orientationStatus end)
+            w:BindReadonlyProperty("orientationToggleLabel", function() return self.orientationToggleLabel end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -210,6 +231,16 @@ function Hud.Build(scene, handlers)
             w:BindEvent("sidebar_close", function()
                 if handlers.onSidebarClose then
                     handlers.onSidebarClose()
+                end
+            end)
+            -- 设置面板：开/关纯 UI；方向按钮把意图交给 Orientation（真正的宿主转屏与
+            -- 相机/UI 重算在那条链路上，这里只转发）。单个按钮做反向切换：面板里
+            -- 不需要玩家再自己对照当前方向选一个。
+            w:BindEvent("settings_open", function() self:OpenSettings() end)
+            w:BindEvent("settings_close", function() self:CloseSettings() end)
+            w:BindEvent("orientation_toggle", function()
+                if handlers.onOrientation then
+                    handlers.onOrientation(not self.landscape)
                 end
             end)
         end,
@@ -395,6 +426,69 @@ function Hud:SetWeaponText(text)
 end
 
 ----------------------------------------------------------------------
+-- 设置面板（语音 + 屏幕方向）
+----------------------------------------------------------------------
+
+--- 设置按钮显隐：宿主至少有一种能力（录音或切屏）才出现。main.lua 在 Build 之后调一次。
+---@param b boolean
+function Hud:SetSettingsAvailable(b)
+    self.settingsAvailable = b and true or false
+    self:Dirty("settingsAvailable")
+end
+
+--- 方向行显隐：宿主具备切屏能力（setDeviceOrientation）才出现。
+---@param b boolean
+function Hud:SetOrientationAvailable(b)
+    self.orientationAvailable = b and true or false
+    self:Dirty("orientationAvailable")
+end
+
+--- 状态行 + 切换按钮文案：由 main.lua 在画布尺寸变化时推（宽>=高 即横屏）——
+--- 宿主是否真的转了屏，只有尺寸算数。
+---@param landscape boolean
+function Hud:SetOrientationLandscape(landscape)
+    landscape = landscape and true or false
+    self.landscape = landscape
+    local label = landscape and "切换竖屏" or "切换横屏"
+    if label ~= self.orientationToggleLabel then
+        self.orientationToggleLabel = label
+        self:Dirty("orientationToggleLabel")
+    end
+    self:SetOrientationStatus(landscape and "当前：横屏" or "当前：竖屏")
+end
+
+--- 状态行原文：请求在途/失败的提示走这里（与当前方向同一行，同一时刻只说一件事）。
+---@param text string
+function Hud:SetOrientationStatus(text)
+    text = text or ""
+    if text == self.orientationStatus then
+        return
+    end
+    self.orientationStatus = text
+    self:Dirty("orientationStatus")
+end
+
+--- 打开设置面板（模态，main.lua 据此暂停世界推进）。
+function Hud:OpenSettings()
+    if not self.settingsOpen then
+        self.settingsOpen = true
+        self:Dirty("settingsOpen")
+    end
+end
+
+function Hud:CloseSettings()
+    if self.settingsOpen then
+        self.settingsOpen = false
+        self:Dirty("settingsOpen")
+    end
+end
+
+---@return boolean 设置面板是否开着（帧循环用它把世界 dt 压成 0）
+function Hud:IsSettingsModal()
+    return self.settingsOpen
+end
+
+----------------------------------------------------------------------
 -- 自定义语音（game/Voice.lua）
 ----------------------------------------------------------------------
 
@@ -404,8 +498,10 @@ function Hud:SetVoiceAvailable(b)
     self:Dirty("voiceAvailable")
 end
 
---- 打开语音面板（模态，main.lua 据此暂停世界推进）。
+--- 打开语音面板（模态，main.lua 据此暂停世界推进）。从设置面板进入，故先把设置收起来
+--- ——两层全屏模态叠着只会多一层黑遮罩，且返回时玩家不知道自己在哪。
 function Hud:OpenVoice()
+    self:CloseSettings()
     if not self.voiceOpen then
         self.voiceOpen = true
         self:Dirty("voiceOpen")

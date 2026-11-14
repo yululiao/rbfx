@@ -53,7 +53,9 @@
             src: /Textures/BtnDisembark.png;
             disembarkDisc: 0dp 0dp 256dp 256dp;
         }
-        #voice_btn { decorator: image(voiceDisc); }
+        /* 设置按钮复用语音那颗圆盘贴图：BtnVoice.png 只是一枚纯色软边圆（不含图标），
+           拿来当设置按钮的底正合适。sprite 名仍叫 voiceDisc，换贴图要连这里一起改。 */
+        #settings_btn { decorator: image(voiceDisc); }
         #board_btn { decorator: image(boardDisc); }
         #disembark_btn { decorator: image(disembarkDisc); }
     </style>
@@ -82,10 +84,11 @@
         <div class="label" style="font-size: 30dp; color: #ffd24dff;">{{comboText}}</div>
     </div>
 
-    <!-- 右上角：自定义语音入口。data-if="voiceAvailable"：编辑器/桌面宿主没有麦克风通路，
-         整块不渲染（与“语音按钮点了没反应”的假入口区分开）。 -->
-    <div data-if="voiceAvailable" id="voice_btn" data-event-click="voice_open" style="position: absolute; right: 28dp; top: 152dp; width: 88dp; height: 88dp; text-align: center; pointer-events: auto;">
-        <div style="position: relative; top: 26dp; color: #ffffffff; font-size: 26dp; font-weight: bold;">语音</div>
+    <!-- 右上角：设置入口。语音与屏幕方向都收进这块面板（原独立语音按钮已并入，2026-11）。
+         data-if="settingsAvailable"：宿主既没有录音通路也没有切屏 API 时（编辑器/桌面）
+         整块不渲染——与旧语音按钮同一处理，不给点了没反应的假入口。 -->
+    <div data-if="settingsAvailable" id="settings_btn" data-event-click="settings_open" style="position: absolute; right: 28dp; top: 152dp; width: 88dp; height: 88dp; text-align: center; pointer-events: auto;">
+        <div style="position: relative; top: 26dp; color: #ffffffff; font-size: 26dp; font-weight: bold;">设置</div>
     </div>
 
     <!-- 准星已移除：改为王者式自动吸附开火（见 Shooting.lua），命中确认靠下面的 hitmarker。 -->
@@ -128,35 +131,78 @@
     <div id="stick_ring" style="position: absolute; left: 40dp; bottom: 40dp; width: 224dp; height: 224dp;"></div>
 
     <!-- 开始画面：会话首次进入时盖住战场（背景=战场实景+半透明遮罩，不占包体）。
-         点击“开始”才放行波间倒计时（main.lua 据此把世界 dt 压成 0）；重开不再出现。 -->
+         点击“开始”才放行波间倒计时（main.lua 据此把世界 dt 压成 0）；重开不再出现。
+         内容块钉在画布正中（不是固定 top 偏移）：横屏画布只有约 700dp 高，竖屏时代的
+         top:300dp 在横屏下会把按钮推出屏幕外。 -->
     <div id="start_panel" data-if="showStart" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
-        <div style="position: relative; top: 300dp;">
-            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
-            <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，开火全自动</div>
-            <button data-event-click="start" style="margin-top: 64dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
+        <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
+            <div style="position: absolute; left: -320dp; top: -150dp; width: 640dp;">
+                <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
+                <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，开火全自动</div>
+                <button data-event-click="start" style="margin-top: 52dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
+            </div>
         </div>
     </div>
 
-    <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染 -->
+    <!-- 结算面板：data-if="gameOver"，未结束时整个不渲染。与开始画面同一套居中手法；
+         行距按“横屏 700dp 高”收紧过——竖屏时代的 48dp 间隔在横屏下会把「分享战绩」
+         挤出屏幕（复活/再开/分享/语音四条都在时总高已过 480dp）。 -->
     <div id="end_panel" data-if="gameOver" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; text-align: center; pointer-events: auto;">
-        <div style="position: relative; top: 320dp;">
-            <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
-            <div class="label" style="margin-top: 16dp; font-size: 34dp;">SCORE {{endScore}}</div>
-            <!-- 看广告复活（休眠链路）：reviveAvailable 三层全真才亮——败局未用过 + 宿主 SDK 可用
-                 + Config.AD.REWARDED_UNIT_ID 非空。当前没广告位时整条不渲染，玩家看不到任何广告痕迹；
-                 金色放在“再来一局”之上：败局这一刻是“不甘心”的峰值，续战是首选动作。 -->
-            <div data-if="reviveAvailable">
-                <button data-event-click="revive" style="margin-top: 36dp; padding: 18dp 48dp; font-size: 30dp; background-color: #c8901ee6; color: #ffffffff; border-radius: 12dp;">看广告复活</button>
+        <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
+            <div style="position: absolute; left: -320dp; top: -240dp; width: 640dp;">
+                <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">{{endTitle}}</div>
+                <div class="label" style="margin-top: 12dp; font-size: 34dp;">SCORE {{endScore}}</div>
+                <!-- 看广告复活（休眠链路）：reviveAvailable 三层全真才亮——败局未用过 + 宿主 SDK 可用
+                     + Config.AD.REWARDED_UNIT_ID 非空。当前没广告位时整条不渲染，玩家看不到任何广告痕迹；
+                     金色放在“再来一局”之上：败局这一刻是“不甘心”的峰值，续战是首选动作。 -->
+                <div data-if="reviveAvailable">
+                    <button data-event-click="revive" style="margin-top: 24dp; padding: 14dp 48dp; font-size: 30dp; background-color: #c8901ee6; color: #ffffffff; border-radius: 12dp;">看广告复活</button>
+                </div>
+                <button data-event-click="restart" style="margin-top: 28dp; padding: 14dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
+                <!-- 战绩分享：宿主可用才显示（编辑器/桌面没有分享通路）；战绩文字由 Lua 拼，
+                     分享面板由宿主自己拉起 -->
+                <div data-if="shareAvailable">
+                    <button data-event-click="share" style="margin-top: 18dp; padding: 10dp 36dp; font-size: 26dp; background-color: #4a8f4ae6; color: #ffffffff; border-radius: 10dp;">分享战绩</button>
+                </div>
+                <!-- 失守这一刻才是吐槽冲动的最高点：再给一个语音入口（面板在 DOM 后面，盖在它之上） -->
+                <div data-if="voiceAvailable">
+                    <button data-event-click="voice_open" style="margin-top: 18dp; padding: 10dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+                </div>
             </div>
-            <button data-event-click="restart" style="margin-top: 48dp; padding: 18dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
-            <!-- 战绩分享：宿主可用才显示（编辑器/桌面没有分享通路）；战绩文字由 Lua 拼，
-                 分享面板由宿主自己拉起 -->
-            <div data-if="shareAvailable">
-                <button data-event-click="share" style="margin-top: 24dp; padding: 12dp 36dp; font-size: 26dp; background-color: #4a8f4ae6; color: #ffffffff; border-radius: 10dp;">分享战绩</button>
-            </div>
-            <!-- 失守这一刻才是吐槽冲动的最高点：再给一个语音入口（面板在 DOM 后面，盖在它之上） -->
-            <div data-if="voiceAvailable">
-                <button data-event-click="voice_open" style="margin-top: 24dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+        </div>
+    </div>
+
+    <!-- 设置面板：语音与屏幕方向两个入口都在这里（原独立语音按钮已并入）。
+         与开始画面/结算面板同一套居中手法（left/top 50% 的零尺寸盒 + 内层左上各回半个卡片），
+         横屏 700dp 高的画布下也完整落在屏内。
+         面板里每一行各自按能力位显隐：宿主没录音通路就只有方向，没切屏 API 就只有语音；
+         两边都没有时设置按钮本身就不渲染（见顶部 #settings_btn）。 -->
+    <div data-if="settingsOpen" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
+        <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
+            <div style="position: absolute; left: -320dp; top: -215dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+                <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">设置</div>
+
+                <!-- 屏幕方向：宿主 setDeviceOrientation 才出现。一颗按钮做反向切换（当前竖屏就写
+                     「切换横屏」），底下那行写当前方向——两个按钮摆在一起玩家还得先对照状态行
+                     再选，选错就是白转一次屏。按钮样式仍然不能绑定变量（内联 style 里塞 {{}}
+                     会让 RCSS 解析器直接崩，见文件头），但按钮文字绑定是允许的。 -->
+                <div data-if="orientationAvailable" style="margin-top: 26dp;">
+                    <div class="label" style="font-size: 24dp; color: #ffffffd9;">屏幕方向</div>
+                    <div style="margin-top: 12dp;">
+                        <button data-event-click="orientation_toggle" style="padding: 12dp 44dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">{{orientationToggleLabel}}</button>
+                    </div>
+                    <div class="label" style="margin-top: 10dp; font-size: 20dp; color: #9fe0ffd9;">{{orientationStatus}}</div>
+                </div>
+
+                <!-- 自定义语音：宿主 SDK 可用才出现（编辑器/桌面没有麦克风通路） -->
+                <div data-if="voiceAvailable" style="margin-top: 26dp;">
+                    <div class="label" style="font-size: 24dp; color: #ffffffd9;">自定义语音</div>
+                    <button data-event-click="voice_open" style="margin-top: 12dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+                </div>
+
+                <div style="margin-top: 30dp;">
+                    <button data-event-click="settings_close" style="padding: 12dp 44dp; font-size: 26dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">关闭</button>
+                </div>
             </div>
         </div>
     </div>
@@ -166,9 +212,9 @@
     <div data-if="voiceOpen" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
         <!-- 居中锚点：left 50% 的零尺寸盒 + 内层左移半个卡片宽（不依赖负 margin，与旧面板同一手法）。
              面板自身 pointer-events:auto，否则会从 body 的 none 继承成点不动。 -->
-        <div style="position: absolute; left: 50%; top: 0; width: 0; height: 0;">
+        <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
             <!-- 宽 640dp（窄横竖屏画布约 700dp：即使 box-sizing 按 content-box 算，加 24dp 两侧 padding 仍不超宽） -->
-            <div style="position: absolute; left: -320dp; top: 130dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+            <div style="position: absolute; left: -320dp; top: -250dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">自定义语音</div>
                 <div class="label" style="margin-top: 8dp; font-size: 20dp; color: #ffffff99;">录一句，战场上放你自己的声音（最长 3 秒）；清除后回到预置旁白</div>
 
@@ -201,9 +247,9 @@
          「去侧边栏」经 navigateToScene 拉起宿主侧边栏面板，「知道了」只关面板；点过任一后宿主
          storage 记住，之后不再弹。模态：main.lua 据此把世界 dt 压成 0。面板在 DOM 最后 = 盖最上层。 -->
     <div data-if="sidebarGuide" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
-        <!-- 居中锚点：与语音面板同一手法（left 50% 零尺寸盒 + 内层左移半个卡片宽） -->
-        <div style="position: absolute; left: 50%; top: 0; width: 0; height: 0;">
-            <div style="position: absolute; left: -300dp; top: 180dp; width: 600dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+        <!-- 居中锚点：与语音面板同一手法（left/top 50% 零尺寸盒 + 内层左上回半个卡片） -->
+        <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
+            <div style="position: absolute; left: -300dp; top: -160dp; width: 600dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">添加到侧边栏</div>
                 <div class="label" style="margin-top: 12dp; font-size: 22dp; color: #ffffffcc;">把游戏固定在抖音侧边栏，下次一键进入</div>
                 <div class="label" style="margin-top: 6dp; font-size: 22dp; color: #ffd24dff;">回归奖励：攻击 +20%，生命 +25%</div>

@@ -48,6 +48,12 @@
         console.error("[rbfx] no canvas available for the engine module");
     }
 
+    // The module instance, for the platform layers that must drive the engine outside a wasm
+    // call: the SDK shim pushes a canvas resize through Module.JSCanvasSize after the host
+    // rotates the screen (the browser shell calls the same export from its resize handler).
+    if (rbfx)
+        rbfx.module = Module;
+
     // ---- browser globals the compiled glue expects ------------------------------------------
     // WebAssembly: the runtime may define only its vendor loader (WeChat has WXWebAssembly,
     // Douyin has the standard global and TTWebAssembly). The glue references e.g.

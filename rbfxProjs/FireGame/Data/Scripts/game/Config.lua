@@ -297,6 +297,9 @@ Config.CAMERA_VFOV_CAP = 70.0        -- 垂直 FOV 上限，竖屏构图旋钮�
                                      -- 70° 时人物 ≈11% 与桌面相当——横向覆盖收窄换主体清晰
 
 --- 按画布宽高比（宽/高）派生本端相机参数。
+--- 横屏（游戏内切到横屏）不需要单独一套参数：aspect >= CAMERA_LANDSCAPE_ASPECT 时
+--- t 被 clamp 到 0，下面 lerp 取的就是桌面那三个原值（DISTANCE/PITCH/LOOK_AHEAD），
+--- 也就是“横屏相机参数用 PC 的”。转屏后画布宽高比由 Player:SetAspect 推进来重跑这里。
 ---@param aspect number|nil 画布宽/高；nil 按桌面横屏
 ---@return { vfov: number, distance: number, pitch: number, lookAhead: number }
 function Config.CameraForAspect(aspect)
@@ -328,6 +331,11 @@ end
 Config.UI_DESIGN_SHORT_SIDE = 700.0
 Config.UI_SCALE_MIN = 0.55
 Config.UI_SCALE = 1.0   -- 占位：main.lua 启动时写入，Juice/摇杆几何读它
+-- 横屏系数：竖屏 393x852 时摇杆直径 126 逻辑像素（约 224dp）；同一份 dp 尺寸搬到横屏
+-- （852x393，dp 屏高只有 393/0.505 ≈ 778dp）后，那 224dp 会吃掉近三成屏高，所以横屏
+-- 这里反而要往下压（0.561 → 0.505），不是放大。只作用于本来就在缩小的真机小屏
+-- （scale<1），桌面/编辑器大窗口保持原比例。
+Config.UI_LANDSCAPE_BOOST = 0.9
 
 --- 按画布尺寸派生 UI 缩放系数。
 ---@param canvasW number
@@ -338,7 +346,14 @@ function Config.ComputeUIScale(canvasW, canvasH)
     if shortSide <= 0.0 then
         return 1.0
     end
-    return math.min(math.max(shortSide / Config.UI_DESIGN_SHORT_SIDE, Config.UI_SCALE_MIN), 1.0)
+    local scale = math.min(math.max(shortSide / Config.UI_DESIGN_SHORT_SIDE, Config.UI_SCALE_MIN), 1.0)
+    -- 横屏再乘一个系数：横屏画布的屏高只有 393，按竖屏宽度设计的 dp 尺寸搬过去会被
+    -- 摇杆/按钮占掉太多空间（见上面 UI_LANDSCAPE_BOOST）。上限仍是 1.0（1dp = 1 画布
+    -- 像素），不越过“大屏不放大”的历史约定。
+    if (canvasW or 0.0) > (canvasH or 0.0) and scale < 1.0 then
+        scale = math.min(scale * Config.UI_LANDSCAPE_BOOST, 1.0)
+    end
+    return scale
 end
 
 ----------------------------------------------------------------------

@@ -30,6 +30,7 @@ local Dog = require("game.Dog")
 local HpBar = require("game.HpBar")
 local Voice = require("game.Voice")
 local Sidebar = require("game.Sidebar")
+local Orientation = require("game.Orientation")
 local Tracker = require("game.Tracker")
 
 ----------------------------------------------------------------------
@@ -121,7 +122,7 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice, sidebar
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice, sidebar, orientation
 -- 激励视频复活链路两状态：ad_showing=广告在途（世界 dt 压 0、吞摇杆，结果事件结算时清）；
 -- reviveAdEnabled=链路总开关（宿主 SDK 可用 + Config.AD.REWARDED_UNIT_ID 非空，Build 后定值）。
 -- 休眠语义：没配广告位时恒 false，结算面板根本不出现复活按钮，玩家看不到任何广告痕迹。
@@ -162,6 +163,7 @@ local function RestartGame()
     if hud then
         hud:HideEnd()
         hud:CloseVoice()   -- 上一局开着的语音面板不带进新局（否则新局一开就定格）
+        hud:CloseSettings() -- 设置面板同理（开着的设置会让世界 dt 恒为 0）
         if hud.SetReviveAvailable then hud:SetReviveAvailable(false) end
     end
     if voice then
@@ -364,6 +366,13 @@ hud = Hud.Build(scene, {
     onSidebarClose = function()
         if sidebar then sidebar:DismissGuide() end
     end,
+    -- 设置面板里的竖屏/横屏按钮：转给 Orientation（在途去重、失败提示都在那边），
+    -- 真正的布局/相机重算不在这里做——等画布尺寸真的变了由帧循环那一段统一落地。
+    onOrientation = function(landscape)
+        if orientation then
+            orientation:Request(landscape)
+        end
+    end,
 })
 -- 结算页分享入口：与语音入口同源的宿主能力判定（编辑器/桌面没有分享通路）。
 do
@@ -385,6 +394,20 @@ sidebar = Sidebar.Build(scene, {
     hud = hud,
     getWaves = function() return waves end,
 })
+-- 屏幕方向（竖屏/横屏）：必须在 Hud 与 Voice 之后建——设置按钮的显隐取决于两块能力
+-- （切屏 API 或录音通路任一可用才出现），这两面到这一步才定值。横屏的相机不需要另配，
+-- 画布一变宽 Player:SetAspect 就取到桌面那组参数（见 game/Config.lua 的 CameraForAspect）。
+orientation = Orientation.Build({ hud = hud })
+if hud.SetOrientationAvailable then
+    hud:SetOrientationAvailable(orientation:IsAvailable())
+end
+if hud.SetSettingsAvailable then
+    hud:SetSettingsAvailable(orientation:IsAvailable() or hud.voiceAvailable)
+end
+if hud.SetOrientationLandscape then
+    -- 启动时先写一次当前方向：横屏窗口 / 横屏出包里状态行第一眼就是对的。
+    hud:SetOrientationLandscape(canvasAspect and canvasAspect >= 1.0)
+end
 -- 相机参数调试面板（仅 Config.DEBUG_CAM_PANEL=true）：右上角一颗按钮，真机上实时拖相机常量
 -- 并把可粘回 Config.lua 的数值打到日志。必须在 player 之后建（它要调 player:ApplyCameraFit）。
 -- 开关为 false 时下面整块不存在——上线包里连 UI 组件都不会创建。
@@ -560,11 +583,12 @@ SubscribeToEvent("Update", function(data)
     -- 引擎侧骨骼动画/粒子不受它影响（走自己的 Frame::timeStep），定格里死亡动画
     -- 照常播——这正是要的效果。世界 dt 只眼世界逻辑：海面滚动/开火/敌人/波次/主角。
     local worldDt = juice:BeginFrame(dt)
-    -- 开始画面/语音面板/侧边栏引导都是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
+    -- 开始画面/语音面板/设置面板/侧边栏引导都是模态的：开着的期间把世界 dt 压成 0（与 hit-stop 同一手法，粒子/骨骼动画
     -- 走引擎自己的 timeStep 不受影响）。开始画面盖着时波间倒计时不走——开局由玩家点击放行；
-    -- 录音上限 3 秒，不暂停就是“调个音色被偷家”。激励视频广告在途（ad_showing）同理：
-    -- 全屏视频盖住游戏，回来前不能刷怪/掉血/走位。
-    if (hud and (hud:IsStartModal() or hud:IsVoiceModal() or hud:IsSidebarGuideModal())) or ad_showing then
+    -- 录音上限 3 秒，不暂停就是“调个音色被偷家”；设置面板里能切屏，切完回来必须还是那一局。
+    -- 激励视频广告在途（ad_showing）同理：全屏视频盖住游戏，回来前不能刷怪/掉血/走位。
+    if (hud and (hud:IsStartModal() or hud:IsVoiceModal() or hud:IsSidebarGuideModal() or hud:IsSettingsModal()))
+        or ad_showing then
         worldDt = 0.0
     end
 
@@ -575,20 +599,33 @@ SubscribeToEvent("Update", function(data)
     coast.seaMaterial:SetShaderParameter("UOffset", Vector4(Config.SEA_TILE, 0.0, 0.0, seaScrollT * Config.SEA_SCROLL_U))
     coast.seaMaterial:SetShaderParameter("VOffset", Vector4(0.0, Config.SEA_TILE, 0.0, seaScrollT * Config.SEA_SCROLL_V))
 
-    -- 环底锚，画布高度可能随 GameView 拖拽变化，每帧重算环心
+    -- 环底锚，画布高度可能随 GameView 拖拽或转屏变化，每帧重算环心
     local cw, ch = CanvasSize()
     if cw > 0 then
-        if cw ~= canvasW or ch ~= canvasH then
-            -- 尺寸变了（编辑器拖 GameView；真机恒定不进这分支）：重算 UI 缩放并同步。
-            -- 引擎只在 ApplyScreenMode 时按 dpiScale 重设 SetScale（Engine.cpp），
-            -- GameView 拖拽不走那条路，这里的重设不会被盖掉。
-            canvasW, canvasH = cw, ch
-            local scale = Config.ComputeUIScale(cw, ch)
+        -- UI 缩放每帧对账，而不是只在尺寸变化时重算：Engine::OnCanvasResize 会按它收到的
+        -- dpiScale 重设 rmlUi:SetScale（转屏走那条路，点“当前方向”也会走），画布尺寸没变时
+        -- 下面的尺寸分支不跑，被盖掉的缩放就不会自己回来。值相同时 SetScale 内部会早退。
+        local scale = Config.ComputeUIScale(cw, ch)
+        if scale ~= Config.UI_SCALE then
             ApplyUIScale(scale)
             if rmlUi then
                 rmlUi:SetScale(scale)
             end
             joystick:SetRadius(STICK.travel, STICK.grab)
+        end
+        if cw ~= canvasW or ch ~= canvasH then
+            -- 尺寸变了：编辑器拖 GameView，或小游戏转屏后 host 把新尺寸推进引擎
+            -- （minigame_sdk.js 的 resize_engine_canvas ⇒ Module.JSCanvasSize）。
+            -- 新宽高比交给相机——横竖屏共用一张插值表，横屏一侧落在桌面原值
+            -- （Config.CameraForAspect 的 t=0）。
+            canvasW, canvasH = cw, ch
+            local aspect = (ch > 0.0) and (cw / ch) or nil
+            if aspect then
+                player:SetAspect(aspect)
+                -- 设置面板的方向状态行以画布形状为准：宿主回包只说明“它接受了请求”，
+                -- 宽高变了才是真的转了屏。
+                hud:SetOrientationLandscape(aspect >= 1.0)
+            end
         end
         joystick:SetCenter(StickCenter(ch))
     end
@@ -601,11 +638,12 @@ SubscribeToEvent("Update", function(data)
     if kx ~= 0.0 or ky ~= 0.0 then
         stickX, stickY = kx, ky
     end
-    -- 开始画面/相机调试面板/语音面板/侧边栏引导展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
+    -- 开始画面/相机调试面板/语音面板/设置面板/侧边栏引导展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
     -- 开始画面盖着时人物不该提前乱跑；小画布（编辑器 GameView）下面板会盖住左下抓取区，否则拖滑条的
     -- 同时人物在走，构图边变边看，调不准；语音面板同理，录音时摇杆帽乱跑看着像卡了；
+    -- 设置面板也盖住左下角，拖按钮边的人物乱走同样难看；
     -- 激励视频在途时全屏广告盖着画面，触摸归宿主，摇杆帽也不该跟着残留输入乱动。
-    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and (hud:IsVoiceModal() or hud:IsSidebarGuideModal()))
+    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and (hud:IsVoiceModal() or hud:IsSidebarGuideModal() or hud:IsSettingsModal()))
         or ad_showing then
         stickX, stickY = 0.0, 0.0
     end

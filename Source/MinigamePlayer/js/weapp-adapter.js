@@ -1664,4 +1664,36 @@ if (globalThis.wx_tt) {
 
 /***/ })
 /******/ ]);
+
+// 宿主转屏后的视口尺寸（竖屏/横屏切换，见 minigame_sdk.js 的 set_device_orientation）。
+//
+// 为什么必须换：这层 mock 在启动那一刻就把 innerWidth/innerHeight 快照成当时的屏幕方向，
+// canvas.getBoundingClientRect 每次都读它们；而 SDL 把 vendor 传来的触点按
+// targetX / canvas CSS 宽 归一化（SDL_emscriptenevents.c 的 Emscripten_HandleTouch）。
+// 快照不换，转屏之后的每一次触摸都按旧方向的比例映射——摇杆和按钮会歪到屏幕另一侧，
+// 看起来像“转屏后触控失灵”。
+if (globalThis.window) {
+    globalThis.rbfx_set_viewport_size = function (width, height) {
+        if (!(width > 0) || !(height > 0))
+            return;
+        try {
+            globalThis.innerWidth = width;
+            globalThis.innerHeight = height;
+            var screen = globalThis.screen;
+            if (screen) {
+                screen.availWidth = width;
+                screen.availHeight = height;
+                screen.width = width;
+                screen.height = height;
+            }
+            var canvas = globalThis.window.canvas;
+            if (canvas && canvas.style) {
+                canvas.style.width = width + "px";
+                canvas.style.height = height + "px";
+            }
+        } catch (error) {
+            console.warn("[rbfx] updating the mock viewport size failed", error);
+        }
+    };
+}
 }
