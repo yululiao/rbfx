@@ -18,6 +18,12 @@
       * 颜色统一 RRGGBBAA 八位十六进制，不用 rgba()（会被 atoi 截断，见 RCSS 配色坑）。
       * 左下 #stick_ring 的几何（left40/bottom40/224x224，dp 基础值）与 main.lua 的
         STICK_BASE 常量、core/Joystick 的抓取判定是同一套，改这里必须同步改那里。
+      * 右下操作区是一组“以屏幕右下角为圆心”的扇形：圆点就是画布角 (W,H)，角度从贴着
+        右边向上量到贴着底边向左。开火键在 45° 对角线上（半径 170dp，最贴角）；远期
+        2/3 号技能键在同心的更大半径 250dp 上，分列 22°/68°（right182/bottom44、
+        right44/bottom182，均为 100x100 的按钮外框值）。开火键几何对应 main.lua 的
+        FIRE_BASE 与 core/FireButton 的按住判定，改一处要同时改另一处。
+      * 所以弹药块与载具按钮不占扇形：它们沿右边缘堆在弧外（right36，bottom250/420）。
 -->
 <rml>
 <head>
@@ -58,6 +64,24 @@
         #settings_btn { decorator: image(voiceDisc); }
         #board_btn { decorator: image(boardDisc); }
         #disembark_btn { decorator: image(disembarkDisc); }
+        /* 开火键：外圈直接复用摇杆那张软边圆环（同图同 sprite 名，不另建表），圆内一颗
+           bullet.png 原图（128x128，decorator 拉伸到 64dp）。decorator 不能染色，
+           改配色只能换图。 */
+        @spritesheet hud_bullet {
+            src: /Textures/bullet.png;
+            bulletIcon: 0dp 0dp 128dp 128dp;
+        }
+        #fire_btn { decorator: image(ringDisc); }
+        #fire_icon { decorator: image(bulletIcon); }
+        #fire_icon_big { decorator: image(bulletIcon); }
+        /* 按下态高亮：一张白 46% 软边圆盘（FirePress.png），叠在 18% 的外圈上整块亮起来。
+           :active 用不了——#fire_btn 是 pointer-events:none 的纯绘制件，RmlUi 永远不知道
+           它被按下；按钮的实际输入由 core/FireButton.lua 直接读，按下态也由 Lua 推回来。 */
+        @spritesheet hud_fire_press {
+            src: /Textures/FirePress.png;
+            firePressDisc: 0dp 0dp 256dp 256dp;
+        }
+        #fire_press { decorator: image(firePressDisc); }
     </style>
 </head>
 <!-- body 设 pointer-events:none 的缘由：RmlUi 的 Context::OnFocusChange 在被聚焦元素所属文档
@@ -110,16 +134,35 @@
         <div style="position: absolute; left: -20dp; top: -3dp; width: 40dp; height: 6dp; background-color: #ff4d4dff; transform: rotate(-45deg);"></div>
     </div>
 
-    <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua -->
-    <div data-if="showBoard" id="board_btn" data-event-click="board" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
+    <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua。
+         沿右边缘堆在扇形弧外（right36/bottom420，弹药块再往上）：右下角那块留给
+         以角落为圆心的按钮扇形，96dp 的按钮放进去会把弧打断。 -->
+    <div data-if="showBoard" id="board_btn" data-event-click="board" style="position: absolute; right: 36dp; bottom: 420dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">登船</div>
     </div>
-    <div data-if="showDisembark" id="disembark_btn" data-event-click="disembark" style="position: absolute; right: 196dp; bottom: 168dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
+    <div data-if="showDisembark" id="disembark_btn" data-event-click="disembark" style="position: absolute; right: 36dp; bottom: 420dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">下船</div>
     </div>
 
-    <!-- 右下：弹药 + 装弹条 + 当前武器（弹丸数，随成长变化） -->
-    <div style="position: absolute; right: 40dp; bottom: 64dp; width: 200dp; text-align: right;">
+    <!-- 右下：开火键（仅手动开火时渲染，data-if="showFireButton"）。外圈借摇杆那张软边
+         圆环，圆内一颗子弹图标。输入判定不在 RML 里：按住/滑出/抬起由 core/FireButton.lua
+         直接读 Input（RmlUi 的 mouseup 派发给“抬起那一刻指针下的元素”，手指滑出圆外再
+         抬起会收不到，扳机就卡在按下态），本元素 pointer-events:none，只负责画。
+         位置在扇形 45° 对角线上（right70/bottom70，半径 170dp），尺寸与将来的技能键同一档；
+         几何与 main.lua 的 FIRE_BASE 同步。 -->
+    <div data-if="showFireButton" id="fire_btn" style="position: absolute; right: 70dp; bottom: 70dp; width: 100dp; height: 100dp; pointer-events: none;">
+        <!-- 按下态（data-if="fireButtonHeld"）：高亮盘打底 + 子弹图标由 34dp 放大到 42dp。
+             两个元素都只靠 data-if 切换，不碰内联 style 绑定（RCSS 解析不了 {{}}，见文件头）。
+             大图标盖在小图标之上，故常态那颗不需要反向绑定。 -->
+        <div data-if="fireButtonHeld" id="fire_press" style="position: absolute; left: 0; top: 0; width: 100dp; height: 100dp;"></div>
+        <div id="fire_icon" style="position: absolute; left: 33dp; top: 33dp; width: 34dp; height: 34dp;"></div>
+        <div data-if="fireButtonHeld" id="fire_icon_big" style="position: absolute; left: 29dp; top: 29dp; width: 42dp; height: 42dp;"></div>
+    </div>
+
+    <!-- 右下：弹药 + 装弹条 + 当前武器（弹丸数，随成长变化）。
+         沿右边缘堆在扇形弧外（right36/bottom250）：角落那一块是按钮扇形的圆心，
+         未来三颗技能键会沿弧占两侧，HUD 只能往外让。宽 200。 -->
+    <div style="position: absolute; right: 36dp; bottom: 250dp; width: 200dp; text-align: right;">
         <div class="big">{{ammo}}</div>
         <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6dp; margin-left: 40dp; width: 160dp; height: 10dp;"/>
         <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">{{weaponText}}</div>
@@ -138,7 +181,7 @@
         <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
             <div style="position: absolute; left: -320dp; top: -150dp; width: 640dp;">
                 <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
-                <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，开火全自动</div>
+                <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，默认自动开火</div>
                 <button data-event-click="start" style="margin-top: 52dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
             </div>
         </div>
@@ -172,14 +215,15 @@
         </div>
     </div>
 
-    <!-- 设置面板：语音与屏幕方向两个入口都在这里（原独立语音按钮已并入）。
+    <!-- 设置面板：开火方式 + 语音 + 屏幕方向三个入口。
          与开始画面/结算面板同一套居中手法（left/top 50% 的零尺寸盒 + 内层左上各回半个卡片），
-         横屏 700dp 高的画布下也完整落在屏内。
-         面板里每一行各自按能力位显隐：宿主没录音通路就只有方向，没切屏 API 就只有语音；
-         两边都没有时设置按钮本身就不渲染（见顶部 #settings_btn）。 -->
+         横屏（dp 高约 780）下也完整落在屏内——卡片内容增到三行后总高约 600dp，top 跟着
+         从 -215 抬到 -300，靠居中对齐而不是再给每行减间距。
+         面板里每一行各自按能力位显隐：宿主没录音通路就只有方向与开火方式，没切屏 API 就只有
+         语音与开火方式；开火方式是纯本地设置，所以设置按钮恒在（见顶部 #settings_btn）。 -->
     <div data-if="settingsOpen" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
         <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
-            <div style="position: absolute; left: -320dp; top: -215dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+            <div style="position: absolute; left: -320dp; top: -300dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">设置</div>
 
                 <!-- 屏幕方向：宿主 setDeviceOrientation 才出现。一颗按钮做反向切换（当前竖屏就写
@@ -198,6 +242,17 @@
                 <div data-if="voiceAvailable" style="margin-top: 26dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">自定义语音</div>
                     <button data-event-click="voice_open" style="margin-top: 12dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+                </div>
+
+                <!-- 开火方式：纯本地设置，不依赖宿主能力，恒显示。与屏幕方向同一手法——一颗
+                     按钮反切（自动时写「切换手动开火」），状态行写当前值。手动开火时右下角
+                     才渲染那颗开火键（#fire_btn 的 data-if="showFireButton"）。 -->
+                <div style="margin-top: 26dp;">
+                    <div class="label" style="font-size: 24dp; color: #ffffffd9;">开火方式</div>
+                    <div style="margin-top: 12dp;">
+                        <button data-event-click="fire_mode_toggle" style="padding: 12dp 44dp; font-size: 26dp; background-color: #d94b3ae6; color: #ffffffff; border-radius: 10dp;">{{fireModeToggleLabel}}</button>
+                    </div>
+                    <div class="label" style="margin-top: 10dp; font-size: 20dp; color: #9fe0ffd9;">{{fireModeStatus}}</div>
                 </div>
 
                 <div style="margin-top: 30dp;">

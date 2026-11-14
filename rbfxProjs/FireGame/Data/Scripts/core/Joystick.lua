@@ -105,7 +105,8 @@ end
 
 --- 每帧采样。input 是引擎 Input 子系统，坐标全是画布像素，无需换算。
 ---@param input Input
-function Joystick:Update(input)
+---@param excludeId number|nil 已被同屏其他控件（右下开火键）锁定的指针，不抢
+function Joystick:Update(input, excludeId)
     -- 1) 手指优先：找回已锁定的那根（整屏任意位置都继续跟）；否则看新手指是否落在移动区。
     local numTouches = input:GetNumTouches()
     local tracked = nil
@@ -117,7 +118,7 @@ function Joystick:Update(input)
             local dy = touch.position.y
             if touch.touchID == self.ptrId_ then
                 tracked = { dx = dx, dy = dy, id = touch.touchID }
-            elseif not fresh and self:InGrabArea(dx, dy) then
+            elseif not fresh and touch.touchID ~= excludeId and self:InGrabArea(dx, dy) then
                 fresh = { dx = dx, dy = dy, id = touch.touchID }
             end
         end
@@ -135,7 +136,7 @@ function Joystick:Update(input)
             local dy = mouse.y
             if self.ptrId_ == MOUSE_ID then
                 sample = { dx = dx, dy = dy, id = MOUSE_ID }
-            elseif self.ptrId_ == nil and self:InGrabArea(dx, dy) then
+            elseif self.ptrId_ == nil and excludeId ~= MOUSE_ID and self:InGrabArea(dx, dy) then
                 sample = { dx = dx, dy = dy, id = MOUSE_ID }
             end
         end
@@ -175,6 +176,13 @@ end
 ---@return boolean
 function Joystick:IsEngaged()
     return self.ptrId_ ~= nil
+end
+
+--- 当前锁定的指针 ID（无则 nil）。供同屏其他按键控件避让：一根手指不能同时推摇杆
+--- 和扣扳机。两向都排：摇杆排掉开火键已锁定的那根，开火键也排掉摇杆已锁定的。
+---@return number|nil
+function Joystick:GetPointerId()
+    return self.ptrId_
 end
 
 ---@return boolean 当前是否有有效输入

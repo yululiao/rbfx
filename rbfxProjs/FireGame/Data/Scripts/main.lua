@@ -1,10 +1,10 @@
 -- Scripts/main.lua
 --
--- FireGame 入口：第三人称俯视角"狙击海盗"垂直切片（全自动开火，玩家只负责走位）。
+-- FireGame 入口：第三人称俯视角"狙击海盗"垂直切片（默认自动开火，设置面板可切手动）。
 -- 本文件不含玩法逻辑，只负责按依赖顺序装配各模块并驱动帧循环：
 --   Config → Coast（海岸布景）→ Player（主角+俯视相机）→ Fx/Audio（反馈）
 --   → Hud（数据绑定 HUD）→ Enemy（单位管理）→ Waves（波次导演）→ Turrets（友方炮塔）
---   → Shooting（自动开火）
+--   → Shooting（开火）
 --
 -- 宿主约定：三个宿主（编辑器 GameView Play / MinigamePlayer / LuaGamePlayer）都在 C++ 侧
 --   注入全局 `scene` 后再执行本脚本；场景根节点必须挂 LuaGameScript 且 Script Path 指向
@@ -13,6 +13,7 @@
 -- require 以 Scripts/ 为基准（EngineLuaVM 的 requirePrefixes_），故写 game.Config / core.Joystick。
 
 local Joystick = require("core.Joystick")
+local FireButton = require("core.FireButton")
 local Config = require("game.Config")
 local Coast = require("game.Coast")
 local Player = require("game.Player")
@@ -58,8 +59,20 @@ local STICK_BASE = {
     knobHalf = 48.0,     -- Knob.rml 是 96x96（dp）
     grab = 260.0,        -- 起手判定半径（dp）：浮动原点式，放宽到覆盖整块左下移动区，好按
 }
+-- 开火键几何的基础 dp 值：与 GameHud.rml 的 #fire_btn 同一套。
+-- 右下操作区是一组以屏幕右下角为圆心的扇形：开火键落在 45° 对角线上、半径 170dp
+-- （right/bottom 各 70 + 半个按钮），最贴近圆心。远期 2/3 号技能键在同心的更大半径
+-- 250dp 上（GameHud.rml 文件头记了角度与外框坐标）。
+-- 判定半径略大于视觉半径（50dp）好按。
+local FIRE_BASE = {
+    right = 70.0,        -- GameHud.rml: #fire_btn 的 right（dp）
+    bottom = 70.0,       --            #fire_btn 的 bottom（dp）
+    size = 100.0,        -- width / height（dp）
+    grab = 66.0,         -- 按住判定半径（dp）
+}
 -- 画布像素量（= 基础值 × UI_SCALE），ApplyUIScale 每次缩放变化重算
 local STICK = {}
+local FIRE = {}
 local function ApplyUIScale(scale)
     Config.UI_SCALE = scale
     STICK.inset = STICK_BASE.inset * scale
@@ -68,6 +81,10 @@ local function ApplyUIScale(scale)
     STICK.knobHalf = STICK_BASE.knobHalf * scale
     STICK.grab = STICK_BASE.grab * scale
     STICK.cx = STICK.inset + STICK.size * 0.5
+    FIRE.right = FIRE_BASE.right * scale
+    FIRE.bottom = FIRE_BASE.bottom * scale
+    FIRE.size = FIRE_BASE.size * scale
+    FIRE.grab = FIRE_BASE.grab * scale
 end
 
 -- 画布尺寸必须问 RmlUI 要：编辑器 GameView 里 RmlUi 的 context 是那块 backbuffer，
@@ -91,6 +108,13 @@ end
 -- 环按 bottom 锚边，Y 随画布高度变，调用方每帧重算。
 local function StickCenter(canvasH)
     return STICK.cx, canvasH - STICK.cx
+end
+
+-- 开火键圆心（画布像素）：#fire_btn 按 right/bottom 锚边，但它不贴角（right≠bottom），
+-- 两个轴各算各的，都随画布尺寸变。
+local function FireCenter(canvasW, canvasH)
+    local half = FIRE.size * 0.5
+    return canvasW - (FIRE.right + half), canvasH - (FIRE.bottom + half)
 end
 
 ----------------------------------------------------------------------
@@ -122,7 +146,7 @@ local canvasAspect = (canvasH > 0.0) and (canvasW / canvasH) or nil
 -- 装配
 ----------------------------------------------------------------------
 -- 先声明，RestartGame / 回调是闭包，运行时才解引用这些 upvalue
-local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, grow, dog, camDebug, hpBar, turrets, turretBars, voice, sidebar, orientation
+local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joystick, fireButton, grow, dog, camDebug, hpBar, turrets, turretBars, voice, sidebar, orientation
 -- 激励视频复活链路两状态：ad_showing=广告在途（世界 dt 压 0、吞摇杆，结果事件结算时清）；
 -- reviveAdEnabled=链路总开关（宿主 SDK 可用 + Config.AD.REWARDED_UNIT_ID 非空，Build 后定值）。
 -- 休眠语义：没配广告位时恒 false，结算面板根本不出现复活按钮，玩家看不到任何广告痕迹。
@@ -373,6 +397,16 @@ hud = Hud.Build(scene, {
             orientation:Request(landscape)
         end
     end,
+    -- 设置面板里的自动/手动开火：真值在 Shooting，它改完回写 HUD（文案 + 开火键显隐）。
+    -- 不存盘也不进 Config：这是本局的操作偏好，重开保留、冷启动回默认自动。
+    onFireMode = function(auto)
+        if shooting then
+            shooting:SetAutoFire(auto)
+        end
+        if hud and hud.SetFireAuto then
+            hud:SetFireAuto(shooting and shooting:IsAutoFire() or auto)
+        end
+    end,
 })
 -- 结算页分享入口：与语音入口同源的宿主能力判定（编辑器/桌面没有分享通路）。
 do
@@ -402,7 +436,9 @@ if hud.SetOrientationAvailable then
     hud:SetOrientationAvailable(orientation:IsAvailable())
 end
 if hud.SetSettingsAvailable then
-    hud:SetSettingsAvailable(orientation:IsAvailable() or hud.voiceAvailable)
+    -- 面板里现在恒有一行可用（开火方式是纯本地设置），所以设置按钮不再按宿主能力收起来；
+    -- 方向/语音两行各自按能力显隐（下两行）。
+    hud:SetSettingsAvailable(true)
 end
 if hud.SetOrientationLandscape then
     -- 启动时先写一次当前方向：横屏窗口 / 横屏出包里状态行第一眼就是对的。
@@ -466,6 +502,10 @@ shooting = Shooting.Build({
     scene = scene, player = player, fx = fx, audio = audio, hud = hud,
     enemies = enemy, onScore = OnScore,
 })
+-- 开火方式回写 HUD：初始值来自 Config（App 默认自动），手动时右下角开火键才渲染。
+if hud.SetFireAuto then
+    hud:SetFireAuto(shooting:IsAutoFire())
+end
 -- 局内成长：Build 会调 Reset 推一次开局武器数值（1 发 1 伤）；之后每次升级回调
 grow = Grow.Build({
     hud = hud,
@@ -493,6 +533,12 @@ knob:SetResource("UI/Knob.rml")
 
 local stickCx, stickCy = StickCenter(canvasH)
 joystick = Joystick:New({ cx = stickCx, cy = stickCy, radius = STICK.travel, grab = STICK.grab })
+
+-- 开火键：同样的“视觉在 rml / 判定在 Lua”分工，只回答扳机按着没有。
+-- 单指不够用：手动模式下走位与开火必须能同时进行（两根手指），所以两个控件各自锁
+-- 自己那根指针，开火键把摇杆当前锁定的那根排掉（见 Update 的 excludeId）。
+local fireCx, fireCy = FireCenter(canvasW, canvasH)
+fireButton = FireButton:New({ cx = fireCx, cy = fireCy, radius = FIRE.grab })
 
 local input = GetSubsystem("Input")
 local time = GetSubsystem("Time")
@@ -612,6 +658,9 @@ SubscribeToEvent("Update", function(data)
                 rmlUi:SetScale(scale)
             end
             joystick:SetRadius(STICK.travel, STICK.grab)
+            if fireButton then
+                fireButton:SetRadius(FIRE.grab)
+            end
         end
         if cw ~= canvasW or ch ~= canvasH then
             -- 尺寸变了：编辑器拖 GameView，或小游戏转屏后 host 把新尺寸推进引擎
@@ -628,27 +677,53 @@ SubscribeToEvent("Update", function(data)
             end
         end
         joystick:SetCenter(StickCenter(ch))
+        fireButton:SetCenter(FireCenter(cw, ch))
     end
 
-    -- 摇杆（视觉 + 抓取区判定）
-    joystick:Update(input)
+    -- 开始画面/相机调试面板/语音面板/设置面板/侧边栏引导展开、或激励视频在途 = 模态：
+    -- 走位与扳机一起吞（摇杆与键盘先合成再吞，下面的开火判定直接看这个标志）。
+    -- 没这层挡子的话：面板会盖住左下抓取区，拖面板边的人物仍在走；语音录音时
+    -- 摇杆帽乱跑看着像卡了；激励视频在途时触摸归宿主，残输入还会把帽带着跑。
+    local uiModal = (hud and (hud:IsStartModal() or hud:IsVoiceModal() or hud:IsSidebarGuideModal()
+        or hud:IsSettingsModal())) or (camDebug and camDebug:IsModal()) or ad_showing
+
+    -- 手动开火的扳机态：自动模式不判（按钮根本不渲染），这里把残留的按住态清掉，
+    -- 免得切回手动时把手按在原位置就立刻喷一枪；模态盖着时同理（世界 dt 已为 0，
+    -- 但扣扳机不看 dt，不清就会在面板底下继续喷弹）。空格键是编辑器/桌面验证用。
+    -- held 同时回写给 HUD 做按下高亮（#fire_btn 不吃指针，按下态只能由 Lua 告诉 UI）。
+    -- 顺序必须排在摇杆之前：两个控件分居左右两角，但摇杆的抓取半径（260dp）比看起来
+    -- 宽得多，改布局/尺寸时随时可能重叠；同一根手指压住两边时谁先认领谁赢——开火键区域
+    -- 小，让它先挑，摇杆随后排掉它锁定的那根（见下面 joystick:Update 的 excludeId）。
+    if shooting:IsAutoFire() or uiModal then
+        fireButton:Reset()
+        shooting:SetTriggerHeld(false)
+        if hud then
+            hud:SetFireHeld(false)
+        end
+    else
+        local held = fireButton:Update(input, joystick:GetPointerId())
+        if KEY and input:GetKeyDown(KEY.SPACE) then
+            held = true
+        end
+        shooting:SetTriggerHeld(held)
+        if hud then
+            hud:SetFireHeld(held)
+        end
+    end
+
+    -- 摇杆（视觉 + 抓取区判定）：开火键已经认领的指针不抢，双指时各管一根。
+    joystick:Update(input, fireButton:GetPointerId())
     local stickX, stickY = joystick:GetVector()
     -- 键盘走位优先覆盖摇杆（PC/编辑器验证用）
     local kx, ky = KeyboardVector()
     if kx ~= 0.0 or ky ~= 0.0 then
         stickX, stickY = kx, ky
     end
-    -- 开始画面/相机调试面板/语音面板/设置面板/侧边栏引导展开时吞掉走位（摇杆与键盘一起吞，放在两者合成之后）：
-    -- 开始画面盖着时人物不该提前乱跑；小画布（编辑器 GameView）下面板会盖住左下抓取区，否则拖滑条的
-    -- 同时人物在走，构图边变边看，调不准；语音面板同理，录音时摇杆帽乱跑看着像卡了；
-    -- 设置面板也盖住左下角，拖按钮边的人物乱走同样难看；
-    -- 激励视频在途时全屏广告盖着画面，触摸归宿主，摇杆帽也不该跟着残留输入乱动。
-    if (hud and hud:IsStartModal()) or (camDebug and camDebug:IsModal()) or (hud and (hud:IsVoiceModal() or hud:IsSidebarGuideModal() or hud:IsSettingsModal()))
-        or ad_showing then
+    if uiModal then
         stickX, stickY = 0.0, 0.0
     end
 
-    -- 全自动开火 + 装弹计时（世界 dt：定格期间不吐弹，弹与定格是同一套时间）
+    -- 开火 + 装弹计时（世界 dt：定格期间不吐弹，弹与定格是同一套时间）
     shooting:Update(worldDt)
 
     -- 玩法与世界

@@ -30,7 +30,7 @@ end
 ---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil,
 ---                   onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil,
 ---                   onVoiceFilter: fun()|nil, onSidebarGo: fun()|nil, onSidebarClose: fun()|nil,
----                   onOrientation: fun(landscape:boolean)|nil }|nil
+---                   onOrientation: fun(landscape:boolean)|nil, onFireMode: fun(auto:boolean)|nil }|nil
 ---@return Hud
 function Hud.Build(scene, handlers)
     local self = setmetatable({}, Hud)
@@ -83,7 +83,7 @@ function Hud.Build(scene, handlers)
     self.voiceFilterName = ""
     -- 设置面板：语音与屏幕方向两个入口的统一出口（原独立语音按钮已并入）。
     -- 能力位分开给：宿主可能有录音却没切屏 API（或反之），面板里每一行各自显隐；
-    -- 两者都不可用时设置按钮本身也不渲染（settingsAvailable），不给假入口。
+    -- 开火方式那一行是纯本地设置，不依赖宿主能力，因而面板恒有一行可用。
     -- settingsOpen 是模态：main.lua 据此把世界 dt 压成 0（与开始画面同一手法）。
     self.settingsAvailable = false
     self.settingsOpen = false
@@ -95,6 +95,16 @@ function Hud.Build(scene, handlers)
     self.orientationToggleLabel = "切换横屏"
     -- 状态行文案：当前方向（“当前：横屏”）或失败提示（“本机不支持切换屏幕方向”）。
     self.orientationStatus = ""
+    -- 开火方式：自动/手动（真值在 game/Shooting.lua，这里镜像一份供 UI 用）。
+    -- 同样是一颗反向切换按钮；手动时右下角开火键才出现（showFireButton 直接取反，
+    -- 自动时整个元素不进渲染树——置灰的圆圈会占着右下角却按不动，比不显示更迷惑）。
+    self.fireAuto = true
+    self.fireModeToggleLabel = "切换手动开火"
+    self.fireModeStatus = "当前：自动开火"
+    -- 开火键按下态（只驱动右下那颗按钮的高亮）。顶层的 :active 拿不到——#fire_btn 是
+    -- pointer-events:none 的纯绘制件，按没按下只有 core/FireButton 直接读 Input 才知道，
+    -- 所以由 main.lua 每帧把结果推过来（FireButton:IsHeld）。
+    self.fireButtonHeld = false
     -- 侧边栏复访引导（game/Sidebar.lua 推）：非侧边栏首次进入、开始画面收起后弹一次。
     -- 模态：开着的期间 main.lua 把世界 dt 压成 0（与开始画面/语音面板同一手法）。
     self.sidebarGuide = false
@@ -145,6 +155,12 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("orientationAvailable", function() return self.orientationAvailable end)
             w:BindReadonlyProperty("orientationStatus", function() return self.orientationStatus end)
             w:BindReadonlyProperty("orientationToggleLabel", function() return self.orientationToggleLabel end)
+            -- 开火方式：手动才显示开火键 / 切换按钮文案 / 当前值
+            w:BindReadonlyProperty("showFireButton", function() return not self.fireAuto end)
+            w:BindReadonlyProperty("fireModeToggleLabel", function() return self.fireModeToggleLabel end)
+            w:BindReadonlyProperty("fireModeStatus", function() return self.fireModeStatus end)
+            -- 开火键按下态：高亮盘与放大版图标都是 data-if="fireButtonHeld"
+            w:BindReadonlyProperty("fireButtonHeld", function() return self.fireButtonHeld end)
 
             w:BindEvent("restart", function()
                 if handlers.onRestart then
@@ -241,6 +257,13 @@ function Hud.Build(scene, handlers)
             w:BindEvent("orientation_toggle", function()
                 if handlers.onOrientation then
                     handlers.onOrientation(not self.landscape)
+                end
+            end)
+            -- 开火方式：与方向同一手法，只把反转后的意图交给 main.lua（真值在 Shooting，
+            -- 它改完后由 main.lua 回写给 SetFireAuto，文案/显隐在这个环里对齐）。
+            w:BindEvent("fire_mode_toggle", function()
+                if handlers.onFireMode then
+                    handlers.onFireMode(not self.fireAuto)
                 end
             end)
         end,
@@ -426,10 +449,11 @@ function Hud:SetWeaponText(text)
 end
 
 ----------------------------------------------------------------------
--- 设置面板（语音 + 屏幕方向）
+-- 设置面板（开火方式 + 语音 + 屏幕方向）
 ----------------------------------------------------------------------
 
---- 设置按钮显隐：宿主至少有一种能力（录音或切屏）才出现。main.lua 在 Build 之后调一次。
+--- 设置按钮显隐：面板里始终有一行（开火方式是纯本地设置），所以现在恒开。
+--- 保留这个方法是为了入口句柄统一，且将来若加纯宿主能力的入口仍可以按能力收起来。
 ---@param b boolean
 function Hud:SetSettingsAvailable(b)
     self.settingsAvailable = b and true or false
@@ -466,6 +490,38 @@ function Hud:SetOrientationStatus(text)
     end
     self.orientationStatus = text
     self:Dirty("orientationStatus")
+end
+
+--- 开火方式（自动/手动）：按钮文案做反向切换，状态行写当前值，右下角开火键只在手动时出现。
+--- 真值在 game/Shooting.lua；main.lua 是两者的接线人，UI 只镜像。
+---@param auto boolean
+function Hud:SetFireAuto(auto)
+    auto = auto and true or false
+    local toggle = auto and "切换手动开火" or "切换自动开火"
+    local status = auto and "当前：自动开火" or "当前：手动开火"
+    if auto ~= self.fireAuto then
+        self.fireAuto = auto
+        self:Dirty("showFireButton")
+    end
+    if toggle ~= self.fireModeToggleLabel then
+        self.fireModeToggleLabel = toggle
+        self:Dirty("fireModeToggleLabel")
+    end
+    if status ~= self.fireModeStatus then
+        self.fireModeStatus = status
+        self:Dirty("fireModeStatus")
+    end
+end
+
+--- 开火键按下态：抬起/切自动/模态遮挡时都要推 false，否则高亮会一直亮着。
+--- 只在变化时 MarkDirty——main.lua 每帧都会调，按住不动不该每帧重刷元素。
+---@param held boolean
+function Hud:SetFireHeld(held)
+    held = held and true or false
+    if held ~= self.fireButtonHeld then
+        self.fireButtonHeld = held
+        self:Dirty("fireButtonHeld")
+    end
 end
 
 --- 打开设置面板（模态，main.lua 据此暂停世界推进）。

@@ -1,9 +1,11 @@
 -- Scripts/game/Shooting.lua
 --
--- 全自动开火 + 子弹实体。
--- 冷却完毕且射程内有敌人就自动开火，玩家只需走位。子弹是曳光弹：Box.mdl 拉成的细长
--- 加色亮芯（LookAt 对准飞行方向）+ 常驻微火花拖尾，从枪口飞向目标，到达后结算伤害。
--- 弹道速度很快（视觉上能看清飞行）。
+-- 开火 + 子弹实体。两种开火方式（设置面板可切，默认自动）：
+--   * 自动：冷却完毕且射程内有敌人就开火，玩家只需走位。
+--   * 手动：同一套索敌/冷却，只多一道闸——右下角开火键按住才扣扳机（SetTriggerHeld）。
+--     不是自己瞄准：锁定仍取最近目标，差别只在扣扳机的时机。
+-- 子弹是曳光弹：Box.mdl 拉成的细长加色亮芯（LookAt 对准飞行方向）+ 常驻微火花拖尾，
+-- 从枪口飞向目标，到达后结算伤害。弹道速度很快（视觉上能看清飞行）。
 --
 -- 目标选择：Enemy:NearestTarget(主角位置, ATTACK_RANGE) 取最近存活威胁（船/海盗，跳过爆桶）。
 -- 装弹：打空 MAG_SIZE 发后自动装弹，装弹期间不开火。
@@ -11,7 +13,7 @@
 local Config = require("game.Config")
 local Sidebar = require("game.Sidebar")
 
----@class Shooting 全自动开火 + 子弹管理
+---@class Shooting 开火与子弹管理
 local Shooting = {}
 Shooting.__index = Shooting
 
@@ -48,6 +50,11 @@ function Shooting.Build(deps)
     self.pellets = 1
     self.damage = 1
     self.pierce = 1   -- 一颗子弹能贯穿的单位数（1=命中即消亡，旧行为）；随 GROWTH 爬升
+    -- 开火方式：autoFire 来自 Config（开局默认自动）；triggerHeld 是手动模式下开火键的
+    -- 按住态，由 main.lua 每帧喂（core/FireButton.lua 判定）。两者放在这层而不是 HUD：
+    -- 开火与否是玩法真相，HUD 只负责按它显隐按钮/写文案。
+    self.autoFire = Config.AUTO_FIRE ~= false
+    self.triggerHeld = false
 
     if self.hud and self.hud.SetAmmo then
         self.hud:SetAmmo(self.ammo)
@@ -78,11 +85,12 @@ function Shooting:Update(dt)
         end
     end
 
-    -- 全自动开火：冷却完毕且非装弹时，射程内有目标就自动射击
+    -- 扣扳机判定：自动模式无条件放行；手动模式只看开火键是否按着。射程内没目标时
+    -- 手动按住也不耗弹（不空放），与自动模式“没目标不开枪”同一语义。
     if self.cooldown <= 0.0 and not self.reloading then
         if self.ammo <= 0 then
             self:StartReload()
-        else
+        elseif self.autoFire or self.triggerHeld then
             local origin = self.player:GetFireOrigin()   -- 一律枪口：船上人物是船子节点，ShootingPos 世界坐标自动随船
             local unit, pos = self.enemies:NearestTarget(origin, Config.ATTACK_RANGE)
             if unit and pos then
@@ -100,6 +108,27 @@ function Shooting:StartReload()
     self.reloading = true
     self.reloadT = Config.RELOAD_TIME
     self.audio:Play("reload")
+end
+
+--- 切换开火方式（设置面板那颗反向切换按钮）。切回自动时顺手清掉按住态：手动模式下
+--- 一直按着的手指，切回自动后手柄还在屏幕上，不清就是“按钮没了却仍在开火”的错觉。
+---@param auto boolean
+function Shooting:SetAutoFire(auto)
+    self.autoFire = auto and true or false
+    if self.autoFire then
+        self.triggerHeld = false
+    end
+end
+
+---@return boolean 当前是否自动开火
+function Shooting:IsAutoFire()
+    return self.autoFire
+end
+
+--- 手动模式的开火键按住态（main.lua 每帧喂）。自动模式下忽略写入。
+---@param held boolean
+function Shooting:SetTriggerHeld(held)
+    self.triggerHeld = (held and not self.autoFire) and true or false
 end
 
 --- 成长系统推来的武器数值：扇形弹丸数 + 单发伤害 + 穿透。由 game/Grow.lua 的 onWeapon
@@ -253,12 +282,14 @@ function Shooting:GetAmmoState()
     return self.ammo, self.reloading
 end
 
---- 新一局：补满弹药、清装弹、清理残留子弹。
+--- 新一局：补满弹药、清装弹、清理残留子弹。开火方式跨局保留（玩家在设置里选过就
+--- 一直是那个），只清按住态。
 function Shooting:Reset()
     self.ammo = Config.MAG_SIZE
     self.reloading = false
     self.reloadT = 0.0
     self.cooldown = 0.0
+    self.triggerHeld = false
     for _, b in ipairs(self.bullets) do
         b.node:Remove()
     end
