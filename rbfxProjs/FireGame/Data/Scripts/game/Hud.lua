@@ -100,11 +100,11 @@ function Hud.Build(scene, handlers)
     -- 状态行文案：当前方向（“当前：横屏”）或失败提示（“本机不支持切换屏幕方向”）。
     self.orientationStatus = ""
     -- 开火方式：自动/手动（真值在 game/Shooting.lua，这里镜像一份供 UI 用）。
-    -- 同样是一颗反向切换按钮；手动时右下角开火键才出现（showFireButton 直接取反，
-    -- 自动时整个元素不进渲染树——置灰的圆圈会占着右下角却按不动，比不显示更迷惑）。
+    -- 设置面板里就是一个 <input type="checkbox" data-checked="fireAuto">（勾上=自动开火），
+    -- 勾号图标由 GameHud.rml 的 theme2x（RmlUI-2x 图集）提供。
+    -- 手动时右下角开火键才出现（showFireButton 直接取反，自动时整个元素不进渲染树——
+    -- 置灰的圆圈会占着右下角却按不动，比不显示更迷惑）。
     self.fireAuto = true
-    self.fireModeToggleLabel = "切换手动开火"
-    self.fireModeStatus = "当前：自动开火"
     -- 开火键上的弹丸 CD 环：每段一位 bool，true=已就绪（亮）。与上面的“手动才显示开火键”
     -- 是同一件事的两面——手动时弹丸信息全在这圈上，所以左上那块弹药 UI 反过来隐掉。
     self.cdTicks = {}
@@ -165,8 +165,9 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("orientationAvailable", function() return self.orientationAvailable end)
             w:BindReadonlyProperty("orientationStatus", function() return self.orientationStatus end)
             w:BindReadonlyProperty("orientationToggleLabel", function() return self.orientationToggleLabel end)
-            -- 开火方式：手动才显示开火键 / 切换按钮文案 / 当前值
+            -- 开火方式：手动才显示开火键 / 勾选框的勾选状态（data-checked 双向绑 fireAuto）
             w:BindReadonlyProperty("showFireButton", function() return not self.fireAuto end)
+            w:BindReadonlyProperty("fireAuto", function() return self.fireAuto end)
             -- 弹药块适时让位：自动开火时才显示（数字/装弹条/弹丸数），手动时整块不渲染，改由开火键上的 CD 环表达
             w:BindReadonlyProperty("showAmmoBlock", function() return self.fireAuto end)
             -- 开火键 CD 环：每段一个 bool（RmlUi 的数据模型只能这样表达圆形进度）
@@ -174,8 +175,6 @@ function Hud.Build(scene, handlers)
                 local idx = i
                 w:BindReadonlyProperty("cdTick" .. idx, function() return self.cdTicks[idx] end)
             end
-            w:BindReadonlyProperty("fireModeToggleLabel", function() return self.fireModeToggleLabel end)
-            w:BindReadonlyProperty("fireModeStatus", function() return self.fireModeStatus end)
             -- 开火键按下态：高亮盘与放大版图标都是 data-if="fireButtonHeld"
             w:BindReadonlyProperty("fireButtonHeld", function() return self.fireButtonHeld end)
 
@@ -276,8 +275,8 @@ function Hud.Build(scene, handlers)
                     handlers.onOrientation(not self.landscape)
                 end
             end)
-            -- 开火方式：与方向同一手法，只把反转后的意图交给 main.lua（真值在 Shooting，
-            -- 它改完后由 main.lua 回写给 SetFireAuto，文案/显隐在这个环里对齐）。
+            -- 开火方式：点击只把反转后的意图交给 main.lua（真值在 Shooting，它改完后由
+            -- main.lua 回写 SetFireAuto，勾号/显隐在那边对齐）。
             w:BindEvent("fire_mode_toggle", function()
                 if handlers.onFireMode then
                     handlers.onFireMode(not self.fireAuto)
@@ -513,25 +512,16 @@ function Hud:SetOrientationStatus(text)
     self:Dirty("orientationStatus")
 end
 
---- 开火方式（自动/手动）：按钮文案做反向切换，状态行写当前值，右下角开火键只在手动时出现。
+--- 开火方式（自动/手动）：勾号 + 开火键/弹药块显隐跟着翻。
 --- 真值在 game/Shooting.lua；main.lua 是两者的接线人，UI 只镜像。
 ---@param auto boolean
 function Hud:SetFireAuto(auto)
     auto = auto and true or false
-    local toggle = auto and "切换手动开火" or "切换自动开火"
-    local status = auto and "当前：自动开火" or "当前：手动开火"
     if auto ~= self.fireAuto then
         self.fireAuto = auto
+        self:Dirty("fireAuto")
         self:Dirty("showFireButton")
         self:Dirty("showAmmoBlock")
-    end
-    if toggle ~= self.fireModeToggleLabel then
-        self.fireModeToggleLabel = toggle
-        self:Dirty("fireModeToggleLabel")
-    end
-    if status ~= self.fireModeStatus then
-        self.fireModeStatus = status
-        self:Dirty("fireModeStatus")
     end
 end
 

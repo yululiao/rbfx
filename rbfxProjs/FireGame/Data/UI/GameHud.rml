@@ -73,6 +73,24 @@
         }
         #fire_btn { decorator: image(ringDisc); }
         #fire_icon { decorator: image(bulletIcon); }
+        /* 主题图标的 2x 版：default.rcss 的 theme 图集取自 RmlUI-1x.png，勾号只有 16px；
+           本作 UI 整体按短边缩到 0.5~0.6，16px 再缩一次就糊成白点（EmptyTest 不缩放，
+           所以 1:1 看着清楚）。引擎随包带了 1x/1.25x/1.5x/2x 四套同名图集，这里挂 2x 那套。
+           两个必须记住的点：
+            1) sprite 矩形是「贴图原始像素」，既不乘也不除 resolution。1x 图集里勾号是
+               36,16,16x16，到 2x 图集就是 72,32,32x32；照抄 36,16 会采到隔壁的关闭按钮/箭头，
+               屏幕上就是一块糊白。
+            2) resolution 只影响「自然尺寸」（宽高写 auto 时的换算）：raw_px × (1/resolution)。
+           以后自己加图标照这个来：图集放 Data/Textures，@spritesheet 登记原始像素矩形，
+           再用 decorator: image(名字) 挂到元素上；换密度只改 src 和 resolution。
+           同名 sprite 不能覆盖 default.rcss（那边的 decorator 在解析时就已实例化），
+           所以换主题图标要像下面这样另起名字 + 自己写一遍同选择器的规则。 */
+        @spritesheet theme2x {
+            src: /Textures/RmlUI-2x.png;
+            resolution: 2;
+            check-mark-2x: 72px 32px 32px 32px;
+        }
+        input.checkbox:checked { decorator: image(check-mark-2x); }
         #fire_icon_big { decorator: image(bulletIcon); }
         /* 按下态高亮：一张白 46% 软边圆盘（FirePress.png），叠在 18% 的外圈上整块亮起来。
            :active 用不了——#fire_btn 是 pointer-events:none 的纯绘制件，RmlUi 永远不知道
@@ -278,18 +296,19 @@
                 <!-- 自定义语音：宿主 SDK 可用才出现（编辑器/桌面没有麦克风通路） -->
                 <div data-if="voiceAvailable" style="margin-top: 26dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">自定义语音</div>
-                    <button data-event-click="voice_open" style="margin-top: 12dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+                    <button data-event-click="voice_open" style="margin-top: 12dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录制语音</button>
                 </div>
 
-                <!-- 开火方式：纯本地设置，不依赖宿主能力，恒显示。与屏幕方向同一手法——一颗
-                     按钮反切（自动时写「切换手动开火」），状态行写当前值。手动开火时右下角
-                     才渲染那颗开火键（#fire_btn 的 data-if="showFireButton"）。 -->
+                <!-- 开火方式：纯本地设置，不依赖宿主能力，恒显示。就是一个普通 checkbox：
+                     data-checked 双向绑 fireAuto（勾上=自动开火），点一下 RmlUi 翻完勾后由
+                     change 事件写回、再回推 Shooting。尺寸比主题默认的 16dp 大一圈，跟旁边
+                     26dp 的字配上；勾号用 2x 图集（见顶部 theme2x）。 -->
                 <div style="margin-top: 26dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">开火方式</div>
                     <div style="margin-top: 12dp;">
-                        <button data-event-click="fire_mode_toggle" style="padding: 12dp 44dp; font-size: 26dp; background-color: #d94b3ae6; color: #ffffffff; border-radius: 10dp;">{{fireModeToggleLabel}}</button>
+                        <input type="checkbox" data-checked="fireAuto" data-event-click="fire_mode_toggle" style="width: 26dp; height: 26dp; vertical-align: middle;"/>
+                        <span style="margin-left: 10dp; font-size: 26dp; color: #ffffffff; vertical-align: middle;">自动开火</span>
                     </div>
-                    <div class="label" style="margin-top: 10dp; font-size: 20dp; color: #9fe0ffd9;">{{fireModeStatus}}</div>
                 </div>
 
                 <div style="margin-top: 30dp;">
