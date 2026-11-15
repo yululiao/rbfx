@@ -403,6 +403,9 @@ Config.CANNON_BALL_SCALE = 0.85          -- 炮弹大小：cannon-ball.prefab �
 Config.CANNON_FLIGHT_TIME = 2.2          -- 炮弹飞行时长（秒）：慢，留躲避时间
 Config.CANNON_LOB_HEIGHT = 9.0           -- 抛物线拱高（米，峰在轨迹中点上方）
 Config.CANNON_SPLASH_RADIUS = 3.2        -- 落点杀伤半径（米）
+-- 预警盘 = 压扁的圆柱（Cylinder.mdl 直径 1、高 1）：x/z 铺成直径，y 压成薄饼。
+-- 厚度留一点点而不真做 0：零厚度平面在透明排序里跟沙子共面会闪，2cm 已经看不出侧面。
+Config.CANNON_WARN_THICKNESS = 0.02
 Config.CANNON_PLAYER_DAMAGE = 2          -- 炸到主角掉几格血（3 格口径：一发掉 2 格，与旧 100 血/30 伤同比例）
 
 Config.PIRATE_SPAWN_Z = -4.5         -- 下水点（浅水里，看着像涉水冲滩）
@@ -771,7 +774,9 @@ Config.MAT_SKY = "Materials/Sky.xml"
 Config.MAT_HIDDEN = "Materials/Hidden.xml"
 Config.MAT_WATER = "Materials/Water.xml"
 Config.MAT_BULLET_TRACER = "Materials/BulletTracer.xml"  -- 曳光弹亮芯（加色发光）
+Config.MAT_CANNON_WARN = "Materials/CannonWarn.xml"      -- 船炮落点预警盘（无光照 + alpha 的橙红圆盘）
 Config.PLANE_MODEL = "Models/Plane.mdl"
+Config.CYLINDER_MODEL = "Models/Cylinder.mdl"   -- 原生圆柱（半径 0.5、高 1、轴沿 y），预警盘压扁它
 Config.BOX_MODEL = "Models/Box.mdl"
 
 -- 主角 prefab：模型引用 + 逐槽材质（hero.material×3）+ 整副骨骼层级都在里面，用户在枪骨
@@ -959,7 +964,8 @@ Config.Tint = {
     water = Color(0.10, 0.28, 0.40),
     playerBody = Color(0.36, 0.42, 0.30),
     cannon = Color(0.14, 0.14, 0.16),       -- 炮弹：深铁色
-    cannonWarn = Color(1.0, 0.42, 0.10),    -- 落点预警盘：醒目橙
+    -- 落点预警盘不走纯色：它要“无厚度 + 半透明圆盘”，形状靠贴图、透明度靠 alpha 混合，
+    -- 见 Config.MAT_CANNON_WARN（材质文件里的 MatDiffColor 就是这里的醒目橙）。
 }
 
 -- 每种纯色的粗糙度（PBR）。DefaultWhite 的默认值 0.3 对沙子和木头太亮；
@@ -972,7 +978,6 @@ Config.Roughness = {
     defense = 0.85,
     water = 0.10,
     cannon = 0.5,
-    cannonWarn = 0.9,
     playerBody = 0.70,
 }
 

@@ -658,15 +658,16 @@ function Enemy:FireCannon(fromPos)
         LogError("Enemy: 炮弹 prefab 加载失败 'cannon-ball'")
     end
 
-    -- 落点预警盘：扁 Box 铺在沙滩上，随炮弹逼近放大（提示“别站在这”）。
-    -- 尺寸故意不小于杀伤盘：玩家只要离开橙色盘就一定安全。
+    -- 落点预警盘：压扁的圆柱贴在沙滩上（Cylinder.mdl 直径 1、高 1，x/z 铺成直径、y 压成
+    -- 薄饼），橙红半透明来自材质（见 Config.MAT_CANNON_WARN），随炮弹逼近放大。
+    -- 尺寸故意不小于杀伤盘：玩家只要离开橙红盘就一定安全。
     local mark = self.scene:CreateChild("CannonWarn")
     mark:SetPosition(Vector3(tx, Config.SAND_Y + 0.05, tz))
     local msm = mark:CreateComponent("StaticModel")
-    msm:SetModel(GetResource("Model", Config.BOX_MODEL))
-    msm:SetMaterial(Materials.Tint("cannonWarn"))
+    msm:SetModel(GetResource("Model", Config.CYLINDER_MODEL))
+    msm:SetMaterial(Materials.CannonWarn())
     msm:SetCastShadows(false)
-    mark:SetScale(Vector3(0.5, 0.08, 0.5))
+    mark:SetScale(Vector3(0.5, Config.CANNON_WARN_THICKNESS, 0.5))
 
     self.projectiles[#self.projectiles + 1] = {
         ball = ball, mark = mark, from = fromPos, to = toPos, t = 0.0, dur = Config.CANNON_FLIGHT_TIME,
@@ -692,7 +693,8 @@ function Enemy:UpdateProjectiles(dt)
             local y = pr.from.y + (pr.to.y - pr.from.y) * u + Config.CANNON_LOB_HEIGHT * 4.0 * u * (1.0 - u)
             pr.ball:SetPosition(Vector3(x, y, z))
             local s = 0.3 + 0.7 * u
-            pr.mark:SetScale(Vector3(Config.CANNON_SPLASH_RADIUS * 2.0 * s, 0.08, Config.CANNON_SPLASH_RADIUS * 2.0 * s))
+            local d = Config.CANNON_SPLASH_RADIUS * 2.0 * s
+            pr.mark:SetScale(Vector3(d, Config.CANNON_WARN_THICKNESS, d))
         end
     end
 end

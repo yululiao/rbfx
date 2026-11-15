@@ -79,6 +79,15 @@ function Materials.Sea()
     return GetResource("Material", Config.MAT_WATER)
 end
 
+--- 船炮落点预警盘：无光照 + alpha 混合的橙红半透明圆盘（配方与调法见 Data/Materials/CannonWarn.xml）。
+--- 不走 Tint 的 PBR 纯色：纯色是跟光照走的实体，落在塔影里会变暗，而它应该像贴花一样恒定亮度。
+--- 也不靠贴图切圆盘：方形平面 + 圆形 alpha 图在 rbfx 里纹理槽绑不上（退化成白图 → 不透明方盘），
+--- 圆形改由压扁的 Cylinder.mdl 几何提供，颜色/透明度只用 MatDiffColor。
+---@return Material
+function Materials.CannonWarn()
+    return GetResource("Material", Config.MAT_CANNON_WARN)
+end
+
 --- 全透明材质：把不想看见的 geometry 藏起来。
 ---
 --- 只用于 Character_Soldier.mdl 的 8..66 号 geometry（散落在角色前方的道具，挡狙击视线）。

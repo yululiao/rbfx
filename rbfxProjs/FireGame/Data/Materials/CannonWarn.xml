@@ -1,0 +1,21 @@
+<!--
+    船炮落点预警盘：压扁的圆柱 + 无光照 + alpha 混合，橙红色半透明圆盘。
+
+    为什么不用贴图（走过一版，失败）：贴图方案靠 DiffUnlitAlpha 的 DIFFMAP 通道 + 方形平面
+    贴一张圆形 alpha 图。实测两件事都没生效——地上仍是橙色不透明方盘，说明 DiffMap 纹理
+    没被绑上（rbfx 的材质纹理槽名与老 Urho3D 的 "DiffMap" 不是同一套），图没绑上就退化成白图，
+    方形边界与不透明同时出现。所以形状交回几何：Cylinder.mdl 压扁就是正圆，颜色/透明度
+    全由 MatDiffColor 一个参数决定，不依赖任何纹理槽名。
+
+    技术走 NoTextureUnlitAlpha（Unlit + 无纹理 + alpha 混合 + depthwrite 关）：
+      * Unlit：预警盘是地面贴花，不该被太阳方向、炮塔阴影改变亮度（在塔影里也要看见）。
+      * 无纹理：sAlbedo 是默认白采样器，albedo = cMatDiffColor，alpha 就是下面第 4 个分量。
+      * blend alpha / depthwrite=false：半透明件不写深度，才不会挡住后面飞的炮弹与爆炸特效。
+
+    调法：颜色取前三分量（现 1.0 / 0.35 / 0.12 橙红），透明度取第 4 个（0.5 = 半透，
+    看得清橙圈也看得见脚下的沙；要更醒目抬到 0.7，要更淡压到 0.3）。
+-->
+<material>
+    <technique name="Techniques/NoTextureUnlitAlpha.xml" />
+    <parameter name="MatDiffColor" value="1 0.35 0.12 0.5" />
+</material>

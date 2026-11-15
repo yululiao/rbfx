@@ -23,7 +23,7 @@
         2/3 号技能键在同心的更大半径 250dp 上，分列 22°/68°（right182/bottom44、
         right44/bottom182，均为 100x100 的按钮外框值）。开火键几何对应 main.lua 的
         FIRE_BASE 与 core/FireButton 的按住判定，改一处要同时改另一处。
-      * 所以弹药块与载具按钮不占扇形：它们沿右边缘堆在弧外（right36，bottom250/420）。
+      * 所以载具按钮不占扇形：它沿右边缘堆在弧外（right36/bottom420）。弹药块已移到左上波次列下方。
 -->
 <rml>
 <head>
@@ -96,10 +96,19 @@
          头顶的世界空间血条（见 game/HpBar.lua + UI/HpBar.rml、UI/TurretHpBar.rml），这里不再留
          第二份显示，免得两个地方各自表达同一条血、不同步时说不清该信谁。 -->
     <div style="position: absolute; left: 28dp; top: 24dp; width: 300dp;">
-        <div class="label">WAVE {{wave}}</div>
+        <div class="label">第{{wave}}波</div>
         <div class="label" style="margin-top: 10dp; font-size: 24dp; color: #ffd24dff;">LV {{level}}</div>
         <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4dp; width: 260dp; height: 10dp;"/>
         <div class="label" style="margin-top: 6dp; font-size: 18dp; color: #ffffff99;">{{narrate}}</div>
+        <!-- 弹药 + 装弹条 + 当前武器（弹丸数，随成长变化）。原先在右下扇形弧外，
+             现收进左上这一列、紧接波次/等级/经验条下方，右下角整块只留操作按钮。 -->
+        <div style="margin-top: 12dp; width: 200dp; text-align: left;">
+            <!-- 字号单独压到 .big 的 80%（64dp → 51dp）：弹药数不再是屏幕主角（已在左上角内），
+                 维持 64dp 会把这列标题（波次/等级）压成配角。class 不能直接改——右上分数共用 .big。 -->
+            <div class="big" style="font-size: 51dp;">{{ammo}}</div>
+            <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6dp; width: 160dp; height: 10dp;"/>
+            <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">{{weaponText}}</div>
+        </div>
     </div>
 
     <!-- 右上：分数 + combo -->
@@ -135,7 +144,7 @@
     </div>
 
     <!-- 右下：载具交互按钮，靠 data-if 显隐（登船=靠近船，下船=在船上），见 main.lua/Hud.lua。
-         沿右边缘堆在扇形弧外（right36/bottom420，弹药块再往上）：右下角那块留给
+         沿右边缘堆在扇形弧外（right36/bottom420）：右下角那块留给
          以角落为圆心的按钮扇形，96dp 的按钮放进去会把弧打断。 -->
     <div data-if="showBoard" id="board_btn" data-event-click="board" style="position: absolute; right: 36dp; bottom: 420dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">登船</div>
@@ -157,15 +166,6 @@
         <div data-if="fireButtonHeld" id="fire_press" style="position: absolute; left: 0; top: 0; width: 100dp; height: 100dp;"></div>
         <div id="fire_icon" style="position: absolute; left: 33dp; top: 33dp; width: 34dp; height: 34dp;"></div>
         <div data-if="fireButtonHeld" id="fire_icon_big" style="position: absolute; left: 29dp; top: 29dp; width: 42dp; height: 42dp;"></div>
-    </div>
-
-    <!-- 右下：弹药 + 装弹条 + 当前武器（弹丸数，随成长变化）。
-         沿右边缘堆在扇形弧外（right36/bottom250）：角落那一块是按钮扇形的圆心，
-         未来三颗技能键会沿弧占两侧，HUD 只能往外让。宽 200。 -->
-    <div style="position: absolute; right: 36dp; bottom: 250dp; width: 200dp; text-align: right;">
-        <div class="big">{{ammo}}</div>
-        <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6dp; margin-left: 40dp; width: 160dp; height: 10dp;"/>
-        <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">{{weaponText}}</div>
     </div>
 
     <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。
