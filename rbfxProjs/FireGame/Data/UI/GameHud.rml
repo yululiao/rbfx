@@ -82,6 +82,11 @@
             firePressDisc: 0dp 0dp 256dp 256dp;
         }
         #fire_press { decorator: image(firePressDisc); }
+        /* 开火键上的“弹丸 CD 环”：24 段刻度，geometry（left/top/rotate）写死在元素内联 style 里，
+           亮不亮由 data-if="cdTickN" 的 24 个布尔切换（Lua 侧 game/Hud.lua:SetFireCd 按填充比例
+           从第 1 段开始点亮）。为什么不用一条真弧线：RmlUi 没有 conic 渐变，本工程的 Lua 绑定
+           也只给到数据模型（改不了元素几何），24 段刻度是这套机制下唯一能做出圆环的写法。 */
+        .cd_tick { position: absolute; width: 4dp; height: 9dp; border-radius: 2dp; background-color: #9fe0ffcc; }
     </style>
 </head>
 <!-- body 设 pointer-events:none 的缘由：RmlUi 的 Context::OnFocusChange 在被聚焦元素所属文档
@@ -100,14 +105,15 @@
         <div class="label" style="margin-top: 10dp; font-size: 24dp; color: #ffd24dff;">LV {{level}}</div>
         <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4dp; width: 260dp; height: 10dp;"/>
         <div class="label" style="margin-top: 6dp; font-size: 18dp; color: #ffffff99;">{{narrate}}</div>
-        <!-- 弹药 + 装弹条 + 当前武器（弹丸数，随成长变化）。原先在右下扇形弧外，
-             现收进左上这一列、紧接波次/等级/经验条下方，右下角整块只留操作按钮。 -->
-        <div style="margin-top: 12dp; width: 200dp; text-align: left;">
+        <!-- 弹药 + 装弹条 + 当前武器（弹丸数，随成长变化）。手动开火时整块不渲染
+             （data-if="showAmmoBlock"）：那时弹丸状态改由右下开火键上的 CD 环表达，
+             同一件事不留两处显示。 -->
+        <div data-if="showAmmoBlock" style="margin-top: 12dp; width: 200dp; text-align: left;">
             <!-- 字号单独压到 .big 的 80%（64dp → 51dp）：弹药数不再是屏幕主角（已在左上角内），
                  维持 64dp 会把这列标题（波次/等级）压成配角。class 不能直接改——右上分数共用 .big。 -->
             <div class="big" style="font-size: 51dp;">{{ammo}}</div>
             <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6dp; width: 160dp; height: 10dp;"/>
-            <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">{{weaponText}}</div>
+            <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">弹丸 x{{pellets}}</div>
         </div>
     </div>
 
@@ -164,8 +170,39 @@
              两个元素都只靠 data-if 切换，不碰内联 style 绑定（RCSS 解析不了 {{}}，见文件头）。
              大图标盖在小图标之上，故常态那颗不需要反向绑定。 -->
         <div data-if="fireButtonHeld" id="fire_press" style="position: absolute; left: 0; top: 0; width: 100dp; height: 100dp;"></div>
-        <div id="fire_icon" style="position: absolute; left: 33dp; top: 33dp; width: 34dp; height: 34dp;"></div>
-        <div data-if="fireButtonHeld" id="fire_icon_big" style="position: absolute; left: 29dp; top: 29dp; width: 42dp; height: 42dp;"></div>
+        <!-- 装弹恢复圈（弹丸 CD）：24 段刻度从正上方顺时针铺满外环。刻度亮=已就绪；
+             只在手动开火时存在（整个 #fire_btn 带 data-if="showFireButton"），自动开火时
+             弹丸信息仍由左上角那块承担。 -->
+        <div data-if="cdTick1" class="cd_tick" style="left: 53.9dp; top: 0.9dp; transform: rotate(7.5deg);"></div>
+        <div data-if="cdTick2" class="cd_tick" style="left: 65.2dp; top: 3.9dp; transform: rotate(22.5deg);"></div>
+        <div data-if="cdTick3" class="cd_tick" style="left: 75.4dp; top: 9.8dp; transform: rotate(37.5deg);"></div>
+        <div data-if="cdTick4" class="cd_tick" style="left: 83.7dp; top: 18.1dp; transform: rotate(52.5deg);"></div>
+        <div data-if="cdTick5" class="cd_tick" style="left: 89.6dp; top: 28.3dp; transform: rotate(67.5deg);"></div>
+        <div data-if="cdTick6" class="cd_tick" style="left: 92.6dp; top: 39.6dp; transform: rotate(82.5deg);"></div>
+        <div data-if="cdTick7" class="cd_tick" style="left: 92.6dp; top: 51.4dp; transform: rotate(97.5deg);"></div>
+        <div data-if="cdTick8" class="cd_tick" style="left: 89.6dp; top: 62.7dp; transform: rotate(112.5deg);"></div>
+        <div data-if="cdTick9" class="cd_tick" style="left: 83.7dp; top: 72.9dp; transform: rotate(127.5deg);"></div>
+        <div data-if="cdTick10" class="cd_tick" style="left: 75.4dp; top: 81.2dp; transform: rotate(142.5deg);"></div>
+        <div data-if="cdTick11" class="cd_tick" style="left: 65.2dp; top: 87.1dp; transform: rotate(157.5deg);"></div>
+        <div data-if="cdTick12" class="cd_tick" style="left: 53.9dp; top: 90.1dp; transform: rotate(172.5deg);"></div>
+        <div data-if="cdTick13" class="cd_tick" style="left: 42.1dp; top: 90.1dp; transform: rotate(187.5deg);"></div>
+        <div data-if="cdTick14" class="cd_tick" style="left: 30.8dp; top: 87.1dp; transform: rotate(202.5deg);"></div>
+        <div data-if="cdTick15" class="cd_tick" style="left: 20.6dp; top: 81.2dp; transform: rotate(217.5deg);"></div>
+        <div data-if="cdTick16" class="cd_tick" style="left: 12.3dp; top: 72.9dp; transform: rotate(232.5deg);"></div>
+        <div data-if="cdTick17" class="cd_tick" style="left: 6.4dp; top: 62.7dp; transform: rotate(247.5deg);"></div>
+        <div data-if="cdTick18" class="cd_tick" style="left: 3.4dp; top: 51.4dp; transform: rotate(262.5deg);"></div>
+        <div data-if="cdTick19" class="cd_tick" style="left: 3.4dp; top: 39.6dp; transform: rotate(277.5deg);"></div>
+        <div data-if="cdTick20" class="cd_tick" style="left: 6.4dp; top: 28.3dp; transform: rotate(292.5deg);"></div>
+        <div data-if="cdTick21" class="cd_tick" style="left: 12.3dp; top: 18.1dp; transform: rotate(307.5deg);"></div>
+        <div data-if="cdTick22" class="cd_tick" style="left: 20.6dp; top: 9.8dp; transform: rotate(322.5deg);"></div>
+        <div data-if="cdTick23" class="cd_tick" style="left: 30.8dp; top: 3.9dp; transform: rotate(337.5deg);"></div>
+        <div data-if="cdTick24" class="cd_tick" style="left: 42.1dp; top: 0.9dp; transform: rotate(352.5deg);"></div>
+        <div id="fire_icon" style="position: absolute; left: 35dp; top: 26dp; width: 30dp; height: 30dp;"></div>
+        <div data-if="fireButtonHeld" id="fire_icon_big" style="position: absolute; left: 31dp; top: 22dp; width: 38dp; height: 38dp;"></div>
+        <!-- 弹药数：子弹图标正下方的数字，每开一枪减一（5 4 3 2 1），打空归 0、装弹完回到满。
+             手动开火时左上那块弹药 UI 整块不渲染，弹匣剩几发只能靠这颗数，所以它必须在
+             CD 环内圈里（半径 40dp 以内才不被刻度压住），故字号取 20dp、位置压在 y=62dp。 -->
+        <div class="label" style="position: absolute; left: 0; top: 62dp; width: 100dp; text-align: center; font-size: 20dp; color: #9fe0ffd9;">{{ammo}}</div>
     </div>
 
     <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。

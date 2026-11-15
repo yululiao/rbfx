@@ -26,6 +26,10 @@ local function clamp01(v)
     return v
 end
 
+--- 开火键 CD 环的刻度数（GameHud.rml 里 cdTick1..cdTick24 一个不差改这里也要跟着改）。
+--- 24 段 = 每段 15°，手机上看得出一格一格地长回来；再细则 RmlUi 每帧要多刷好几个元素。
+local CD_SEGMENTS = 24
+
 ---@param scene Scene
 ---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil,
 ---                   onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil,
@@ -65,11 +69,11 @@ function Hud.Build(scene, handlers)
     -- 登船/下船按钮显隐（data-if）：main.lua 帧循环里根据交互条件 Show/Hide
     self.showBoard = false
     self.showDisembark = false
-    -- 局内成长（game/Grow.lua 推）：等级 + 经验条进度(0..1) + 武器文本（“弹丸 xN”，
-    -- 力量可见增长的直读回报）
+    -- 局内成长（game/Grow.lua 推）：等级 + 经验条进度(0..1) + 弹丸数（扇形一次喷几颗，
+    -- 力量可见增长的直读回报；自动开火时在左上拼成“弹丸 xN”，手动时是开火键图标下的数字）
     self.level = 1
     self.xpProg = 0.0
-    self.weaponText = "弹丸 x1"
+    self.pellets = 1
     -- 性能 Overlay（调试）：perfText 是 Lua 拼好的一行文本，showPerf 控制 data-if 整体显隐。
     self.perfText = ""
     self.showPerf = false
@@ -101,6 +105,12 @@ function Hud.Build(scene, handlers)
     self.fireAuto = true
     self.fireModeToggleLabel = "切换手动开火"
     self.fireModeStatus = "当前：自动开火"
+    -- 开火键上的弹丸 CD 环：每段一位 bool，true=已就绪（亮）。与上面的“手动才显示开火键”
+    -- 是同一件事的两面——手动时弹丸信息全在这圈上，所以左上那块弹药 UI 反过来隐掉。
+    self.cdTicks = {}
+    for i = 1, CD_SEGMENTS do
+        self.cdTicks[i] = true
+    end
     -- 开火键按下态（只驱动右下那颗按钮的高亮）。顶层的 :active 拿不到——#fire_btn 是
     -- pointer-events:none 的纯绘制件，按没按下只有 core/FireButton 直接读 Input 才知道，
     -- 所以由 main.lua 每帧把结果推过来（FireButton:IsHeld）。
@@ -135,10 +145,10 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("endTitle", function() return self.endTitle end)
             w:BindReadonlyProperty("shareAvailable", function() return self.shareAvailable end)
             w:BindReadonlyProperty("reviveAvailable", function() return self.reviveAvailable end)
-            -- 局内成长：等级、经验条(0..1)、武器文本
+            -- 局内成长：等级、经验条(0..1)、弹丸数
             w:BindReadonlyProperty("level", function() return self.level end)
             w:BindReadonlyProperty("xp", function() return clamp01(self.xpProg) end)
-            w:BindReadonlyProperty("weaponText", function() return self.weaponText end)
+            w:BindReadonlyProperty("pellets", function() return self.pellets end)
             -- 性能 Overlay（调试）：文本 + 显隐开关
             w:BindReadonlyProperty("perfText", function() return self.perfText end)
             w:BindReadonlyProperty("showPerf", function() return self.showPerf end)
@@ -157,6 +167,13 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("orientationToggleLabel", function() return self.orientationToggleLabel end)
             -- 开火方式：手动才显示开火键 / 切换按钮文案 / 当前值
             w:BindReadonlyProperty("showFireButton", function() return not self.fireAuto end)
+            -- 弹药块适时让位：自动开火时才显示（数字/装弹条/弹丸数），手动时整块不渲染，改由开火键上的 CD 环表达
+            w:BindReadonlyProperty("showAmmoBlock", function() return self.fireAuto end)
+            -- 开火键 CD 环：每段一个 bool（RmlUi 的数据模型只能这样表达圆形进度）
+            for i = 1, CD_SEGMENTS do
+                local idx = i
+                w:BindReadonlyProperty("cdTick" .. idx, function() return self.cdTicks[idx] end)
+            end
             w:BindReadonlyProperty("fireModeToggleLabel", function() return self.fireModeToggleLabel end)
             w:BindReadonlyProperty("fireModeStatus", function() return self.fireModeStatus end)
             -- 开火键按下态：高亮盘与放大版图标都是 data-if="fireButtonHeld"
@@ -442,10 +459,14 @@ function Hud:SetXpProgress(v)
     self:Dirty("xp")
 end
 
---- 武器文本（“弹丸 xN”），升级时随当前弹丸数刷新。
-function Hud:SetWeaponText(text)
-    self.weaponText = text or ""
-    self:Dirty("weaponText")
+--- 弹丸数（扇形一次喷几颗），升级时随当前档位刷新。
+---@param n number
+function Hud:SetPellets(n)
+    n = math.max(1, math.floor(n or 1))
+    if n ~= self.pellets then
+        self.pellets = n
+        self:Dirty("pellets")
+    end
 end
 
 ----------------------------------------------------------------------
@@ -502,6 +523,7 @@ function Hud:SetFireAuto(auto)
     if auto ~= self.fireAuto then
         self.fireAuto = auto
         self:Dirty("showFireButton")
+        self:Dirty("showAmmoBlock")
     end
     if toggle ~= self.fireModeToggleLabel then
         self.fireModeToggleLabel = toggle
@@ -521,6 +543,20 @@ function Hud:SetFireHeld(held)
     if held ~= self.fireButtonHeld then
         self.fireButtonHeld = held
         self:Dirty("fireButtonHeld")
+    end
+end
+
+--- 开火键上的弹丸 CD 环：progress 0..1 = 已恢复的比例，从正上方顺时针点亮前 N 段。
+--- 只在段数变化时 MarkDirty：main/Shooting 每帧都调，没变化就不该让 RmlUi 重建元素。
+---@param progress number
+function Hud:SetFireCd(progress)
+    local lit = math.ceil(clamp01(progress or 0.0) * CD_SEGMENTS)
+    for i = 1, CD_SEGMENTS do
+        local on = i <= lit
+        if self.cdTicks[i] ~= on then
+            self.cdTicks[i] = on
+            self:Dirty("cdTick" .. i)
+        end
     end
 end
 

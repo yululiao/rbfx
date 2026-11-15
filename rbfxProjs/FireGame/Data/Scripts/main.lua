@@ -514,7 +514,7 @@ grow = Grow.Build({
         -- 弹丸越多爆炸会越频繁（combo 靠击杀数涨），达阈值后把间隔抬到 BIG 档补偿，防后期滚雪球。
         if waves then waves:SetBlastEvery(Config.ComboBlastEvery(snapshot.pellets)) end
         if hud then
-            hud:SetWeaponText("弹丸 x" .. snapshot.pellets)
+            hud:SetPellets(snapshot.pellets)
             -- 开局不提醒；真正升级时把"变强"做成一次可听可见的反馈（飘字旁白 + 轻震）
             if not isInitial and grow and grow.level > 1 then
                 hud:Narrate("升级！弹丸 x" .. snapshot.pellets, 2.0)

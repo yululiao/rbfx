@@ -85,6 +85,17 @@ function Shooting:Update(dt)
         end
     end
 
+    -- 弹丸 CD 环（手动开火时开火键外圈）：只表达“装弹中”这一件事——弹匣没空时环恒满，
+    -- 打空那一瞬清零、随 RELOAD_TIME 重新长回满。不跟两发之间的 FIRE_COOLDOWN 走：那个
+    -- 只有0.22s，环每发抽一下看着像在跳帧，而且它本来就不是玩家需要等的那个状态。
+    if self.hud and self.hud.SetFireCd then
+        local cd = 1.0
+        if self.reloading then
+            cd = 1.0 - math.max(0.0, self.reloadT) / Config.RELOAD_TIME
+        end
+        self.hud:SetFireCd(cd)
+    end
+
     -- 扣扳机判定：自动模式无条件放行；手动模式只看开火键是否按着。射程内没目标时
     -- 手动按住也不耗弹（不空放），与自动模式“没目标不开枪”同一语义。
     if self.cooldown <= 0.0 and not self.reloading then
