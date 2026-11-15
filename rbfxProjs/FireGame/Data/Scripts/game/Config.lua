@@ -282,9 +282,9 @@ Config.TURRET_RECOIL_TIME = 1.0      -- 后坐力总时长（秒）：到点强�
 -- t=0 即桌面观感（1024x768 时垂直 FOV≈42，与改动前一致）。
 ----------------------------------------------------------------------
 Config.CAMERA_H_FOV = 54.0           -- 水平视场角（度），各端恒定
-Config.CAMERA_DISTANCE = 20.0
+Config.CAMERA_DISTANCE = 23
 Config.CAMERA_TARGET_Y = 2.85        -- 相机关注点相对主角脚底的高度
-Config.CAMERA_PITCH = 35.0           -- 俯角（度），斜后方朝海面倾斜俯视
+Config.CAMERA_PITCH = 26.5           -- 俯角（度），斜后方朝海面倾斜俯视
 Config.CAMERA_LOOK_AHEAD = 6.0       -- 视线中心往海方向偏移，看到更大范围战场
 Config.CAMERA_FAR_CLIP = 260.0
 Config.CAMERA_KICK = 0.3             -- 开火相机微小震动幅度
