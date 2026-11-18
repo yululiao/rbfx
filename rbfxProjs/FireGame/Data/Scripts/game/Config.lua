@@ -722,6 +722,10 @@ Config.BARREL_CHAIN_DELAY = 0.12     -- 连锁引爆的递延，让爆炸看起�
 --   volleys："同刻铺满 4 航道"的齐射次数，每次消耗 4 艘小艇（从 boats 里扣）。
 --   window：把船铺到的时间跨度（秒）；ramp：前松后紧曲线档（warmup/steady/heavy）。
 --   firstT（可选）：本波第一艘的最早时刻，缺省 1.0。lane 由 WaveGen 轮转，无需指定。
+-- 条目数即关卡长度：清完最后一波（#Config.WAVES）判胜利（Waves:Win），不再有无尽追加波。
+-- 调终局压力只动最后一波的配额，不另开波号：玩家侧的战绩就是波数。
+-- 一条波还可以给 phases（阶段配方数组）：每段是一份独立配方、段间零间歇、时刻首尾相接，
+-- 用来在同一波号里排出"小艇群 -> 大船群 -> 小艇群 -> 大船群"的节奏，不占用额外波号。
 ----------------------------------------------------------------------
 Config.WAVE_INTERMISSION = 5.0
 Config.WAVES = {
@@ -729,33 +733,24 @@ Config.WAVES = {
     { voice = "round_1", boats = 12, bigboats = 0, volleys = 0, window = 16.6, ramp = "warmup" },
     -- 第二波：首次投入大船，两波四航道齐射护航（13 小 + 4 大）。
     { voice = "round_2", boats = 13, bigboats = 4, volleys = 2, window = 12.5, ramp = "steady" },
-    -- 第三波（终局高潮）：更多大船 + 密集齐射，堆尸潮（15 小 + 5 大）。
-    { voice = "round_3", boats = 15, bigboats = 5, volleys = 2, window = 15.0, ramp = "heavy", firstT = 0.8 },
-}
-
-----------------------------------------------------------------------
--- 无尽模式：Config.WAVES 的手调开场用尽后（第 from 波起），由 WaveGen.EndlessRecipe(n)
--- 按下面的配方随波次升配额。只加"数量 / 密度 / 收紧窗口"，绝不动任何单位血量与速度
--- ——这是"遭遇战压力优先调波次结构而非堆血量"的铁律。一局没有通关，直到防线/主角被
--- 打穿才结束（Waves:Lose），HUD 波次号即"撑到第几波"的战绩。旋钮集中在此，Play 直调。
-----------------------------------------------------------------------
-Config.ENDLESS = {
-    from = 4,                  -- 前 3 波走 Config.WAVES 手调开场，第 4 波起进公式
-    boatsBase = 15,            -- 小艇起始配额（接住第 3 波的 15，无缝衔接）
-    boatsPerWave = 2,          -- 每波小艇 +2（曾提到 3 直接打不过，退回原值；这是压力主旋钮）
-    boatsCap = 42,             -- 小艇配额上限（到顶后靠窗口收紧继续加压）
-    bigBase = 5,
-    bigEveryWaves = 2,         -- 每 2 波多 1 条大船
-    bigCap = 12,
-    volleyBase = 2,
-    volleyEveryWaves = 3,      -- 每 3 波多 1 次四航道齐射（曾提到 2 过猛，退回原值）
-    volleyCap = 4,
-    windowStart = 15.0,
-    windowShrinkPerWave = 0.35, -- 出怪窗口随波次收紧（0.45 过密，收到略高于原 0.3）
-    windowMin = 10.5,          -- 窗口下限（再密就撞同屏闸 MAX_ALIVE_UNITS）
-    ramp = "heavy",            -- 沿用终局的"前松后紧"曲线
-    firstT = 0.8,
-    voiceEvery = 5,            -- 每 5 波播一次 round_3 旁白作里程碑（其余波静音）
+    -- 第三波（终局高潮）：拆成四个阶段连续压上来，小艇群 -> 大船群 -> 小艇群 -> 大船群。
+    -- 段与段之间不留间歇，时刻首尾相接（见 WaveGen.Generate 的 phases 分支）。
+    -- 配额总量与三段式（原第3+4+5波串起来）那一版逐一相等：47 小 + 15 大 = 509 海盗、
+    -- 出怪跨度 43s（那版 44.65s），所以强度基准可比；但这版段间没有 5s 间歇，压得更紧，
+    -- 体感应略强于当年实测。嫌弱继续加各阶段的 boats/bigboats，别改第 1/2 波。
+    {
+        voice = "round_3",
+        phases = {
+            -- 阶段一：小艇群 + 三次齐射开局（22 艘）。
+            { boats = 22, bigboats = 0, volleys = 3, window = 11.0, ramp = "steady", firstT = 0.8 },
+            -- 阶段二：大船群压境（7 艘），纯占位铺道。
+            { boats = 0, bigboats = 7, volleys = 0, window = 10.0, ramp = "heavy", firstT = 1.0 },
+            -- 阶段三：第二波小艇潮，量最大、齐射最密（25 艘 + 4 次齐射）。
+            { boats = 25, bigboats = 0, volleys = 4, window = 12.0, ramp = "warmup", firstT = 0.8 },
+            -- 阶段四：收尾大船群（8 艘），窗口最短=最后一波最凶。
+            { boats = 0, bigboats = 8, volleys = 0, window = 10.0, ramp = "heavy", firstT = 1.0 },
+        },
+    },
 }
 
 ----------------------------------------------------------------------

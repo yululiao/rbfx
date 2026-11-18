@@ -1,8 +1,10 @@
 -- Scripts/game/Waves.lua
 --
 -- 波次导演 + 计分/combo + 炮塔血量 + 胜负结算。它是玩法的"时钟"：按 Config.WAVES 手调
--- 开局、其后再由 WaveGen.EndlessRecipe 随波次升配额（无尽模式），一波清完进间歇、永不通关，
--- 直到防线/主角被打穿才结算（Lose）。HUD 波次号即"撑到第几波"的战绩。
+-- 逐波推进（共 3 波），一波清完进间歇；清完最后一波判胜利（Win），防线/主角被打穿判
+-- 失败（Lose），两种结局都弹结算面板。HUD 波次号即"打到第几波"的战绩。
+-- 一个波号内部还可以由 WaveGen 的 phases 拆成若干连续阶段（第 3 波就是小->大->小->大），
+-- 阶段之间不额外留间歇：波号仍是战绩，节奏却比单段长得多。
 --
 -- 血量都住在这里、只住这里：主角血 playerHp、两座炮塔血 turretHp（每塔一份，
 -- 下标对齐 Config.TURRETS）。Enemy 砍塔只递一个 (塔号, 伤害) 过来、Turrets 开火前反过来
@@ -92,8 +94,8 @@ end
 --- 开始下一波：拷一份生成时间表，播旁白，切到 active。
 function Waves:BeginWave()
     self.waveIndex = self.waveIndex + 1
-    -- 无尽模式：前若干波用 Config.WAVES 手调开场，配额用尽后按波次公式生成越来越重的编队。
-    local wave = Config.WAVES[self.waveIndex] or WaveGen.EndlessRecipe(self.waveIndex)
+    -- 关卡就是 Config.WAVES 这一张表：条目数即总波数，清完最后一波由 Update 判胜。
+    local wave = Config.WAVES[self.waveIndex]
 
     self.queue = {}
     -- 开局按本波配方实时编排一张生成表（总量固定、铺法每局随机）。
@@ -114,7 +116,7 @@ function Waves:BeginWave()
         first_run_hint_shown = true
         self.hud:Narrate("拖动摇杆走位躲海盗，开火是全自动的", 3.5)
     end
-    -- 波次里程碑：第 1 波必报（漏斗起点），其后每 5 波一条；无尽模式一局几十波，
+    -- 波次里程碑：第 1 波必报（漏斗起点），其后每 5 波一条；关卡共 3 波，
     -- 逐波上报太吵，局终波数由 game_over 兜底。
     if self.waveIndex == 1 or self.waveIndex % 5 == 0 then
         Tracker.Report("wave", { wave = self.waveIndex })
@@ -134,7 +136,7 @@ function Waves:Update(dt)
         end
     end
 
-    if self.phase == "ended" or self.phase == "freeRoam" then
+    if self.phase == "ended" then
         return
     elseif self.phase == "intermission" then
         self.phaseT = self.phaseT - dt
@@ -148,16 +150,20 @@ function Waves:Update(dt)
         self.waveClock = self.waveClock + dt
         self:ProcessQueue()
         if self.allFired and self.enemy:ThreatCount() == 0 then
-            -- 本波清完
+            -- 本波清完：最后一波直接通关，其余进间歇倒计时
             if self.onWaveCleared then
                 self.onWaveCleared(self.waveIndex)
             end
-            self.phase = "intermission"
-            self.phaseT = Config.WAVE_INTERMISSION
+            if self.waveIndex >= #Config.WAVES then
+                self:Win()
+            else
+                self.phase = "intermission"
+                self.phaseT = Config.WAVE_INTERMISSION
+            end
         end
     end
 
-    if self.phase == "ended" or self.phase == "freeRoam" then return end
+    if self.phase == "ended" then return end
     if self:AnyTurretDown() then
         self:Lose("defense")
     elseif self.playerHp <= 0 then
@@ -305,20 +311,27 @@ end
 ----------------------------------------------------------------------
 
 function Waves:Win()
-    if self.phase == "ended" or self.phase == "freeRoam" then
+    if self.phase == "ended" then
         return
     end
-    -- 通关不再弹全屏结算面板挡住画面（那会盖住摇杆/登船按钮且不会自动消失），
-    -- 而是进入“自由探索”态：停止刷怪，玩家可走动/登船出海（本期载具玩法的入口）。
-    -- 分数/combo/防线仍显在 HUD 上；只有防线被攻破（Lose）才弹真正的结算面板。
-    self.phase = "freeRoam"
+    -- 通关与失守走同一块结算面板（data-if="gameOver"），只是标题与语音不同；
+    -- 复活按钮不亮（main.lua 的 OnGameOver 只给 lose 点亮）。
+    self.phase = "ended"
     self.allFired = true
     self.audio:Voice(Config.Voice.win)
     if self:DefenseIntact() then
         self.audio:Voice(Config.Voice.flawless)
     end
-    if self.hud and self.hud.Narrate then
-        self.hud:Narrate("海盗已清空，出海自由探索吧！", 4.0)
+    if self.hud then
+        if self.hud.ShowEnd then
+            self.hud:ShowEnd(true, self.score, "胜利!")
+        end
+        if self.hud.Narrate then
+            self.hud:Narrate("三波海盗全清，防线守住了！", 4.0)
+        end
+    end
+    if self.onGameOver then
+        self.onGameOver("win", self.score)
     end
     Tracker.Report("game_over", {
         outcome = "win",

@@ -4,6 +4,10 @@
 -- 实时生成一张 {t, kind, lane} 的生成时间表。设计铁律是"总量与手调基线逐一相等、只把
 -- 铺法随机化"——所以每局难度不飘，但哪条航道来船、什么时候来、齐射铺几条道每次都不同。
 --
+-- 一条波可以拆成 phases（阶段序列）：每段是一份独立配方，段与段之间不留间歇、时刻首尾相接，
+-- 用来在同一波号里做出"小艇群→大船群→小艇群→大船群"的连续压迫感。难度来自总时长与累计
+-- 漏防（掉血不回复），不是同屏数量——同屏数一直被 Enemy 的 MAX_ALIVE_UNITS 闸钳着。
+--
 -- 三处真随机（早期版本这里做得太"确定"，编队看着局局一样，已重写）：
 --   1. 时刻：反 CDF 全程随机采样（不是等分桶 + 微抖动），按 ramp 曲线决定疏密形状；
 --   2. 航道：从"当前空闲"（距上次占用 >= minLaneGap）的道里均匀随机挑，而非固定轮转；
@@ -64,11 +68,10 @@ local function dealLanes(count, nLanes)
     return out
 end
 
----@param recipe table { voice, boats, bigboats, volleys, window, ramp, firstT?, minLaneGap? }
----@return table[] 生成表（{t, kind, lane}），已按 t 升序
-function WaveGen.Generate(recipe)
-    reseed()
-
+---@param recipe table 一段配方 { boats, bigboats, volleys, window, ramp, firstT?, minLaneGap? }
+---@return table[] 该段内相对时刻的生成表（{t, kind, lane}），已按 t 升序
+---@return number 该段的时刻上界（秒），供多阶段接续用
+local function genSegment(recipe)
     local nLanes = #Config.LANES
     local firstT = recipe.firstT or FIRST_T
     local window = math.max(firstT + 1.0, recipe.window or 15.0)
@@ -153,33 +156,38 @@ function WaveGen.Generate(recipe)
     end
 
     table.sort(spawns, function(a, b) return a.t < b.t end)
-    return spawns
+    return spawns, window
 end
 
---- 无尽模式：第 n 波（n 从 Config.ENDLESS.from 起）的配额配方，形状同 Config.WAVES 条目，
---- 可直接喂 Generate。只按波次升"数量 + 密度 + 收紧窗口"，绝不动单位血量/速度（结构优先）。
----@param n number
----@return table
-function WaveGen.EndlessRecipe(n)
-    local e = Config.ENDLESS
-    local k = n - e.from
-    if k < 0 then
-        k = 0
+--- 出一份波的完整生成表。波可以是单段（配方直接给 boats/...），也可以给 phases 拆成
+--- 若干阶段：阶段之间不留间歇，下一阶段的时刻直接接在上一阶段的时刻上界之后，
+--- 于是"小艇群 → 大船群 → 小艇群 → 大船群"能在同一波号里连续压上来。
+---@param wave table 一条 Config.WAVES 条目（可含 phases）
+---@return table[] 生成表（{t, kind, lane}），已按全波绝对时刻升序
+function WaveGen.Generate(wave)
+    reseed()
+
+    local phases = wave.phases
+    if not phases then
+        -- 单段：条目本身就是配方。
+        phases = { { boats = wave.boats, bigboats = wave.bigboats, volleys = wave.volleys,
+                    window = wave.window, ramp = wave.ramp, firstT = wave.firstT,
+                    minLaneGap = wave.minLaneGap } }
     end
-    local boats = math.min(e.boatsCap, e.boatsBase + e.boatsPerWave * k)
-    local big = math.min(e.bigCap, e.bigBase + math.floor(k / e.bigEveryWaves))
-    local volleys = math.min(e.volleyCap, e.volleyBase + math.floor(k / e.volleyEveryWaves))
-    local window = math.max(e.windowMin, e.windowStart - e.windowShrinkPerWave * k)
-    local voice = (e.voiceEvery and e.voiceEvery > 0 and (n % e.voiceEvery == 0)) and "round_3" or nil
-    return {
-        voice = voice,
-        boats = boats,
-        bigboats = big,
-        volleys = volleys,
-        window = window,
-        ramp = e.ramp,
-        firstT = e.firstT,
-    }
+
+    local spawns = {}
+    local offset = 0.0
+    for _, phase in ipairs(phases) do
+        local seg, segEnd = genSegment(phase)
+        for _, s in ipairs(seg) do
+            s.t = s.t + offset
+            spawns[#spawns + 1] = s
+        end
+        offset = offset + segEnd
+    end
+
+    table.sort(spawns, function(a, b) return a.t < b.t end)
+    return spawns
 end
 
 return WaveGen
