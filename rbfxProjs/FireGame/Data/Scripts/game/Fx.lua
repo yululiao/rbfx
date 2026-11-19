@@ -19,6 +19,7 @@ Fx.__index = Fx
 --- 每种特效的存活时长（秒）：必须 >= activetime + max(timetolive)，否则粒子还没淡完
 --- 就被 Remove 掉，看着像"啪一下没了"。数值与 Particle/*.xml 里的 ttl 对齐，可调。
 local LIFE = {
+    muzzle = 0.12,
     hitFlesh = 0.8,
     hitWood = 0.9,
     hitMetal = 0.6,
@@ -45,6 +46,7 @@ end
 ---@param worldPos Vector3
 ---@param scale number|nil 整体缩放，缺省 1
 function Fx:Spawn(key, worldPos, scale)
+    if not self:HasRoom(key) then return nil end
     local path = Config.Fx[key]
     if not path then
         print("Fx: unknown effect key " .. tostring(key))
@@ -64,7 +66,7 @@ function Fx:Spawn(key, worldPos, scale)
     local emitter = node:CreateComponent("ParticleEmitter")
     emitter:SetEffect(effect)
 
-    self.active[#self.active + 1] = { node = node, ttl = LIFE[key] or DEFAULT_LIFE }
+    self.active[#self.active + 1] = { node = node, key = key, ttl = LIFE[key] or DEFAULT_LIFE }
     return node
 end
 
@@ -73,7 +75,22 @@ end
 ---@param color Color
 ---@param range number
 ---@param lifetime number|nil
+function Fx:HasRoom(key)
+    local limit = Config.FX_LIMITS[key]
+    if not limit then return true end
+    local count = 0
+    for _, entry in ipairs(self.active) do
+        if entry.key == key then count = count + 1 end
+    end
+    return count < limit
+end
+
+function Fx:Muzzle(worldPos, scale)
+    return self:Spawn("muzzle", worldPos, scale)
+end
+
 function Fx:Flash(worldPos, color, range, lifetime)
+    if not self:HasRoom("flash") then return nil end
     local node = self.root:CreateChild("Flash")
     node:SetPosition(worldPos)
     local light = node:CreateComponent("Light")
@@ -83,7 +100,7 @@ function Fx:Flash(worldPos, color, range, lifetime)
     light:SetColor(color)
     light:SetRange(range)
     light:SetBrightness(1.0)
-    self.active[#self.active + 1] = { node = node, ttl = lifetime or 0.06 }
+    self.active[#self.active + 1] = { node = node, key = "flash", ttl = lifetime or 0.06 }
     return node
 end
 

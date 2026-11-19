@@ -818,8 +818,10 @@
     // step transcodes the ogg masters into m4a, and rbfx.files.resolve maps the
     // engine-visible path onto the physical package file for InnerAudioContext.src.
 
-    var SFX_CAP = 8;          // concurrent one-shots; past it the oldest is stolen
+    var SFX_CAP = 8;          // active + idle one-shot contexts; music is separate
     var sfx_active = [];      // one-shot instances in flight, oldest first
+    var sfx_idle = [];        // only naturally completed, same-path reusable contexts
+    var sfx_recent = Object.create(null);
     var looped_audio = {};    // engine path -> instance (music)
 
     function destroy_audio(audio) {
@@ -891,34 +893,82 @@
             return;
         }
 
-        // One-shot: past the cap, steal the oldest (a truncated gunshot is less wrong
-        // than a silently dropped one).
+        var priority = Math.max(0, Math.min(3, Number(args.priority) || 0));
+        var mergeMs = Math.max(0, Math.min(1000, Number(args.mergeMs) || 0));
+        var group = args.group ? String(args.group) : path;
+        var now = Date.now();
+        // Expire keys as well as timestamps: arbitrary resource paths must not grow this map.
+        Object.keys(sfx_recent).forEach(function (key) {
+            if (now - sfx_recent[key] > 1000 || now < sfx_recent[key]) delete sfx_recent[key];
+        });
+        if (mergeMs && sfx_recent[group] !== undefined && now - sfx_recent[group] < mergeMs)
+            return complete(request_id, true, '{"status":"merged"}');
+
+        // Steal the oldest lowest-priority sound, never a more important one.
         if (sfx_active.length >= SFX_CAP) {
-            var oldest = sfx_active.shift();
-            if (oldest.__settle) {
-                try { oldest.__settle(false, "stolen by a newer playback"); } catch (e) { /* ignore */ }
-            } else {
-                destroy_audio(oldest);
+            var victim = sfx_active[0];
+            for (var n = 1; n < sfx_active.length; ++n) {
+                if (sfx_active[n].__priority < victim.__priority) victim = sfx_active[n];
             }
+            if (victim.__priority > priority)
+                return complete(request_id, true, '{"status":"dropped"}');
+            victim.__settle(true, '{"status":"stolen"}');
         }
 
-        var audio = wx_tt.createInnerAudioContext();
-        audio.src = src;
-        audio.volume = gain;
+        var audio = null;
+        if (args.reuse !== false) {
+            for (var j = sfx_idle.length - 1; j >= 0; --j) {
+                if (sfx_idle[j].__path === path) {
+                    audio = sfx_idle.splice(j, 1)[0];
+                    break;
+                }
+            }
+        }
+        if (!audio) {
+            while (sfx_active.length + sfx_idle.length >= SFX_CAP)
+                destroy_audio(sfx_idle.shift());
+            try { audio = wx_tt.createInnerAudioContext(); }
+            catch (error) { return complete(request_id, false, fail_text(error, "audio creation failed")); }
+        }
         audio.__path = path;
+        audio.__priority = priority;
         var settled = false;
-        var settle = function (ok, text) {
+        var timer = null;
+        var onEnd = function () { settle(true, "{}", true); };
+        var onError = function (error) { settle(false, fail_text(error, "playback failed")); };
+        var settle = function (ok, text, ended) {
             if (settled)
                 return;
             settled = true;
+            if (timer !== null) clearTimeout(timer);
             sfx_remove(audio);
+            audio.__settle = null;
+            // Old queued callbacks retain this settled closure and cannot settle a later play.
+            var reusable = ended && args.reuse !== false
+                && typeof audio.offEnded === "function" && typeof audio.offError === "function";
+            try {
+                if (audio.offEnded) audio.offEnded(onEnd);
+                if (audio.offError) audio.offError(onError);
+                if (reusable) audio.stop(); // reset to the beginning before returning to the pool
+            } catch (error) { reusable = false; }
+            if (reusable) sfx_idle.push(audio);
+            else destroy_audio(audio);
             complete(request_id, ok, text || "{}");
-            destroy_audio(audio);
         };
         audio.__settle = settle;
-        audio.onEnded(function () { settle(true); });
-        audio.onError(function (error) { settle(false, fail_text(error, "playback failed")); });
+        sfx_active.push(audio);
         try {
+            audio.onEnded(onEnd);
+            audio.onError(onError);
+            // Reuse only for the same file; avoid reassigning src and restarting its load.
+            if (audio.src !== src) audio.src = src;
+            if (settled) return; // some hosts report a source error synchronously
+            audio.loop = false;
+            audio.volume = gain;
+            audio.startTime = 0;
+            // Broken host callbacks must not keep a request/context alive indefinitely.
+            timer = setTimeout(function () { settle(false, "audio playback timeout"); }, 30000);
+            if (mergeMs) sfx_recent[group] = now;
             audio.play();
         } catch (error) {
             settle(false, fail_text(error, "playback failed"));
@@ -928,6 +978,11 @@
     handlers[KIND.stop_game_audio] = function (request_id, payload) {
         var args = parse_payload(payload);
         var path = args.path ? String(args.path) : "";
+        sfx_recent = Object.create(null);
+        for (var idleIndex = sfx_idle.length - 1; idleIndex >= 0; --idleIndex) {
+            if (!path || sfx_idle[idleIndex].__path === path)
+                destroy_audio(sfx_idle.splice(idleIndex, 1)[0]);
+        }
 
         if (path) {
             var music = looped_audio[path];

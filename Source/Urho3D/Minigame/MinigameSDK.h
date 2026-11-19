@@ -128,7 +128,10 @@ public:
     /// volume (0..1). One-shot playbacks complete when they end or fail; a looped playback
     /// (music) completes on start and persists until StopGameAudio. The packaging step
     /// transcodes the game's ogg masters into the m4a family the vendor player documents.
-    int PlayGameAudio(const ea::string& path, float gain, bool looped);
+    /// Higher priority survives saturation. Same-group requests within mergeMs are coalesced.
+    /// reuse permits a bounded host pool for naturally completed one-shots.
+    int PlayGameAudio(const ea::string& path, float gain, bool looped,
+        int priority = 0, unsigned mergeMs = 0, const ea::string& group = EMPTY_STRING, bool reuse = true);
     /// Stop the game-audio playbacks of path (empty path: everything). Completes right away.
     int StopGameAudio(const ea::string& path);
 

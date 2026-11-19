@@ -285,7 +285,8 @@ int MinigameSDK::ClearUserAudio(const ea::string& slotName)
     return Invoke(MinigameSDKRequestKind::ClearUserAudio, payload);
 }
 
-int MinigameSDK::PlayGameAudio(const ea::string& path, float gain, bool looped)
+int MinigameSDK::PlayGameAudio(const ea::string& path, float gain, bool looped,
+    int priority, unsigned mergeMs, const ea::string& group, bool reuse)
 {
     ea::string payload;
     payload += "{\"path\":";
@@ -294,6 +295,11 @@ int MinigameSDK::PlayGameAudio(const ea::string& path, float gain, bool looped)
     payload += ea::to_string(std::min(std::max(gain, 0.0f), 1.0f));
     payload += ",\"loop\":";
     payload += looped ? "true" : "false";
+    payload += ",\"priority\":" + ea::to_string(std::min(std::max(priority, 0), 3));
+    payload += ",\"mergeMs\":" + ea::to_string(std::min(mergeMs, 1000u));
+    payload += ",\"group\":" + EscapeJson(group);
+    payload += ",\"reuse\":";
+    payload += reuse ? "true" : "false";
     payload += '}';
     return Invoke(MinigameSDKRequestKind::PlayGameAudio, payload);
 }

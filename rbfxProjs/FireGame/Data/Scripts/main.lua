@@ -15,6 +15,7 @@
 local Joystick = require("core.Joystick")
 local FireButton = require("core.FireButton")
 local Config = require("game.Config")
+local Quality = require("game.Quality")
 local Coast = require("game.Coast")
 local Player = require("game.Player")
 local Fx = require("game.Fx")
@@ -166,6 +167,9 @@ local function RestartGame()
     if shooting then
         shooting:Reset()
     end
+    if fx then
+        fx:Clear()
+    end
     if player then
         player:Reset()   -- 满血、解除死亡/无敌态（阵亡动画是终态，不自动恢复）
     end
@@ -298,6 +302,7 @@ local function OnDisembark()
     if player then player:LeaveBoat() end
 end
 
+Quality.Apply(scene)
 coast = Coast.Build(scene)
 player = Player.Build(scene, coast.playerSpot, coast.playerBoat, canvasAspect)
 -- 打击感三件套：要主角的相机（飘字投影 + 震屏偏移的宿主）与画布尺寸

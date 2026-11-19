@@ -65,8 +65,14 @@ void RegisterMinigameBindings(sol::state& lua, Context* context)
             // Game audio (sfx/music) through the host player: gain defaults to 1.0,
             // looped to false. The packaging step ships m4a for these paths.
             LUA_MEMBER_FUNC_RAW(PlayGameAudio, [](MinigameSDK* sdk, const ea::string& path,
-                sol::optional<float> gain, sol::optional<bool> looped) -> int {
-                return sdk ? sdk->PlayGameAudio(path, gain.value_or(1.0f), looped.value_or(false)) : 0;
+                sol::optional<float> gain, sol::optional<bool> looped,
+                sol::optional<sol::table> options) -> int {
+                const int priority = options ? options->get_or("priority", 0) : 0;
+                const unsigned mergeMs = options ? options->get_or("mergeMs", 0u) : 0u;
+                const ea::string group = options ? options->get_or("group", EMPTY_STRING) : EMPTY_STRING;
+                const bool reuse = options ? options->get_or("reuse", true) : true;
+                return sdk ? sdk->PlayGameAudio(path, gain.value_or(1.0f), looped.value_or(false),
+                    priority, mergeMs, group, reuse) : 0;
             })
             // Path is optional: no argument stops every game-audio playback.
             LUA_MEMBER_FUNC_RAW(StopGameAudio, [](MinigameSDK* sdk,

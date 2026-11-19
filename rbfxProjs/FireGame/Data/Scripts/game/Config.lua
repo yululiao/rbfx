@@ -446,6 +446,39 @@ Config.DEBUG_CAM_PANEL = false
 -- 经 engine:SetWebFrameRate(Config.MAX_FPS) 落地。
 Config.MAX_FPS = 40
 
+-- Restart/repackage to compare: PCF only, then LDR, then minimal postprocessing.
+-- preview also applies this mobile profile in the desktop/editor player.
+Config.MOBILE_QUALITY = {
+    enabled = true,
+    preview = false,
+    pcfKernel = 2,
+    useLDR = true,
+    minimalPostprocess = false,
+    disablePostprocess = true,
+    disableShadows = true,
+}
+-- Visual limits only: damage and chain reactions are unaffected.
+Config.FX_LIMITS = { explosion = 6, smoke = 4, flash = 2, muzzle = 4 }
+
+-- Host audio: priority 0..3, merge window in real milliseconds.
+-- AUDIO_POOL=false disables reuse for an A/B comparison; priority/merging stay on.
+Config.AUDIO_POOL = true
+Config.AUDIO_DEFAULT = { priority = 0, mergeMs = 70, reuse = true }
+Config.AUDIO_VOICE = { priority = 3, mergeMs = 0, reuse = true }
+Config.AUDIO_POLICY = {
+    hitFlesh = { priority = 0, mergeMs = 70, group = "impact", reuse = true },
+    hitWood = { priority = 0, mergeMs = 70, group = "impact", reuse = true },
+    hitMetal = { priority = 0, mergeMs = 70, group = "impact", reuse = true },
+    shot = { priority = 2, mergeMs = 0, reuse = true },
+    reload = { priority = 2, mergeMs = 80, group = "reload", reuse = true },
+    cannonShot = { priority = 1, mergeMs = 90, group = "cannonShot", reuse = true },
+    turretShot = { priority = 1, mergeMs = 90, group = "cannonShot", reuse = true },
+    cannonBlast = { priority = 1, mergeMs = 100, group = "blast", reuse = true },
+    turretBlast = { priority = 1, mergeMs = 100, group = "blast", reuse = true },
+    explosion = { priority = 1, mergeMs = 100, group = "blast", reuse = true },
+    breakWood = { priority = 1, mergeMs = 100, group = "breakWood", reuse = true },
+}
+
 ----------------------------------------------------------------------
 -- 广告（休眠链路）：激励视频「死亡复活」。引擎侧 ShowRewardedAd 已全通
 -- （C++ → Lua 绑定 → JS handler，看完整判定 isEnded），游戏侧只在这里取广告位 ID。
@@ -506,7 +539,7 @@ Config.BULLET_HIT_RADIUS = 1.3       -- 子弹扫掠命中半径（米）
 -- 替换旧的 54KB Sphere.mdl 实心球；微火花拖尾是常驻发射器，随弹销毁，false 可整关。
 Config.BULLET_BOLT_THICK = 0.055     -- 亮芯截面边长（米）
 Config.BULLET_BOLT_LEN = 0.85        -- 亮芯长度（米）
-Config.BULLET_TRAIL = true           -- 子弹微火花拖尾（每颗弹 1 个 draw call，可关）
+Config.BULLET_TRAIL = false          -- 子弹微火花拖尾（每颗弹 1 个 draw call，可关）
 Config.GROW_XP = { pirate = 1, boat = 6, bigboat = 20, barrel = 2 }  -- 各类击杀喂的经验
 -- 成长曲线：每项 { xp=达到该级所需累计经验, pellets=扇形弹丸数, damage=单发伤害, pierce=子弹可贯穿的单位数 }。
 -- 首项是开局形态（xp 恒 0）；到达某级即采用该项，之后只增不减。pierce=1 即一发只杀一个、命中即消亡；
@@ -932,6 +965,7 @@ end
 -- 打包时只带 CoreData 与工程 Data，于是编辑器里看得见、真机上静默消失。
 ----------------------------------------------------------------------
 Config.Fx = {
+    muzzle = "Particle/MuzzleFlash.xml",
     hitFlesh = "Particle/HitFlesh.xml",
     hitWood = "Particle/HitWood.xml",
     hitMetal = "Particle/HitMetal.xml",

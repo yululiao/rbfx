@@ -637,7 +637,7 @@ function Enemy:FireCannon(fromPos)
     local toPos = Vector3(tx, Config.SAND_Y, tz)
 
     -- 开炮反馈：炮口光 + 炮声（专用 cannonShot，由 powerful-cannon-shot 转码而来）
-    self.fx:Flash(fromPos, Color(1.0, 0.8, 0.4), 8.0, 0.08)
+    self.fx:Muzzle(fromPos, 1.5)
     self.audio:Play("cannonShot")
 
     -- 炮弹实体：pirate-kit 的 cannon-ball prefab（自带 kennypirate 材质）。ball 仍是父节点，

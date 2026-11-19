@@ -16,7 +16,7 @@
 --   * 桌面/web：引擎 Sound 解码 ogg，SoundSource 出声（上面的论述都是这条路的）。
 --   * 抖音小游戏：宿主没有 WebAudio，引擎没有 PCM 出口，改走 MinigameSDK 的
 --     PlayGameAudio —— 宿主 InnerAudioContext 直接播打包时由 ogg 转出的 m4a
---     （Build 的 DouyinRuntimeStep 转码，包里没有 ogg），一次一实例、BGM 循环常驻，
+--     （Build 的 DouyinRuntimeStep 转码，包里没有 ogg），短音效使用有界复用池、BGM 循环常驻，
 --     语义与桌面路一致。路径只做扩展名替换，Config 里的 ogg 路径两边通用。
 
 local Config = require("game.Config")
@@ -87,7 +87,7 @@ function Audio:Play(event, gain)
         return
     end
     local path = variants[math.random(#variants)]
-    self:Emit(path, gain or 1.0)
+    self:Emit(path, gain or 1.0, Config.AUDIO_POLICY[event] or Config.AUDIO_DEFAULT)
 end
 
 --- 播一句旁白（单文件，不做变体）。name 是 Config.Voice 里的值。
@@ -97,15 +97,18 @@ function Audio:Voice(name, gain)
     if not name then
         return
     end
-    self:Emit(Config.VoicePath(name), gain or 1.0)
+    self:Emit(Config.VoicePath(name), gain or 1.0, Config.AUDIO_VOICE)
 end
 
---- 底层：按资源路径播一次（桌面建自动回收 SoundSource，小游戏走宿主一次性实例）。
+--- 底层：按资源路径播一次（桌面自动回收 SoundSource，小游戏走优先级/合并/复用池）。
 ---@param path string Sound 资源名
 ---@param gain number
-function Audio:Emit(path, gain)
+---@param options table|nil Config.AUDIO_POLICY 中的宿主音效策略
+function Audio:Emit(path, gain, options)
     if self.minigame then
-        self.sdk:PlayGameAudio(ToHostPath(path), gain or 1.0)
+        options = options or Config.AUDIO_DEFAULT
+        options.reuse = Config.AUDIO_POOL
+        self.sdk:PlayGameAudio(ToHostPath(path), gain or 1.0, false, options)
         return
     end
     local sound = GetResource("Sound", path)

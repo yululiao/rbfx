@@ -148,7 +148,7 @@ local function Fire(self, tw, toPos)
         m.x * math.cos(yaw) - m.z * math.sin(yaw),
         m.y,
         m.x * math.sin(yaw) + m.z * math.cos(yaw))
-    self.fx:Flash(muzzle, Color(1.0, 0.78, 0.42), 7.0, 0.08)
+    self.fx:Muzzle(muzzle, 1.5)
     self.audio:Play("turretShot")
 
     -- 弹丸实体：同用 pirate-kit 的 cannon-ball prefab（自带材质）。ball 是父节点，飞行/落点

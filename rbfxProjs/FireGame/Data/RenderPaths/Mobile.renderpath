@@ -1,0 +1,17 @@
+{
+    "passes": [
+        {
+            "type": "FullScreenShaderPass",
+            "value": {
+                "attributes": [
+                    { "name": "Pass Name", "type": "String", "value": "Postprocess: FXAA v3" },
+                    { "name": "Is Enabled By Default", "type": "Bool", "value": true },
+                    { "name": "Shader Name", "type": "String", "value": "v2/P_FXAA3" },
+                    { "name": "Shader Defines", "type": "String", "value": "FXAA_QUALITY_PRESET=12" },
+                    { "name": "Read+Write Color Output", "type": "Bool", "value": true },
+                    { "name": "Bilinear Color Sampler", "type": "Bool", "value": true }
+                ]
+            }
+        }
+    ]
+}

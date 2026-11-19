@@ -163,7 +163,7 @@ function Shooting:FireAt(unit, targetPos)
     self.player:PlayShoot()
     self.audio:Play("shot")
     local muzzle = self.player:NextGunPos()   -- 一律枪口，人与站在地面时一致
-    self.fx:Flash(muzzle, Color(1.0, 0.85, 0.5), 6.0, 0.05)
+    self.fx:Muzzle(muzzle)
     if self.hud and self.hud.SetAmmo then
         self.hud:SetAmmo(self.ammo)
     end
