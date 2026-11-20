@@ -171,18 +171,14 @@ function Waves:Update(dt)
     end
 end
 
---- 按时间表催生成。同屏超上限时不标记 fired，下一帧重试（延后生成）。
+--- 按时间表生成，出兵节奏不受当前存活单位数影响。
 function Waves:ProcessQueue()
     local pending = false
     for _, entry in ipairs(self.queue) do
         if not entry.fired then
             if self.waveClock >= entry.t then
-                if self.enemy:CanSpawn() then
-                    self.enemy:SpawnBoat(entry.kind, entry.lane)
-                    entry.fired = true
-                else
-                    pending = true -- 闸门挡住，稍后重试
-                end
+                self.enemy:SpawnBoat(entry.kind, entry.lane)
+                entry.fired = true
             else
                 pending = true
             end

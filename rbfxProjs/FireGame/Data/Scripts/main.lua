@@ -16,6 +16,7 @@ local Joystick = require("core.Joystick")
 local FireButton = require("core.FireButton")
 local Config = require("game.Config")
 local Quality = require("game.Quality")
+local Telemetry = require("game.Telemetry")
 local Coast = require("game.Coast")
 local Player = require("game.Player")
 local Fx = require("game.Fx")
@@ -154,7 +155,9 @@ local coast, player, fx, audio, hud, enemy, waves, shooting, juice, knob, joysti
 local ad_showing = false
 local reviveAdEnabled = false
 
+local telemetry
 local function RestartGame()
+    if telemetry then telemetry.round = telemetry.round + 1 end
     -- 重开埋点在 Reset 之前取数：局终数据只存在 waves 里，Reset 一跑就清零了。
     -- restart 与 game_start 分开计数，两者相除就是重开率。
     if waves then
@@ -547,6 +550,13 @@ fireButton = FireButton:New({ cx = fireCx, cy = fireCy, radius = FIRE.grab })
 
 local input = GetSubsystem("Input")
 local time = GetSubsystem("Time")
+if Config.PERF_TELEMETRY then
+    telemetry = Telemetry.Build(scene, {
+        enemy = enemy, shooting = shooting, turrets = turrets, fx = fx, waves = waves,
+        player = player, dog = dog, juice = juice, hud = hud, audio = audio,
+        hpBar = hpBar, turretBars = turretBars,
+    })
+end
 
 print(string.format("FireGame MARK boot: canvas=%.0fx%.0f uiScale=%.2f aspect=%.2f tower=(%.1f,%.1f,%.1f)",
     canvasW, canvasH, uiScale, canvasAspect or 0.0,
@@ -629,6 +639,7 @@ local function PerfCountUnits()
 end
 
 SubscribeToEvent("Update", function(data)
+    if telemetry then telemetry:BeginFrame() end
     local dt = data.TimeStep
     -- 打击感帧首：推进 hit-stop 真实倒计时，拿到本帧世界 dt（定格期间被缩到 5%）。
     -- 引擎侧骨骼动画/粒子不受它影响（走自己的 Frame::timeStep），定格里死亡动画
@@ -812,6 +823,7 @@ SubscribeToEvent("Update", function(data)
             --     pirates, boats, draws, tris, fps))
         end
     end
+    if telemetry then telemetry:EndFrame() end
 end)
 
 ----------------------------------------------------------------------
@@ -825,3 +837,9 @@ SubscribeToEvent("SceneDrawableUpdateFinished", function(_data)
         player:ApplyAim()
     end
 end)
+
+if telemetry then
+    SubscribeToEvent("EndFrame", function()
+        telemetry:Report()
+    end)
+end

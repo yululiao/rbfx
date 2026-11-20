@@ -29,6 +29,7 @@
 #include "../Graphics/AnimationController.h"
 #include "../Graphics/BoneMatrixBaker.h"
 #include "../Graphics/FlipbookBaker.h"
+#include "../Graphics/FrameSprite.h"
 #include "../Graphics/Camera.h"
 #include "../Graphics/CameraOperator.h"
 #include "../Graphics/Geometry.h"
@@ -715,6 +716,9 @@ void RegisterGraphicsLibrary(Context* context)
     VATBaker::RegisterObject(context);
     BoneMatrixBaker::RegisterObject(context);
     FlipbookBaker::RegisterObject(context);
+    FrameSprite::RegisterObject(context);
+    FrameSpriteAnimator::RegisterObject(context);
+    FrameSpriteBatch::RegisterObject(context);
     Skybox::RegisterObject(context);
     AnimatedModel::RegisterObject(context);
     AnimationController::RegisterObject(context);

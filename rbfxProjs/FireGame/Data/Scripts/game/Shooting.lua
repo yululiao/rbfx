@@ -242,7 +242,7 @@ function Shooting:UpdateBullets(dt)
         local hitUnit = nil
         for _, u in ipairs(units) do
             if u.alive and u.node and u.kind ~= "barrel" and not b.hit[u] then
-                local up = u.node:GetWorldPosition()
+                local up = u.position
                 local ddx = up.x - np.x
                 local ddz = up.z - np.z
                 if ddx * ddx + ddz * ddz <= r2 then

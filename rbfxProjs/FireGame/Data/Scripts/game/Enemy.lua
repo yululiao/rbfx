@@ -72,6 +72,25 @@ local function wadeY(x, z)
     return Config.SEA_Y + Config.PIRATE_WADE_DEPTH
 end
 
+local function unitWadeY(unit, x, z)
+    -- Shoreline is static. Re-evaluate only when lateral movement changes x.
+    local prof = unit.mgr.detailProfile
+    if unit.shoreX ~= x then
+        unit.shoreZ = Config.ShoreZ(x)
+        unit.shoreX = x
+        if prof then prof:DetailCount("Pirate.ShoreCacheMiss") end
+    end
+    if prof then prof:DetailCount("Pirate.ShoreHeight") end
+    if z >= unit.shoreZ then return Config.SAND_Y end
+    return Config.SEA_Y + Config.PIRATE_WADE_DEPTH
+end
+
+local function writeUnitPosition(unit, p)
+    unit.node:SetPosition(p)
+    local prof = unit.mgr.detailProfile
+    if prof then prof:DetailCount("Unit.SetPosition") end
+end
+
 ----------------------------------------------------------------------
 -- 管理器
 ----------------------------------------------------------------------
@@ -144,11 +163,6 @@ function Enemy:AliveCount()
     return n
 end
 
---- 同屏单位闸：超上限时 Waves 会延后生成（58 骨骼蒙皮不便宜）。
-function Enemy:CanSpawn()
-    return self:AliveCount() < Config.MAX_ALIVE_UNITS
-end
-
 --- 活着的"威胁"数（船 + 海盗），不含常驻爆桶。Waves 靠它判断一波是否清完。
 function Enemy:ThreatCount()
     local n = 0
@@ -167,7 +181,7 @@ end
 ---@param maxDist number
 ---@return table|nil, Vector3|nil
 function Enemy:NearestTarget(fromPos, maxDist)
-    local best, bestD, bestPos = nil, maxDist, nil
+    local best, bestD = nil, maxDist * maxDist
     for _, u in ipairs(self.units) do
         if u.alive and u.node and (u.kind == "pirate" or u.kind == "boat" or u.kind == "bigboat") then
             -- 船在"投递兵员"的窗口内不作目标，否则全程在射程里被扇形弹糊、没靠岸就沉，
@@ -178,28 +192,23 @@ function Enemy:NearestTarget(fromPos, maxDist)
             local delivering = (u.kind == "boat" and u.state == "sail")
                 or (u.kind == "bigboat" and u.state ~= "bombard")
             if not delivering then
-                local p = u.node:GetWorldPosition()
+                local p = u.position
                 -- 单位 node 原点都在“脚下/船底”（脚底与水面下），直接拿它当瞄点会让子弹打脚、
                 -- 命中特效也喷在脚底（船更甚：扎进水里被水面盖住）。按 kind 抬到躯干/甲板：选择仍
                 -- 按 XZ 距离（下面只用 dx/dz），y 抬高不影响挑谁，只把弹道与 hitPos 提到身体中段。
-                if u.kind == "pirate" then
-                    p.y = p.y + Config.PIRATE_HIT_HEIGHT
-                elseif u.kind == "bigboat" then
-                    -- 大船船壳约 8m（ship-pirate-large ×0.8），与小船的 0.85 差一个数量级，
-                    -- 共用一个高度必有一边飘，所以按 kind 分档。
-                    p.y = p.y + Config.BOAT_BIG_HIT_HEIGHT
-                else
-                    p.y = p.y + Config.BOAT_HIT_HEIGHT
-                end
                 local dx, dz = p.x - fromPos.x, p.z - fromPos.z
-                local d = math.sqrt(dx * dx + dz * dz)
+                local d = dx * dx + dz * dz
                 if d <= bestD then
-                    best, bestD, bestPos = u, d, p
+                    best, bestD = u, d
                 end
             end
         end
     end
-    return best, bestPos
+    if not best then return nil, nil end
+    local p = best.position
+    local lift = best.kind == "pirate" and Config.PIRATE_HIT_HEIGHT
+        or (best.kind == "bigboat" and Config.BOAT_BIG_HIT_HEIGHT or Config.BOAT_HIT_HEIGHT)
+    return best, Vector3(p.x, p.y + lift, p.z)
 end
 
 --- 延时执行（连锁爆炸的递延靠它，避免同一帧递归引爆）。
@@ -264,6 +273,10 @@ local function newUnit(mgr, kind, node)
         mgr = mgr,
         kind = kind,
         node = node,
+        -- Enemies root is identity and never moved/reparented. This is both local/world
+        -- position. Unit movement mutates it in place, then writes it to the node.
+        -- Spatial queries must treat this shared Vector3 as read-only.
+        position = node:GetPosition(),
         alive = true,
         removing = false,
         removeT = 0.0,
@@ -360,9 +373,9 @@ function Enemy:SpawnBoat(kind, laneIndex)
 
     function unit:Update(dt)
         if self.state == "sail" then
-            local p = self.node:GetPosition()
+            local p = self.position
             p.z = p.z + self.speed * dt
-            self.node:SetPosition(p)
+            writeUnitPosition(self, p)
             -- 大船一出场就边驶边炮击（不等靠岸，否则大半在途中就被集火掉、看不到开炮）
             if self.big then
                 self:TickCannon(dt)
@@ -376,7 +389,7 @@ function Enemy:SpawnBoat(kind, laneIndex)
             if self.unloadT <= 0.0 and self.remaining > 0 then
                 self.unloadT = Config.BOAT_UNLOAD_TIME
                 self.remaining = self.remaining - 1
-                local p = self.node:GetPosition()
+                local p = self.position
                 self.mgr:SpawnPirate(Vector3(p.x + randSpread(0.0, 1.2), 0.0, p.z))
                 if self.remaining <= 0 then
                     if self.big then
@@ -400,9 +413,9 @@ function Enemy:SpawnBoat(kind, laneIndex)
             end
         elseif self.state == "sinking" then
             -- 下沉 + 侧倾，给击沉一点分量（removeT 由管理器统一递减，这里不碰）
-            local p = self.node:GetPosition()
+            local p = self.position
             p.y = p.y - dt * 0.9
-            self.node:SetPosition(p)
+            writeUnitPosition(self, p)
             self.node:Roll(dt * 22.0)
         end
     end
@@ -435,15 +448,11 @@ function Enemy:SpawnPirate(spawnPos, skin)
     local y = Config.SEA_Y + Config.PIRATE_WADE_DEPTH
     node:SetPosition(Vector3(spawnPos.x, y, spawnPos.z))
     node:SetRotation(Quaternion(Config.PIRATE_YAW, Vector3.UP))
-
-    -- 视觉降级为序列帧 billboard：海盗不再挂 AnimatedModel/AnimationController（不再逐实例蒙皮），
-    -- 改由 FlipbookCrowd 在该皮肤的 BillboardSet 里占一张卡片、逐帧改写 UV 切帧。node 仅保留世界
-    -- 位置与朝向，承载全部玩法数学（自动吸附/子弹扫掠/溅射/移除倒计时都读 u.node）。billboard 恒朝
-    -- 相机，故 node 旋转不影响视觉。
+    -- FrameSprite follows the logic node and plays the atlas entirely in C++.
+    local unit = newUnit(self, "pirate", node)
     local sprite = self.crowd:Acquire(skin, node)
     self.crowd:Play(sprite, "Run")
 
-    local unit = newUnit(self, "pirate", node)
     unit.hp = raider and Config.PIRATE_RAIDER_HP or Config.PIRATE_HP
     unit.raider = raider           -- 突袭型：Update 里转追主角而非直冲防线
     unit.turretIdx = nil           -- 冲塔型进入砍击时定下的目标塔号（扣血时回传给 Waves）
@@ -455,7 +464,7 @@ function Enemy:SpawnPirate(spawnPos, skin)
 
     function unit:Update(dt)
         if self.state == "advance" then
-            local p = self.node:GetPosition()
+            local p = self.position
             local player = self.mgr.player
             -- 可追击：突袭型 & 主角在陆地（未上船出海、未阵亡）。主角一旦上船，突袭型
             -- 够不着，退回直冲防线分支（载具因此对突袭型有天然闪避价值）。
@@ -473,11 +482,9 @@ function Enemy:SpawnPirate(spawnPos, skin)
                     local step = self.speed * dt
                     p.x = p.x + dx / dist * step
                     p.z = p.z + dz / dist * step
-                    p.y = wadeY(p.x, p.z)
-                    self.node:SetPosition(p)
-                    -- 面向主角（角色模型前向 +z，与 Player 同一 yaw 约定，见 Config.MODEL_FORWARD_YAW）
-                    local yaw = math.atan(dx, -dz)
-                    self.node:SetRotation(Quaternion(Config.MODEL_FORWARD_YAW - math.deg(yaw), Vector3.UP))
+                    p.y = unitWadeY(self, p.x, p.z)
+                    writeUnitPosition(self, p)
+                    -- Camera-facing billboard does not use node rotation.
                 end
             else
                 -- 冲滩型（或主角已上船/阵亡）：直线 +z 朝滩头，抵近防线带后转打最近那座炮塔。
@@ -486,7 +493,9 @@ function Enemy:SpawnPirate(spawnPos, skin)
                     -- 进塔前圈：锁最近的一座活塔并走到它的砍击点（海侧、距心 STAND_OFF）。
                     -- 塔在 x=±9、航道在 ±13/±4.5，正对着塔的只有少数几条，不在这里转过去
                     -- 就会当着两塔中间对空气挥刀、却算砍到塔——视觉与判据脱节。
+                    local prof = self.mgr.detailProfile
                     local idx, tx, tz = self.mgr.turrets:NearestAlive(p.x, p.z)
+                    if prof then prof:DetailCount("Pirate.NearestTower") end
                     if not idx then
                         -- 塔全哑了（Waves 下一帧就判负），别再拖：直接同归于尽收尸
                         self.alive = false
@@ -505,16 +514,16 @@ function Enemy:SpawnPirate(spawnPos, skin)
                             local step = self.speed * dt
                             p.x = p.x + dx / dist * step
                             p.z = p.z + dz / dist * step
-                            p.y = wadeY(p.x, p.z)
-                            self.node:SetPosition(p)
+                            p.y = unitWadeY(self, p.x, p.z)
+                            writeUnitPosition(self, p)
                         end
                     end
                 else
                     -- 直线冲滩：x 恒在航道上，只有 z 在动，所以“涉水→贴沙”的切换点就是
                     -- 这条航道自己撞岸那一处（四条航道各不相同）——这正是曲线岸线顺手给的好处。
                     p.z = p.z + self.speed * dt
-                    p.y = wadeY(p.x, p.z)
-                    self.node:SetPosition(p)
+                    p.y = unitWadeY(self, p.x, p.z)
+                    writeUnitPosition(self, p)
                 end
             end
         elseif self.state == "attack" then
@@ -528,7 +537,7 @@ function Enemy:SpawnPirate(spawnPos, skin)
                     self.state = "advance"
                     self.mgr.crowd:Play(self.sprite, "Run")
                 else
-                    local p = self.node:GetPosition()
+                    local p = self.position
                     local dx, dz = player.spot.x - p.x, player.spot.z - p.z
                     local leash = Config.PIRATE_MELEE_RANGE * 1.9
                     if dx * dx + dz * dz > leash * leash then
@@ -734,6 +743,9 @@ end
 
 ---@param dt number
 function Enemy:Update(dt)
+    local prof = self.detailProfile
+    local timerStarted = prof and prof:DetailBegin()
+    local totalStarted = timerStarted
     -- 延时队列
     local timers = self.timers
     for i = #timers, 1, -1 do
@@ -747,11 +759,15 @@ function Enemy:Update(dt)
     end
 
     -- 单位：倒序遍历，移除时 swap-pop
+    if prof then prof:DetailEnd("Enemy.Timers", timerStarted) end
     local units = self.units
+    local unitsStarted = prof and prof:DetailBegin()
     for i = #units, 1, -1 do
         local unit = units[i]
+        if prof then prof:DetailCount("Unit." .. unit.kind .. "." .. unit.state) end
         unit:Update(dt)
         if unit.removing then
+            if prof then prof:DetailCount("Enemy.Cleanup") end
             unit.removeT = unit.removeT - dt
             if unit.removeT <= 0.0 then
                 if unit.sprite then
@@ -767,11 +783,17 @@ function Enemy:Update(dt)
         end
     end
 
-    -- 序列帧海盗：在各单位 Update 摆好 node 世界位置后，统一推进 clip 时间并同步 billboard 位置/UV。
+    if prof then prof:DetailEnd("Enemy.UnitsAndCleanup", unitsStarted) end
+    -- One native call updates every sprite after movement, using the gameplay dt.
     self.crowd:Update(dt)
 
     -- 大船炮台的在飞炮弹（独立于 units：船开走/沉没，已发射的炮弹照样落地）
+    local projectileStarted = prof and prof:DetailBegin()
     self:UpdateProjectiles(dt)
+    if prof then
+        prof:DetailEnd("Enemy.Projectiles", projectileStarted)
+        prof:DetailEnd("Enemy.Total", totalStarted)
+    end
 end
 
 --- 清空所有单位与计时器（换局/停止）。

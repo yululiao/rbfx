@@ -15,6 +15,7 @@
 #include "../Urho3D/Graphics/Animation.h"
 #include "../Urho3D/Graphics/AnimationController.h"
 #include "../Urho3D/Graphics/BillboardSet.h"
+#include "../Urho3D/Graphics/FrameSprite.h"
 #include "../Urho3D/Graphics/ParticleEffect.h"
 #include "../Urho3D/Graphics/ParticleEmitter.h"
 #include "../Urho3D/Graphics/Camera.h"
@@ -85,6 +86,9 @@ template <> struct is_automagical<Urho3D::Skeleton> : std::false_type {};
 template <> struct is_automagical<Urho3D::Bone> : std::false_type {};
 template <> struct is_automagical<Urho3D::AnimationController> : std::false_type {};
 template <> struct is_automagical<Urho3D::BillboardSet> : std::false_type {};
+template <> struct is_automagical<Urho3D::FrameSprite> : std::false_type {};
+template <> struct is_automagical<Urho3D::FrameSpriteAnimator> : std::false_type {};
+template <> struct is_automagical<Urho3D::FrameSpriteBatch> : std::false_type {};
 template <> struct is_automagical<Urho3D::ParticleEmitter> : std::false_type {};
 template <> struct is_automagical<Urho3D::ParticleEffect> : std::false_type {};
 template <> struct is_automagical<Urho3D::Billboard> : std::false_type {};
@@ -1135,6 +1139,92 @@ void RegisterGraphicsBindings(sol::state& lua, Context* context)
         );
     }
     RegisterLuaObjectWrapper<BillboardSet>();
+
+    {
+        using LUA_THIS = FrameSprite;
+        LUA_CLASS(FrameSprite,
+            sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetAtlasAnimation)
+            LUA_MEMBER_FUNC(SetGridAnimation)
+            LUA_MEMBER_FUNC_RAW(SetImageAnimation, [](FrameSprite* sprite, const sol::table& paths, float fps, bool looped) {
+                ea::vector<ea::string> names;
+                const auto count = paths.size();
+                for (unsigned i = 1; i <= count; ++i)
+                {
+                    sol::object path = paths[i];
+                    if (path.get_type() != sol::type::string) return false;
+                    names.emplace_back(path.as<std::string>().c_str());
+                }
+                return sprite->SetImageAnimation(names, fps, looped);
+            })
+            LUA_MEMBER_FUNC(Play)
+            LUA_MEMBER_FUNC(Pause)
+            LUA_MEMBER_FUNC(Resume)
+            LUA_MEMBER_FUNC(Stop)
+            LUA_MEMBER_FUNC(SetSpeed)
+            LUA_MEMBER_FUNC(GetSpeed)
+            LUA_MEMBER_FUNC(IsPlaying)
+            LUA_MEMBER_FUNC(IsFinished)
+            LUA_MEMBER_FUNC(GetFrame)
+            LUA_MEMBER_FUNC(SetMaterial)
+            LUA_MEMBER_FUNC(SetSize)
+            LUA_MEMBER_FUNC(GetSize)
+            LUA_MEMBER_FUNC(SetOffset)
+            LUA_MEMBER_FUNC(GetOffset)
+            LUA_MEMBER_FUNC(SetColor)
+            LUA_MEMBER_FUNC(GetColor)
+        );
+    }
+    RegisterLuaObjectWrapper<FrameSprite>();
+    {
+        using LUA_THIS = FrameSpriteAnimator;
+        LUA_CLASS(FrameSpriteAnimator,
+            sol::call_constructor, sol::factories(
+                [context]() { return MakeShared<FrameSpriteAnimator>(context); })
+            LUA_BASES(Object)
+            LUA_MEMBER_FUNC(SetSprite)
+            LUA_MEMBER_FUNC(GetSprite)
+            LUA_MEMBER_FUNC(AddAtlasAnimation)
+            LUA_MEMBER_FUNC(AddGridAnimation)
+            LUA_MEMBER_FUNC_RAW(AddImageAnimation, [](FrameSpriteAnimator* animator, const ea::string& name,
+                const sol::table& paths, float fps, bool looped) {
+                ea::vector<ea::string> names;
+                const auto count = paths.size();
+                for (unsigned i = 1; i <= count; ++i)
+                {
+                    sol::object path = paths[i];
+                    if (path.get_type() != sol::type::string) return false;
+                    names.emplace_back(path.as<std::string>().c_str());
+                }
+                return animator->AddImageAnimation(name, names, fps, looped);
+            })
+            LUA_MEMBER_FUNC(CopyAnimations)
+            LUA_MEMBER_FUNC(PlayAni)
+            LUA_MEMBER_FUNC(GetAnimationName)
+        );
+    }
+    RegisterLuaObjectWrapper<FrameSpriteAnimator>();
+    {
+        using LUA_THIS = FrameSpriteBatch;
+        LUA_CLASS(FrameSpriteBatch,
+            sol::no_constructor
+            LUA_BASES(Component, Serializable, Object)
+            LUA_MEMBER_FUNC(SetAutoUpdate)
+            LUA_MEMBER_FUNC(GetAutoUpdate)
+            LUA_MEMBER_FUNC(SetStatisticsEnabled)
+            LUA_MEMBER_FUNC(GetStatisticsEnabled)
+            LUA_MEMBER_FUNC(Update)
+            LUA_MEMBER_FUNC(GetNumSprites)
+            LUA_MEMBER_FUNC(GetNumBatches)
+            LUA_MEMBER_FUNC(GetUpdateCount)
+            LUA_MEMBER_FUNC(GetTotalUpdateMs)
+            LUA_MEMBER_FUNC(GetMaxUpdateMs)
+            LUA_MEMBER_FUNC(GetFrameChanges)
+            LUA_MEMBER_FUNC(ResetStatistics)
+        );
+    }
+    RegisterLuaObjectWrapper<FrameSpriteBatch>();
 
     // ParticleEffect: 3D particle configuration resource consumed by
     // ParticleEmitter:SetEffect.

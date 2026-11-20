@@ -179,34 +179,41 @@ end
 --- 仍比锁定目标距离小），否则保持锁定，防止两个等距海盗引发逐帧 A↔B 横跳。
 ---@return table|nil, Vector3|nil
 function Dog:FindPirate()
-    local best, bestD, bestPos = nil, self.cfg.aggroRadius, nil
-    local units = self.enemies:GetUnits()
-    for _, u in ipairs(units) do
-        if u.alive and u.node and u.kind == "pirate" then
-            local p = u.node:GetWorldPosition()
-            local d = distXZ(self.x, self.z, p.x, p.z)
-            if d <= bestD then
-                best, bestD = u, d
-                bestPos = Vector3(p.x, p.y + Config.PIRATE_HIT_HEIGHT, p.z)
-            end
-        end
-    end
-
-    -- 粘滞判定：锁定目标仍有效时，仅当新目标明显更近才切换
+    local radius2 = self.cfg.aggroRadius * self.cfg.aggroRadius
     local locked = self.lockedTarget
-    if locked and locked.alive and locked.node and best and locked ~= best then
-        local lp = locked.node:GetWorldPosition()
-        local ld = distXZ(self.x, self.z, lp.x, lp.z)
-        if ld <= self.cfg.aggroRadius and ld * self.cfg.stickFactor <= bestD then
-            -- 锁定目标仍在范围且“折算后”不算太远（未被子击穿）→ 保持锁定
-            best = locked
-            bestD = ld
-            bestPos = Vector3(lp.x, lp.y + Config.PIRATE_HIT_HEIGHT, lp.z)
+    local lockedD
+    if locked and locked.alive and locked.node then
+        local p = locked.position
+        local dx, dz = p.x - self.x, p.z - self.z
+        lockedD = dx * dx + dz * dz
+        if lockedD > radius2 then locked = nil end
+    else
+        locked = nil
+    end
+    -- Invalid targets are replaced immediately; valid targets track their live position.
+    if (self.targetScanT or 0) > 0 and (locked or not self.lockedTarget) then
+        if not locked then return nil, nil end
+        local p = locked.position
+        return locked, Vector3(p.x, p.y + Config.PIRATE_HIT_HEIGHT, p.z)
+    end
+    self.targetScanT = Config.DOG_TARGET_SCAN_INTERVAL
+    local best, bestD = nil, radius2
+    for _, u in ipairs(self.enemies:GetUnits()) do
+        if u.alive and u.node and u.kind == "pirate" then
+            local p = u.position
+            local dx, dz = p.x - self.x, p.z - self.z
+            local d = dx * dx + dz * dz
+            if d <= bestD then best, bestD = u, d end
         end
     end
-
+    if locked and best and locked ~= best
+        and lockedD * self.cfg.stickFactor * self.cfg.stickFactor <= bestD then
+        best = locked
+    end
     self.lockedTarget = best
-    return best, bestPos
+    if not best then return nil, nil end
+    local p = best.position
+    return best, Vector3(p.x, p.y + Config.PIRATE_HIT_HEIGHT, p.z)
 end
 
 ----------------------------------------------------------------------
@@ -215,6 +222,7 @@ end
 
 ---@param dt number
 function Dog:Update(dt)
+    self.targetScanT = math.max(0, (self.targetScanT or 0) - dt)
     -- 在空中/落地起身期间由 launch 状态机整体接管（推进位移/翻滚/回正），主状态机让路。
     if self.launchCtl:Update(dt) then
         return
@@ -375,6 +383,7 @@ end
 ----------------------------------------------------------------------
 
 function Dog:Reset()
+    self.targetScanT = 0
     self.launchCtl:Reset()
     self.restT = 0.0
     self.restReturn = false

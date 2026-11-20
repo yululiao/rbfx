@@ -428,12 +428,16 @@ Config.PIRATE_RAIDER_CHANCE = 0.6    -- 每个海盗是突袭型（追主角）�
 Config.PIRATE_RAIDER_HP = 3          -- 突袭型血量（普通型走 PIRATE_HP=1）：追身的略肉一点避免一发带走
 Config.PIRATE_MELEE_RANGE = 1.7      -- 与主角水平距离小于此值即停下挥刀
 Config.PIRATE_PLAYER_DAMAGE = 1      -- 突袭型一刀砍主角几格血（3 格口径：一刀掉 1 格）
-Config.MAX_ALIVE_UNITS = 32          -- 同屏单位闸：超了就延后生成。船能整船靠岸后上岸量猛增，拉到 32 保证潮水不断流（真机卡就回调）
 Config.FAR_UNIT_DISTANCE = 55.0      -- 超过这个距离的单位关掉不可见时也更新
 
 -- 性能Overlay（调试开关）：true 时屏幕顶中叠加一行 FPS/drawcall/三角面/同屏单位数（每 3 秒刷）。
 -- 上线前必须置 false（关掉就不显不刷）。真机（抖音）没有引擎 DebugHud（SystemUI 已禁用），靠这个看指标。
 Config.PERF_OVERLAY = false
+-- Temporary thermal investigation: one log every 5 real seconds, no UI overlay.
+Config.PERF_TELEMETRY = false -- enables both Lua probes and native FrameSprite timing
+Config.PERF_SAMPLE_EVERY = 4 -- sample gameplay functions once every N frames
+Config.PERF_ENEMY_DETAIL = false
+Config.PERF_DETAIL_EVERY = 40 -- detailed enemy probes, about one frame per second
 
 -- 相机参数调试面板（调试开关）：true 时 HUD 右上角多一颗“相机”按钮，点开可在真机上实时拖
 -- 本节全部相机常量并打印可直接粘回本文件的数值（见 game/CamDebug.lua + UI/CamDebug.rml）。
@@ -453,12 +457,13 @@ Config.MOBILE_QUALITY = {
     preview = false,
     pcfKernel = 2,
     useLDR = true,
-    minimalPostprocess = false,
-    disablePostprocess = true,
+    minimalPostprocess = true, -- FXAA v3 only; no exposure/tone mapping/color adjustment
+    disablePostprocess = false, -- true overrides the above and disables FXAA as well
     disableShadows = true,
 }
 -- Visual limits only: damage and chain reactions are unaffected.
 Config.FX_LIMITS = { explosion = 6, smoke = 4, flash = 2, muzzle = 4 }
+Config.DOG_TARGET_SCAN_INTERVAL = 0.15 -- movement/bites still update every frame
 
 -- Host audio: priority 0..3, merge window in real milliseconds.
 -- AUDIO_POOL=false disables reuse for an A/B comparison; priority/merging stay on.
@@ -768,9 +773,7 @@ Config.WAVES = {
     { voice = "round_2", boats = 13, bigboats = 4, volleys = 2, window = 12.5, ramp = "steady" },
     -- 第三波（终局高潮）：拆成四个阶段连续压上来，小艇群 -> 大船群 -> 小艇群 -> 大船群。
     -- 段与段之间不留间歇，时刻首尾相接（见 WaveGen.Generate 的 phases 分支）。
-    -- 配额总量与三段式（原第3+4+5波串起来）那一版逐一相等：47 小 + 15 大 = 509 海盗、
-    -- 出怪跨度 43s（那版 44.65s），所以强度基准可比；但这版段间没有 5s 间歇，压得更紧，
-    -- 体感应略强于当年实测。嫌弱继续加各阶段的 boats/bigboats，别改第 1/2 波。
+    -- 配额总量：32 艘小艇 + 11 艘大船；出怪跨度仍为 43s，阶段间不加间歇。
     {
         voice = "round_3",
         phases = {
@@ -778,10 +781,10 @@ Config.WAVES = {
             { boats = 22, bigboats = 0, volleys = 3, window = 11.0, ramp = "steady", firstT = 0.8 },
             -- 阶段二：大船群压境（7 艘），纯占位铺道。
             { boats = 0, bigboats = 7, volleys = 0, window = 10.0, ramp = "heavy", firstT = 1.0 },
-            -- 阶段三：第二波小艇潮，量最大、齐射最密（25 艘 + 4 次齐射）。
-            { boats = 25, bigboats = 0, volleys = 4, window = 12.0, ramp = "warmup", firstT = 0.8 },
-            -- 阶段四：收尾大船群（8 艘），窗口最短=最后一波最凶。
-            { boats = 0, bigboats = 8, volleys = 0, window = 10.0, ramp = "heavy", firstT = 1.0 },
+            -- 阶段三：第二波小艇潮（10 艘，齐射按剩余配额生成）。
+            { boats = 10, bigboats = 0, volleys = 4, window = 12.0, ramp = "warmup", firstT = 0.8 },
+            -- 阶段四：收尾大船群（4 艘）。
+            { boats = 0, bigboats = 4, volleys = 0, window = 10.0, ramp = "heavy", firstT = 1.0 },
         },
     },
 }

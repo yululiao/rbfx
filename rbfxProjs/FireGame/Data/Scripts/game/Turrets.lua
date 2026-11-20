@@ -119,19 +119,21 @@ end
 ---@param enemies Enemy
 ---@return table|nil, Vector3|nil
 local function FindTarget(tw, enemies)
-    local best, bestD, bestPos = nil, Config.TURRET_RANGE, nil
+    local best, bestD = nil, Config.TURRET_RANGE * Config.TURRET_RANGE
     for _, u in ipairs(enemies:GetUnits()) do
         if u.alive and u.node and (u.kind == "boat" or u.kind == "bigboat") then
-            local p = u.node:GetPosition()
-            local d = distXZ(tw.x, tw.z, p.x, p.z)
+            local p = u.position
+            local dx, dz = tw.x - p.x, tw.z - p.z
+            local d = dx * dx + dz * dz
             if d <= bestD then
                 best, bestD = u, d
-                local lift = (u.kind == "bigboat") and Config.BOAT_BIG_HIT_HEIGHT or Config.BOAT_HIT_HEIGHT
-                bestPos = Vector3(p.x, p.y + lift, p.z)
             end
         end
     end
-    return best, bestPos
+    if not best then return nil, nil end
+    local p = best.position
+    local lift = (best.kind == "bigboat") and Config.BOAT_BIG_HIT_HEIGHT or Config.BOAT_HIT_HEIGHT
+    return best, Vector3(p.x, p.y + lift, p.z)
 end
 
 --- 从炮口向 toPos 开一炮：炮口光 + 专用炮声 + 一发在飞弹丸（无预警盘，友方射击不用）。
@@ -216,7 +218,7 @@ function Turrets:Impact(pr)
     for i = #units, 1, -1 do
         local u = units[i]
         if u.alive and u.node and (u.kind == "boat" or u.kind == "bigboat") then
-            local p = u.node:GetPosition()
+            local p = u.position
             local dx, dz = p.x - ip.x, p.z - ip.z
             if dx * dx + dz * dz <= r2 then
                 local lift = (u.kind == "bigboat") and Config.BOAT_BIG_HIT_HEIGHT or Config.BOAT_HIT_HEIGHT
@@ -270,7 +272,8 @@ function Turrets:UpdateAim(dt)
     for _, tw in ipairs(self.towers) do
         if not tw.dead then
             local targetYaw = 0.0
-            local _, pos = FindTarget(tw, self.enemies)
+            local target, pos = FindTarget(tw, self.enemies)
+            tw.target, tw.targetPos = target, pos
             if pos then
                 targetYaw = yawTo(tw, pos)
             end
@@ -327,7 +330,7 @@ function Turrets:Update(dt)
             -- 而"开局首发迟"只作用在第一次（TURRET_FIRST）那一下。
             tw.cd = tw.cd - dt
             if tw.cd <= 0.0 then
-                local _, pos = FindTarget(tw, self.enemies)
+                local pos = tw.target and tw.target.alive and tw.targetPos or nil
                 if pos then
                     -- 转向没咬住先不开炮（±TURRET_AIM_FIRE_TOL）：等待期间 cd 不回填，
                     -- 炮口一对准这一帧就点火，转向耗时（约 0.3s）不会被算进间隔里。
@@ -353,6 +356,7 @@ function Turrets:Reset()
     self.projectiles = {}
     for _, tw in ipairs(self.towers) do
         tw.cd = Config.TURRET_FIRST
+        tw.target, tw.targetPos = nil, nil
         tw.aimYaw = 0.0
         tw.recoilT = nil
         tw.gun:SetPosition(tw.gunRest)
