@@ -136,8 +136,8 @@
 		<node _id="7">
 			<attributes>
 				<attribute name="Name" type="String" value="island" />
-				<attribute name="Position" type="Vector3" value="0 -3.2 39" />
-				<attribute name="Rotation" type="Quaternion" value="0.707107 0 0.707107 0" />
+				<attribute name="Position" type="Vector3" value="0 -3.2 36" />
+				<attribute name="Rotation" type="Quaternion" value="-4.37114e-08 0 1 -0" />
 				<attribute name="Scale" type="Vector3" value="2 1 2" />
 			</attributes>
 			<components>
