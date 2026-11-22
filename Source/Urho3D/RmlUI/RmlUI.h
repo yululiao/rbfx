@@ -105,6 +105,10 @@ public:
     void SetRenderTarget(std::nullptr_t target, const Color& clearColor=Color::TRANSPARENT_BLACK);
     /// Enable or disable this UI subsystem. When disabled, no inputs will be processed and nothing will be rendered.
     void SetRendering(bool enable) { isRendering_ = enable; }
+    /// Clear the render target at the start of every Render() call even when the clear color is fully transparent.
+    /// Offscreen canvases own their target and need this; instances rendering into a surface that already holds the
+    /// rendered scene (editor game view backbuffer) must leave it off, otherwise they would erase that scene.
+    void SetClearsRenderTarget(bool enable) { clearRenderTarget_ = enable; }
     /// Return true if this subsystem is rendering. When disabled, it is still possible to manually render by calling Render() method.
     bool IsRendering() const { return isRendering_; }
     /// Return true if input is captured by UI.
@@ -181,6 +185,8 @@ private:
     WeakPtr<RenderSurface> renderSurface_;
     /// Color used to clear render surface if not rendering into backbuffer.
     Color clearColor_ = Color::TRANSPARENT_BLACK;
+    /// Whether Render() clears the render target regardless of the clear color alpha.
+    bool clearRenderTarget_ = false;
     /// Flag indicating RmlUi debugger is already initialized.
     bool debuggerInitialized_ = false;
     /// Whether current subsystem is rendering or not.

@@ -46,6 +46,7 @@ RmlWorldCanvas::RmlWorldCanvas(Context* context)
     : CustomGeometry(context)
 {
     offScreenUI_ = new RmlUI(context_, Format("RmlWorldCanvas_{:p}", static_cast<void*>(this)).c_str());
+    offScreenUI_->SetClearsRenderTarget(true);
     texture_ = MakeShared<Texture2D>(context_);
     SetNumGeometries(1);
     SetDynamic(true);

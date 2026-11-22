@@ -53,6 +53,7 @@ RmlCanvasComponent::RmlCanvasComponent(Context* context)
     : LogicComponent(context)
 {
     offScreenUI_ = new RmlUI(context_, Format("RmlTextureComponent_{:p}", (void*)this).c_str());
+    offScreenUI_->SetClearsRenderTarget(true);
     offScreenUI_->OnMouseMoveEvent.Subscribe(this, &RmlCanvasComponent::RemapMousePos);
     texture_ = MakeShared<Texture2D>(context_);
     SetUpdateEventMask(USE_UPDATE);

@@ -888,7 +888,10 @@ void RmlUI::Render()
     {
         const RenderTargetView renderTargets[] = {renderSurface_->GetView()};
         renderContext->SetRenderTargets(ea::nullopt, renderTargets);
-        if (clearColor_.a_ > 0)
+        // A transparent clear color used to mean "overlay on top of whatever this surface already holds", which is
+        // what the editor game view wants. Own-target consumers (offscreen canvases) opt in via SetClearsRenderTarget,
+        // otherwise their previous frame's content stays composited underneath and changed glyphs pile up as ghosts.
+        if (clearRenderTarget_ || clearColor_.a_ > 0)
             renderContext->ClearRenderTarget(0, clearColor_);
     }
     renderContext->SetFullViewport();
