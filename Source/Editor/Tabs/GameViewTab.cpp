@@ -248,11 +248,17 @@ private:
     void UpdateRenderSurface()
     {
         RenderSurface* backbufferSurface = backbuffer_->GetTexture()->GetRenderSurface();
-        if (backbufferSurface_ != backbufferSurface)
+        // Resizing keeps the same RenderSurface object (Texture::Create only rebuilds
+        // it when the surface count changes), so comparing the pointer alone misses
+        // every panel resize: the RmlUi context and legacy UI would keep the
+        // dimensions of the last surface swap and stop matching the visible rect.
+        const IntVector2 surfaceSize = backbufferSurface ? backbufferSurface->GetSize() : IntVector2::ZERO;
+        if (backbufferSurface_ != backbufferSurface || backbufferSurfaceSize_ != surfaceSize)
         {
             backbufferSurface_ = backbufferSurface;
+            backbufferSurfaceSize_ = surfaceSize;
             renderer_->SetBackbufferRenderSurface(backbufferSurface_);
-            legacyUI_->SetCustomSize(backbufferSurface->GetSize());
+            legacyUI_->SetCustomSize(surfaceSize);
 #if URHO3D_RMLUI
             rmlUI_->SetRenderTarget(backbufferSurface_);
 #endif
@@ -349,6 +355,8 @@ private:
 
     CustomBackbufferTexture* backbuffer_{};
     WeakPtr<RenderSurface> backbufferSurface_;
+    /// Size the UI render targets were last reconfigured for; the surface object survives resizes.
+    IntVector2 backbufferSurfaceSize_;
     WeakPtr<Scene> editorScene_;
     /// Scene state as it was before Play started; restored on Stop.
     PackedSceneData sceneSnapshot_;
