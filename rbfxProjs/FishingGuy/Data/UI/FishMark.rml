@@ -1,0 +1,35 @@
+<!--
+    FishMark.rml —— 拉杆竖条里的鱼标记：位置由 Lua 每帧 SetPosition 驱动，鱼种靠 data-if 三选一。
+    它是 LuaRmlUIComponent（要数据绑定），绑定节点必须包在 data-model 容器里。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <style>
+        @spritesheet m_crucian {
+            src: /Textures/Fish/fish_crucian.png;
+            markCrucian: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet m_koi {
+            src: /Textures/Fish/fish_koi.png;
+            markKoi: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet m_puffer {
+            src: /Textures/Fish/fish_puffer.png;
+            markPuffer: 0dp 0dp 256dp 256dp;
+        }
+        .mark { position: absolute; left: 0dp; top: 0dp; width: 60dp; height: 60dp; pointer-events: none; }
+        .crucian { decorator: image(markCrucian); }
+        .koi { decorator: image(markKoi); }
+        .puffer { decorator: image(markPuffer); }
+    </style>
+</head>
+<body style="display: block; position: absolute; width: 60dp; height: 60dp; pointer-events: none;">
+<div data-model="{{__data_model_id}}">
+    <div class="mark crucian" data-if="markC"></div>
+    <div class="mark koi" data-if="markK"></div>
+    <div class="mark puffer" data-if="markP"></div>
+</div>
+</body>
+</rml>

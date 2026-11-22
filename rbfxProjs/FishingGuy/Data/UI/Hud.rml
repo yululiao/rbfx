@@ -1,0 +1,179 @@
+<!--
+    Hud.rml —— 顶部背包 + 拉杆竖条 + 提示与详情卡。动态值全走数据模型绑定（Lua 改值后 MarkDirty）。
+
+    约定（与 FireGame 同源，实测只有这两种绑定写法）：
+      * 绑定节点必须包在 <div data-model="{{__data_model_id}}"> 里。
+      * 文本 {{name}}；显隐 data-if="name"（bool）。
+      * 内联 style 里绝不能出现 {{}}，RCSS 解析器会直接崩，所以进度条用「一格一个 data-if」
+        的分段灯做，而不是 <progress>（主题 default.rcss 不在本工程里，progress 无样式可用）。
+      * 单位一律 dp，1dp = UI_SCALE 画布像素；颜色 RRGGBBAA。本工程内联档（RCSS 的 var()/
+        text-shadow 在这个 vendored RmlUi 里都不支持），所以尺寸是字面值。
+      * @spritesheet 的矩形是原始像素坐标（贴图多大就写多大）。
+      * 几何与 game/Config.lua 的 BAG / REEL / CARD 是同一套数字，改一处要同步改另一处
+        （命中判定用 Config 那份，画出来的是这里，两者错位就是「看着能点却点不动」）。
+
+    居中（照 FireGame/Data/UI/GameHud.rml 的 start_panel：零尺寸锚点 + 子节点负 dp）：
+        <div style="position:absolute; left:50%; top:88dp; width:0; height:0;">
+            <div style="position:absolute; left:-322dp; top:0; width:644dp; ...">
+      锚点负责「屏幕上的哪个点」，子盒负责「从这个点往哪长」。定宽盒一律这样摆，
+      不用 transform: translate(-50%) —— FireGame 里 translate 只出现在 rotate 和自适应宽度的
+      小标签上，定宽盒子从没依赖过它，别拿本工程当试验田。
+      水平靠右的件（竖条、进度灯）锚点写 right，子盒用负 left 往回长；垂直居中同理用负 top。
+
+    输入：本文档不吃指针（全树 pointer-events: none），点哪儿由 game/Hud.lua 的 HitTest 算。
+    理由是编辑器 GameView 与抖音真机的 hover 时序不一致，把「按到哪」放在自己算的几何里
+    只有一套行为要验。
+
+    锚定：短边折算成 dp 恒等于 Config.UI_DESIGN_SHORT_SIDE（700dp，UI_SCALE 无上下限），所以
+      * 背包行整行 644dp，横着必须在 700dp 内；
+      * 拉杆竖条按垂直居中锚，不能 top:300dp 起 620dp 高——
+        编辑器 GameView 接近方形时纵向只有 ~700dp，那种写法会把条拖出屏幕下沿。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+    <style>
+        /* 本工程没有 default.rcss，字号全靠内联；字体族必须自己指到 main.lua 里 LoadFont 的那张，
+           否则 RmlUi 报 "No font face defined. Missing 'font-family'"（FireGame 是写在 default.rcss 的 body 上）。 */
+        body { font-family: "Noto Sans SC"; font-weight: normal; font-style: normal; }
+        @spritesheet wood {
+            src: /Textures/UI/ui_panel_wood.png;
+            woodOuter: 0dp 0dp 512dp 512dp;
+            woodInner: 120dp 120dp 272dp 272dp;
+        }
+        @spritesheet bag {
+            src: /Textures/UI/ui_icon_bag.png;
+            bagIcon: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet f_crucian {
+            src: /Textures/Fish/fish_crucian.png;
+            crucianImg: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet f_koi {
+            src: /Textures/Fish/fish_koi.png;
+            koiImg: 0dp 0dp 256dp 256dp;
+        }
+        @spritesheet f_puffer {
+            src: /Textures/Fish/fish_puffer.png;
+            pufferImg: 0dp 0dp 256dp 256dp;
+        }
+
+        .slot {
+            position: absolute; top: 0dp; width: 88dp; height: 88dp;
+            decorator: ninepatch(woodOuter, woodInner);
+            pointer-events: none;
+        }
+        .fish {
+            position: absolute; left: 10dp; top: 12dp; width: 68dp; height: 68dp;
+            pointer-events: none;
+        }
+        .crucian { decorator: image(crucianImg); }
+        .koi { decorator: image(koiImg); }
+        .puffer { decorator: image(pufferImg); }
+        .count {
+            position: absolute; right: 6dp; bottom: 2dp;
+            color: #ffe9b9ff; font-size: 22dp; font-weight: bold; pointer-events: none;
+        }
+        .txt { color: #f4e7cfff; font-size: 24dp; }
+        .seg_off { position: absolute; left: 0dp; width: 20dp; height: 50dp; background-color: #1d1712cc; }
+        .seg_on { position: absolute; left: 0dp; width: 20dp; height: 50dp; background-color: #79c268ff; }
+    </style>
+</head>
+<body class="fullscreen" style="pointer-events: none;">
+<div data-model="{{__data_model_id}}">
+
+    <!-- 顶部背包：6 格 + 左侧布袋标。整行 644dp 水平居中，rowTop 88dp 是刘海安全区留白。 -->
+    <div style="position: absolute; left: 50%; top: 88dp; width: 0dp; height: 0dp;">
+        <div style="position: absolute; left: -322dp; top: 0dp; width: 644dp; height: 88dp;">
+            <div style="position: absolute; left: 0dp; top: 10dp; width: 68dp; height: 68dp; decorator: image(bagIcon);"></div>
+            <div class="slot" style="left: 76dp;">
+                <div class="fish crucian" data-if="s0c"></div>
+                <div class="fish koi" data-if="s0k"></div>
+                <div class="fish puffer" data-if="s0p"></div>
+                <div class="count" data-if="s0has">{{s0n}}</div>
+            </div>
+            <div class="slot" style="left: 172dp;">
+                <div class="fish crucian" data-if="s1c"></div>
+                <div class="fish koi" data-if="s1k"></div>
+                <div class="fish puffer" data-if="s1p"></div>
+                <div class="count" data-if="s1has">{{s1n}}</div>
+            </div>
+            <div class="slot" style="left: 268dp;">
+                <div class="fish crucian" data-if="s2c"></div>
+                <div class="fish koi" data-if="s2k"></div>
+                <div class="fish puffer" data-if="s2p"></div>
+                <div class="count" data-if="s2has">{{s2n}}</div>
+            </div>
+            <div class="slot" style="left: 364dp;">
+                <div class="fish crucian" data-if="s3c"></div>
+                <div class="fish koi" data-if="s3k"></div>
+                <div class="fish puffer" data-if="s3p"></div>
+                <div class="count" data-if="s3has">{{s3n}}</div>
+            </div>
+            <div class="slot" style="left: 460dp;">
+                <div class="fish crucian" data-if="s4c"></div>
+                <div class="fish koi" data-if="s4k"></div>
+                <div class="fish puffer" data-if="s4p"></div>
+                <div class="count" data-if="s4has">{{s4n}}</div>
+            </div>
+            <div class="slot" style="left: 556dp;">
+                <div class="fish crucian" data-if="s5c"></div>
+                <div class="fish koi" data-if="s5k"></div>
+                <div class="fish puffer" data-if="s5p"></div>
+                <div class="count" data-if="s5has">{{s5n}}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 收获飘字（背包行下方）与底部操作提示：都是 660dp 宽、居中、文字居中 -->
+    <div style="position: absolute; left: 50%; top: 200dp; width: 0dp; height: 0dp;">
+        <div class="txt" data-if="showToast" style="position: absolute; left: -330dp; top: 0dp; width: 660dp; text-align: center; font-size: 28dp; color: #ffe27aff;">{{toast}}</div>
+    </div>
+    <div style="position: absolute; left: 50%; bottom: 36dp; width: 0dp; height: 0dp;">
+        <div class="txt" style="position: absolute; left: -330dp; bottom: 0dp; width: 660dp; text-align: center; font-size: 22dp; color: #e8dccca8;">{{hint}}</div>
+    </div>
+
+    <!-- 拉杆竖条：外框 + 左侧 10 段进度灯。绿区与鱼标记是另开的两个定位文档（UI/ReelBar.rml、
+         UI/FishMark.rml），位置由 Lua 每帧 SetPosition 驱动，这里只画静止部分。
+         段距 56dp × 10 = 560dp 与外框同高，内槽 14dp 留白对应 Config.REEL.pad。
+         seg0 排在最底（top:504dp）往上递减：进度是从下往上涨的，Lua 那边 idx < segOn 的语义不变。 -->
+    <div style="position: absolute; right: 40dp; top: 50%; width: 0dp; height: 0dp;">
+        <div id="reel_track" data-if="showReel" style="position: absolute; left: -96dp; top: -280dp; width: 96dp; height: 560dp; decorator: ninepatch(woodOuter, woodInner);">
+            <div style="position: absolute; left: 14dp; top: 14dp; width: 68dp; height: 532dp; background-color: #10151acc;"></div>
+        </div>
+    </div>
+    <div style="position: absolute; right: 146dp; top: 50%; width: 0dp; height: 0dp;">
+        <div id="reel_meter" data-if="showReel" style="position: absolute; left: -20dp; top: -280dp; width: 20dp; height: 560dp;">
+            <div class="seg_off" style="top: 504dp;"></div><div class="seg_on" data-if="seg0" style="top: 504dp;"></div>
+            <div class="seg_off" style="top: 448dp;"></div><div class="seg_on" data-if="seg1" style="top: 448dp;"></div>
+            <div class="seg_off" style="top: 392dp;"></div><div class="seg_on" data-if="seg2" style="top: 392dp;"></div>
+            <div class="seg_off" style="top: 336dp;"></div><div class="seg_on" data-if="seg3" style="top: 336dp;"></div>
+            <div class="seg_off" style="top: 280dp;"></div><div class="seg_on" data-if="seg4" style="top: 280dp;"></div>
+            <div class="seg_off" style="top: 224dp;"></div><div class="seg_on" data-if="seg5" style="top: 224dp;"></div>
+            <div class="seg_off" style="top: 168dp;"></div><div class="seg_on" data-if="seg6" style="top: 168dp;"></div>
+            <div class="seg_off" style="top: 112dp;"></div><div class="seg_on" data-if="seg7" style="top: 112dp;"></div>
+            <div class="seg_off" style="top: 56dp;"></div><div class="seg_on" data-if="seg8" style="top: 56dp;"></div>
+            <div class="seg_off" style="top: 0dp;"></div><div class="seg_on" data-if="seg9" style="top: 0dp;"></div>
+        </div>
+    </div>
+
+    <!-- 详情卡：点背包格子打开，点卡片以外任意处或右上角 × 关闭（关闭判定在 Lua 侧） -->
+    <div style="position: absolute; left: 50%; top: 50%; width: 0dp; height: 0dp;">
+        <div id="card" data-if="showCard" style="position: absolute; left: -230dp; top: -150dp; width: 460dp; height: 300dp; decorator: ninepatch(woodOuter, woodInner); pointer-events: none;">
+            <div class="fish crucian" data-if="cardC" style="left: 34dp; top: 70dp; width: 160dp; height: 160dp;"></div>
+            <div class="fish koi" data-if="cardK" style="left: 34dp; top: 70dp; width: 160dp; height: 160dp;"></div>
+            <div class="fish puffer" data-if="cardP" style="left: 34dp; top: 70dp; width: 160dp; height: 160dp;"></div>
+            <div style="position: absolute; left: 210dp; top: 70dp; width: 232dp;">
+                <div class="txt" style="font-size: 32dp; color: #ffe9b9ff;">{{cardName}}</div>
+                <div class="txt" style="font-size: 24dp; margin-top: 12dp;">{{cardDesc}}</div>
+            </div>
+            <div style="position: absolute; right: 0dp; top: 0dp; width: 72dp; height: 72dp;">
+                <div class="txt" style="text-align: center; font-size: 40dp; color: #ffe9b9ff;">×</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+</body>
+</rml>

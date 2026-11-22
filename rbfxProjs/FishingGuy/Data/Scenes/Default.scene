@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<resource _id="1">
+	<attributes>
+		<attribute name="Next Node ID" type="Int" value="4" />
+		<attribute name="Next Component ID" type="Int" value="6" />
+	</attributes>
+	<components>
+		<component _id="1" _typeName="Octree" />
+		<component _id="2" _typeName="LuaGameScript">
+			<attributes>
+				<attribute name="Script Path" type="String" value="Scripts/main.lua" />
+			</attributes>
+		</component>
+		<component _id="3" _typeName="RenderPipeline">
+			<attributes>
+				<attribute name="Color Space" type="String" value="LDR Gamma" />
+			</attributes>
+		</component>
+	</components>
+	<nodes>
+		<node _id="2">
+			<attributes>
+				<attribute name="Name" type="String" value="Global Zone" />
+			</attributes>
+			<components>
+				<component _id="4" _typeName="Zone">
+					<attributes>
+						<attribute name="Bounding Box Min" type="Vector3" value="-100 -100 -100" />
+						<attribute name="Bounding Box Max" type="Vector3" value="100 100 100" />
+						<attribute name="Ambient Color" type="Color" value="1 1 1 1" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+		<node _id="3">
+			<attributes>
+				<attribute name="Name" type="String" value="Camera" />
+				<attribute name="Position" type="Vector3" value="0 0 -10" />
+			</attributes>
+			<components>
+				<component _id="5" _typeName="Camera">
+					<attributes>
+						<attribute name="Orthographic" type="Bool" value="true" />
+						<attribute name="Orthographic Size" type="Float" value="17.920000" />
+						<attribute name="Far Clip" type="Float" value="100.000000" />
+					</attributes>
+				</component>
+			</components>
+		</node>
+	</nodes>
+	<auxiliary />
+</resource>

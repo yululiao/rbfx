@@ -1,0 +1,15 @@
+<!--
+    ReelBar.rml —— 拉杆小游戏的绿色捕获区。纯视觉件：位置由 Lua 每帧 SetPosition（画布像素）驱动，
+    尺寸固定 68x128dp，与 game/Config.lua 的 REEL.w / REEL.barH 内框一致。
+    body 必须 position:absolute，否则 SetPosition 写进来的 left/top 会被布局当 static 盒丢掉。
+-->
+<rml>
+<head>
+    <link type="text/rcss" href="rml.rcss"/>
+    <link type="text/rcss" href="layout.rcss"/>
+</head>
+<body style="display: block; position: absolute; width: 68dp; height: 128dp; pointer-events: none;">
+    <div style="position: absolute; left: 0dp; top: 0dp; width: 68dp; height: 128dp; background-color: #79c268e0; border: 2dp solid #2f5c28ff;"></div>
+    <div style="position: absolute; left: 4dp; top: 4dp; width: 60dp; height: 10dp; background-color: #b6e3a3a0;"></div>
+</body>
+</rml>
