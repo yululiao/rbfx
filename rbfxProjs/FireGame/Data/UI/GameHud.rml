@@ -23,7 +23,8 @@
         2/3 号技能键在同心的更大半径 250dp 上，分列 22°/68°（right182/bottom44、
         right44/bottom182，均为 100x100 的按钮外框值）。开火键几何对应 main.lua 的
         FIRE_BASE 与 core/FireButton 的按住判定，改一处要同时改另一处。
-      * 所以载具按钮不占扇形：它沿右边缘堆在弧外（right36/bottom420）。弹药块已移到左上波次列下方。
+      * 所以载具按钮不占扇形：它沿右边缘堆在弧外（right36/bottom420）。弹匣/装弹信息在
+        主角头顶血条右侧的 CD 环里（世界面板，UI/HpBar.rml），屏幕 HUD 不再重复一块。
 -->
 <rml>
 <head>
@@ -32,11 +33,12 @@
     <link type="text/rcss" href="default.rcss"/>
     <style>
         .bar_track { position: relative; background-color: #00000066; border-radius: 6dp; overflow: hidden; }
-        .label { color: #ffffffd9; font-size: 22dp; }
+        .label { color: #f4e7cfe6; font-size: 22dp; }
         .big { color: #ffffffff; font-size: 64dp; font-weight: bold; }
-        /* 摇杆外环改用抗锯齿圆盘贴图：border-radius 实心圆是 RmlUi 的多边形逼近、边缘不做 AA，
-           手机上（backbuffer 低于物理像素再拉伸）硬台阶特别明显。StickRing.png 已把“白 18% alpha”
-           烘进软边，decorator 按元素尺寸拉伸 + 双线性采样 → 不依赖 MSAA/分辨率也平滑。 */
+        /* 摇杆外环用原来的 StickRing.png（白 18% alpha 软边环）：玩具风的橙色环在摇杆上
+           太抢眼，外圈保持原来的低调白环；内圈手柄仍用玩具风 ui_knob.png。
+           border-radius 实心圆是 RmlUi 的多边形逼近、边缘不做 AA，手机上（backbuffer
+           低于物理像素再拉伸）硬台阶特别明显，所以仍走贴图 + 双线性拉伸。 */
         @spritesheet joystick {
             src: /Textures/StickRing.png;
             ringDisc: 0dp 0dp 256dp 256dp;
@@ -45,28 +47,33 @@
         /* 圆形按钮同一套解法：border-radius 实心圆是多边形逼近、边缘不做 AA，再加上真机
            backbuffer 低于物理像素再拉伸，边上的硬台阶特别明显。改用 256x256 软边圆盘贴图，
            靠 decorator 的双线性缩放到元素尺寸（画多大都平滑）。
-           贴图与颜色由 _gen_hud_disc.py 生成（颜色烘进贴图：decorator 不能染色，改配色要重跑）。
+           贴图与配色由 Tools/gen_ui_toy.py 生成（颜色烘进贴图：decorator 不能染色，改配色要重跑）。
            注意：三张图必须用不同的 sprite 名，同名会在全局精灵表里互相覆盖。 */
         @spritesheet hud_voice {
-            src: /Textures/BtnVoice.png;
+            src: /Textures/UIStyle/ui_disc_teal.png;
             voiceDisc: 0dp 0dp 256dp 256dp;
         }
         @spritesheet hud_board {
-            src: /Textures/BtnBoard.png;
+            src: /Textures/UIStyle/ui_disc_gold.png;
             boardDisc: 0dp 0dp 256dp 256dp;
         }
         @spritesheet hud_disembark {
-            src: /Textures/BtnDisembark.png;
+            src: /Textures/UIStyle/ui_disc_coral.png;
             disembarkDisc: 0dp 0dp 256dp 256dp;
         }
-        /* 设置按钮复用语音那颗圆盘贴图：BtnVoice.png 只是一枚纯色软边圆（不含图标），
-           拿来当设置按钮的底正合适。sprite 名仍叫 voiceDisc，换贴图要连这里一起改。 */
-        #settings_btn { decorator: image(voiceDisc); }
+        /* 设置按钮不写字：直接挂一枚齿轮图标（通用的设置符号，Tools/gen_ui_toy.py 生成），
+           图标本身就是按钮，不再垫圆盘。独立 sprite 表，别和其它盘共用名字。 */
+        @spritesheet hud_gear {
+            src: /Textures/UIStyle/ui_icon_gear.png;
+            gearIcon: 0dp 0dp 256dp 256dp;
+        }
+        #settings_btn { decorator: image(gearIcon); }
         #board_btn { decorator: image(boardDisc); }
         #disembark_btn { decorator: image(disembarkDisc); }
         /* 开火键：外圈直接复用摇杆那张软边圆环（同图同 sprite 名，不另建表），圆内一颗
            bullet.png 原图（128x128，decorator 拉伸到 64dp）。decorator 不能染色，
-           改配色只能换图。 */
+           改配色只能换图。玩具风珊瑚环 ui_ring.png 是为垫当初那 24 段 CD 刻度才换上的，
+           刻度已从屏幕上删掉（只留主角头顶那圈），外圈跟着回退，右下角不再抢戏。 */
         @spritesheet hud_bullet {
             src: /Textures/bullet.png;
             bulletIcon: 0dp 0dp 128dp 128dp;
@@ -89,22 +96,25 @@
             src: /Textures/RmlUI-2x.png;
             resolution: 2;
             check-mark-2x: 72px 32px 32px 32px;
+            close-button-2x: 0px 0px 40px 40px;
         }
         input.checkbox:checked { decorator: image(check-mark-2x); }
+        /* 对话框右上角的关闭叉：主题图集里的 close-button（白色 X，源图 0,0 40x40），不垫
+           底 plate——面板本身就是底。绝对定位量到 panel_card 的 padding box，而 panel_dark 的
+           九宫格边带只有 19.8dp（源图 36px / resolution 1.82），但 AI 手绘的圆角在角上往里鼓，
+           截屏量到角上约 28dp 才见深色区；28dp 的偏移正好把白叉压在奶油线上（白底等于隐形），
+           所以两边各取 40dp。div 挂 data-event-click 与 #settings_btn 同一写法。 */
+        .dialog_close { position: absolute; right: 40dp; top: 40dp; width: 26dp; height: 26dp;
+                        decorator: image(close-button-2x); cursor: pointer; }
         #fire_icon_big { decorator: image(bulletIcon); }
-        /* 按下态高亮：一张白 46% 软边圆盘（FirePress.png），叠在 18% 的外圈上整块亮起来。
+        /* 按下态高亮：一张奶白半透明软边圆盘（ui_press.png），叠在珊瑚色外环上整块亮起来。
            :active 用不了——#fire_btn 是 pointer-events:none 的纯绘制件，RmlUi 永远不知道
            它被按下；按钮的实际输入由 core/FireButton.lua 直接读，按下态也由 Lua 推回来。 */
         @spritesheet hud_fire_press {
-            src: /Textures/FirePress.png;
+            src: /Textures/UIStyle/ui_press.png;
             firePressDisc: 0dp 0dp 256dp 256dp;
         }
         #fire_press { decorator: image(firePressDisc); }
-        /* 开火键上的“弹丸 CD 环”：24 段刻度，geometry（left/top/rotate）写死在元素内联 style 里，
-           亮不亮由 data-if="cdTickN" 的 24 个布尔切换（Lua 侧 game/Hud.lua:SetFireCd 按填充比例
-           从第 1 段开始点亮）。为什么不用一条真弧线：RmlUi 没有 conic 渐变，本工程的 Lua 绑定
-           也只给到数据模型（改不了元素几何），24 段刻度是这套机制下唯一能做出圆环的写法。 */
-        .cd_tick { position: absolute; width: 4dp; height: 9dp; border-radius: 2dp; background-color: #9fe0ffcc; }
     </style>
 </head>
 <!-- body 设 pointer-events:none 的缘由：RmlUi 的 Context::OnFocusChange 在被聚焦元素所属文档
@@ -121,19 +131,15 @@
     <div style="position: absolute; left: 28dp; top: 24dp; width: 300dp;">
         <div class="label">第{{wave}}波</div>
         <div class="label" style="margin-top: 10dp; font-size: 24dp; color: #ffd24dff;">LV {{level}}</div>
-        <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4dp; width: 260dp; height: 10dp;"/>
+        <!-- 经验条底色：主题 default.rcss 给 progress 挂的是深棕渐变凹槽 decorator（不是
+             background-color，只覆盖 background-color 没用），这里按元素覆成深灰。两档取
+             38/3c 这种肉眼无差的邻值：照抄主题的 gradient 写法最稳，又不落在退化渐变上。 -->
+        <progress class="horizontal" data-value="xp" style="display: block; margin-top: 4dp; width: 260dp; height: 10dp; decorator: gradient(vertical #383838 #3c3c3c);"/>
         <div class="label" style="margin-top: 6dp; font-size: 18dp; color: #ffffff99;">{{narrate}}</div>
-        <!-- 弹药 + 装弹条 + 当前武器（弹丸数，随成长变化）。手动开火时整块不渲染
-             （data-if="showAmmoBlock"）：那时弹丸状态改由右下开火键上的 CD 环表达，
-             同一件事不留两处显示。 -->
-        <div data-if="showAmmoBlock" style="margin-top: 12dp; width: 200dp; text-align: left;">
-            <!-- 字号单独压到 .big 的 80%（64dp → 51dp）：弹药数不再是屏幕主角（已在左上角内），
-                 维持 64dp 会把这列标题（波次/等级）压成配角。class 不能直接改——右上分数共用 .big。 -->
-            <div class="big" style="font-size: 51dp;">{{ammo}}</div>
-            <progress class="horizontal" data-value="reload" style="display: block; margin-top: 6dp; width: 160dp; height: 10dp;"/>
-            <div class="label" style="margin-top: 6dp; font-size: 20dp; color: #9fe0ffd9;">弹丸 x{{pellets}}</div>
-        </div>
     </div>
+
+    <!-- 弹药不再在这里：弹匣剩余与装弹进度统一由主角头顶血条右侧的弹丸 CD 环表达
+         （UI/HpBar.rml，环心数字 + 24 段装弹刻度）。左上升级为成长信息栏，只留波次/等级/经验。 -->
 
     <!-- 右上：分数 + combo -->
     <div style="position: absolute; right: 28dp; top: 24dp; width: 220dp; text-align: right;">
@@ -143,10 +149,9 @@
 
     <!-- 右上角：设置入口。语音与屏幕方向都收进这块面板（原独立语音按钮已并入，2026-11）。
          data-if="settingsAvailable"：宿主既没有录音通路也没有切屏 API 时（编辑器/桌面）
-         整块不渲染——与旧语音按钮同一处理，不给点了没反应的假入口。 -->
-    <div data-if="settingsAvailable" id="settings_btn" data-event-click="settings_open" style="position: absolute; right: 28dp; top: 152dp; width: 88dp; height: 88dp; text-align: center; pointer-events: auto;">
-        <div style="position: relative; top: 26dp; color: #ffffffff; font-size: 26dp; font-weight: bold;">设置</div>
-    </div>
+         整块不渲染——与旧语音按钮同一处理，不给点了没反应的假入口。
+         尺寸缩到原来的一半（44dp）：真机上大图标会和右上角系统图标叠在一起；同时下移一档。 -->
+    <div data-if="settingsAvailable" id="settings_btn" data-event-click="settings_open" style="position: absolute; right: 28dp; top: 192dp; width: 44dp; height: 44dp; pointer-events: auto;"></div>
 
     <!-- 准星已移除：改为王者式自动吸附开火（见 Shooting.lua），命中确认靠下面的 hitmarker。 -->
 
@@ -171,7 +176,7 @@
          沿右边缘堆在扇形弧外（right36/bottom420）：右下角那块留给
          以角落为圆心的按钮扇形，96dp 的按钮放进去会把弧打断。 -->
     <div data-if="showBoard" id="board_btn" data-event-click="board" style="position: absolute; right: 36dp; bottom: 420dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
-        <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">登船</div>
+        <div style="position: relative; top: 32dp; color: #3b2a1ce6; font-size: 30dp; font-weight: bold;">登船</div>
     </div>
     <div data-if="showDisembark" id="disembark_btn" data-event-click="disembark" style="position: absolute; right: 36dp; bottom: 420dp; width: 96dp; height: 96dp; text-align: center; pointer-events: auto;">
         <div style="position: relative; top: 32dp; color: #ffffffff; font-size: 30dp; font-weight: bold;">下船</div>
@@ -188,39 +193,8 @@
              两个元素都只靠 data-if 切换，不碰内联 style 绑定（RCSS 解析不了 {{}}，见文件头）。
              大图标盖在小图标之上，故常态那颗不需要反向绑定。 -->
         <div data-if="fireButtonHeld" id="fire_press" style="position: absolute; left: 0; top: 0; width: 100dp; height: 100dp;"></div>
-        <!-- 装弹恢复圈（弹丸 CD）：24 段刻度从正上方顺时针铺满外环。刻度亮=已就绪；
-             只在手动开火时存在（整个 #fire_btn 带 data-if="showFireButton"），自动开火时
-             弹丸信息仍由左上角那块承担。 -->
-        <div data-if="cdTick1" class="cd_tick" style="left: 53.9dp; top: 0.9dp; transform: rotate(7.5deg);"></div>
-        <div data-if="cdTick2" class="cd_tick" style="left: 65.2dp; top: 3.9dp; transform: rotate(22.5deg);"></div>
-        <div data-if="cdTick3" class="cd_tick" style="left: 75.4dp; top: 9.8dp; transform: rotate(37.5deg);"></div>
-        <div data-if="cdTick4" class="cd_tick" style="left: 83.7dp; top: 18.1dp; transform: rotate(52.5deg);"></div>
-        <div data-if="cdTick5" class="cd_tick" style="left: 89.6dp; top: 28.3dp; transform: rotate(67.5deg);"></div>
-        <div data-if="cdTick6" class="cd_tick" style="left: 92.6dp; top: 39.6dp; transform: rotate(82.5deg);"></div>
-        <div data-if="cdTick7" class="cd_tick" style="left: 92.6dp; top: 51.4dp; transform: rotate(97.5deg);"></div>
-        <div data-if="cdTick8" class="cd_tick" style="left: 89.6dp; top: 62.7dp; transform: rotate(112.5deg);"></div>
-        <div data-if="cdTick9" class="cd_tick" style="left: 83.7dp; top: 72.9dp; transform: rotate(127.5deg);"></div>
-        <div data-if="cdTick10" class="cd_tick" style="left: 75.4dp; top: 81.2dp; transform: rotate(142.5deg);"></div>
-        <div data-if="cdTick11" class="cd_tick" style="left: 65.2dp; top: 87.1dp; transform: rotate(157.5deg);"></div>
-        <div data-if="cdTick12" class="cd_tick" style="left: 53.9dp; top: 90.1dp; transform: rotate(172.5deg);"></div>
-        <div data-if="cdTick13" class="cd_tick" style="left: 42.1dp; top: 90.1dp; transform: rotate(187.5deg);"></div>
-        <div data-if="cdTick14" class="cd_tick" style="left: 30.8dp; top: 87.1dp; transform: rotate(202.5deg);"></div>
-        <div data-if="cdTick15" class="cd_tick" style="left: 20.6dp; top: 81.2dp; transform: rotate(217.5deg);"></div>
-        <div data-if="cdTick16" class="cd_tick" style="left: 12.3dp; top: 72.9dp; transform: rotate(232.5deg);"></div>
-        <div data-if="cdTick17" class="cd_tick" style="left: 6.4dp; top: 62.7dp; transform: rotate(247.5deg);"></div>
-        <div data-if="cdTick18" class="cd_tick" style="left: 3.4dp; top: 51.4dp; transform: rotate(262.5deg);"></div>
-        <div data-if="cdTick19" class="cd_tick" style="left: 3.4dp; top: 39.6dp; transform: rotate(277.5deg);"></div>
-        <div data-if="cdTick20" class="cd_tick" style="left: 6.4dp; top: 28.3dp; transform: rotate(292.5deg);"></div>
-        <div data-if="cdTick21" class="cd_tick" style="left: 12.3dp; top: 18.1dp; transform: rotate(307.5deg);"></div>
-        <div data-if="cdTick22" class="cd_tick" style="left: 20.6dp; top: 9.8dp; transform: rotate(322.5deg);"></div>
-        <div data-if="cdTick23" class="cd_tick" style="left: 30.8dp; top: 3.9dp; transform: rotate(337.5deg);"></div>
-        <div data-if="cdTick24" class="cd_tick" style="left: 42.1dp; top: 0.9dp; transform: rotate(352.5deg);"></div>
-        <div id="fire_icon" style="position: absolute; left: 35dp; top: 26dp; width: 30dp; height: 30dp;"></div>
-        <div data-if="fireButtonHeld" id="fire_icon_big" style="position: absolute; left: 31dp; top: 22dp; width: 38dp; height: 38dp;"></div>
-        <!-- 弹药数：子弹图标正下方的数字，每开一枪减一（5 4 3 2 1），打空归 0、装弹完回到满。
-             手动开火时左上那块弹药 UI 整块不渲染，弹匣剩几发只能靠这颗数，所以它必须在
-             CD 环内圈里（半径 40dp 以内才不被刻度压住），故字号取 20dp、位置压在 y=62dp。 -->
-        <div class="label" style="position: absolute; left: 0; top: 62dp; width: 100dp; text-align: center; font-size: 20dp; color: #9fe0ffd9;">{{ammo}}</div>
+        <div id="fire_icon" style="position: absolute; left: 33dp; top: 33dp; width: 34dp; height: 34dp;"></div>
+        <div data-if="fireButtonHeld" id="fire_icon_big" style="position: absolute; left: 29dp; top: 29dp; width: 42dp; height: 42dp;"></div>
     </div>
 
     <!-- 左下：虚拟摇杆底环（几何与 Joystick 判定共用，勿单独改）。
@@ -237,7 +211,7 @@
             <div style="position: absolute; left: -320dp; top: -150dp; width: 640dp;">
                 <div style="color: #ffffffff; font-size: 72dp; font-weight: bold;">海盗防线</div>
                 <div class="label" style="margin-top: 24dp; font-size: 32dp;">拖动摇杆走位躲海盗，默认自动开火</div>
-                <button data-event-click="start" style="margin-top: 52dp; padding: 18dp 64dp; font-size: 32dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">开始游戏</button>
+                <button class="btn_primary" data-event-click="start" style="margin-top: 52dp; padding: 18dp 64dp; font-size: 32dp;">开始游戏</button>
             </div>
         </div>
     </div>
@@ -254,17 +228,17 @@
                      + Config.AD.REWARDED_UNIT_ID 非空。当前没广告位时整条不渲染，玩家看不到任何广告痕迹；
                      金色放在“再来一局”之上：败局这一刻是“不甘心”的峰值，续战是首选动作。 -->
                 <div data-if="reviveAvailable">
-                    <button data-event-click="revive" style="margin-top: 24dp; padding: 14dp 48dp; font-size: 30dp; background-color: #c8901ee6; color: #ffffffff; border-radius: 12dp;">看广告复活</button>
+                    <button class="btn_accent" data-event-click="revive" style="margin-top: 24dp; padding: 14dp 48dp; font-size: 30dp;">看广告复活</button>
                 </div>
-                <button data-event-click="restart" style="margin-top: 28dp; padding: 14dp 48dp; font-size: 30dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 12dp;">再来一局</button>
+                <button class="btn_primary" data-event-click="restart" style="margin-top: 28dp; padding: 14dp 48dp; font-size: 30dp;">再来一局</button>
                 <!-- 战绩分享：宿主可用才显示（编辑器/桌面没有分享通路）；战绩文字由 Lua 拼，
                      分享面板由宿主自己拉起 -->
                 <div data-if="shareAvailable">
-                    <button data-event-click="share" style="margin-top: 18dp; padding: 10dp 36dp; font-size: 26dp; background-color: #4a8f4ae6; color: #ffffffff; border-radius: 10dp;">分享战绩</button>
+                    <button class="btn_secondary" data-event-click="share" style="margin-top: 18dp; padding: 10dp 36dp; font-size: 26dp;">分享战绩</button>
                 </div>
                 <!-- 失守这一刻才是吐槽冲动的最高点：再给一个语音入口（面板在 DOM 后面，盖在它之上） -->
                 <div data-if="voiceAvailable">
-                    <button data-event-click="voice_open" style="margin-top: 18dp; padding: 10dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录我的吐槽</button>
+                    <button class="btn_secondary" data-event-click="voice_open" style="margin-top: 18dp; padding: 10dp 36dp; font-size: 26dp;">录我的吐槽</button>
                 </div>
             </div>
         </div>
@@ -278,7 +252,17 @@
          语音与开火方式；开火方式是纯本地设置，所以设置按钮恒在（见顶部 #settings_btn）。 -->
     <div data-if="settingsOpen" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
         <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
-            <div style="position: absolute; left: -320dp; top: -300dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+            <!-- 内边距不是四边等分（三块 panel_card 同此）：panel_dark 的九宫格
+                 边框是源图 36px / resolution 1.82 ≈ 19.8dp 厚，而 ninepatch 画在元素的
+                 padding box 上，四边都只给 24dp 时最下面那颗按钮离外框只剩 4dp、顶上标题也
+                 几乎贴上奶油线（CJK 字形基本吃满 em 框，行框上方那点空是虚的）。故上 40dp、
+                 下 44dp、左右仍 24dp；比原来四边 24dp 多出 36dp 高度，用 top 各上抬 18dp
+                 抵掉，面板视觉中心不变。
+                 底部那行「关闭」按钮已换成右上角的叉（见 .dialog_close）：卡片高度由内容撑出，
+                 少一行就矮一截而 top 钉在中心上，故设置/侧边栏各下移约半行高（45/34dp）找回
+                 中心；语音面板删的只是同一排的第二颗按钮，排高没变，top 不动。 -->
+            <div class="panel_card" style="position: absolute; left: -320dp; top: -273dp; width: 640dp; padding: 40dp 24dp 44dp 24dp; text-align: center;">
+                <div class="dialog_close" data-event-click="settings_close"></div>
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">设置</div>
 
                 <!-- 屏幕方向：宿主 setDeviceOrientation 才出现。一颗按钮做反向切换（当前竖屏就写
@@ -288,15 +272,15 @@
                 <div data-if="orientationAvailable" style="margin-top: 26dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">屏幕方向</div>
                     <div style="margin-top: 12dp;">
-                        <button data-event-click="orientation_toggle" style="padding: 12dp 44dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">{{orientationToggleLabel}}</button>
+                        <button class="btn_secondary" data-event-click="orientation_toggle" style="padding: 12dp 44dp; font-size: 26dp;">{{orientationToggleLabel}}</button>
                     </div>
-                    <div class="label" style="margin-top: 10dp; font-size: 20dp; color: #9fe0ffd9;">{{orientationStatus}}</div>
+                    <div class="label" style="margin-top: 10dp; font-size: 20dp; color: #f4e7cf99;">{{orientationStatus}}</div>
                 </div>
 
                 <!-- 自定义语音：宿主 SDK 可用才出现（编辑器/桌面没有麦克风通路） -->
                 <div data-if="voiceAvailable" style="margin-top: 26dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">自定义语音</div>
-                    <button data-event-click="voice_open" style="margin-top: 12dp; padding: 12dp 36dp; font-size: 26dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">录制语音</button>
+                    <button class="btn_secondary" data-event-click="voice_open" style="margin-top: 12dp; padding: 12dp 36dp; font-size: 26dp;">录制语音</button>
                 </div>
 
                 <!-- 开火方式：纯本地设置，不依赖宿主能力，恒显示。就是一个普通 checkbox：
@@ -311,9 +295,6 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 30dp;">
-                    <button data-event-click="settings_close" style="padding: 12dp 44dp; font-size: 26dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">关闭</button>
-                </div>
             </div>
         </div>
     </div>
@@ -325,50 +306,48 @@
              面板自身 pointer-events:auto，否则会从 body 的 none 继承成点不动。 -->
         <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
             <!-- 宽 640dp（窄横竖屏画布约 700dp：即使 box-sizing 按 content-box 算，加 24dp 两侧 padding 仍不超宽） -->
-            <div style="position: absolute; left: -320dp; top: -250dp; width: 640dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+            <div class="panel_card" style="position: absolute; left: -320dp; top: -268dp; width: 640dp; padding: 40dp 24dp 44dp 24dp; text-align: center;">
+                <div class="dialog_close" data-event-click="voice_close"></div>
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">自定义语音</div>
                 <div class="label" style="margin-top: 8dp; font-size: 20dp; color: #ffffff99;">录一句，战场上放你自己的声音（最长 3 秒）；清除后回到预置旁白</div>
 
                 <div style="margin-top: 22dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">失守吐槽 · 防线被攻破时播</div>
-                    <button data-event-click="voice_rec_lose" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
-                    <button data-event-click="voice_preview_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10dp;">试听</button>
-                    <button data-event-click="voice_clear_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #444a55e6; color: #ffffffff; border-radius: 10dp;">清除</button>
+                    <button class="btn_primary" data-event-click="voice_rec_lose" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp;">录一句</button>
+                    <button class="btn_secondary" data-event-click="voice_preview_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp;">试听</button>
+                    <button class="btn_clear" data-event-click="voice_clear_lose" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp;">清除</button>
                 </div>
 
                 <div style="margin-top: 18dp;">
                     <div class="label" style="font-size: 24dp; color: #ffffffd9;">连杀战吼 · 5 连杀起每档播</div>
-                    <button data-event-click="voice_rec_kill" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp; background-color: #d94b3aff; color: #ffffffff; border-radius: 10dp;">录一句</button>
-                    <button data-event-click="voice_preview_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #2e8b8be6; color: #ffffffff; border-radius: 10dp;">试听</button>
-                    <button data-event-click="voice_clear_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #444a55e6; color: #ffffffff; border-radius: 10dp;">清除</button>
+                    <button class="btn_primary" data-event-click="voice_rec_kill" style="margin-top: 8dp; padding: 10dp 32dp; font-size: 24dp;">录一句</button>
+                    <button class="btn_secondary" data-event-click="voice_preview_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp;">试听</button>
+                    <button class="btn_clear" data-event-click="voice_clear_kill" style="margin-top: 8dp; margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp;">清除</button>
                 </div>
 
                 <div data-if="voiceRecording" style="margin-top: 16dp; color: #ff6b6bff; font-size: 24dp; font-weight: bold;">● 录音中…</div>
-                <div class="label" style="margin-top: 12dp; font-size: 20dp; color: #9fe0ffd9;">{{voiceStatus}}</div>
+                <div class="label" style="margin-top: 12dp; font-size: 20dp; color: #f4e7cf99;">{{voiceStatus}}</div>
 
                 <div style="margin-top: 22dp;">
-                    <button data-event-click="voice_filter" style="padding: 10dp 28dp; font-size: 24dp; background-color: #3a6ea5e6; color: #ffffffff; border-radius: 10dp;">音色 {{voiceFilterName}}</button>
-                    <button data-event-click="voice_close" style="margin-left: 14dp; padding: 10dp 28dp; font-size: 24dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">关闭</button>
+                    <button class="btn_secondary" data-event-click="voice_filter" style="padding: 10dp 28dp; font-size: 24dp;">音色 {{voiceFilterName}}</button>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- 侧边栏复访引导（抖音必接合规，game/Sidebar.lua）：非侧边栏首次进入、开始画面收起后弹一次。
-         「去侧边栏」经 navigateToScene 拉起宿主侧边栏面板，「知道了」只关面板；点过任一后宿主
+         「去侧边栏」经 navigateToScene 拉起宿主侧边栏面板，右上角的叉只关面板；点过任一后宿主
          storage 记住，之后不再弹。模态：main.lua 据此把世界 dt 压成 0。面板在 DOM 最后 = 盖最上层。 -->
     <div data-if="sidebarGuide" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #000000b3; pointer-events: auto;">
         <!-- 居中锚点：与语音面板同一手法（left/top 50% 零尺寸盒 + 内层左上回半个卡片） -->
         <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0;">
-            <div style="position: absolute; left: -300dp; top: -160dp; width: 600dp; padding: 24dp; background-color: #1a1f2bee; border-radius: 20dp; text-align: center;">
+            <div class="panel_card" style="position: absolute; left: -300dp; top: -144dp; width: 600dp; padding: 40dp 24dp 44dp 24dp; text-align: center;">
+                <div class="dialog_close" data-event-click="sidebar_close"></div>
                 <div style="color: #ffffffff; font-size: 38dp; font-weight: bold;">添加到侧边栏</div>
                 <div class="label" style="margin-top: 12dp; font-size: 22dp; color: #ffffffcc;">把游戏固定在抖音侧边栏，下次一键进入</div>
                 <div class="label" style="margin-top: 6dp; font-size: 22dp; color: #ffd24dff;">回归奖励：攻击 +20%，生命 +25%</div>
                 <div style="margin-top: 30dp;">
-                    <button data-event-click="sidebar_go" style="padding: 14dp 44dp; font-size: 28dp; background-color: #c8901ee6; color: #ffffffff; border-radius: 10dp;">去侧边栏</button>
-                </div>
-                <div style="margin-top: 14dp;">
-                    <button data-event-click="sidebar_close" style="padding: 10dp 32dp; font-size: 24dp; background-color: #555555e6; color: #ffffffff; border-radius: 10dp;">知道了</button>
+                    <button class="btn_accent" data-event-click="sidebar_go" style="padding: 14dp 44dp; font-size: 28dp;">去侧边栏</button>
                 </div>
             </div>
         </div>

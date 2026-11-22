@@ -5,15 +5,15 @@
     <link type="text/rcss" href="default.rcss"/>
     <style>
         /* 帽同样改抗锯齿圆盘贴图（与 GameHud 外环同理，治手机上 border-radius 硬边锯齿）。
-           StickKnob.png 已把 #222831 / 90% alpha 烘进软边，decorator 拉伸 + 双线性采样。 */
+           ui_knob.png 是 4x 超采样的奶白圆帽（深棕描边 + 左上高光），decorator 拉伸 + 双线性采样。 */
         @spritesheet knob {
-            src: /Textures/StickKnob.png;
+            src: /Textures/UIStyle/ui_knob.png;
             knobDisc: 0dp 0dp 256dp 256dp;
         }
         #knob_cap { decorator: image(knobDisc); }
     </style>
   </head>
-  <!-- 虚拟摇杆帽（深色实心圆，即玩家眼中的“内圈”）：body 必须带 position:absolute，
+  <!-- 虚拟摇杆帽（奶白实心圆 + 深棕描边）：body 必须带 position:absolute，
        否则 SetPosition 写入根元素的 left/top 会被布局当作 static 盒丢弃；
        尺寸 96x96 dp（= 96×UI_SCALE 画布像素），位置由 main.lua 每帧 SetPosition 驱动
        （SetPosition 走画布像素，故 main 侧的帽半宽也是 dp 基础值×UI_SCALE）。

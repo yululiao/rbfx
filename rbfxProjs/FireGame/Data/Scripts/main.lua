@@ -487,6 +487,11 @@ hpBar = HpBar.Build(scene, {
     -- 异常缺字段时回落 Config 值。
     getHp = function() return waves.playerHp, waves.playerMaxHp or Config.PLAYER_HP end,
     overhead = Config.HP_BAR.overhead,
+    -- 血条右侧的弹丸 CD 环：环心数字读弹匣剩余、亮刻度读装弹进度（都是 Hud 从 Shooting
+    -- 镜像过来的值，不直接抓 Shooting——hpBar 比 shooting 先建，闭包抓局部变量虽可行，
+    -- 但环和 HUD 开火键那圈必须同源，统一走 Hud 才只有一个真相）。
+    getAmmo = function() return hud.ammo end,
+    getCd = function() return hud.cdProgress end,
     isHidden = function() return player.dying end,
 })
 -- 两座炮塔头顶血条：复用主角那套世界面板（HpBar.lua）但走 ratio 模式（连续进度条 UI/TurretHpBar.rml，
@@ -504,6 +509,8 @@ for i, tw in ipairs(turrets.towers) do
         overhead = Config.TURRET_HP_BAR.overhead,
         worldW = Config.TURRET_HP_BAR.worldW,
         worldH = Config.TURRET_HP_BAR.worldH,
+        texW = Config.TURRET_HP_BAR.texW,
+        texH = Config.TURRET_HP_BAR.texH,
     })
 end
 shooting = Shooting.Build({
@@ -522,7 +529,6 @@ grow = Grow.Build({
         -- 弹丸越多爆炸会越频繁（combo 靠击杀数涨），达阈值后把间隔抬到 BIG 档补偿，防后期滚雪球。
         if waves then waves:SetBlastEvery(Config.ComboBlastEvery(snapshot.pellets)) end
         if hud then
-            hud:SetPellets(snapshot.pellets)
             -- 开局不提醒；真正升级时把"变强"做成一次可听可见的反馈（飘字旁白 + 轻震）
             if not isInitial and grow and grow.level > 1 then
                 hud:Narrate("升级！弹丸 x" .. snapshot.pellets, 2.0)

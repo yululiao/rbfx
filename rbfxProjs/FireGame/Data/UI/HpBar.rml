@@ -1,24 +1,30 @@
 <!--
-    HpBar.rml —— 主角头顶的 3 格血条。它不是屏幕 HUD，而是渲染进一张离屏纹理、贴在被
-    game/HpBar.lua 创建的 3D 节点上的"世界面板"（机制同 107_HelloRmlUI 里贴旋转方块那份：
-    同一个 Node 上放 RmlCanvasComponent + LuaRmlUIComponent，文档会被自动挪进离屏 UI，
-    屏幕那份同时关闭，所以不会既在 3D 里有一份、屏幕上又剩一份）。
+    HpBar.rml —— 主角头顶的 3 格血条 + 右侧弹丸 CD 环。它不是屏幕 HUD，而是渲染进一张离屏
+    纹理、贴在被 game/HpBar.lua 创建的 3D 节点上的"世界面板"（机制同 107_HelloRmlUI 里贴
+    旋转方块那份：同一个 Node 上放 RmlCanvasComponent + LuaRmlUIComponent，文档会被自动挪进
+    离屏 UI，屏幕那份同时关闭，所以不会既在 3D 里有一份、屏幕上又剩一份）。
 
     单位为什么用 px 而不是 GameHud 那套 dp：本文档渲染进的是 RmlCanvasComponent 自己那份
     离屏 RmlUI 实例，main.lua 的 rmlUi:SetScale(UI_SCALE) 只作用在子系统主实例上，管不到这里；
-    而 dp 要再乘一次 device pixel ratio，那是个我不想在真机上赌的量。px 是绝对像素，320x64
-    就是纹理的 320x64，排版结果与设备无关。
+    而 dp 要再乘一次 device pixel ratio，那是个我不想在真机上赌的量。px 是绝对像素，448x128
+    就是纹理的 448x128，排版结果与设备无关。
 
     尺寸契约（改一边必须同步另一边，见 Config.HP_BAR）：
-      * 本文档按 320 x 64 排版，对应 canvas:SetUISize(320, 64)；两轴都不小于 64，那是
+      * 本文档按 448 x 128 排版，对应 canvas:SetUISize(448, 128)；两轴都不小于 64，那是
         RmlCanvasComponent::SetUISize 的硬校验下限（低于它整条会被拒收，纹理停在默认 512x512）；
-      * 面板世界尺寸 1.9 x 0.38 米 = 5:1，与 320:64 同比例，格子不会被透视拉扁。
+      * 左侧 320px 是 3 格血条区（格子在画布里的相对尺寸与 400x64 版完全一致，只是整体下移
+        32px 在新的高度里居中），右侧 128px 是弹丸 CD 环（外径 112，圆心 x=384 y=64）；
+      * 面板世界尺寸 2.66 x 0.76 米 = 3.5:1，与 448:128 同比例，且每米的像素数（168.42）与
+        加环前的 400x64 版一样 → 格子的屏幕尺寸一像素没变，只有环和环内数字放大了一倍；
+      * 画布加宽后格子中心（x=160）偏离画布中心，HpBar.lua 会沿相机右轴平移面板补回差值，
+        格子才仍压在头顶正上方、环挂在其右侧。
 
     绑定期望值（与 GameHud 同源的那套规则）：
       * 绑定节点必须包在 <div data-model="{{__data_model_id}}"> 里；
       * 显隐走 data-if="pipN"（bool getter）——绝不写内联 style 绑 {{}}，RCSS 解析器会崩；
       * 掉血时亮格整个不进渲染树，露出底下常驻的暗槽，所以上限（3 格）始终可读，
-        也不会出现"格子还在但变灰"这种和暗槽重复的表达。
+        也不会出现"格子还在但变灰"这种和暗槽重复的表达；
+      * 环的亮刻度同理走 data-if="cdTickN"（24 段，段数取自 Config.CD_SEGMENTS）。
 -->
 <rml>
 <head>
@@ -26,25 +32,97 @@
     <link type="text/rcss" href="layout.rcss"/>
     <link type="text/rcss" href="default.rcss"/>
     <style>
-        /* 常驻暗槽：告诉玩家上限是 3。比亮格四周各宽 6px，露出一圈边当描边。 */
-        .track { position: absolute; left: 6px; top: 6px; width: 308px; height: 52px;
+        /* 常驻暗槽：告诉玩家上限是 3。比亮格四周各宽 6px，露出一圈边当描边。
+           画布高度翻倍后整块下移 32px 保持垂直居中（64 版里它是 top 6 / 高 52，正好居中）。 */
+        .track { position: absolute; left: 6px; top: 38px; width: 308px; height: 52px;
                  background-color: #00000077; border-radius: 7px; }
         /* 亮格：96px 宽，左起 10 / 112 / 214（格间距 6px，最右格 310px 处正好收进槽内）。
            绿与炮塔连续条（UI/TurretHpBar.rml）同色系，主角、友方同一种绿。 */
-        .pip { position: absolute; top: 12px; width: 96px; height: 40px;
+        .pip { position: absolute; top: 44px; width: 96px; height: 40px;
                background-color: #37d17aff; border-radius: 5px; }
         .p1 { left: 10px; }
         .p2 { left: 112px; }
         .p3 { left: 214px; }
+        /* 弹丸 CD 环：常驻一圈暗刻度当轨道，亮刻度（data-if="cdTickN"）叠在上面。
+           RmlUi 没有 conic 渐变、元素几何也不能从 Lua 改，24 段刻度是这套机制下唯一能画
+           圆形进度的写法。geometry 由 cx=384 cy=64 r=49 算出，刻度 6x14：
+           left = cx + r*sin(a) - 3，top = cy - r*cos(a) - 7，a = 7.5° + 15°*(N-1)。
+           改环大小要重算全部 24 个 left/top/rotate。 */
+        .cd_dim { position: absolute; width: 6px; height: 14px; border-radius: 3px;
+                  background-color: #ffffff26; }
+        /* 亮刻度用与血条同一种绿：黄色和沙滩底色撞在一起读不出来。 */
+        .cd_lit { position: absolute; width: 6px; height: 14px; border-radius: 3px;
+                  background-color: #37d17aff; }
+        /* 环心数字：弹匣剩几发。玫红（#ff2e7f）——同盘的绿刻度与绿血条挨得太近，绿色数字
+           在亮刻度里读不出来；不垫底色；居中用绝对定位 + line-height 与字号同值（flex/描边在
+           这块离屏画布上不保险）。80x80 的方框以环心 (384,64) 为中心，字号 52px（64 版里是
+           40x40 / 26px，整块放大一倍）。 */
+        #cd_num { position: absolute; left: 344px; top: 24px; width: 80px; height: 80px;
+                  line-height: 80px; text-align: center;
+                  font-size: 52px; font-weight: bold; color: #ff2e7fff; }
     </style>
 </head>
 <!-- 离屏画布尺寸固定，所以 body 显式吃满，不依赖 auto-size 行为。 -->
-<body style="display: block; width: 320px; height: 64px; pointer-events: none;">
+<body style="display: block; width: 448px; height: 128px; pointer-events: none;">
 <div data-model="{{__data_model_id}}">
     <div class="track"></div>
     <div data-if="pip1" class="pip p1"></div>
     <div data-if="pip2" class="pip p2"></div>
     <div data-if="pip3" class="pip p3"></div>
+
+    <!-- 弹丸 CD 环：暗刻度恒在当轨道，亮刻度按装弹进度从正上方顺时针点亮。
+         环内数字 = 弹匣剩余（每开一枪减一，打空归 0、装弹完回到满）。 -->
+    <div class="cd_dim" style="left: 387.4px; top: 8.4px; transform: rotate(7.5deg);"></div>
+    <div class="cd_dim" style="left: 399.8px; top: 11.7px; transform: rotate(22.5deg);"></div>
+    <div class="cd_dim" style="left: 410.8px; top: 18.1px; transform: rotate(37.5deg);"></div>
+    <div class="cd_dim" style="left: 419.9px; top: 27.2px; transform: rotate(52.5deg);"></div>
+    <div class="cd_dim" style="left: 426.3px; top: 38.2px; transform: rotate(67.5deg);"></div>
+    <div class="cd_dim" style="left: 429.6px; top: 50.6px; transform: rotate(82.5deg);"></div>
+    <div class="cd_dim" style="left: 429.6px; top: 63.4px; transform: rotate(97.5deg);"></div>
+    <div class="cd_dim" style="left: 426.3px; top: 75.8px; transform: rotate(112.5deg);"></div>
+    <div class="cd_dim" style="left: 419.9px; top: 86.8px; transform: rotate(127.5deg);"></div>
+    <div class="cd_dim" style="left: 410.8px; top: 95.9px; transform: rotate(142.5deg);"></div>
+    <div class="cd_dim" style="left: 399.8px; top: 102.3px; transform: rotate(157.5deg);"></div>
+    <div class="cd_dim" style="left: 387.4px; top: 105.6px; transform: rotate(172.5deg);"></div>
+    <div class="cd_dim" style="left: 374.6px; top: 105.6px; transform: rotate(187.5deg);"></div>
+    <div class="cd_dim" style="left: 362.2px; top: 102.3px; transform: rotate(202.5deg);"></div>
+    <div class="cd_dim" style="left: 351.2px; top: 95.9px; transform: rotate(217.5deg);"></div>
+    <div class="cd_dim" style="left: 342.1px; top: 86.8px; transform: rotate(232.5deg);"></div>
+    <div class="cd_dim" style="left: 335.7px; top: 75.8px; transform: rotate(247.5deg);"></div>
+    <div class="cd_dim" style="left: 332.4px; top: 63.4px; transform: rotate(262.5deg);"></div>
+    <div class="cd_dim" style="left: 332.4px; top: 50.6px; transform: rotate(277.5deg);"></div>
+    <div class="cd_dim" style="left: 335.7px; top: 38.2px; transform: rotate(292.5deg);"></div>
+    <div class="cd_dim" style="left: 342.1px; top: 27.2px; transform: rotate(307.5deg);"></div>
+    <div class="cd_dim" style="left: 351.2px; top: 18.1px; transform: rotate(322.5deg);"></div>
+    <div class="cd_dim" style="left: 362.2px; top: 11.7px; transform: rotate(337.5deg);"></div>
+    <div class="cd_dim" style="left: 374.6px; top: 8.4px; transform: rotate(352.5deg);"></div>
+
+    <div data-if="cdTick1" class="cd_lit" style="left: 387.4px; top: 8.4px; transform: rotate(7.5deg);"></div>
+    <div data-if="cdTick2" class="cd_lit" style="left: 399.8px; top: 11.7px; transform: rotate(22.5deg);"></div>
+    <div data-if="cdTick3" class="cd_lit" style="left: 410.8px; top: 18.1px; transform: rotate(37.5deg);"></div>
+    <div data-if="cdTick4" class="cd_lit" style="left: 419.9px; top: 27.2px; transform: rotate(52.5deg);"></div>
+    <div data-if="cdTick5" class="cd_lit" style="left: 426.3px; top: 38.2px; transform: rotate(67.5deg);"></div>
+    <div data-if="cdTick6" class="cd_lit" style="left: 429.6px; top: 50.6px; transform: rotate(82.5deg);"></div>
+    <div data-if="cdTick7" class="cd_lit" style="left: 429.6px; top: 63.4px; transform: rotate(97.5deg);"></div>
+    <div data-if="cdTick8" class="cd_lit" style="left: 426.3px; top: 75.8px; transform: rotate(112.5deg);"></div>
+    <div data-if="cdTick9" class="cd_lit" style="left: 419.9px; top: 86.8px; transform: rotate(127.5deg);"></div>
+    <div data-if="cdTick10" class="cd_lit" style="left: 410.8px; top: 95.9px; transform: rotate(142.5deg);"></div>
+    <div data-if="cdTick11" class="cd_lit" style="left: 399.8px; top: 102.3px; transform: rotate(157.5deg);"></div>
+    <div data-if="cdTick12" class="cd_lit" style="left: 387.4px; top: 105.6px; transform: rotate(172.5deg);"></div>
+    <div data-if="cdTick13" class="cd_lit" style="left: 374.6px; top: 105.6px; transform: rotate(187.5deg);"></div>
+    <div data-if="cdTick14" class="cd_lit" style="left: 362.2px; top: 102.3px; transform: rotate(202.5deg);"></div>
+    <div data-if="cdTick15" class="cd_lit" style="left: 351.2px; top: 95.9px; transform: rotate(217.5deg);"></div>
+    <div data-if="cdTick16" class="cd_lit" style="left: 342.1px; top: 86.8px; transform: rotate(232.5deg);"></div>
+    <div data-if="cdTick17" class="cd_lit" style="left: 335.7px; top: 75.8px; transform: rotate(247.5deg);"></div>
+    <div data-if="cdTick18" class="cd_lit" style="left: 332.4px; top: 63.4px; transform: rotate(262.5deg);"></div>
+    <div data-if="cdTick19" class="cd_lit" style="left: 332.4px; top: 50.6px; transform: rotate(277.5deg);"></div>
+    <div data-if="cdTick20" class="cd_lit" style="left: 335.7px; top: 38.2px; transform: rotate(292.5deg);"></div>
+    <div data-if="cdTick21" class="cd_lit" style="left: 342.1px; top: 27.2px; transform: rotate(307.5deg);"></div>
+    <div data-if="cdTick22" class="cd_lit" style="left: 351.2px; top: 18.1px; transform: rotate(322.5deg);"></div>
+    <div data-if="cdTick23" class="cd_lit" style="left: 362.2px; top: 11.7px; transform: rotate(337.5deg);"></div>
+    <div data-if="cdTick24" class="cd_lit" style="left: 374.6px; top: 8.4px; transform: rotate(352.5deg);"></div>
+
+    <div id="cd_num">{{ammo}}</div>
 </div>
 </body>
 </rml>

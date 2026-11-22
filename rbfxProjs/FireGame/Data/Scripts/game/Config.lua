@@ -233,6 +233,7 @@ Config.BARREL_SPOTS = {
 Config.TURRETS = { -9.0, 9.0 }       -- 每座塔的 x，z 恒取 DEFENSE_Z
 Config.TURRET_Z = Config.DEFENSE_Z
 Config.TURRET_HP = 150               -- 每塔血量：两座合计 300 = 原 DEFENSE_HP，总抗漏量一格没变（难度基线不飘）
+Config.REVIVE_TURRET_HP = 50         -- 看广告复活且死因是防线失守时，每塔只补这点血（约 5 刀），不满血重开
 Config.TURRET_STAND_OFF = 1.6        -- 海盗砍塔时与塔中心的水平距离（停在台座外沿，不钻进模型里）
 -- 炮台 = pirate-kit 瞭望塔 prefab（tower-complete-small）缩小一档坐地，塔顶再架一门 Prop_Cannon 当炮
 -- （失能时 Turrets 把那根炮管歪下来）。塔身实测高 6.78m（解析 Cache 里 .mdl 顶点缓冲，同 Coast 头部
@@ -526,6 +527,10 @@ Config.PIRATE_SKIN_RARE = { "Characters_Skeleton", "Characters_Captain_Barbaross
 Config.AUTO_FIRE = true              -- 开局默认开火方式；运行时的当前值在 game/Shooting.lua
 Config.MAG_SIZE = 5
 Config.RELOAD_TIME = 1.2
+-- 弹丸 CD 环的段数：RmlUi 没有 conic 渐变，圆形进度只能拆成 N 段刻度用 data-if 点亮。
+-- 用它的文档：UI/HpBar.rml（主角头顶血条右侧那圈，弹丸 CD 唯一的常驻显示位）。
+-- 改这里必须同步改 RML 里的刻度元素个数与几何。24 段 = 每段 15°。
+Config.CD_SEGMENTS = 24
 Config.FIRE_COOLDOWN = 0.22          -- 两发之间的最小间隔（不降扳机频率，总伤害靠穿透/爆炸来收）
 Config.FIRE_WINDOW = 0.6             -- 开火后维持射击姿态/上半身对准目标的窗口（秒）：大于冷却
                                      -- 保证连发期间不断档，装弹期间自然回落举枪
@@ -715,21 +720,30 @@ Config.LEAK_DAMAGE = 10              -- 一个海盗砍到塔一刀扣多少
 Config.PLAYER_HP = 3
 Config.PLAYER_INVULN = 0.6           -- 受击后无敌帧（秒），防贴身多刀在同一帧秒融
 
--- 主角头顶血条（3 格，RmlUI 挂在 3D 节点上，见 game/HpBar.lua + UI/HpBar.rml）。
+-- 主角头顶血条（3 格 + 右侧一枚弹丸 CD 环，RmlUI 挂在 3D 节点上，见 game/HpBar.lua + UI/HpBar.rml）。
 Config.HP_BAR = {
     -- 血条中心离脚底的高度（米）。Characters_Lis.mdl 实测原生 y 上限 1.712（.mdl 顶点盒解析，
     -- 同法已复现 boat-row-large 的 2.75x0.85x2.85），乘 PLAYER_MODEL_SCALE 1.5 = 2.568，
     -- 再加 0.18 余量让条子压在头顶空气上而不是埋进头发。
     overhead = 2.75,
-    -- 面板世界尺寸（米）。1.9 x 0.38 恰为 5:1，与下面纹理 320x64 同比例 → 格子不会被拉扁。
-    worldW = 1.9,
-    worldH = 0.38,
+    -- 面板世界尺寸（米）。448:128 = 3.5:1，与下面纹理同比例 → 格子与环都不会被拉扁。
+    -- 每米的像素数维持 168.42（= 2.66/448 = 0.76/128 = 早先 400x64 版的 2.375/400），
+    -- 所以格子的屏幕尺寸一像素没变，只是画布长高到能装下放大一倍的环（外径 112）。
+    worldW = 2.66,
+    worldH = 0.76,
     -- 离屏画布的逻辑尺寸（UI 像素，同时是分配的纹理大小）。RmlUI 按它排版，别改一边忘另一边。
     -- 硬约束：两轴都必须在 64..4096（RmlCanvasComponent::SetUISize 里校验）。踩过的坑：
     -- 先前写的 200x40 因 40 < 64 被整条拒收，纹理停在默认的 512x512，血条的 200x40 排版
     -- 只占那张纹理左上 39%x8%，UV 覆满面板后就被拉成一条几乎看不见的细缝。
-    texW = 320,
-    texH = 64,
+    -- 448 = 左 320 血条区 + 8 间距 + 120 环区（环外径 112，圆心 x=384 y=64）；高 128 是为了
+    -- 让放大一倍的环装得下，血条区在 UI/HpBar.rml 里整体下移 32px 保持垂直居中。
+    -- 炮塔那份仍是 320x64，由 Config.TURRET_HP_BAR 显式覆盖，别把这里当成所有 HpBar 的共用尺寸。
+    texW = 448,
+    texH = 128,
+    -- 3 格血条在画布里的水平中心（track left 6 + width 308/2）。画布加宽后它不再落在画布
+    -- 中心（200），面板要沿相机右轴平移 (texW/2 - pipCenterPx) 对应的世界距离，格子才仍
+    -- 压在头顶正上方、环挂在其右侧。见 HpBar.lua 的 shiftX。
+    pipCenterPx = 160,
     -- 贴图技术：引擎 Contents 里的 DiffUnlitAlpha（RmlWorldCanvas 内部用的同一个，无光照 + alpha 混合，
     -- 血条不会被太阳打暗、透明处不糊成一块黑）。
     technique = "Techniques/DiffUnlitAlpha.xml",
@@ -744,6 +758,10 @@ Config.TURRET_HP_BAR = {
     overhead = Config.TURRET_TOP_Y + 1.3,
     worldW = 1.4,
     worldH = 0.28,
+    -- 画布尺寸必须显式写：主角那份为了右侧的弹丸 CD 环已加宽到 400，炮塔没有环，
+    -- 仍按 TurretHpBar.rml 的 320x64 排版（继承 HP_BAR 会把条子压扁并左偏）。
+    texW = 320,
+    texH = 64,
 }
 
 -- 爆桶：无物理模块（抖音包禁用 URHO3D_PHYSICS），所以用距离遍历而不是球形查询

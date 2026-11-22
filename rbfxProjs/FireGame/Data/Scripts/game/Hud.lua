@@ -26,10 +26,6 @@ local function clamp01(v)
     return v
 end
 
---- 开火键 CD 环的刻度数（GameHud.rml 里 cdTick1..cdTick24 一个不差改这里也要跟着改）。
---- 24 段 = 每段 15°，手机上看得出一格一格地长回来；再细则 RmlUi 每帧要多刷好几个元素。
-local CD_SEGMENTS = 24
-
 ---@param scene Scene
 ---@param handlers { onRestart: fun()|nil, onBoard: fun()|nil, onDisembark: fun()|nil,
 ---                   onVoiceRecord: fun(slot:string)|nil, onVoicePreview: fun()|nil,
@@ -44,8 +40,9 @@ function Hud.Build(scene, handlers)
     self.score = 0
     self.wave = 1
     self.combo = 0
-    self.ammo = Config.MAG_SIZE
-    self.reload = 0.0          -- 0..1，绑定 <progress data-value="reload">
+    self.ammo = Config.MAG_SIZE   -- 弹丸数不再进 HUD 屏幕文档，只镜像给主角头顶血条右侧那圈环心数字
+    -- 装弹进度 0..1（1=弹匣满、可开火）：只由主角头顶血条右侧那圈 CD 环读（game/HpBar.lua 的 getCd）。
+    self.cdProgress = 1.0
     -- 主角血、炮塔血都不往 HUD 喂：分挂在人物/炮塔头顶的世界空间血条（game/HpBar.lua）每帧直读。
     self.narrate = ""
     self.narrateT = 0.0
@@ -69,11 +66,10 @@ function Hud.Build(scene, handlers)
     -- 登船/下船按钮显隐（data-if）：main.lua 帧循环里根据交互条件 Show/Hide
     self.showBoard = false
     self.showDisembark = false
-    -- 局内成长（game/Grow.lua 推）：等级 + 经验条进度(0..1) + 弹丸数（扇形一次喷几颗，
-    -- 力量可见增长的直读回报；自动开火时在左上拼成“弹丸 xN”，手动时是开火键图标下的数字）
+    -- 局内成长（game/Grow.lua 推）：等级 + 经验条进度(0..1)。弹丸数的“变强”反馈
+    -- 走升级旁白（main.lua），左上也不再常驻一行静态数字。
     self.level = 1
     self.xpProg = 0.0
-    self.pellets = 1
     -- 性能 Overlay（调试）：perfText 是 Lua 拼好的一行文本，showPerf 控制 data-if 整体显隐。
     self.perfText = ""
     self.showPerf = false
@@ -105,12 +101,6 @@ function Hud.Build(scene, handlers)
     -- 手动时右下角开火键才出现（showFireButton 直接取反，自动时整个元素不进渲染树——
     -- 置灰的圆圈会占着右下角却按不动，比不显示更迷惑）。
     self.fireAuto = true
-    -- 开火键上的弹丸 CD 环：每段一位 bool，true=已就绪（亮）。与上面的“手动才显示开火键”
-    -- 是同一件事的两面——手动时弹丸信息全在这圈上，所以左上那块弹药 UI 反过来隐掉。
-    self.cdTicks = {}
-    for i = 1, CD_SEGMENTS do
-        self.cdTicks[i] = true
-    end
     -- 开火键按下态（只驱动右下那颗按钮的高亮）。顶层的 :active 拿不到——#fire_btn 是
     -- pointer-events:none 的纯绘制件，按没按下只有 core/FireButton 直接读 Input 才知道，
     -- 所以由 main.lua 每帧把结果推过来（FireButton:IsHeld）。
@@ -127,13 +117,11 @@ function Hud.Build(scene, handlers)
             self.w = w
             w:BindReadonlyProperty("score", function() return self.score end)
             w:BindReadonlyProperty("wave", function() return self.wave end)
-            w:BindReadonlyProperty("ammo", function() return self.ammo end)
             w:BindReadonlyProperty("endScore", function() return self.endScore end)
             w:BindReadonlyProperty("comboText", function()
                 return self.combo > 1 and ("x" .. self.combo) or ""
             end)
             -- progress 条：0..1 数值，RmlUi <progress data-value> 直接吃
-            w:BindReadonlyProperty("reload", function() return clamp01(self.reload) end)
             -- data-if 显隐：bool
             w:BindReadonlyProperty("hitNormal", function() return self.hitNormal end)
             w:BindReadonlyProperty("hitStrong", function() return self.hitStrong end)
@@ -145,10 +133,9 @@ function Hud.Build(scene, handlers)
             w:BindReadonlyProperty("endTitle", function() return self.endTitle end)
             w:BindReadonlyProperty("shareAvailable", function() return self.shareAvailable end)
             w:BindReadonlyProperty("reviveAvailable", function() return self.reviveAvailable end)
-            -- 局内成长：等级、经验条(0..1)、弹丸数
+            -- 局内成长：等级、经验条(0..1)
             w:BindReadonlyProperty("level", function() return self.level end)
             w:BindReadonlyProperty("xp", function() return clamp01(self.xpProg) end)
-            w:BindReadonlyProperty("pellets", function() return self.pellets end)
             -- 性能 Overlay（调试）：文本 + 显隐开关
             w:BindReadonlyProperty("perfText", function() return self.perfText end)
             w:BindReadonlyProperty("showPerf", function() return self.showPerf end)
@@ -168,13 +155,6 @@ function Hud.Build(scene, handlers)
             -- 开火方式：手动才显示开火键 / 勾选框的勾选状态（data-checked 双向绑 fireAuto）
             w:BindReadonlyProperty("showFireButton", function() return not self.fireAuto end)
             w:BindReadonlyProperty("fireAuto", function() return self.fireAuto end)
-            -- 弹药块适时让位：自动开火时才显示（数字/装弹条/弹丸数），手动时整块不渲染，改由开火键上的 CD 环表达
-            w:BindReadonlyProperty("showAmmoBlock", function() return self.fireAuto end)
-            -- 开火键 CD 环：每段一个 bool（RmlUi 的数据模型只能这样表达圆形进度）
-            for i = 1, CD_SEGMENTS do
-                local idx = i
-                w:BindReadonlyProperty("cdTick" .. idx, function() return self.cdTicks[idx] end)
-            end
             -- 开火键按下态：高亮盘与放大版图标都是 data-if="fireButtonHeld"
             w:BindReadonlyProperty("fireButtonHeld", function() return self.fireButtonHeld end)
 
@@ -254,7 +234,7 @@ function Hud.Build(scene, handlers)
                     handlers.onVoiceFilter()
                 end
             end)
-            -- 侧边栏引导：「去侧边栏」拉起宿主面板、「知道了」只关；持久化在 game/Sidebar.lua
+            -- 侧边栏引导：「去侧边栏」拉起宿主面板、右上角的叉只关；持久化在 game/Sidebar.lua
             w:BindEvent("sidebar_go", function()
                 if handlers.onSidebarGo then
                     handlers.onSidebarGo()
@@ -313,15 +293,9 @@ function Hud:SetCombo(v)
     self:Dirty("comboText")
 end
 
+--- 弹丸数：屏幕 HUD 上不再有这块 UI，值只留作主角头顶环心数字的镜像（main.lua 的 getAmmo）。
 function Hud:SetAmmo(v)
     self.ammo = v or 0
-    self:Dirty("ammo")
-end
-
---- 装弹进度 0..1。
-function Hud:SetReload(v)
-    self.reload = clamp01(v or 0.0)
-    self:Dirty("reload")
 end
 
 --- 性能 Overlay（调试）：直接喂拼好的一行文本。
@@ -458,16 +432,6 @@ function Hud:SetXpProgress(v)
     self:Dirty("xp")
 end
 
---- 弹丸数（扇形一次喷几颗），升级时随当前档位刷新。
----@param n number
-function Hud:SetPellets(n)
-    n = math.max(1, math.floor(n or 1))
-    if n ~= self.pellets then
-        self.pellets = n
-        self:Dirty("pellets")
-    end
-end
-
 ----------------------------------------------------------------------
 -- 设置面板（开火方式 + 语音 + 屏幕方向）
 ----------------------------------------------------------------------
@@ -512,7 +476,7 @@ function Hud:SetOrientationStatus(text)
     self:Dirty("orientationStatus")
 end
 
---- 开火方式（自动/手动）：勾号 + 开火键/弹药块显隐跟着翻。
+--- 开火方式（自动/手动）：勾号 + 开火键显隐跟着翻。
 --- 真值在 game/Shooting.lua；main.lua 是两者的接线人，UI 只镜像。
 ---@param auto boolean
 function Hud:SetFireAuto(auto)
@@ -521,7 +485,6 @@ function Hud:SetFireAuto(auto)
         self.fireAuto = auto
         self:Dirty("fireAuto")
         self:Dirty("showFireButton")
-        self:Dirty("showAmmoBlock")
     end
 end
 
@@ -536,18 +499,11 @@ function Hud:SetFireHeld(held)
     end
 end
 
---- 开火键上的弹丸 CD 环：progress 0..1 = 已恢复的比例，从正上方顺时针点亮前 N 段。
---- 只在段数变化时 MarkDirty：main/Shooting 每帧都调，没变化就不该让 RmlUi 重建元素。
+--- 装弹进度 0..1：Shooting 每帧推过来，这里只存值——唯一读者是主角头顶血条右侧那圈
+--- CD 环（game/HpBar.lua 的 getCd，段数变化才 MarkDirty，节流在那边做）。
 ---@param progress number
 function Hud:SetFireCd(progress)
-    local lit = math.ceil(clamp01(progress or 0.0) * CD_SEGMENTS)
-    for i = 1, CD_SEGMENTS do
-        local on = i <= lit
-        if self.cdTicks[i] ~= on then
-            self.cdTicks[i] = on
-            self:Dirty("cdTick" .. i)
-        end
-    end
+    self.cdProgress = clamp01(progress or 0.0)
 end
 
 --- 打开设置面板（模态，main.lua 据此暂停世界推进）。

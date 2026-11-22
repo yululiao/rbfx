@@ -21,6 +21,17 @@
 
 local Config = require("game.Config")
 
+--- 弹丸 CD 环的段数：与 Config.CD_SEGMENTS 同一来源，UI/HpBar.rml 里的 cdTick1..N 必须一个不差。
+local CD_SEGMENTS = Config.CD_SEGMENTS
+
+--- 装弹进度 0..1 → 已就绪的刻度数（从正上方顺时针点亮）。
+---@param progress number
+---@return integer
+local function LitSegments(progress)
+    progress = math.max(0.0, math.min(1.0, progress or 0.0))
+    return math.ceil(progress * CD_SEGMENTS)
+end
+
 ---@class HpBar 世界空间头顶血条（3D 面板 + RmlUI 离屏文档，主角与炮塔共用）
 local HpBar = {}
 HpBar.__index = HpBar
@@ -45,7 +56,7 @@ local function PipsOf(cur, max)
 end
 
 ---@param scene Scene
----@param cfg { name: string, cameraNode: Node, getAnchorPos: fun():Vector3, getHp: fun():(number, number), overhead: number, worldW: number, worldH: number, isHidden: (fun():boolean)|nil }
+---@param cfg { name: string, cameraNode: Node, getAnchorPos: fun():Vector3, getHp: fun():(number, number), overhead: number, worldW: number, worldH: number, texW: number|nil, texH: number|nil, getAmmo: (fun():number)|nil, getCd: (fun():number)|nil, isHidden: (fun():boolean)|nil }
 ---@return HpBar
 function HpBar.Build(scene, cfg)
     local self = setmetatable({}, HpBar)
@@ -56,10 +67,32 @@ function HpBar.Build(scene, cfg)
     self.isHidden = cfg.isHidden      -- 额外的“整块摘掉”条件（主角阵亡定格用；炮塔靠血量归零即可）
 
     -- 纹理尺寸与贴图技术是所有 HpBar.rml 面板共用的硬契约（见 UI/HpBar.rml 的尺寸说明），
-    -- 只有世界面板大小与悬浮高度按调用方给：主角大一些、炮塔小一些。
+    -- 世界面板大小与悬浮高度按调用方给：主角大一些、炮塔小一些。画布尺寸也一样可覆盖——
+    -- 主角那份右侧多一枚弹丸 CD 环，画布加宽到 400，炮塔仍是 320（见 Config 两个血条表）。
     local c = Config.HP_BAR
+    local texW = cfg.texW or c.texW
+    local texH = cfg.texH or c.texH
     self.worldW = cfg.worldW or c.worldW
     self.worldH = cfg.worldH or c.worldH
+
+    -- 画布加宽后 3 格血条的中心（pipCenterPx）不再落在画布中心：面板要沿相机右轴平移
+    -- (texW/2 - pipCenterPx) 对应的世界距离，格子才仍压在头顶正上方、环挂在其右侧。
+    -- 只有带头顶环的主角那份（传了 getAmmo）需要这个修正；炮塔没有环，差值为 0。
+    self.shiftX = 0.0
+    if cfg.getAmmo then
+        self.shiftX = (texW * 0.5 - (c.pipCenterPx or texW * 0.5)) * self.worldW / texW
+    end
+
+    -- 弹丸状态（只有主角传）：环心数字读 getAmmo，亮刻度读 getCd（0..1 装弹进度）。
+    -- 真相都在 Shooting，这里只做镜像，和 Hud 那套一样“变了才 MarkDirty”。
+    self.getAmmo = cfg.getAmmo
+    self.getCd = cfg.getCd
+    self.ammo = cfg.getAmmo and (cfg.getAmmo() or 0) or 0
+    self.cdTicks = {}
+    local lit = LitSegments(cfg.getCd and cfg.getCd() or 1.0)
+    for i = 1, CD_SEGMENTS do
+        self.cdTicks[i] = i <= lit
+    end
 
     -- 两种表现共用同一块世界面板，只差 RmlUI 文档与绑定：pips 是 3 格显隐（主角），
     -- ratio 是连续进度条（炮塔：掉血是缓慢持续的过程，格子读不出细微增减）。
@@ -88,7 +121,7 @@ function HpBar.Build(scene, cfg)
     -- 所以关掉输入重映射（RmlCanvasComponent 的 remap 只对兄弟 StaticModel 生效，
     -- 但血条本来就盖在画面中央，宁可显式关掉）。
     local canvas = node:CreateComponent("RmlCanvasComponent")
-    canvas:SetUISize(IntVector2(c.texW, c.texH))
+    canvas:SetUISize(IntVector2(texW, texH))
     canvas:SetRemapMousePos(false)
     canvas:SetClearColor(Color(0.0, 0.0, 0.0, 0.0))
 
@@ -120,12 +153,21 @@ function HpBar.Build(scene, cfg)
             end,
         })
     else
+        local withRing = self.getAmmo ~= nil
         comp:SetHandlers({
             onInit = function(w)
                 self.w = w
                 w:BindReadonlyProperty("pip1", function() return self.pip1 end)
                 w:BindReadonlyProperty("pip2", function() return self.pip2 end)
                 w:BindReadonlyProperty("pip3", function() return self.pip3 end)
+                -- 主角专属：环心数字 + 24 段亮刻度（炮塔文档里没有这些元素，不绑）
+                if withRing then
+                    w:BindReadonlyProperty("ammo", function() return self.ammo end)
+                    for i = 1, CD_SEGMENTS do
+                        local idx = i
+                        w:BindReadonlyProperty("cdTick" .. idx, function() return self.cdTicks[idx] end)
+                    end
+                end
             end,
         })
     end
@@ -157,7 +199,9 @@ function HpBar:Update(dt)
     -- 位置取锚点节点世界坐标（不是玩法里的 spot 之类逻辑值）：主角登船后人是被船带着走的，
     -- 只有节点世界坐标反映船体抬升，血条才不会掉到甲板下面去。
     local wp = self.getAnchorPos()
-    self.node:SetPosition(wp + Vector3(0.0, self.overhead, 0.0))
+    -- shiftX：画布加宽后把血条格子拉回头顶正上方（相机右轴 = 面板局部 X，见 Build 里的推导）。
+    local shift = self.cameraNode:GetRotation() * Vector3(self.shiftX, 0.0, 0.0)
+    self.node:SetPosition(wp + Vector3(0.0, self.overhead, 0.0) + shift)
     self.node:SetRotation(self.cameraNode:GetRotation() * Quaternion(-90.0, Vector3(1.0, 0.0, 0.0)))
 
     if self.mode == "ratio" then
@@ -173,6 +217,24 @@ function HpBar:Update(dt)
             self:Dirty("pip1")
             self:Dirty("pip2")
             self:Dirty("pip3")
+        end
+    end
+
+    -- 弹丸 CD 环（仅主角）：环心数字 + 亮刻度。刻度只在“亮到第几段”变化时才 MarkDirty，
+    -- 每帧无脑刷会让 RmlUi 每帧重建这些元素（与 Hud:SetFireCd 同一套节流）。
+    if self.getAmmo then
+        local ammo = self.getAmmo() or 0
+        if ammo ~= self.ammo then
+            self.ammo = ammo
+            self:Dirty("ammo")
+        end
+        local lit = LitSegments(self.getCd and self.getCd() or 1.0)
+        for i = 1, CD_SEGMENTS do
+            local on = i <= lit
+            if self.cdTicks[i] ~= on then
+                self.cdTicks[i] = on
+                self:Dirty("cdTick" .. i)
+            end
         end
     end
 end

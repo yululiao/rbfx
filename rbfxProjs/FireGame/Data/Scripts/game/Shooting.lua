@@ -72,15 +72,11 @@ function Shooting:Update(dt)
     end
     if self.reloading then
         self.reloadT = self.reloadT - dt
-        if self.hud and self.hud.SetReload then
-            self.hud:SetReload(1.0 - math.max(0.0, self.reloadT) / Config.RELOAD_TIME)
-        end
         if self.reloadT <= 0.0 then
             self.reloading = false
             self.ammo = Config.MAG_SIZE
-            if self.hud then
-                if self.hud.SetAmmo then self.hud:SetAmmo(self.ammo) end
-                if self.hud.SetReload then self.hud:SetReload(0.0) end
+            if self.hud and self.hud.SetAmmo then
+                self.hud:SetAmmo(self.ammo)
             end
         end
     end
@@ -305,9 +301,8 @@ function Shooting:Reset()
         b.node:Remove()
     end
     self.bullets = {}
-    if self.hud then
-        if self.hud.SetAmmo then self.hud:SetAmmo(self.ammo) end
-        if self.hud.SetReload then self.hud:SetReload(0.0) end
+    if self.hud and self.hud.SetAmmo then
+        self.hud:SetAmmo(self.ammo)
     end
 end
 

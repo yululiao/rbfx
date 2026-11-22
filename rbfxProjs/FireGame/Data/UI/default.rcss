@@ -10,6 +10,18 @@
     resize-handle: 36dp 32dp 16dp 16dp;
 }
 
+/* ===== toy 主题贴图（Tools/gen_ui_toy.py 生成，改配色/尺寸要重跑脚本） =====
+   按钮不再出贴图：底色/描边/圆角全走 dp 单位的原生 background/border，任何缩放下都是硬边。
+   九宫格只留给面板 panel_dark（AI 手绘边框 826x561）。sprite 矩形里的 dp 只取数值，
+   单位不参与换算（见 StyleSheetParser 里 Get<float>()），所以写的是原始像素。 */
+@spritesheet panel_dark
+{
+    src: /Textures/UIStyle/ui_panel_dark.png;
+    resolution: 1.82;
+    panel_dark_outer: 0dp 0dp 826dp 561dp;
+    panel_dark_inner: 36dp 36dp 754dp 489dp;
+}
+
 body
 {
     font-family: "Noto Sans SC";
@@ -62,38 +74,111 @@ body
     cursor: unavailable;
 }
 
-/* button */
+/* button：纯色底 + 描边 + 圆角，全走 RmlUi 原生 background/border，单位是 dp，任何缩放下
+   都是硬边。早先的四色九宫格贴图会在按钮上叠出一圈半透方框（四角/边条采样与 dp 缩放耦合），
+   故按钮不再挂 decorator；九宫格只留给面板 panel_dark。
+   类决定底色：.btn_primary/.btn_secondary/.btn_accent/.btn_neutral/.btn_clear，无类落到中性 taupe。 */
 button,
 input.submit
 {
-    border: 1dp #45614a;
-    border-top: 1dp #688762;
-    decorator: gradient(vertical #3c5c4a #25413a);
+    background-color: #9a8670ff;
+    border: 3dp #4a3626ff;
+    border-radius: 14dp;
     display: inline-block;
     text-align: center;
-    padding: 4dp 8dp;
+    padding: 10dp 26dp;
     margin-right: 4dp;
     tab-index: auto;
-    border-radius: 3dp;
+    font-weight: bold;
+    color: #3b2a1cff;
+}
+
+.btn_primary
+{
+    background-color: #e05a3fff;
+    color: #fff8eeff;
+}
+
+.btn_secondary
+{
+    background-color: #2e8b8bff;
+    color: #fff8eeff;
+}
+
+.btn_accent
+{
+    background-color: #f0b23cff;
+    color: #3b2a1cff;
+}
+
+.btn_neutral
+{
+    background-color: #9a8670ff;
+    color: #3b2a1cff;
+}
+
+/* 语音面板的「清除」：和同排的录制/试听区分开，用琥珀橙而不是中性 taupe。 */
+.btn_clear
+{
+    background-color: #cd8435ff;
+    color: #3b2a1cff;
 }
 
 button:hover,
 input.submit:hover
 {
-    border: 1dp #45614a;
-    border-top: 1dp #688762;
-    decorator: gradient(vertical #3b785a #225b4b);
+    background-color: #a89480ff;
+}
+
+.btn_primary:hover
+{
+    background-color: #ea6a4dff;
+}
+
+.btn_secondary:hover
+{
+    background-color: #37a0a0ff;
+}
+
+.btn_accent:hover
+{
+    background-color: #f6c05aff;
 }
 
 button:active,
 input.submit:active
 {
-    decorator: gradient(vertical #225b4b #3b785a);
+    background-color: #857361ff;
+}
+
+.btn_primary:active
+{
+    background-color: #c44a30ff;
+}
+
+.btn_secondary:active
+{
+    background-color: #257272ff;
+}
+
+.btn_accent:active
+{
+    background-color: #d29a2cff;
+}
+
+.btn_clear:hover
+{
+    background-color: #d79245ff;
+}
+
+.btn_clear:active
+{
+    background-color: #b3712cff;
 }
 
 input.submit:disabled
 {
-    decorator: gradient(vertical #3c5c4a #25413a);
+    background-color: #b8aa9aff;
 }
 
 /* X button */
@@ -134,6 +219,12 @@ textarea
     margin-top: 4dp;
 }
 
+/* 深色木质卡片（设置/语音/侧边栏面板）：AI 手绘边框 + 九宫格拉伸 */
+.panel_card
+{
+    decorator: ninepatch(panel_dark_outer, panel_dark_inner);
+}
+
 /* checkbox, radio */
 input.checkbox
 {
@@ -141,10 +232,9 @@ input.checkbox
     height: 16dp;
     vertical-align: -3dp;
     margin-right: 4dp;
-    border: 1dp #45614a;
-    border-bottom: 1dp #6a8963;
-    border-radius: 3dp;
-    background: #344443;
+    border: 2dp #f4e7cf;
+    border-radius: 5dp;
+    background: #4a3626;
 }
 
 input.radio
@@ -161,7 +251,7 @@ input.checkbox:checked:hover,
 input.radio:hover,
 input.radio:checked:hover
 {
-    background: #45614a;
+    background: #6b5137;
 }
 
 input.checkbox:checked
@@ -345,13 +435,16 @@ scrollbarvertical > sliderbar
     height: auto;
 }
 
+/* progress：深棕凹槽 + 金色填充。条高只有 10dp，用九宫格贴图会把边框压到亚像素，
+   所以这里保留纯色/渐变（圆角半径也小，硬边不明显），不再挂贴图。 */
 progress
 {
     display: block;
-    border: 1dp #45614a;
-    border-top: #688762;
-    border-radius: 3dp;
-    decorator: gradient(vertical #3c5c4a #25413a);
+    border: 0dp;
+    border-radius: 6dp;
+    padding: 2dp;
+    overflow: hidden;
+    decorator: gradient(vertical #3f2c1e #6b4630);
 }
 
 progress.horizontal
@@ -366,8 +459,9 @@ progress.vertical
 
 progress fill
 {
-    border: 2dp #225b4b;
-    background-color: #3b785a;
+    border: 0dp;
+    border-radius: 4dp;
+    decorator: gradient(vertical #ffd57a #f0a62e);
 }
 
 .resize-handle

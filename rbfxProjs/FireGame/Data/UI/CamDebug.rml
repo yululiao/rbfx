@@ -37,7 +37,7 @@
         .head { position: absolute; left: 12dp; top: 10dp; width: 94%; height: 52dp; }
         .title { float: left; color: #ffd24dff; font-size: 24dp; font-weight: bold; }
         .btns { float: right; }
-        .btns button { margin-left: 6dp; padding: 6dp 14dp; font-size: 20dp; color: #ffffffff;
+        .btns button { margin-left: 6dp; padding: 6dp 14dp; font-size: 20dp; color: #3b2a1cff;
             border-radius: 6dp; }
         .status { position: absolute; left: 12dp; top: 66dp; width: 94%; height: 30dp;
             color: #7cfc00ff; font-size: 18dp; }

@@ -28,8 +28,10 @@
         progress { position: absolute; left: 4px; top: 16px; width: 312px; height: 32px;
                    decorator: none; background-color: #00000088;
                    border: 2px #00000066; border-radius: 6px; }
-        /* 填充：绿色，与主角那套格血条同色系（友方单位一律这个绿）。 */
-        progress fill { background-color: #37d17aff; border-radius: 4px; }
+        /* 填充：绿色，与主角那套格血条同色系（友方单位一律这个绿）。
+           default.rcss 现在给 progress fill 挂了金色 decorator（toy 主题的 XP/装弹条），
+           这里不覆盖掉就会在绿底上再叠一层金 → 必须显式换回绿色渐变。 */
+        progress fill { decorator: gradient(vertical #58e295 #2fbf6c); border: 0; border-radius: 4px; }
     </style>
 </head>
 <!-- 离屏画布尺寸固定，body 显式吃满，不依赖 auto-size 行为。 -->
