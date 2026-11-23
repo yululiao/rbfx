@@ -1,0 +1,19 @@
+/* Generated bamboo/jade artwork. Coordinates are source-image pixels. */
+@spritesheet fishing_slot {
+    src: /Textures/UI/ui_slot_jade.png;
+    jadeSlot: 0dp 0dp 176dp 176dp;
+}
+@spritesheet fishing_track {
+    src: /Textures/UI/ui_reel_track.png;
+    bambooTrack: 0dp 0dp 192dp 1120dp;
+}
+@spritesheet fishing_zone {
+    src: /Textures/UI/ui_reel_zone.png;
+    jadeZone: 0dp 0dp 136dp 256dp;
+}
+.reel_label {
+    position: absolute; top: -310dp; height: 24dp;
+    color: #fff1caff; font-size: 18dp; text-align: center;
+    background-color: #173b32e8; border-radius: 6dp;
+    pointer-events: none;
+}

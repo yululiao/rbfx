@@ -1,0 +1,82 @@
+[
+  {
+    "name": "idle_down",
+    "center": 223.5,
+    "bottom": 400,
+    "scale": 0.52,
+    "rodTip": [
+      55,
+      -155
+    ]
+  },
+  {
+    "name": "idle_right",
+    "center": 228,
+    "bottom": 400,
+    "scale": 0.52,
+    "rodTip": [
+      63,
+      -159
+    ]
+  },
+  {
+    "name": "idle_up",
+    "center": 218.5,
+    "bottom": 400,
+    "scale": 0.52,
+    "rodTip": [
+      56,
+      -154
+    ]
+  },
+  {
+    "name": "idle_left",
+    "center": 215,
+    "bottom": 400,
+    "scale": 0.52,
+    "rodTip": [
+      -61,
+      -156
+    ]
+  },
+  {
+    "name": "pose_cast_down",
+    "center": 211.5,
+    "bottom": 396,
+    "scale": 0.52,
+    "rodTip": [
+      84,
+      -22
+    ]
+  },
+  {
+    "name": "pose_cast_up",
+    "center": 195.5,
+    "bottom": 396,
+    "scale": 0.52,
+    "rodTip": [
+      87,
+      -176
+    ]
+  },
+  {
+    "name": "pose_reel_down",
+    "center": 206,
+    "bottom": 396,
+    "scale": 0.52,
+    "rodTip": [
+      84,
+      -21
+    ]
+  },
+  {
+    "name": "pose_reel_up",
+    "center": 187,
+    "bottom": 396,
+    "scale": 0.52,
+    "rodTip": [
+      81,
+      -163
+    ]
+  }
+]

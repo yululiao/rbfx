@@ -1,0 +1,44 @@
+[
+  {
+    "name": "ui_slot_jade.png",
+    "source": "exec-85ded854-8d25-4eda-8880-e5d1e35fa999.png",
+    "size": [
+      176,
+      176
+    ],
+    "crop": [
+      28,
+      27,
+      1226,
+      1223
+    ]
+  },
+  {
+    "name": "ui_reel_track.png",
+    "source": "exec-cbeebb5d-6461-48d3-b490-ebc3a5f39e49.png",
+    "size": [
+      192,
+      1120
+    ],
+    "crop": [
+      207,
+      61,
+      527,
+      2071
+    ]
+  },
+  {
+    "name": "ui_reel_zone.png",
+    "source": "exec-849accc2-3519-4430-8795-4e699982afdf.png",
+    "size": [
+      136,
+      256
+    ],
+    "crop": [
+      39,
+      35,
+      874,
+      1686
+    ]
+  }
+]

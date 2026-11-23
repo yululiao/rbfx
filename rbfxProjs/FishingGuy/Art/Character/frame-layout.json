@@ -1,0 +1,294 @@
+{
+  "generator": "Built-in image_gen",
+  "bobberSHA256": "b7a48093385be42b1c835d25ae744be6225c81b748463debfe8778e4a71f4b2b",
+  "frames": [
+    {
+      "name": "walk_down_0.png",
+      "sourceCell": [
+        0,
+        0,
+        281,
+        280
+      ],
+      "center": 143,
+      "bottom": 277,
+      "scale": 0.75,
+      "rodTip": [
+        68,
+        -155
+      ]
+    },
+    {
+      "name": "walk_down_1.png",
+      "sourceCell": [
+        281,
+        0,
+        561,
+        280
+      ],
+      "center": 136,
+      "bottom": 276,
+      "scale": 0.75,
+      "rodTip": [
+        66,
+        -154
+      ]
+    },
+    {
+      "name": "walk_down_2.png",
+      "sourceCell": [
+        561,
+        0,
+        842,
+        280
+      ],
+      "center": 137,
+      "bottom": 276,
+      "scale": 0.75,
+      "rodTip": [
+        66,
+        -158
+      ]
+    },
+    {
+      "name": "walk_down_3.png",
+      "sourceCell": [
+        842,
+        0,
+        1122,
+        280
+      ],
+      "center": 135,
+      "bottom": 276,
+      "scale": 0.75,
+      "rodTip": [
+        68,
+        -156
+      ]
+    },
+    {
+      "name": "walk_right_0.png",
+      "sourceCell": [
+        0,
+        280,
+        281,
+        561
+      ],
+      "center": 139,
+      "bottom": 264,
+      "scale": 0.75,
+      "rodTip": [
+        73,
+        -164
+      ]
+    },
+    {
+      "name": "walk_right_1.png",
+      "sourceCell": [
+        281,
+        280,
+        561,
+        561
+      ],
+      "center": 137,
+      "bottom": 267,
+      "scale": 0.75,
+      "rodTip": [
+        73,
+        -165
+      ]
+    },
+    {
+      "name": "walk_right_2.png",
+      "sourceCell": [
+        561,
+        280,
+        842,
+        561
+      ],
+      "center": 137,
+      "bottom": 267,
+      "scale": 0.75,
+      "rodTip": [
+        73,
+        -166
+      ]
+    },
+    {
+      "name": "walk_right_3.png",
+      "sourceCell": [
+        842,
+        280,
+        1122,
+        561
+      ],
+      "center": 136,
+      "bottom": 267,
+      "scale": 0.75,
+      "rodTip": [
+        72,
+        -165
+      ]
+    },
+    {
+      "name": "walk_up_0.png",
+      "sourceCell": [
+        0,
+        561,
+        281,
+        841
+      ],
+      "center": 142,
+      "bottom": 266,
+      "scale": 0.75,
+      "rodTip": [
+        60,
+        -150
+      ]
+    },
+    {
+      "name": "walk_up_1.png",
+      "sourceCell": [
+        281,
+        561,
+        561,
+        841
+      ],
+      "center": 136,
+      "bottom": 261,
+      "scale": 0.75,
+      "rodTip": [
+        59,
+        -146
+      ]
+    },
+    {
+      "name": "walk_up_2.png",
+      "sourceCell": [
+        561,
+        561,
+        842,
+        841
+      ],
+      "center": 137,
+      "bottom": 267,
+      "scale": 0.75,
+      "rodTip": [
+        59,
+        -152
+      ]
+    },
+    {
+      "name": "walk_up_3.png",
+      "sourceCell": [
+        842,
+        561,
+        1122,
+        841
+      ],
+      "center": 135,
+      "bottom": 264,
+      "scale": 0.75,
+      "rodTip": [
+        59,
+        -149
+      ]
+    },
+    {
+      "name": "walk_left_0.png",
+      "sourceCell": [
+        0,
+        841,
+        281,
+        1105
+      ],
+      "center": 148,
+      "bottom": 255,
+      "scale": 0.75,
+      "rodTip": [
+        -79,
+        -161
+      ]
+    },
+    {
+      "name": "walk_left_1.png",
+      "sourceCell": [
+        281,
+        841,
+        561,
+        1105
+      ],
+      "center": 140,
+      "bottom": 255,
+      "scale": 0.75,
+      "rodTip": [
+        -78,
+        -159
+      ]
+    },
+    {
+      "name": "walk_left_2.png",
+      "sourceCell": [
+        561,
+        841,
+        842,
+        1105
+      ],
+      "center": 140,
+      "bottom": 258,
+      "scale": 0.75,
+      "rodTip": [
+        -79,
+        -160
+      ]
+    },
+    {
+      "name": "walk_left_3.png",
+      "sourceCell": [
+        842,
+        841,
+        1122,
+        1105
+      ],
+      "center": 140,
+      "bottom": 255,
+      "scale": 0.75,
+      "rodTip": [
+        -80,
+        -156
+      ]
+    },
+    {
+      "name": "pose_cast.png",
+      "sourceCell": [
+        0,
+        1110,
+        281,
+        1402
+      ],
+      "center": 107,
+      "bottom": 280,
+      "scale": 0.75,
+      "rodTip": [
+        82,
+        -203
+      ]
+    },
+    {
+      "name": "pose_reel.png",
+      "sourceCell": [
+        281,
+        1110,
+        561,
+        1402
+      ],
+      "center": 107,
+      "bottom": 280,
+      "scale": 0.75,
+      "rodTip": [
+        114,
+        -152
+      ]
+    }
+  ]
+}

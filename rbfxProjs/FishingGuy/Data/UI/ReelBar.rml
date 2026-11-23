@@ -7,9 +7,9 @@
 <head>
     <link type="text/rcss" href="rml.rcss"/>
     <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="FishingTheme.rcss"/>
 </head>
 <body style="display: block; position: absolute; width: 68dp; height: 128dp; pointer-events: none;">
-    <div style="position: absolute; left: 0dp; top: 0dp; width: 68dp; height: 128dp; background-color: #79c268e0; border: 2dp solid #2f5c28ff;"></div>
-    <div style="position: absolute; left: 4dp; top: 4dp; width: 60dp; height: 10dp; background-color: #b6e3a3a0;"></div>
+    <div style="position: absolute; left: 0dp; top: 0dp; width: 68dp; height: 128dp; decorator: image(jadeZone);"></div>
 </body>
 </rml>

@@ -1,0 +1,19 @@
+FishingGuy character replacement — 2026-11-23
+
+Generated with the built-in image_gen tool; no external API/CLI generation.
+Runtime deliverables: Data/Textures/Char/walk_{down,right,up,left}_{0..3}.png,
+pose_cast.png and pose_reel.png. All are RGBA PNG, 256x256.
+bobber.png was not modified. Its SHA-256 is recorded in frame-layout.json.
+character-sheet.png is the original generated transparent sheet.
+character-preview.png is a contact sheet composited on a light background for review.
+frame-layout.json records crop bounds, scale and rod endpoint measurements.
+Mechanical slicing and nearest-neighbor resizing preserve generated alpha.
+The original runtime frames are also backed up in Temp/char-before-20261123.
+Config.ROD_TIP was updated for the new rod geometry. Feet retain the existing
+12/256 hotspot. Game playback has not been tested in the running application.
+
+Initial generation prompt:
+Use case: stylized-concept. Production game sprite sheet for a cozy Chinese courtyard fishing game. Create a beautifully polished pixel-art young male fisherman, straw hat with dark band, short dark hair, blue traditional cloth shirt, dark trousers, brown cloth shoes, bamboo fishing rod. Big readable head but attractive proportions, warm expressive face, finely designed pixel clusters, restrained earthy colors, crisp outlines, no blur, no photorealism. True transparent background. One consistent character across ALL cells. Orthographic slightly top-down RPG camera. EXACT regular 4 columns x 5 rows sheet, preferably 1024x1280 pixels, each cell 256x256. No margins between cells, NO text, labels, borders, ground shadows, scenery, fishing line or bobber. Each character entirely within its own cell, feet centered at local x128 y244, same scale (hat top around y65, boots bottom244), rod may extend upwards to y12. Row1: FOUR walking frames facing DOWN toward viewer, left-foot-forward/contact, feet-together/passing, right-foot-forward/contact, feet-together/opposite passing. Row2: same four phases facing RIGHT in clear side profile. Row3: same four phases facing UP, entirely back view of hat and blue shirt, NO face. Row4: same four phases facing LEFT clear side profile. Row5: column1 casting fishing rod, facing right, raised rod tip local (180,10); column2 reeling fishing rod facing right, rod tip local (245,50); columns3 and4 MUST remain fully transparent empty. Exactly 18 sprites total. For walking rod tips consistent within each row: down local(208,58), right(222,55), up(182,118), left(30,68). Stable hat, torso and rod placement across each walking row; make the walking readable with alternating legs and small free arm movement. Keep all pixels inside cell boundaries. This is a finished animation asset, not a concept board. Preserve alpha transparency.
+
+Refinement prompt (input: initial generated sheet):
+Clean up this exact 18-character sprite sheet. Preserve the character design, all 18 poses, regular 4-column 5-row layout and empty last two cells. Remove ALL red, yellow and gray halos/fringes around silhouettes and all stray pixels between sprites. Replace those edge artifacts with genuine fully transparent alpha. Every character must have a clean crisp dark pixel-art outline meeting transparent empty background immediately. No glow, no fuzzy edges, no drop shadows or ground shadows. Keep row1 front four walking poses; row2 right four walking poses; row3 back four walking poses; row4 left four walking poses; row5 casting right and reeling right then two EMPTY cells. Feet baseline uniform in each cell, no cropping. Exactly same costume and face across frames. No text or grid.

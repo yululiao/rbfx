@@ -85,14 +85,24 @@ Config.LINE_SAG = { fly = 4, wait = 26, bite = 20, reeled = 14 }
 
 -- 竿尖锚点：图像像素，相对角色脚底（x 向右、y 向上为负）。
 -- 数值是照着 256px 素材一格一格量的（walk 四朝向各一个，cast/reel 两个姿势各一个）。
--- cast 与 reel 素材只画了朝右，Player:RodTip 在朝左时镜像 x。
+-- Fishing poses have front/back resources; left mirrors the right image and endpoint.
 Config.ROD_TIP = {
-    down = { 80, -186 },
-    right = { 94, -189 },
-    up = { 54, -126 },
-    left = { -98, -176 },
-    cast = { 52, -234 },
-    reel = { 117, -194 },
+    down = { 66, -154 },
+    right = { 73, -165 },
+    up = { 59, -146 },
+    left = { -78, -159 },
+    idle = {
+        down = { 55, -155 }, right = { 63, -159 },
+        up = { 56, -154 }, left = { -61, -156 },
+    },
+    cast = {
+        down = { 84, -22 }, right = { 82, -203 },
+        up = { 87, -176 }, left = { -82, -203 },
+    },
+    reel = {
+        down = { 84, -21 }, right = { 114, -152 },
+        up = { 81, -163 }, left = { -114, -152 },
+    },
 }
 
 Config.REEL_BAR_RATIO = 0.24     -- 绿区占竖条高度

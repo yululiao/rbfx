@@ -196,4 +196,19 @@ TEST_CASE("FrameSprite migration preserves FireGame gameplay hot paths")
     CHECK(status == LUA_OK);
 }
 
+TEST_CASE("FishingGuy player restores idle and faces fishing direction")
+{
+    const ea::string root = GetPath(__FILE__) + "../../../";
+    lua_State* lua = luaL_newstate();
+    REQUIRE(lua);
+    luaL_openlibs(lua);
+    lua_pushstring(lua, (root + "rbfxProjs/FishingGuy/Data/").c_str());
+    lua_setglobal(lua, "FISHINGGUY_DATA_ROOT");
+    const int status = luaL_dofile(lua, (root + "script/test_fishingguy_player.lua").c_str());
+    const ea::string error = status == LUA_OK ? "" : lua_tostring(lua, -1);
+    lua_close(lua);
+    INFO(error.c_str());
+    CHECK(status == LUA_OK);
+}
+
 #endif // URHO3D_LUA

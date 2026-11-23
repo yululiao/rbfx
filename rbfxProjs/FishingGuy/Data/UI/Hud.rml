@@ -33,6 +33,7 @@
 <head>
     <link type="text/rcss" href="rml.rcss"/>
     <link type="text/rcss" href="layout.rcss"/>
+    <link type="text/rcss" href="FishingTheme.rcss"/>
     <style>
         /* 本工程没有 default.rcss，字号全靠内联；字体族必须自己指到 main.lua 里 LoadFont 的那张，
            否则 RmlUi 报 "No font face defined. Missing 'font-family'"（FireGame 是写在 default.rcss 的 body 上）。 */
@@ -61,23 +62,25 @@
 
         .slot {
             position: absolute; top: 0dp; width: 88dp; height: 88dp;
-            decorator: ninepatch(woodOuter, woodInner);
+            decorator: image(jadeSlot);
             pointer-events: none;
         }
         .fish {
-            position: absolute; left: 10dp; top: 12dp; width: 68dp; height: 68dp;
+            position: absolute; left: 12dp; top: 10dp; width: 64dp; height: 64dp;
             pointer-events: none;
         }
         .crucian { decorator: image(crucianImg); }
         .koi { decorator: image(koiImg); }
         .puffer { decorator: image(pufferImg); }
         .count {
-            position: absolute; right: 6dp; bottom: 2dp;
-            color: #ffe9b9ff; font-size: 22dp; font-weight: bold; pointer-events: none;
+            position: absolute; right: 7dp; bottom: 6dp;
+            min-width: 20dp; padding: 0dp 4dp; text-align: center;
+            background-color: #173b32ed; border-radius: 5dp;
+            color: #fff1caff; font-size: 20dp; font-weight: bold; pointer-events: none;
         }
         .txt { color: #f4e7cfff; font-size: 24dp; }
-        .seg_off { position: absolute; left: 0dp; width: 20dp; height: 50dp; background-color: #1d1712cc; }
-        .seg_on { position: absolute; left: 0dp; width: 20dp; height: 50dp; background-color: #79c268ff; }
+        .seg_off { position: absolute; left: 0dp; width: 20dp; height: 50dp; background-color: #102e28ee; border-radius: 4dp; }
+        .seg_on { position: absolute; left: 0dp; width: 20dp; height: 50dp; decorator: image(jadeZone); }
     </style>
 </head>
 <body class="fullscreen" style="pointer-events: none;">
@@ -139,12 +142,13 @@
          段距 56dp × 10 = 560dp 与外框同高，内槽 14dp 留白对应 Config.REEL.pad。
          seg0 排在最底（top:504dp）往上递减：进度是从下往上涨的，Lua 那边 idx < segOn 的语义不变。 -->
     <div style="position: absolute; right: 40dp; top: 50%; width: 0dp; height: 0dp;">
-        <div id="reel_track" data-if="showReel" style="position: absolute; left: -96dp; top: -280dp; width: 96dp; height: 560dp; decorator: ninepatch(woodOuter, woodInner);">
-            <div style="position: absolute; left: 14dp; top: 14dp; width: 68dp; height: 532dp; background-color: #10151acc;"></div>
-        </div>
+        <div class="reel_label" data-if="showReel" style="left: -96dp; width: 96dp;">控鱼</div>
+        <div id="reel_track" data-if="showReel" style="position: absolute; left: -96dp; top: -280dp; width: 96dp; height: 560dp; decorator: image(bambooTrack);"></div>
     </div>
     <div style="position: absolute; right: 146dp; top: 50%; width: 0dp; height: 0dp;">
+        <div class="reel_label" data-if="showReel" style="left: -32dp; width: 40dp;">捕获</div>
         <div id="reel_meter" data-if="showReel" style="position: absolute; left: -20dp; top: -280dp; width: 20dp; height: 560dp;">
+            <div style="position: absolute; left: -6dp; top: -8dp; width: 32dp; height: 576dp; decorator: image(bambooTrack);"></div>
             <div class="seg_off" style="top: 504dp;"></div><div class="seg_on" data-if="seg0" style="top: 504dp;"></div>
             <div class="seg_off" style="top: 448dp;"></div><div class="seg_on" data-if="seg1" style="top: 448dp;"></div>
             <div class="seg_off" style="top: 392dp;"></div><div class="seg_on" data-if="seg2" style="top: 392dp;"></div>

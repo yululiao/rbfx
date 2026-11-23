@@ -25,24 +25,34 @@ function Player.Build(scene)
     self.pose = "idle"
     self.goalX, self.goalY = nil, nil
     self.animT = 0.0
-    self.frame = 2          -- 起手落在并腿帧，和 SetPose(“idle”) 的站定帧一致
+    self.frame = 2 -- walking phase; idle uses dedicated standing sprites
     self.locked = false
 
     self.frames = {}
+    self.idleSprites = {}
     for _, d in ipairs(DIRS) do
         local cycle = {}
         for i = 0, 3 do
             cycle[i + 1] = World.Spr("Textures/Char/walk_" .. d .. "_" .. i .. ".png")
         end
         self.frames[d] = cycle
+        self.idleSprites[d] = World.Spr("Textures/Char/idle_" .. d .. ".png")
     end
     self.poseSprites = {
-        cast = World.Spr("Textures/Char/pose_cast.png"),
-        reel = World.Spr("Textures/Char/pose_reel.png"),
+        cast = {},
+        reel = {},
     }
+    for _, pose in ipairs({ "cast", "reel" }) do
+        local sprites = self.poseSprites[pose]
+        sprites.right = World.Spr("Textures/Char/pose_" .. pose .. ".png")
+        sprites.left = sprites.right -- mirror both the image and its rod endpoint
+        sprites.down = World.Spr("Textures/Char/pose_" .. pose .. "_down.png")
+        sprites.up = World.Spr("Textures/Char/pose_" .. pose .. "_up.png")
+    end
 
     self.node, self.comp = World.NewSprite(scene, "Player",
-        "Textures/Char/walk_down_1.png", 3, 0.5, FEET_HOTSPOT)
+        "Textures/Char/idle_down.png", 3, 0.5, FEET_HOTSPOT)
+    self:RefreshVisual()
     World.SetNodePos(self.node, self.x, self.y)
 
     -- 走位高亮框：点地时出现在落点，走到（或改道/被锁住）时淡出。
@@ -108,19 +118,40 @@ function Player:SetSprite(sp)
     end
 end
 
+-- Resolve pose and direction together, including turns within the same pose.
+function Player:RefreshVisual()
+    local fishing = self.pose == "cast" or self.pose == "reel"
+    local flipped = fishing and self.dir == "left"
+    if self.flipped ~= flipped then
+        self.comp:SetFlipX(flipped)
+        self.flipped = flipped
+    end
+    if fishing then
+        self:SetSprite(self.poseSprites[self.pose][self.dir])
+    elseif self.pose == "walk" then
+        self:SetSprite(self.frames[self.dir][self.frame])
+    else
+        self:SetSprite(self.idleSprites[self.dir])
+    end
+end
+
+function Player:SyncPosition()
+    local bob = self.pose == "walk" and BOB_PX[self.frame] or 0
+    World.SetNodePos(self.node, self.x, self.y + bob)
+end
+
 function Player:SetPose(pose)
     if self.pose == pose then
+        self:RefreshVisual()
+        self:SyncPosition()
         return
     end
     self.pose = pose
-    -- 换姿势一律归到并腿帧：停在跨步帧上像突然劈叉，竿尖/头顶锚点也是按这帧量的
+    -- Reset the walk cycle; idle/fishing images are independent of this phase.
     self.frame = 2
     self.animT = 0.0
-    if pose == "cast" or pose == "reel" then
-        self:SetSprite(self.poseSprites[pose])
-    else
-        self:SetSprite(self.frames[self.dir][self.frame])
-    end
+    self:RefreshVisual()
+    self:SyncPosition()
 end
 
 local function PickDir(dx, dy)
@@ -162,36 +193,25 @@ function Player:Update(dt)
         if self.animT >= FRAME_TIME then
             self.animT = self.animT - FRAME_TIME
             self.frame = self.frame % 4 + 1
-            self:SetSprite(self.frames[self.dir][self.frame])
         end
-    elseif self.pose == "idle" then
-        self:SetSprite(self.frames[self.dir][self.frame])
     end
+    self:RefreshVisual()
 
     -- 位置每帧都写：跨步帧的 2px 下沉靠它落地，换帧/换姿势后也不会残留旧偏移
-    World.SetNodePos(self.node, self.x, self.y + BOB_PX[self.frame])
+    self:SyncPosition()
 end
 
 --- 朝向水面/某个点站定（抛竿前用，避免背对鱼钩）
 function Player:FaceTowards(px, py)
     self.dir = PickDir(px - self.x, py - self.y)
-    if self.pose ~= "walk" then
-        self:SetSprite(self.frames[self.dir][self.frame])
-    end
+    self:RefreshVisual()
 end
 
 --- 竿尖的图像像素坐标：抛竿/拉杆姿势用姿势锚点，其余用当前朝向锚点。
 function Player:RodTip()
-    local pose = self.pose
-    local key, mirrored = self.dir, false
-    if pose == "cast" or pose == "reel" then
-        key = pose
-        -- 这两个姿势素材只画了朝右，朝左时把 x 偏移镜像，否则线从左肩出去
-        mirrored = self.dir == "left"
-    end
-    local off = Config.ROD_TIP[key] or Config.ROD_TIP.down
-    local ox = mirrored and -off[1] or off[1]
-    return self.x + ox, self.y + off[2]
+    local tips = Config.ROD_TIP[self.pose]
+    local off = tips and tips[self.dir] or Config.ROD_TIP[self.dir]
+    return self.x + off[1], self.y + off[2]
 end
 
 return Player
